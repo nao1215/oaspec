@@ -61,7 +61,7 @@ jobs:
 
       - run: gleam deps download
       - run: gleam build
-      - run: gleam publish -y
+      - run: echo 'I am not using semantic versioning' | gleam publish -y
         env:
           HEXPM_API_KEY: ${{ secrets.HEXPM_API_KEY }}
 
