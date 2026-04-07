@@ -2,7 +2,7 @@ import oas_gleam/config.{type Config}
 import oas_gleam/openapi/spec.{type OpenApiSpec}
 
 /// The version of oas-gleam used for generated code headers.
-pub const version = "0.1.1"
+pub const version = "0.1.2"
 
 /// Context for code generation, carrying all needed state.
 pub type Context {

@@ -23,7 +23,7 @@ Download the `oas_gleam` escript binary from the [Releases](https://github.com/n
 
 ```sh
 # Download (replace URL with the latest release)
-curl -fSL -o oas_gleam https://github.com/nao1215/gleam-oas/releases/download/v0.1.0/gleam_oas
+curl -fSL -o oas_gleam https://github.com/nao1215/gleam-oas/releases/latest/download/oas_gleam
 chmod +x oas_gleam
 sudo mv oas_gleam /usr/local/bin/
 ```

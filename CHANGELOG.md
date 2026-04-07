@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-04-08
+
+### Changed
+
+- Rename package from `gleam_oas` to `oas_gleam` to avoid Hex `gleam_` prefix restriction
+- Rename CLI binary from `gleam_oas` to `oas_gleam`
+- Rename config file from `gleam-oas.yaml` to `oas-gleam.yaml`
+
 ## [0.1.1] - 2026-04-08
 
 ### Fixed
