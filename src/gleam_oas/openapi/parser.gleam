@@ -312,12 +312,17 @@ fn parse_parameter(
         _ -> None
       }
 
+      let style =
+        yay.extract_optional_string(node, "style")
+        |> result.unwrap(None)
+
       Ok(Parameter(
         name:,
         in_:,
         description:,
         required:,
         schema: param_schema,
+        style:,
         deprecated:,
       ))
     }
@@ -793,17 +798,20 @@ fn parse_typed_schema(
         Ok(r) -> r
         _ -> []
       }
-      let additional_properties = case
+      let #(additional_properties, additional_properties_untyped) = case
         yay.select_sugar(from: node, selector: "additionalProperties")
       {
-        Ok(ap_node) -> parse_schema_ref(ap_node) |> option.from_result
-        _ -> None
+        Ok(yay.NodeBool(True)) -> #(None, True)
+        Ok(yay.NodeBool(False)) -> #(None, False)
+        Ok(ap_node) -> #(parse_schema_ref(ap_node) |> option.from_result, False)
+        _ -> #(None, False)
       }
       Ok(ObjectSchema(
         description:,
         properties:,
         required:,
         additional_properties:,
+        additional_properties_untyped:,
         nullable:,
       ))
     }

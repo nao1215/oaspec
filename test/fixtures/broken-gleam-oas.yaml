@@ -1,0 +1,5 @@
+input: test/fixtures/broken_openapi.yaml
+output:
+  server: ./test_output/broken_server
+  client: ./test_output/broken_client
+package: api

@@ -1,0 +1,5 @@
+input: test/fixtures/complex_openapi.yaml
+output:
+  server: ./test_output/complex_server
+  client: ./test_output/complex_client
+package: api

@@ -1,0 +1,159 @@
+openapi: 3.0.3
+info:
+  title: Complex Supported Test API
+  version: 1.0.0
+
+servers:
+  - url: https://api.example.com/v1
+
+paths:
+  /users/{userId}:
+    get:
+      operationId: getUser
+      summary: Get user with polymorphic response
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/AdminUser'
+                  - $ref: '#/components/schemas/RegularUser'
+                discriminator:
+                  propertyName: type
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /search:
+    post:
+      operationId: postSearch
+      summary: Complex search
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Pagination'
+                - type: object
+                  properties:
+                    query:
+                      type: string
+                    filters:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Filter'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+                  total:
+                    type: integer
+
+  /webhook:
+    post:
+      operationId: postWebhook
+      summary: Receive webhook
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookEvent'
+      responses:
+        '200':
+          description: OK
+
+components:
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    User:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [admin, regular]
+
+    AdminUser:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            permissions:
+              type: array
+              items:
+                type: string
+
+    RegularUser:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            subscription:
+              type: string
+              nullable: true
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        per_page:
+          type: integer
+
+    Filter:
+      type: object
+      required: [field, op]
+      properties:
+        field:
+          type: string
+        op:
+          type: string
+          enum: [eq, ne, gt, lt]
+
+    WebhookEvent:
+      type: object
+      required: [type, callbackUrl]
+      properties:
+        type:
+          type: string
+        callbackUrl:
+          type: string
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: string

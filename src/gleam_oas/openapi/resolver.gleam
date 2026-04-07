@@ -80,6 +80,7 @@ pub fn resolve_schema_refs_in_schema(
       properties:,
       required:,
       additional_properties:,
+      additional_properties_untyped:,
       nullable:,
     ) -> {
       let resolved_props =
@@ -93,6 +94,7 @@ pub fn resolve_schema_refs_in_schema(
         properties: resolved_props,
         required:,
         additional_properties: resolved_ap,
+        additional_properties_untyped:,
         nullable:,
       )
     }

@@ -28,26 +28,99 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
   ]
 }
 
-/// Generate types from component schemas.
+/// Generate types from component schemas and anonymous types from operations.
 fn generate_types(ctx: Context) -> String {
   let sb =
     se.file_header(context.version)
-    |> se.imports([
-      "gleam/option.{type Option}",
-    ])
+    |> se.imports(["gleam/option.{type Option}"])
 
+  // Generate component schema types
   let schemas = case ctx.spec.components {
     Some(components) -> dict.to_list(components.schemas)
     None -> []
   }
 
+  // First pass: collect inline enum types from object properties
+  let sb =
+    list.fold(schemas, sb, fn(sb, entry) {
+      let #(name, schema_ref) = entry
+      generate_inline_enums_for_schema(sb, name, schema_ref, ctx)
+    })
+
+  // Second pass: generate the main types
   let sb =
     list.fold(schemas, sb, fn(sb, entry) {
       let #(name, schema_ref) = entry
       generate_type_def(sb, name, schema_ref, ctx)
     })
 
+  // Generate anonymous types from operations (inline response/request schemas)
+  let sb = generate_anonymous_types(sb, ctx)
+
   se.to_string(sb)
+}
+
+/// Generate inline enum types found in object schema properties.
+/// These are generated as separate types before the parent type.
+fn generate_inline_enums_for_schema(
+  sb: se.StringBuilder,
+  parent_name: String,
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> se.StringBuilder {
+  case schema_ref {
+    Inline(ObjectSchema(properties:, ..)) ->
+      generate_inline_enums_from_properties(sb, parent_name, properties, ctx)
+    Inline(AllOfSchema(schemas:, ..)) -> {
+      // Merge properties from allOf to find inline enums
+      let merged_props =
+        list.fold(schemas, dict.new(), fn(acc, s_ref) {
+          case s_ref {
+            Inline(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
+            Reference(_) ->
+              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
+                Ok(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
+                _ -> acc
+              }
+            _ -> acc
+          }
+        })
+      generate_inline_enums_from_properties(sb, parent_name, merged_props, ctx)
+    }
+    _ -> sb
+  }
+}
+
+/// Generate enum types for any properties that have inline enum values.
+fn generate_inline_enums_from_properties(
+  sb: se.StringBuilder,
+  parent_name: String,
+  properties: dict.Dict(String, SchemaRef),
+  _ctx: Context,
+) -> se.StringBuilder {
+  let entries = dict.to_list(properties)
+  list.fold(entries, sb, fn(sb, entry) {
+    let #(prop_name, prop_ref) = entry
+    case prop_ref {
+      Inline(StringSchema(description:, enum_values:, ..)) if enum_values != [] -> {
+        let type_name =
+          naming.schema_to_type_name(parent_name)
+          <> naming.schema_to_type_name(prop_name)
+        let sb = maybe_doc_comment(sb, description)
+        let sb = sb |> se.line("pub type " <> type_name <> " {")
+        let sb =
+          list.fold(enum_values, sb, fn(sb, value) {
+            let variant_name =
+              naming.schema_to_type_name(type_name <> "_" <> value)
+            sb |> se.indent(1, variant_name)
+          })
+        sb
+        |> se.line("}")
+        |> se.blank_line()
+      }
+      _ -> sb
+    }
+  })
 }
 
 /// Generate a single type definition.
@@ -60,7 +133,7 @@ fn generate_type_def(
   let type_name = naming.schema_to_type_name(name)
 
   case schema_ref {
-    Inline(schema) -> generate_schema_type(sb, type_name, schema, ctx)
+    Inline(schema) -> generate_schema_type(sb, type_name, name, schema, ctx)
     Reference(ref:) -> {
       let resolved_name = resolver.ref_to_name(ref)
       let resolved_type = naming.schema_to_type_name(resolved_name)
@@ -75,6 +148,7 @@ fn generate_type_def(
 fn generate_schema_type(
   sb: se.StringBuilder,
   type_name: String,
+  raw_name: String,
   schema: SchemaObject,
   ctx: Context,
 ) -> se.StringBuilder {
@@ -89,7 +163,13 @@ fn generate_schema_type(
         list.index_fold(props, sb, fn(sb, entry, idx) {
           let #(prop_name, prop_ref) = entry
           let field_name = naming.to_snake_case(prop_name)
-          let field_type = schema_ref_to_type(prop_ref, ctx)
+          let field_type =
+            schema_ref_to_type_with_inline_enum(
+              prop_ref,
+              raw_name,
+              prop_name,
+              ctx,
+            )
           let is_required = list.contains(required, prop_name)
           let is_already_optional = schema_ref_is_nullable(prop_ref)
           // Avoid Option(Option(T)): if schema is nullable, type is
@@ -175,9 +255,10 @@ fn generate_schema_type(
           properties: merged_props,
           required: merged_required,
           additional_properties: None,
+          additional_properties_untyped: False,
           nullable: False,
         )
-      generate_schema_type(sb, type_name, merged_schema, ctx)
+      generate_schema_type(sb, type_name, raw_name, merged_schema, ctx)
     }
 
     _ -> {
@@ -190,11 +271,228 @@ fn generate_schema_type(
   }
 }
 
+/// Convert a SchemaRef to a type string, using inline enum type if applicable.
+fn schema_ref_to_type_with_inline_enum(
+  ref: SchemaRef,
+  parent_name: String,
+  prop_name: String,
+  ctx: Context,
+) -> String {
+  case ref {
+    Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
+      naming.schema_to_type_name(parent_name)
+      <> naming.schema_to_type_name(prop_name)
+    }
+    _ -> schema_ref_to_type(ref, ctx)
+  }
+}
+
+/// Generate anonymous types from inline schemas in operations.
+fn generate_anonymous_types(
+  sb: se.StringBuilder,
+  ctx: Context,
+) -> se.StringBuilder {
+  let operations = collect_operations(ctx)
+  list.fold(operations, sb, fn(sb, op) {
+    let #(op_id, operation, _path, _method) = op
+    let sb = generate_anonymous_response_types(sb, op_id, operation, ctx)
+    let sb = generate_anonymous_request_body_type(sb, op_id, operation, ctx)
+    sb
+  })
+}
+
+/// Generate anonymous types for inline response schemas.
+fn generate_anonymous_response_types(
+  sb: se.StringBuilder,
+  op_id: String,
+  operation: spec.Operation,
+  ctx: Context,
+) -> se.StringBuilder {
+  let responses = dict.to_list(operation.responses)
+  list.fold(responses, sb, fn(sb, entry) {
+    let #(status_code, response) = entry
+    let content_entries = dict.to_list(response.content)
+    case content_entries {
+      [#(_media_type, media_type), ..] ->
+        case media_type.schema {
+          Some(Inline(schema_obj)) ->
+            generate_anonymous_type_for_schema(
+              sb,
+              op_id,
+              "Response" <> status_code_suffix(status_code),
+              schema_obj,
+              ctx,
+            )
+          _ -> sb
+        }
+      _ -> sb
+    }
+  })
+}
+
+/// Generate anonymous type for a request body if it has an inline schema.
+fn generate_anonymous_request_body_type(
+  sb: se.StringBuilder,
+  op_id: String,
+  operation: spec.Operation,
+  ctx: Context,
+) -> se.StringBuilder {
+  case operation.request_body {
+    Some(rb) -> {
+      let content_entries = dict.to_list(rb.content)
+      case content_entries {
+        [#(_media_type, media_type), ..] ->
+          case media_type.schema {
+            Some(Inline(schema_obj)) ->
+              generate_anonymous_type_for_schema(
+                sb,
+                op_id,
+                "RequestBody",
+                schema_obj,
+                ctx,
+              )
+            _ -> sb
+          }
+        _ -> sb
+      }
+    }
+    None -> sb
+  }
+}
+
+/// Generate a named type for an inline schema object.
+fn generate_anonymous_type_for_schema(
+  sb: se.StringBuilder,
+  op_id: String,
+  suffix: String,
+  schema_obj: SchemaObject,
+  ctx: Context,
+) -> se.StringBuilder {
+  let type_name = naming.schema_to_type_name(op_id) <> suffix
+  let raw_name = op_id <> "_" <> suffix
+
+  case schema_obj {
+    ObjectSchema(..) ->
+      generate_schema_type(sb, type_name, raw_name, schema_obj, ctx)
+    OneOfSchema(schemas:, ..) -> {
+      // Only generate if all schemas are $ref (inline primitives are caught by validation)
+      let all_refs =
+        list.all(schemas, fn(s) {
+          case s {
+            Reference(_) -> True
+            _ -> False
+          }
+        })
+      case all_refs {
+        True -> {
+          let sb = sb |> se.line("pub type " <> type_name <> " {")
+          let sb =
+            list.fold(schemas, sb, fn(sb, s_ref) {
+              let variant_type = schema_ref_to_type(s_ref, ctx)
+              let variant_name = type_name <> variant_type
+              sb |> se.indent(1, variant_name <> "(" <> variant_type <> ")")
+            })
+          sb
+          |> se.line("}")
+          |> se.blank_line()
+        }
+        False -> sb
+      }
+    }
+    AnyOfSchema(schemas:, ..) -> {
+      let all_refs =
+        list.all(schemas, fn(s) {
+          case s {
+            Reference(_) -> True
+            _ -> False
+          }
+        })
+      case all_refs {
+        True -> {
+          let sb = sb |> se.line("pub type " <> type_name <> " {")
+          let sb =
+            list.fold(schemas, sb, fn(sb, s_ref) {
+              let variant_type = schema_ref_to_type(s_ref, ctx)
+              let variant_name = type_name <> variant_type
+              sb |> se.indent(1, variant_name <> "(" <> variant_type <> ")")
+            })
+          sb
+          |> se.line("}")
+          |> se.blank_line()
+        }
+        False -> sb
+      }
+    }
+    AllOfSchema(description:, schemas:) -> {
+      // Merge properties from allOf
+      let merged_props =
+        list.fold(schemas, dict.new(), fn(acc, s_ref) {
+          case s_ref {
+            Inline(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
+            Reference(_) ->
+              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
+                Ok(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
+                _ -> acc
+              }
+            _ -> acc
+          }
+        })
+      let merged_required =
+        list.flat_map(schemas, fn(s_ref) {
+          case s_ref {
+            Inline(ObjectSchema(required:, ..)) -> required
+            Reference(_) ->
+              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
+                Ok(ObjectSchema(required:, ..)) -> required
+                _ -> []
+              }
+            _ -> []
+          }
+        })
+      let merged_schema =
+        ObjectSchema(
+          description:,
+          properties: merged_props,
+          required: merged_required,
+          additional_properties: None,
+          additional_properties_untyped: False,
+          nullable: False,
+        )
+      generate_schema_type(sb, type_name, raw_name, merged_schema, ctx)
+    }
+    _ -> sb
+  }
+}
+
+/// Get a status code suffix for anonymous type names.
+fn status_code_suffix(code: String) -> String {
+  case code {
+    "200" -> "Ok"
+    "201" -> "Created"
+    "204" -> "NoContent"
+    "400" -> "BadRequest"
+    "401" -> "Unauthorized"
+    "403" -> "Forbidden"
+    "404" -> "NotFound"
+    "409" -> "Conflict"
+    "422" -> "UnprocessableEntity"
+    "500" -> "InternalServerError"
+    "default" -> "Default"
+    other -> "Status" <> other
+  }
+}
+
 /// Convert a SchemaRef to a qualified Gleam type string (with types. prefix).
 /// Used in response_types and request_types where types are in a separate module.
-fn schema_ref_to_type_qualified(ref: SchemaRef, ctx: Context) -> String {
+fn schema_ref_to_type_qualified(
+  ref: SchemaRef,
+  op_id: String,
+  suffix: String,
+  ctx: Context,
+) -> String {
   case ref {
-    Inline(schema) -> schema_to_gleam_type_qualified(schema, ctx)
+    Inline(schema_obj) ->
+      schema_to_gleam_type_qualified(schema_obj, op_id, suffix, ctx)
     Reference(ref:) -> {
       let name = resolver.ref_to_name(ref)
       "types." <> naming.schema_to_type_name(name)
@@ -203,17 +501,63 @@ fn schema_ref_to_type_qualified(ref: SchemaRef, ctx: Context) -> String {
 }
 
 /// Convert a schema to a qualified Gleam type with types. prefix for compound types.
-fn schema_to_gleam_type_qualified(schema: SchemaObject, ctx: Context) -> String {
-  case schema {
+fn schema_to_gleam_type_qualified(
+  schema_obj: SchemaObject,
+  op_id: String,
+  suffix: String,
+  ctx: Context,
+) -> String {
+  case schema_obj {
     ArraySchema(items:, ..) ->
       case items {
         Reference(ref:) -> {
           let name = resolver.ref_to_name(ref)
           "List(types." <> naming.schema_to_type_name(name) <> ")"
         }
-        _ -> schema_to_gleam_type(schema, ctx)
+        _ -> schema_to_gleam_type(schema_obj, ctx)
       }
-    _ -> schema_to_gleam_type(schema, ctx)
+    // Inline objects, oneOf, anyOf, allOf → reference the anonymous type
+    ObjectSchema(..) -> {
+      let type_name = naming.schema_to_type_name(op_id) <> suffix
+      "types." <> type_name
+    }
+    OneOfSchema(schemas:, ..) -> {
+      let all_refs =
+        list.all(schemas, fn(s) {
+          case s {
+            Reference(_) -> True
+            _ -> False
+          }
+        })
+      case all_refs {
+        True -> {
+          let type_name = naming.schema_to_type_name(op_id) <> suffix
+          "types." <> type_name
+        }
+        False -> schema_to_gleam_type(schema_obj, ctx)
+      }
+    }
+    AnyOfSchema(schemas:, ..) -> {
+      let all_refs =
+        list.all(schemas, fn(s) {
+          case s {
+            Reference(_) -> True
+            _ -> False
+          }
+        })
+      case all_refs {
+        True -> {
+          let type_name = naming.schema_to_type_name(op_id) <> suffix
+          "types." <> type_name
+        }
+        False -> schema_to_gleam_type(schema_obj, ctx)
+      }
+    }
+    AllOfSchema(..) -> {
+      let type_name = naming.schema_to_type_name(op_id) <> suffix
+      "types." <> type_name
+    }
+    _ -> schema_to_gleam_type(schema_obj, ctx)
   }
 }
 
@@ -289,7 +633,7 @@ fn generate_request_type(
   sb: se.StringBuilder,
   op_id: String,
   operation: spec.Operation,
-  _ctx: Context,
+  ctx: Context,
 ) -> se.StringBuilder {
   let type_name = naming.schema_to_type_name(op_id) <> "Request"
 
@@ -331,7 +675,7 @@ fn generate_request_type(
 
       let sb = case operation.request_body {
         Some(rb) -> {
-          let body_type = extract_request_body_type(rb)
+          let body_type = extract_request_body_type(rb, op_id, ctx)
           sb |> se.indent(2, "body: " <> body_type)
         }
         None -> sb
@@ -388,7 +732,9 @@ fn generate_response_type(
             [#(_media_type, media_type), ..] ->
               case media_type.schema {
                 Some(ref) -> {
-                  let inner_type = schema_ref_to_type_qualified(ref, ctx)
+                  let suffix = "Response" <> status_code_suffix(status_code)
+                  let inner_type =
+                    schema_ref_to_type_qualified(ref, op_id, suffix, ctx)
                   sb
                   |> se.indent(1, variant_name <> "(" <> inner_type <> ")")
                 }
@@ -480,21 +826,45 @@ fn schema_ref_is_nullable(ref: SchemaRef) -> Bool {
 
 /// Extract the Gleam type for a request body from its content media types.
 /// Uses types. prefix since request body schemas live in the types module.
-fn extract_request_body_type(rb: spec.RequestBody) -> String {
+fn extract_request_body_type(
+  rb: spec.RequestBody,
+  op_id: String,
+  ctx: Context,
+) -> String {
   let content_entries = dict.to_list(rb.content)
   case content_entries {
     [#(_media_type, media_type), ..] ->
       case media_type.schema {
         Some(Reference(ref:)) ->
           "types." <> naming.schema_to_type_name(resolver.ref_to_name(ref))
-        Some(Inline(ObjectSchema(..))) -> "String"
-        Some(Inline(StringSchema(..))) -> "String"
-        Some(Inline(IntegerSchema(..))) -> "Int"
-        Some(Inline(NumberSchema(..))) -> "Float"
-        Some(Inline(BooleanSchema(..))) -> "Bool"
+        Some(Inline(schema_obj)) ->
+          extract_inline_request_body_type(schema_obj, op_id, ctx)
         _ -> "String"
       }
     [] -> "String"
+  }
+}
+
+/// Extract the type for an inline request body schema.
+fn extract_inline_request_body_type(
+  schema_obj: SchemaObject,
+  op_id: String,
+  ctx: Context,
+) -> String {
+  case schema_obj {
+    ObjectSchema(..) -> {
+      let type_name = naming.schema_to_type_name(op_id) <> "RequestBody"
+      "types." <> type_name
+    }
+    AllOfSchema(..) -> {
+      let type_name = naming.schema_to_type_name(op_id) <> "RequestBody"
+      "types." <> type_name
+    }
+    StringSchema(..) -> "String"
+    IntegerSchema(..) -> "Int"
+    NumberSchema(..) -> "Float"
+    BooleanSchema(..) -> "Bool"
+    _ -> schema_to_gleam_type(schema_obj, ctx)
   }
 }
 

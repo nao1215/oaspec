@@ -2,6 +2,8 @@ name = "gleam_oas"
 version = "0.1.0"
 target = "erlang"
 description = "Generate Gleam code from OpenAPI 3.x specifications"
+licences = ["MIT"]
+repository = { type = "github", user = "nao1215", repo = "gleam-oas" }
 
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"

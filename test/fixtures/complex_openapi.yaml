@@ -1,0 +1,261 @@
+openapi: 3.0.3
+info:
+  title: Complex Test API
+  version: 1.0.0
+
+servers:
+  - url: https://api.example.com/v1
+  - url: https://staging-api.example.com/v1
+
+tags:
+  - name: user
+  - name: file
+  - name: webhook
+
+paths:
+  /users/{userId}:
+    get:
+      tags: [user]
+      summary: Get user with polymorphic response
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-zA-Z0-9_-]+$'
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            properties:
+              age:
+                type: integer
+              active:
+                type: boolean
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-RateLimit-Remaining:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/AdminUser'
+                  - $ref: '#/components/schemas/RegularUser'
+                discriminator:
+                  propertyName: type
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /upload:
+    post:
+      tags: [file]
+      summary: Upload file
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                metadata:
+                  $ref: '#/components/schemas/FileMetadata'
+      responses:
+        '201':
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileResponse'
+
+  /search:
+    post:
+      summary: Complex search
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Pagination'
+                - type: object
+                  properties:
+                    query:
+                      type: string
+                    filters:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Filter'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      anyOf:
+                        - $ref: '#/components/schemas/User'
+                        - $ref: '#/components/schemas/FileResponse'
+
+  /webhook:
+    post:
+      tags: [webhook]
+      summary: Receive webhook
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookEvent'
+      responses:
+        '200':
+          description: OK
+      callbacks:
+        onEvent:
+          '{$request.body#/callbackUrl}':
+            post:
+              requestBody:
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/WebhookResponse'
+              responses:
+                '200':
+                  description: callback success
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    BearerAuth:
+      type: http
+      scheme: bearer
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    User:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [admin, regular]
+
+    AdminUser:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            permissions:
+              type: array
+              items:
+                type: string
+
+    RegularUser:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            subscription:
+              type: string
+              nullable: true
+
+    FileMetadata:
+      type: object
+      properties:
+        tags:
+          type: array
+          items:
+            type: string
+        visibility:
+          type: string
+          enum: [public, private]
+
+    FileResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        url:
+          type: string
+          format: uri
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        perPage:
+          type: integer
+
+    Filter:
+      type: object
+      required: [field, op]
+      properties:
+        field:
+          type: string
+        op:
+          type: string
+          enum: [eq, ne, gt, lt]
+        value:
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+
+    WebhookEvent:
+      type: object
+      required: [type, callbackUrl]
+      properties:
+        type:
+          type: string
+        callbackUrl:
+          type: string
+          format: uri
+        payload:
+          type: object
+          additionalProperties: true
+
+    WebhookResponse:
+      type: object
+      properties:
+        status:
+          type: string
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: string

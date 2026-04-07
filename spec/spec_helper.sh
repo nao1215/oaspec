@@ -31,3 +31,10 @@ generate_petstore_once() {
     cd "$PROJECT_ROOT" && gleam run -- generate --config=test/fixtures/gleam-oas.yaml 2>/dev/null
   fi
 }
+
+# Helper: generate complex supported spec once (idempotent)
+generate_complex_supported_once() {
+  if [ ! -f "$TEST_OUTPUT_DIR/complex_server/types.gleam" ]; then
+    cd "$PROJECT_ROOT" && gleam run -- generate --config=test/fixtures/complex-supported-gleam-oas.yaml 2>/dev/null
+  fi
+}

@@ -1,7 +1,9 @@
 import gleam/int
 import gleam/io
+import gleam/list
 import gleam/option.{Some}
 import gleam_oas/codegen/context
+import gleam_oas/codegen/validate
 import gleam_oas/codegen/writer
 import gleam_oas/config
 import gleam_oas/openapi/parser
@@ -191,6 +193,19 @@ fn run_generate(
 
   // Create generation context
   let ctx = context.new(spec, cfg)
+
+  // Validate spec for unsupported features
+  let validation_errors = validate.validate(ctx)
+  case list.is_empty(validation_errors) {
+    True -> Nil
+    False -> {
+      io.println("Error: OpenAPI spec contains unsupported features:")
+      list.each(validation_errors, fn(e) {
+        io.println("  - " <> validate.error_to_string(e))
+      })
+      halt(1)
+    }
+  }
 
   // Generate files
   io.println("Generating code...")

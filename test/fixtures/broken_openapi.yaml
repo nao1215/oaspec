@@ -1,0 +1,74 @@
+openapi: 3.0.3
+info:
+  title: Broken Test API
+  version: 1.0.0
+
+paths:
+  /deep-object:
+    get:
+      operationId: getWithDeepObject
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            properties:
+              age:
+                type: integer
+      responses:
+        '200':
+          description: OK
+
+  /upload:
+    post:
+      operationId: uploadFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Uploaded
+
+  /mixed-oneof:
+    get:
+      operationId: getMixedOneOf
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: string
+                  - type: number
+                  - type: boolean
+
+components:
+  schemas:
+    UntypedPayload:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+
+    InlineOneOfProperty:
+      type: object
+      properties:
+        value:
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean

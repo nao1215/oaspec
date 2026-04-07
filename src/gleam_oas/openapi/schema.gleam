@@ -40,6 +40,7 @@ pub type SchemaObject {
     properties: Dict(String, SchemaRef),
     required: List(String),
     additional_properties: Option(SchemaRef),
+    additional_properties_untyped: Bool,
     nullable: Bool,
   )
   AllOfSchema(description: Option(String), schemas: List(SchemaRef))

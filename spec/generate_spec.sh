@@ -298,4 +298,115 @@ Describe 'gleam-oas generate'
       The path "$TEST_OUTPUT_DIR/server" should not be exist
     End
   End
+
+  # -------------------------------------------------------------------
+  # Unsupported feature validation
+  # -------------------------------------------------------------------
+
+  Describe 'unsupported features'
+    It 'fails with error for specs containing unsupported patterns'
+      When run generate --config=test/fixtures/broken-gleam-oas.yaml
+      The status should be failure
+      The output should include 'Unsupported feature'
+    End
+
+    It 'reports deepObject style as unsupported'
+      When run generate --config=test/fixtures/broken-gleam-oas.yaml
+      The status should be failure
+      The output should include 'deepObject'
+    End
+
+    It 'reports multipart/form-data as unsupported'
+      When run generate --config=test/fixtures/broken-gleam-oas.yaml
+      The status should be failure
+      The output should include 'multipart/form-data'
+    End
+
+    It 'reports additionalProperties as unsupported'
+      When run generate --config=test/fixtures/broken-gleam-oas.yaml
+      The status should be failure
+      The output should include 'additionalProperties'
+    End
+
+    It 'reports inline oneOf primitives as unsupported'
+      When run generate --config=test/fixtures/broken-gleam-oas.yaml
+      The status should be failure
+      The output should include 'oneOf/anyOf with inline primitive'
+    End
+  End
+
+  # -------------------------------------------------------------------
+  # Complex supported spec (inline objects, oneOf $ref, allOf, enums)
+  # -------------------------------------------------------------------
+
+  Describe 'complex supported spec'
+    BeforeAll 'clean_test_output'
+
+    It 'generates successfully'
+      When run generate --config=test/fixtures/complex-supported-gleam-oas.yaml
+      The status should be success
+      The output should include 'Successfully generated'
+    End
+  End
+
+  Describe 'complex supported spec content'
+    BeforeAll 'generate_complex_supported_once'
+
+    # Inline enum types
+
+    It 'generates inline enum for User.type'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'pub type UserType {'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'UserTypeAdmin'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'UserTypeRegular'
+    End
+
+    It 'generates inline enum for Filter.op'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'pub type FilterOp {'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'FilterOpEq'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'FilterOpNe'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'FilterOpGt'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'FilterOpLt'
+    End
+
+    It 'references inline enum type in Filter.op field'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'op: FilterOp'
+    End
+
+    # Inline object in response
+
+    It 'generates anonymous type for inline response object'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'pub type PostSearchResponseOk {'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'results: Option(List(User))'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'total: Option(Int)'
+    End
+
+    # oneOf with $ref in response
+
+    It 'generates oneOf type with $ref variants'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'pub type GetUserResponseOk {'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'GetUserResponseOkAdminUser(AdminUser)'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'GetUserResponseOkRegularUser(RegularUser)'
+    End
+
+    # allOf merged requestBody
+
+    It 'generates merged allOf type for request body'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'pub type PostSearchRequestBody {'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'page: Option(Int)'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/types.gleam" should include 'query: Option(String)'
+    End
+
+    # Response types reference anonymous types
+
+    It 'response types reference anonymous types correctly'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/response_types.gleam" should include 'PostSearchResponseOk(types.PostSearchResponseOk)'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/response_types.gleam" should include 'GetUserResponseOk(types.GetUserResponseOk)'
+    End
+
+    # Request types reference merged allOf type
+
+    It 'request types reference merged allOf body type'
+      The contents of file "$TEST_OUTPUT_DIR/complex_server/request_types.gleam" should include 'body: types.PostSearchRequestBody'
+    End
+  End
 End

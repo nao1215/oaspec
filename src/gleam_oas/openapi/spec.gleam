@@ -77,6 +77,7 @@ pub type Parameter {
     description: Option(String),
     required: Bool,
     schema: Option(SchemaRef),
+    style: Option(String),
     deprecated: Bool,
   )
 }

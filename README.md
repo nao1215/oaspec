@@ -5,6 +5,9 @@
 
 ![gleam_oas_logo](https://raw.githubusercontent.com/nao1215/gleam-oas/main/doc/img/gleam-oas-small-logo.png)
 
+> [!IMPORTANT]
+> Not fully supporting the entire OpenAPI 3.x specification, gleam-oas can only perform limited code generation at this stage. Support will be expanded incrementally.
+
 Generate strongly typed Gleam code from OpenAPI 3.x specifications.
 
 - Custom types for every component schema (no generic maps)
@@ -176,28 +179,40 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 
 - OpenAPI 3.x (YAML and JSON input)
 - Paths and operations (GET, POST, PUT, DELETE, PATCH)
-- Path and query parameters (path-level params merged into operations, serialized to URL in client)
+- Path, query, header, and cookie parameters (path-level merged into operations, serialized in client)
 - Request bodies with `$ref` schema resolution (typed, not raw String)
-- Responses with status codes
+- Inline allOf in request body (property merging from `$ref` + inline objects)
+- Responses with status codes, including `$ref` responses from `components.responses`
+- `$ref` parameters, requestBodies, and responses resolved from `components`
 - Component schemas with `$ref` resolution (types, decoders, encoders)
 - String enums with unknown-value rejection (decode returns Error, not silent fallback)
+- Inline enums in properties (auto-named types generated)
+- Inline objects in response/requestBody (anonymous types auto-generated)
+- oneOf/anyOf with `$ref` variants (sum types generated)
 - Nullable fields, arrays (including array of `$ref`)
-- allOf (property merging from inline and `$ref` schemas)
+- allOf (property merging from inline and `$ref` schemas, including required fields)
 - Encode/decode roundtrip safety: `decode(encode(value)) == Ok(value)`
+- Circular `$ref` detection (returns error instead of infinite recursion)
+- Fail-fast parser: missing required fields and unknown parameter locations return Error
+
+### Explicitly unsupported (generator exits with error)
+
+These patterns are detected before code generation. The generator prints a clear error message and exits non-zero instead of generating broken code.
+
+- **`style: deepObject`** query parameters
+- **`multipart/form-data`** request bodies
+- **`additionalProperties: true`** (untyped map)
+- **Inline oneOf/anyOf with primitive types** (`String | Int | Bool`)
 
 ### Not yet supported
 
 - **Client response decoding**: Client returns raw `ClientResponse`, not typed response variants
 - **Client request body encoding**: Client accepts `body: String`, not typed body parameter
-- **oneOf / anyOf**: Type definitions generated, but no decoders/encoders
-- **Nested inline objects**: Mapped to `String` — use named schemas in `components` instead
-- **additionalProperties**: Parsed but ignored in type generation (no `Dict` support)
-- **Header / cookie parameters**: Parsed but not serialized in client requests
-- **`$ref` parameters**: Extracted by name, not resolved from `components.parameters`
-- **`$ref` requestBodies / responses**: `components.requestBodies` and `components.responses` are not resolved
-- **Discriminator**: Parsed but not used in decoder generation
-- **Circular `$ref`**: Not detected — will cause infinite recursion
-- **Validation constraints** (minLength, maxLength, pattern, minimum, maximum): Parsed but not enforced in decoders
+- **oneOf / anyOf decoders/encoders**: Types generated for `$ref` variants, but no decoder/encoder
+- **Discriminator in decoders**: Parsed but not used in generated decoder logic
+- **Validation constraints** (minLength, maxLength, pattern, minimum, maximum): Parsed but not enforced
+- **Callbacks**: Parsed but ignored
+- **Security schemes**: Parsed but not applied to generated client
 
 ### Schema-to-type mapping
 
