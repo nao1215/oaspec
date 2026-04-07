@@ -26,7 +26,7 @@ jobs:
       - name: Download dependencies
         run: gleam deps download
 
-      - name: Build gleam-oas
+      - name: Build oas-gleam
         run: gleam build
 
       - name: Install ShellSpec
@@ -56,7 +56,7 @@ jobs:
       - name: Download dependencies
         run: gleam deps download
 
-      - name: Build gleam-oas
+      - name: Build oas-gleam
         run: gleam build
 
       - name: Run integration tests

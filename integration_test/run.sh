@@ -28,7 +28,7 @@ rm -rf "$SCRIPT_DIR/src/api"
 mkdir -p "$SCRIPT_DIR/src/api"
 
 gleam run -- generate \
-  --config="$SCRIPT_DIR/gleam-oas.yaml" \
+  --config="$SCRIPT_DIR/oas-gleam.yaml" \
   --mode=server
 
 info "Code generation done."
@@ -126,7 +126,7 @@ rm -rf "$CLIENT_DIR"
 mkdir -p "$CLIENT_DIR/src"
 
 # Create a config file that outputs client code with matching package/directory name
-cat > "$CLIENT_DIR/gleam-oas-client.yaml" << 'YAML_EOF'
+cat > "$CLIENT_DIR/oas-gleam-client.yaml" << 'YAML_EOF'
 input: test/fixtures/petstore.yaml
 output:
   client: ./integration_test/client_test/src/api
@@ -136,7 +136,7 @@ YAML_EOF
 cd "$PROJECT_ROOT"
 
 gleam run -- generate \
-  --config="$CLIENT_DIR/gleam-oas-client.yaml" \
+  --config="$CLIENT_DIR/oas-gleam-client.yaml" \
   --mode=client
 
 # Create a minimal Gleam project around the generated client code

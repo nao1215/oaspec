@@ -2,15 +2,15 @@ import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
-import gleam_oas/codegen/context
-import gleam_oas/codegen/validate
-import gleam_oas/config
-import gleam_oas/openapi/parser
-import gleam_oas/openapi/resolver
-import gleam_oas/openapi/schema
-import gleam_oas/util/naming
 import gleeunit
 import gleeunit/should
+import oas_gleam/codegen/context
+import oas_gleam/codegen/validate
+import oas_gleam/config
+import oas_gleam/openapi/parser
+import oas_gleam/openapi/resolver
+import oas_gleam/openapi/schema
+import oas_gleam/util/naming
 
 pub fn main() {
   gleeunit.main()
@@ -51,7 +51,7 @@ pub fn capitalize_test() {
 // --- Config Tests ---
 
 pub fn load_config_test() {
-  let assert Ok(cfg) = config.load("test/fixtures/gleam-oas.yaml")
+  let assert Ok(cfg) = config.load("test/fixtures/oas-gleam.yaml")
   cfg.input |> should.equal("test/fixtures/petstore.yaml")
   cfg.output_server |> should.equal("./test_output/server")
   cfg.output_client |> should.equal("./test_output/client")

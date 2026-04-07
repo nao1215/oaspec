@@ -1,12 +1,12 @@
 import gleam/list
 import gleam/option.{Some}
-import gleam_oas/codegen/context.{
+import oas_gleam/codegen/context.{
   type Context, type GeneratedFile, GeneratedFile,
 }
-import gleam_oas/codegen/types as type_gen
-import gleam_oas/openapi/spec
-import gleam_oas/util/naming
-import gleam_oas/util/string_extra as se
+import oas_gleam/codegen/types as type_gen
+import oas_gleam/openapi/spec
+import oas_gleam/util/naming
+import oas_gleam/util/string_extra as se
 
 /// Generate server stub files.
 pub fn generate(ctx: Context) -> List(GeneratedFile) {

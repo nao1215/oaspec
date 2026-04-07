@@ -4,11 +4,11 @@ import gleam/option.{None, Some}
 import gleam/result
 import gleam/set.{type Set}
 import gleam/string
-import gleam_oas/openapi/schema.{
+import oas_gleam/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
   Inline, ObjectSchema, OneOfSchema, Reference,
 }
-import gleam_oas/openapi/spec.{type OpenApiSpec}
+import oas_gleam/openapi/spec.{type OpenApiSpec}
 
 /// Errors during reference resolution.
 pub type ResolveError {

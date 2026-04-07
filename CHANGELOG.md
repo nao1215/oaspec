@@ -20,8 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 #### CLI
-- `gleam_oas generate` command with `--config`, `--mode`, `--output` flags
-- `gleam_oas init` command to scaffold `gleam-oas.yaml` config template
+- `oas_gleam generate` command with `--config`, `--mode`, `--output` flags
+- `oas_gleam init` command to scaffold `oas-gleam.yaml` config template
 - Config file support with `input`, `package`, `mode`, and `output.dir`/`output.server`/`output.client`
 - escript binary distribution via gleescript
 - GitHub Actions release workflow: tag push builds escript and attaches to GitHub Release

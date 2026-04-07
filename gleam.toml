@@ -1,4 +1,4 @@
-name = "gleam_oas"
+name = "oas_gleam"
 version = "0.1.1"
 target = "erlang"
 description = "Generate Gleam code from OpenAPI 3.x specifications"

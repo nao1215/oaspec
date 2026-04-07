@@ -1,13 +1,13 @@
 import gleam/io
 import gleam/list
 import gleam/result
-import gleam_oas/codegen/client
-import gleam_oas/codegen/context.{type Context, type GeneratedFile}
-import gleam_oas/codegen/decoders
-import gleam_oas/codegen/middleware
-import gleam_oas/codegen/server
-import gleam_oas/codegen/types
-import gleam_oas/config.{Both, Client, Server}
+import oas_gleam/codegen/client
+import oas_gleam/codegen/context.{type Context, type GeneratedFile}
+import oas_gleam/codegen/decoders
+import oas_gleam/codegen/middleware
+import oas_gleam/codegen/server
+import oas_gleam/codegen/types
+import oas_gleam/config.{Both, Client, Server}
 import simplifile
 
 /// Errors that can occur during file writing.

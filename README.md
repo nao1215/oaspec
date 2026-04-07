@@ -1,12 +1,10 @@
-# gleam-oas
+# oas-gleam
 
-[![CI](https://github.com/nao1215/gleam-oas/actions/workflows/ci.yml/badge.svg)](https://github.com/nao1215/gleam-oas/actions/workflows/ci.yml)
-[![Integration Tests](https://github.com/nao1215/gleam-oas/actions/workflows/integration.yml/badge.svg)](https://github.com/nao1215/gleam-oas/actions/workflows/integration.yml)
-
-![gleam_oas_logo](https://raw.githubusercontent.com/nao1215/gleam-oas/main/doc/img/gleam-oas-small-logo.png)
+[![CI](https://github.com/nao1215/oas-gleam/actions/workflows/ci.yml/badge.svg)](https://github.com/nao1215/oas-gleam/actions/workflows/ci.yml)
+[![Integration Tests](https://github.com/nao1215/oas-gleam/actions/workflows/integration.yml/badge.svg)](https://github.com/nao1215/oas-gleam/actions/workflows/integration.yml)
 
 > [!IMPORTANT]
-> Not fully supporting the entire OpenAPI 3.x specification, gleam-oas can only perform limited code generation at this stage. Support will be expanded incrementally.
+> Not fully supporting the entire OpenAPI 3.x specification, oas-gleam can only perform limited code generation at this stage. Support will be expanded incrementally.
 
 Generate strongly typed Gleam code from OpenAPI 3.x specifications.
 
@@ -21,13 +19,13 @@ Generate strongly typed Gleam code from OpenAPI 3.x specifications.
 
 ### From GitHub Release (recommended)
 
-Download the `gleam_oas` escript binary from the [Releases](https://github.com/nao1215/gleam-oas/releases) page. Requires Erlang/OTP 27+ runtime.
+Download the `oas_gleam` escript binary from the [Releases](https://github.com/nao1215/gleam-oas/releases) page. Requires Erlang/OTP 27+ runtime.
 
 ```sh
 # Download (replace URL with the latest release)
-curl -fSL -o gleam_oas https://github.com/nao1215/gleam-oas/releases/download/v0.1.0/gleam_oas
-chmod +x gleam_oas
-sudo mv gleam_oas /usr/local/bin/
+curl -fSL -o oas_gleam https://github.com/nao1215/gleam-oas/releases/download/v0.1.0/gleam_oas
+chmod +x oas_gleam
+sudo mv oas_gleam /usr/local/bin/
 ```
 
 ### From source
@@ -35,11 +33,11 @@ sudo mv gleam_oas /usr/local/bin/
 Requires Gleam 1.15+, Erlang/OTP 27+, and rebar3.
 
 ```sh
-git clone https://github.com/nao1215/gleam-oas.git
-cd gleam-oas
+git clone https://github.com/nao1215/oas-gleam.git
+cd oas-gleam
 gleam deps download
-gleam run -m gleescript    # produces ./gleam_oas escript binary
-sudo mv gleam_oas /usr/local/bin/
+gleam run -m gleescript    # produces ./oas_gleam escript binary
+sudo mv oas_gleam /usr/local/bin/
 ```
 
 ## Usage
@@ -47,10 +45,10 @@ sudo mv gleam_oas /usr/local/bin/
 ### 1. Create a config file
 
 ```sh
-gleam_oas init
+oas_gleam init
 ```
 
-This creates `gleam-oas.yaml` with a commented template. Edit it for your project:
+This creates `oas-gleam.yaml` with a commented template. Edit it for your project:
 
 ```yaml
 input: openapi.yaml
@@ -75,18 +73,18 @@ The directory basename must match `package` so that Gleam imports (`import my_ap
 ### 2. Run the generator
 
 ```sh
-gleam_oas generate --config=gleam-oas.yaml
+oas_gleam generate --config=oas-gleam.yaml
 ```
 
 Options:
 
 ```
---config=<path>   Path to config file (default: ./gleam-oas.yaml)
+--config=<path>   Path to config file (default: ./oas-gleam.yaml)
 --mode=<mode>     server, client, or both (default: both)
 --output=<path>   Override output base directory
 ```
 
-When developing gleam-oas itself, you can also run via `gleam run -- generate --config=gleam-oas.yaml`.
+When developing oas-gleam itself, you can also run via `gleam run -- generate --config=oas-gleam.yaml`.
 
 ### 3. Generated output
 
@@ -113,7 +111,7 @@ gen/my_api_client/          # client
 
 ## Generated code examples
 
-Given a Petstore OpenAPI spec, gleam-oas generates:
+Given a Petstore OpenAPI spec, oas-gleam generates:
 
 ### Types
 

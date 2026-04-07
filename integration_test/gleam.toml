@@ -1,7 +1,7 @@
 name = "integration_test"
 version = "0.1.0"
 target = "erlang"
-description = "Integration tests for gleam-oas generated code"
+description = "Integration tests for oas-gleam generated code"
 
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"

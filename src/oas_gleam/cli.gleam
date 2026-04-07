@@ -2,18 +2,18 @@ import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{Some}
-import gleam_oas/codegen/context
-import gleam_oas/codegen/validate
-import gleam_oas/codegen/writer
-import gleam_oas/config
-import gleam_oas/openapi/parser
 import glint
+import oas_gleam/codegen/context
+import oas_gleam/codegen/validate
+import oas_gleam/codegen/writer
+import oas_gleam/config
+import oas_gleam/openapi/parser
 import simplifile
 
 /// Set up the CLI application.
 pub fn app() -> glint.Glint(Nil) {
   glint.new()
-  |> glint.with_name("gleam-oas")
+  |> glint.with_name("oas-gleam")
   |> glint.global_help("Generate Gleam code from OpenAPI 3.x specifications")
   |> glint.pretty_help(glint.default_pretty_help())
   |> glint.add(at: ["generate"], do: generate_command())
@@ -25,7 +25,7 @@ fn generate_command() -> glint.Command(Nil) {
   {
     use config_path <- glint.flag(
       glint.string_flag("config")
-      |> glint.flag_default("./gleam-oas.yaml")
+      |> glint.flag_default("./oas-gleam.yaml")
       |> glint.flag_help("Path to config file"),
     )
 
@@ -49,7 +49,7 @@ fn generate_command() -> glint.Command(Nil) {
         glint.command(fn(_named_args, _args, flags) {
           let config_path = case config_path(flags) {
             Ok(p) -> p
-            Error(_) -> "./gleam-oas.yaml"
+            Error(_) -> "./oas-gleam.yaml"
           }
 
           let mode_str = case mode(flags) {
@@ -74,15 +74,15 @@ fn init_command() -> glint.Command(Nil) {
   {
     use output_path <- glint.flag(
       glint.string_flag("output")
-      |> glint.flag_default("./gleam-oas.yaml")
+      |> glint.flag_default("./oas-gleam.yaml")
       |> glint.flag_help("Output path for the config file"),
     )
 
-    glint.command_help("Create a gleam-oas.yaml config file", fn() {
+    glint.command_help("Create a oas-gleam.yaml config file", fn() {
       glint.command(fn(_named_args, _args, flags) {
         let path = case output_path(flags) {
           Ok(p) -> p
-          Error(_) -> "./gleam-oas.yaml"
+          Error(_) -> "./oas-gleam.yaml"
         }
         run_init(path)
       })
@@ -93,8 +93,8 @@ fn init_command() -> glint.Command(Nil) {
 /// Create a config file template.
 fn run_init(path: String) -> Nil {
   let template =
-    "# gleam-oas configuration file
-# See https://github.com/nao1215/gleam-oas for documentation.
+    "# oas-gleam configuration file
+# See https://github.com/nao1215/oas-gleam for documentation.
 
 # Path to your OpenAPI 3.x specification (YAML or JSON).
 input: openapi.yaml
@@ -136,7 +136,7 @@ fn run_generate(
   mode_str: String,
   output_str: String,
 ) -> Nil {
-  io.println("gleam-oas v" <> context.version)
+  io.println("oas-gleam v" <> context.version)
   io.println("Loading config from: " <> config_path)
 
   // Load config

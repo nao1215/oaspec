@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Thank you for considering contributing to the gleam-oas project! This document explains how to contribute. We welcome all forms of contributions, including code contributions, documentation improvements, bug reports, and feature suggestions.
+Thank you for considering contributing to the oas-gleam project! This document explains how to contribute. We welcome all forms of contributions, including code contributions, documentation improvements, bug reports, and feature suggestions.
 
 ## Setting Up Development Environment
 
@@ -18,8 +18,8 @@ Thank you for considering contributing to the gleam-oas project! This document e
 ### Cloning the Project
 
 ```bash
-git clone https://github.com/nao1215/gleam-oas.git
-cd gleam-oas
+git clone https://github.com/nao1215/oas-gleam.git
+cd oas-gleam
 ```
 
 ### Installing Tools
@@ -78,7 +78,7 @@ just check        # format check, typecheck, build, unit tests
 
 When changing how code is generated:
 
-1. Make your changes in `src/gleam_oas/codegen/`
+1. Make your changes in `src/oas_gleam/codegen/`
 2. Run `just check` to verify the generator compiles
 3. Run `just shellspec` to verify generated file structure and content
 4. Run `just integration` to verify generated code compiles and works correctly
@@ -88,10 +88,10 @@ When changing how code is generated:
 
 When adding support for a new OpenAPI feature:
 
-1. Add types to `src/gleam_oas/openapi/spec.gleam` or `schema.gleam`
-2. Add parsing logic in `src/gleam_oas/openapi/parser.gleam`
-3. Add resolution logic in `src/gleam_oas/openapi/resolver.gleam` if needed
-4. Update code generation in the relevant `src/gleam_oas/codegen/` module
+1. Add types to `src/oas_gleam/openapi/spec.gleam` or `schema.gleam`
+2. Add parsing logic in `src/oas_gleam/openapi/parser.gleam`
+3. Add resolution logic in `src/oas_gleam/openapi/resolver.gleam` if needed
+4. Update code generation in the relevant `src/oas_gleam/codegen/` module
 5. Add a test case to the petstore fixture (`test/fixtures/petstore.yaml`)
 6. Add unit tests, ShellSpec checks, and integration tests
 
@@ -159,7 +159,7 @@ When you find a bug, please create an issue with the following information:
    - OS and version
    - Gleam version
    - Erlang/OTP version
-   - gleam-oas version
+   - oas-gleam version
 
 2. **Reproduction Steps**
    - Minimal OpenAPI spec that triggers the bug
