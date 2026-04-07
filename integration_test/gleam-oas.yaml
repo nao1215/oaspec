@@ -1,0 +1,4 @@
+input: test/fixtures/petstore.yaml
+output:
+  server: ./integration_test/src/api
+package: api

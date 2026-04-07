@@ -1,0 +1,5 @@
+input: test/fixtures/petstore.yaml
+output:
+  server: ./test_output/server
+  client: ./test_output/client
+package: api

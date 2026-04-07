@@ -2,3 +2,12 @@
 *.ez
 /build
 erl_crash.dump
+CLAUDE.md
+.codex
+.claude
+doc/reference/*
+test_output/
+integration_test/src/api/
+integration_test/build/
+integration_test/manifest.toml
+/gleam_oas

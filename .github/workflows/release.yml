@@ -1,0 +1,128 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build escript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          gleam-version: "1.15"
+
+      - name: Install rebar3
+        run: |
+          wget https://s3.amazonaws.com/rebar3/rebar3 -O /usr/local/bin/rebar3
+          chmod +x /usr/local/bin/rebar3
+
+      - run: gleam deps download
+      - run: gleam format --check src/ test/
+      - run: gleam build --warnings-as-errors
+      - run: gleam test
+
+      - name: Build escript binary
+        run: gleam run -m gleescript
+
+      - name: Verify binary works
+        run: ./gleam_oas --help
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gleam_oas
+          path: gleam_oas
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gleam_oas
+
+      - name: Make binary executable
+        run: chmod +x gleam_oas
+
+      - name: Extract tag name
+        id: tag
+        run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          TAG="${{ steps.tag.outputs.TAG_NAME }}"
+          TAG_WITHOUT_V="${TAG#v}"
+
+          CHANGELOG_FILE="changelog_content.md"
+
+          # Extract content between the current version and the next version header
+          awk -v ver="$TAG_WITHOUT_V" '
+            BEGIN { found = 0; }
+            $0 ~ "^#{2,3} \\[?" ver "\\]?" { found = 1; next; }
+            /^#{2,3} \[?[0-9]+\.[0-9]+\.[0-9]+\]?/ { if (found) exit; }
+            found { print; }
+          ' CHANGELOG.md > "$CHANGELOG_FILE"
+
+          # If no content found with version without 'v', try with 'v'
+          if [ ! -s "$CHANGELOG_FILE" ]; then
+            awk -v ver="$TAG" '
+              BEGIN { found = 0; }
+              $0 ~ "^#{2,3} \\[?" ver "\\]?" { found = 1; next; }
+              /^#{2,3} \[?v?[0-9]+\.[0-9]+\.[0-9]+\]?/ { if (found) exit; }
+              found { print; }
+            ' CHANGELOG.md > "$CHANGELOG_FILE"
+          fi
+
+          # If still no content, use a default message
+          if [ ! -s "$CHANGELOG_FILE" ]; then
+            echo "No changelog entry found for version $TAG" > "$CHANGELOG_FILE"
+            echo "" >> "$CHANGELOG_FILE"
+            echo "Please check CHANGELOG.md for updates." >> "$CHANGELOG_FILE"
+          fi
+
+          {
+            echo 'CHANGELOG_CONTENT<<EOF'
+            cat "$CHANGELOG_FILE"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.TAG_NAME }}
+          name: ${{ steps.tag.outputs.TAG_NAME }}
+          body: |
+            ${{ steps.changelog.outputs.CHANGELOG_CONTENT }}
+
+            ## Install
+
+            Download the `gleam_oas` escript binary below and place it on your PATH.
+            Requires Erlang/OTP runtime.
+
+            ```sh
+            chmod +x gleam_oas
+            ./gleam_oas generate --config=gleam-oas.yaml
+            ```
+          files: gleam_oas
+          draft: false
+          prerelease: ${{ contains(steps.tag.outputs.TAG_NAME, '-alpha') || contains(steps.tag.outputs.TAG_NAME, '-beta') || contains(steps.tag.outputs.TAG_NAME, '-rc') }}
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
