@@ -1,9 +1,7 @@
 import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import oaspec/codegen/context.{
-  type Context, type GeneratedFile, GeneratedFile,
-}
+import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{
   type SchemaRef, ArraySchema, BooleanSchema, Inline, IntegerSchema,

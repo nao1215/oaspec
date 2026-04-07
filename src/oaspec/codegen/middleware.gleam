@@ -1,6 +1,4 @@
-import oaspec/codegen/context.{
-  type Context, type GeneratedFile, GeneratedFile,
-}
+import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
 import oaspec/util/string_extra as se
 
 /// Generate middleware module.

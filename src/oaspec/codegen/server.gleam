@@ -1,8 +1,6 @@
 import gleam/list
 import gleam/option.{Some}
-import oaspec/codegen/context.{
-  type Context, type GeneratedFile, GeneratedFile,
-}
+import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
 import oaspec/codegen/types as type_gen
 import oaspec/openapi/spec
 import oaspec/util/naming
