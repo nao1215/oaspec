@@ -1,7 +1,7 @@
 # oas-gleam
 
-[![CI](https://github.com/nao1215/oas-gleam/actions/workflows/ci.yml/badge.svg)](https://github.com/nao1215/oas-gleam/actions/workflows/ci.yml)
-[![Integration Tests](https://github.com/nao1215/oas-gleam/actions/workflows/integration.yml/badge.svg)](https://github.com/nao1215/oas-gleam/actions/workflows/integration.yml)
+[![CI](https://github.com/nao1215/gleam-oas/actions/workflows/ci.yml/badge.svg)](https://github.com/nao1215/gleam-oas/actions/workflows/ci.yml)
+[![Integration Tests](https://github.com/nao1215/gleam-oas/actions/workflows/integration.yml/badge.svg)](https://github.com/nao1215/gleam-oas/actions/workflows/integration.yml)
 
 > [!IMPORTANT]
 > Not fully supporting the entire OpenAPI 3.x specification, oas-gleam can only perform limited code generation at this stage. Support will be expanded incrementally.
