@@ -217,7 +217,7 @@ These are detected before code generation. The generator prints an error and exi
 - Inline oneOf/anyOf schemas (variants must be `$ref`)
 - Nested inline object/allOf in properties (use `$ref`)
 - Array parameters (query/header/cookie with `type: array`)
-- Complex schema parameters (object/allOf/oneOf/anyOf in query/header/cookie)
+- Complex schema parameters (object/allOf/oneOf/anyOf in path/query/header/cookie)
 - Inline complex array items (object/allOf/oneOf/anyOf; use `$ref`)
 - Duplicate operationId
 - Function/type name collisions after case conversion
@@ -231,10 +231,11 @@ These are detected before code generation. The generator prints an error and exi
 
 - Validation constraints enforcement at runtime (guards are generated but not auto-called)
 - Callbacks: ignored by the generator
-- OAuth2 / OpenID Connect: rejected at validation time
+- OAuth2: rejected at validation time
+- OpenID Connect: rejected at parse time
 - Unsupported HTTP security schemes (e.g. hoba, negotiate): rejected at validation time
-- allOf with non-object sub-schemas
-- `additionalProperties` with inline complex schemas
+- `allOf` merge only supports object sub-schemas (non-object entries are ignored)
+- `additionalProperties` with inline complex schemas is not handled explicitly; use primitives or `$ref`
 
 ### Schema-to-type mapping
 
