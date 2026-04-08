@@ -226,6 +226,29 @@ fn generate_client(ctx: Context) -> String {
     False -> imports
   }
 
+  // result module needed for cookie-based apiKey security (reading existing cookie header)
+  let has_cookie_api_key = case ctx.spec.components {
+    Some(c) ->
+      list.any(dict.to_list(c.security_schemes), fn(entry) {
+        case entry {
+          #(_, spec.ApiKeyScheme(in_: "cookie", ..)) -> True
+          _ -> False
+        }
+      })
+    _ -> False
+  }
+  let imports = case has_cookie_api_key {
+    True -> {
+      // Need gleam/list for list.key_find and gleam/result for result.unwrap
+      let imports = case needs_list {
+        True -> imports
+        False -> ["gleam/list", ..imports]
+      }
+      ["gleam/result", ..imports]
+    }
+    False -> imports
+  }
+
   let sb =
     se.file_header(context.version)
     |> se.imports(imports)
@@ -648,12 +671,18 @@ fn generate_client_function(
             Ok(spec.ApiKeyScheme(name: cookie_name, in_: "cookie")) ->
               sb
               |> se.indent(1, "let req = case config." <> field_name <> " {")
+              |> se.indent(2, "Some(value) -> {")
               |> se.indent(
-                2,
-                "Some(value) -> request.set_header(req, \"cookie\", \""
-                  <> cookie_name
-                  <> "=\" <> value)",
+                3,
+                "let existing = list.key_find(req.headers, \"cookie\") |> result.unwrap(\"\")",
               )
+              |> se.indent(3, "let cookie_val = \"" <> cookie_name <> "=\" <> value")
+              |> se.indent(3, "let new_cookie = case existing {")
+              |> se.indent(4, "\"\" -> cookie_val")
+              |> se.indent(4, "_ -> existing <> \"; \" <> cookie_val")
+              |> se.indent(3, "}")
+              |> se.indent(3, "request.set_header(req, \"cookie\", new_cookie)")
+              |> se.indent(2, "}")
               |> se.indent(2, "None -> req")
               |> se.indent(1, "}")
             Ok(spec.HttpScheme(scheme: "basic", ..)) ->
