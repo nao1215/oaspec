@@ -194,6 +194,58 @@ pub fn validate_broken_spec_detects_additional_properties_test() {
   |> should.be_true()
 }
 
+// --- Parser: fail-fast tests ---
+
+pub fn parse_missing_responses_fails_test() {
+  let result = parser.parse_file("test/fixtures/missing_responses.yaml")
+  should.be_error(result)
+  let assert Error(parser.MissingField(path: _, field: "responses")) = result
+}
+
+pub fn parse_invalid_param_location_fails_test() {
+  let result = parser.parse_file("test/fixtures/invalid_param_location.yaml")
+  should.be_error(result)
+  let assert Error(parser.InvalidValue(path: "parameter.in", detail: _)) =
+    result
+}
+
+pub fn parse_missing_openapi_field_fails_test() {
+  let yaml =
+    "
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+"
+  let result = parser.parse_string(yaml)
+  should.be_error(result)
+  let assert Error(parser.MissingField(path: "", field: "openapi")) = result
+}
+
+pub fn parse_missing_info_fails_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+paths: {}
+"
+  let result = parser.parse_string(yaml)
+  should.be_error(result)
+  let assert Error(parser.MissingField(path: "", field: "info")) = result
+}
+
+pub fn parse_missing_info_title_fails_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  version: 1.0.0
+paths: {}
+"
+  let result = parser.parse_string(yaml)
+  should.be_error(result)
+  let assert Error(parser.MissingField(path: "info", field: "title")) = result
+}
+
 pub fn validate_petstore_has_no_errors_test() {
   let ctx = make_ctx("test/fixtures/petstore.yaml")
   let errors = validate.validate(ctx)

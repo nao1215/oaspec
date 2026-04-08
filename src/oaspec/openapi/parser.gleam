@@ -64,13 +64,28 @@ fn parse_root(node: yay.Node) -> Result(OpenApiSpec, ParseError) {
 
   use info <- result.try(parse_info(node))
 
-  // Parse components FIRST so we can resolve $ref during path parsing
-  let components = parse_components(node) |> option.from_result
+  // Parse components FIRST so we can resolve $ref during path parsing.
+  // Components section is optional, but if present it must parse correctly.
+  use components <- result.try(parse_optional_components(node))
 
   use paths <- result.try(parse_paths(node, components))
-  let servers = parse_servers(node) |> result.unwrap([])
+  use servers <- result.try(parse_servers(node))
 
   Ok(OpenApiSpec(openapi:, info:, paths:, components:, servers:))
+}
+
+/// Parse optional components section.
+/// Returns Ok(None) if not present, Ok(Some(..)) if valid, Error if malformed.
+fn parse_optional_components(
+  root: yay.Node,
+) -> Result(Option(Components), ParseError) {
+  case yay.select_sugar(from: root, selector: "components") {
+    Ok(_) -> {
+      use comps <- result.try(parse_components(root))
+      Ok(Some(comps))
+    }
+    Error(_) -> Ok(None)
+  }
 }
 
 /// Parse the info object.
@@ -159,23 +174,44 @@ fn parse_path_item(
     yay.extract_optional_string(node, "description")
     |> result.unwrap(None)
 
-  let get =
-    parse_operation_at(node, "get", path, Get, components)
-    |> option.from_result
-  let post =
-    parse_operation_at(node, "post", path, Post, components)
-    |> option.from_result
-  let put =
-    parse_operation_at(node, "put", path, Put, components)
-    |> option.from_result
-  let delete =
-    parse_operation_at(node, "delete", path, Delete, components)
-    |> option.from_result
-  let patch =
-    parse_operation_at(node, "patch", path, Patch, components)
-    |> option.from_result
+  // Operations are optional, but if present must parse correctly.
+  use get <- result.try(parse_optional_operation(
+    node,
+    "get",
+    path,
+    Get,
+    components,
+  ))
+  use post <- result.try(parse_optional_operation(
+    node,
+    "post",
+    path,
+    Post,
+    components,
+  ))
+  use put <- result.try(parse_optional_operation(
+    node,
+    "put",
+    path,
+    Put,
+    components,
+  ))
+  use delete <- result.try(parse_optional_operation(
+    node,
+    "delete",
+    path,
+    Delete,
+    components,
+  ))
+  use patch <- result.try(parse_optional_operation(
+    node,
+    "patch",
+    path,
+    Patch,
+    components,
+  ))
 
-  let parameters = parse_parameters_list(node, components) |> result.unwrap([])
+  use parameters <- result.try(parse_parameters_list(node, components))
 
   Ok(PathItem(
     summary:,
@@ -187,6 +223,30 @@ fn parse_path_item(
     patch:,
     parameters:,
   ))
+}
+
+/// Parse an optional operation: Ok(None) if key absent, Ok(Some(..)) if valid,
+/// Error if present but malformed.
+fn parse_optional_operation(
+  node: yay.Node,
+  method_key: String,
+  path: String,
+  method: HttpMethod,
+  components: Option(Components),
+) -> Result(Option(Operation), ParseError) {
+  case yay.select_sugar(from: node, selector: method_key) {
+    Ok(_) -> {
+      use op <- result.try(parse_operation_at(
+        node,
+        method_key,
+        path,
+        method,
+        components,
+      ))
+      Ok(Some(op))
+    }
+    Error(_) -> Ok(None)
+  }
 }
 
 /// Parse an operation at a specific HTTP method key.
@@ -233,11 +293,21 @@ fn parse_operation(
     |> result.unwrap(None)
     |> option.unwrap(False)
 
-  let parameters = parse_parameters_list(node, components) |> result.unwrap([])
-  let request_body =
-    parse_request_body_at(node, context, components) |> option.from_result
-  let responses =
-    parse_responses(node, context, components) |> result.unwrap(dict.new())
+  use parameters <- result.try(parse_parameters_list(node, components))
+
+  // requestBody is optional; absent is Ok(None), present-but-broken is Error.
+  use request_body <- result.try(parse_optional_request_body(
+    node,
+    context,
+    components,
+  ))
+
+  // responses is REQUIRED per OpenAPI 3.x
+  use responses <- result.try(parse_responses_required(
+    node,
+    context,
+    components,
+  ))
 
   Ok(Operation(
     operation_id:,
@@ -249,6 +319,34 @@ fn parse_operation(
     responses:,
     deprecated:,
   ))
+}
+
+/// Parse optional requestBody: Ok(None) if absent, Ok(Some(..)) if valid,
+/// Error if present but malformed.
+fn parse_optional_request_body(
+  node: yay.Node,
+  context: String,
+  components: Option(Components),
+) -> Result(Option(RequestBody), ParseError) {
+  case yay.select_sugar(from: node, selector: "requestBody") {
+    Ok(_) -> {
+      use rb <- result.try(parse_request_body_at(node, context, components))
+      Ok(Some(rb))
+    }
+    Error(_) -> Ok(None)
+  }
+}
+
+/// Parse responses, requiring the field to be present.
+fn parse_responses_required(
+  node: yay.Node,
+  context: String,
+  components: Option(Components),
+) -> Result(dict.Dict(String, Response), ParseError) {
+  case yay.select_sugar(from: node, selector: "responses") {
+    Ok(_) -> parse_responses(node, context, components)
+    Error(_) -> Error(MissingField(path: context, field: "responses"))
+  }
 }
 
 /// Parse parameters list from a node.
@@ -467,7 +565,7 @@ fn parse_request_body(
     |> result.unwrap(None)
     |> option.unwrap(False)
 
-  let content = parse_content(node, context) |> result.unwrap(dict.new())
+  use content <- result.try(parse_content(node, context))
 
   Ok(RequestBody(description:, content:, required:))
 }
@@ -541,7 +639,7 @@ fn parse_response(
         yay.extract_optional_string(node, "description")
         |> result.unwrap(None)
 
-      let content = parse_content(node, "response") |> result.unwrap(dict.new())
+      use content <- result.try(parse_content(node, "response"))
 
       Ok(Response(description:, content:))
     }
@@ -555,13 +653,10 @@ fn parse_components(root: yay.Node) -> Result(Components, ParseError) {
     |> result.map_error(fn(_) { MissingField(path: "", field: "components") }),
   )
 
-  let schemas = parse_schemas_map(components_node) |> result.unwrap(dict.new())
-  let parameters =
-    parse_parameters_map(components_node) |> result.unwrap(dict.new())
-  let request_bodies =
-    parse_request_bodies_map(components_node) |> result.unwrap(dict.new())
-  let responses =
-    parse_responses_map(components_node) |> result.unwrap(dict.new())
+  use schemas <- result.try(parse_schemas_map(components_node))
+  use parameters <- result.try(parse_parameters_map(components_node))
+  use request_bodies <- result.try(parse_request_bodies_map(components_node))
+  use responses <- result.try(parse_responses_map(components_node))
 
   Ok(Components(schemas:, parameters:, request_bodies:, responses:))
 }
@@ -759,31 +854,12 @@ fn parse_typed_schema(
     "boolean" -> Ok(BooleanSchema(description:, nullable:))
 
     "array" -> {
-      let items = case yay.select_sugar(from: node, selector: "items") {
-        Ok(items_node) ->
-          parse_schema_ref(items_node)
-          |> result.unwrap(
-            Inline(StringSchema(
-              description: None,
-              format: None,
-              enum_values: [],
-              min_length: None,
-              max_length: None,
-              pattern: None,
-              nullable: False,
-            )),
-          )
-        _ ->
-          Inline(StringSchema(
-            description: None,
-            format: None,
-            enum_values: [],
-            min_length: None,
-            max_length: None,
-            pattern: None,
-            nullable: False,
-          ))
-      }
+      use items <- result.try(
+        case yay.select_sugar(from: node, selector: "items") {
+          Ok(items_node) -> parse_schema_ref(items_node)
+          _ -> Error(MissingField(path: "schema(type=array)", field: "items"))
+        },
+      )
       let min_items =
         yay.extract_optional_int(node, "minItems") |> result.unwrap(None)
       let max_items =
