@@ -3,6 +3,10 @@ pub type ContentType {
   ApplicationJson
   TextPlain
   MultipartFormData
+  FormUrlEncoded
+  ApplicationOctetStream
+  ApplicationXml
+  TextXml
   UnsupportedContentType(String)
 }
 
@@ -12,6 +16,10 @@ pub fn from_string(content_type: String) -> ContentType {
     "application/json" -> ApplicationJson
     "text/plain" -> TextPlain
     "multipart/form-data" -> MultipartFormData
+    "application/x-www-form-urlencoded" -> FormUrlEncoded
+    "application/octet-stream" -> ApplicationOctetStream
+    "application/xml" -> ApplicationXml
+    "text/xml" -> TextXml
     other -> UnsupportedContentType(other)
   }
 }
@@ -22,6 +30,10 @@ pub fn to_string(content_type: ContentType) -> String {
     ApplicationJson -> "application/json"
     TextPlain -> "text/plain"
     MultipartFormData -> "multipart/form-data"
+    FormUrlEncoded -> "application/x-www-form-urlencoded"
+    ApplicationOctetStream -> "application/octet-stream"
+    ApplicationXml -> "application/xml"
+    TextXml -> "text/xml"
     UnsupportedContentType(s) -> s
   }
 }
@@ -32,6 +44,10 @@ pub fn is_supported(content_type: ContentType) -> Bool {
     ApplicationJson -> True
     TextPlain -> True
     MultipartFormData -> True
+    FormUrlEncoded -> True
+    ApplicationOctetStream -> True
+    ApplicationXml -> True
+    TextXml -> True
     _ -> False
   }
 }
@@ -41,6 +57,7 @@ pub fn is_supported_request(content_type: ContentType) -> Bool {
   case content_type {
     ApplicationJson -> True
     MultipartFormData -> True
+    FormUrlEncoded -> True
     _ -> False
   }
 }
@@ -50,6 +67,9 @@ pub fn is_supported_response(content_type: ContentType) -> Bool {
   case content_type {
     ApplicationJson -> True
     TextPlain -> True
+    ApplicationOctetStream -> True
+    ApplicationXml -> True
+    TextXml -> True
     _ -> False
   }
 }

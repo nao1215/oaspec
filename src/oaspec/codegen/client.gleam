@@ -513,13 +513,15 @@ fn generate_client_function(
   let sb = case operation.request_body {
     Some(rb) -> {
       let content_entries = dict.to_list(rb.content)
-      let is_multipart = case content_entries {
-        [#("multipart/form-data", _), ..] -> True
-        _ -> False
+      let content_type_key = case content_entries {
+        [#(key, _), ..] -> key
+        _ -> "application/json"
       }
-      case is_multipart {
-        True -> generate_multipart_body(sb, rb, op_id, ctx)
-        False -> {
+      case content_type_key {
+        "multipart/form-data" -> generate_multipart_body(sb, rb, op_id, ctx)
+        "application/x-www-form-urlencoded" ->
+          generate_form_urlencoded_body(sb, rb, op_id, ctx)
+        _ -> {
           let body_encode_expr = get_body_encode_expr(rb, op_id, ctx)
           sb
           |> se.indent(
@@ -755,8 +757,11 @@ fn generate_client_function(
           )
         [#(media_type_name, media_type), ..] ->
           case media_type_name {
-            // text/plain responses: return the body string directly
-            "text/plain" ->
+            // text/plain, XML, octet-stream responses: return the body string directly
+            "text/plain"
+            | "application/xml"
+            | "text/xml"
+            | "application/octet-stream" ->
               case media_type.schema {
                 Some(_) ->
                   sb
@@ -1195,6 +1200,85 @@ fn multipart_field_to_string_fn(
       }
     _ -> ""
   }
+}
+
+/// Generate application/x-www-form-urlencoded body encoding in the client function.
+fn generate_form_urlencoded_body(
+  sb: se.StringBuilder,
+  rb: spec.RequestBody,
+  _op_id: String,
+  ctx: Context,
+) -> se.StringBuilder {
+  let content_entries = dict.to_list(rb.content)
+  let #(properties, required_fields) = case content_entries {
+    [#(_, media_type), ..] ->
+      case media_type.schema {
+        Some(Inline(schema.ObjectSchema(properties:, required:, ..))) -> #(
+          dict.to_list(properties),
+          required,
+        )
+        Some(Reference(ref:) as schema_ref) ->
+          case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
+            Ok(schema.ObjectSchema(properties:, required:, ..)) -> {
+              let _ = ref
+              #(dict.to_list(properties), required)
+            }
+            _ -> #([], [])
+          }
+        _ -> #([], [])
+      }
+    _ -> #([], [])
+  }
+
+  let sb = sb |> se.indent(1, "let form_parts = []")
+  let sb =
+    list.fold(properties, sb, fn(sb, prop) {
+      let #(field_name, field_schema) = prop
+      let gleam_field = naming.to_snake_case(field_name)
+      let is_required = list.contains(required_fields, field_name)
+      let to_str = multipart_field_to_string_fn(field_schema, ctx)
+      case is_required {
+        True -> {
+          let value_expr = case to_str {
+            "" -> "body." <> gleam_field
+            fn_name -> fn_name <> "(body." <> gleam_field <> ")"
+          }
+          sb
+          |> se.indent(
+            1,
+            "let form_parts = [\""
+              <> field_name
+              <> "=\" <> uri.percent_encode("
+              <> value_expr
+              <> "), ..form_parts]",
+          )
+        }
+        False ->
+          sb
+          |> se.indent(1, "let form_parts = case body." <> gleam_field <> " {")
+          |> se.indent(
+            2,
+            "Some(v) -> [\""
+              <> field_name
+              <> "=\" <> uri.percent_encode("
+              <> { case to_str { "" -> "v" fn_name -> fn_name <> "(v)" } }
+              <> "), ..form_parts]",
+          )
+          |> se.indent(2, "None -> form_parts")
+          |> se.indent(1, "}")
+      }
+    })
+
+  sb
+  |> se.indent(
+    1,
+    "let body_str = string.join(form_parts, \"&\")",
+  )
+  |> se.indent(
+    1,
+    "let req = request.set_header(req, \"content-type\", \"application/x-www-form-urlencoded\")",
+  )
+  |> se.indent(1, "let req = request.set_body(req, body_str)")
 }
 
 /// Get the decode expression for a response body.

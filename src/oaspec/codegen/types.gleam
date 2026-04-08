@@ -786,8 +786,11 @@ fn generate_response_type(
             [] -> sb |> se.indent(1, variant_name)
             [#(media_type_name, media_type), ..] ->
               case media_type_name {
-                // text/plain responses always use String type regardless of schema
-                "text/plain" ->
+                // text/plain, XML, octet-stream: always use String type
+                "text/plain"
+                | "application/xml"
+                | "text/xml"
+                | "application/octet-stream" ->
                   case media_type.schema {
                     Some(_) ->
                       sb

@@ -1245,8 +1245,17 @@ pub fn content_type_from_string_test() {
   content_type.from_string("multipart/form-data")
   |> should.equal(content_type.MultipartFormData)
 
+  content_type.from_string("application/x-www-form-urlencoded")
+  |> should.equal(content_type.FormUrlEncoded)
+
   content_type.from_string("application/xml")
-  |> should.equal(content_type.UnsupportedContentType("application/xml"))
+  |> should.equal(content_type.ApplicationXml)
+
+  content_type.from_string("text/xml")
+  |> should.equal(content_type.TextXml)
+
+  content_type.from_string("application/octet-stream")
+  |> should.equal(content_type.ApplicationOctetStream)
 }
 
 pub fn content_type_to_string_test() {
@@ -1259,8 +1268,14 @@ pub fn content_type_to_string_test() {
   content_type.to_string(content_type.MultipartFormData)
   |> should.equal("multipart/form-data")
 
-  content_type.to_string(content_type.UnsupportedContentType("application/xml"))
+  content_type.to_string(content_type.FormUrlEncoded)
+  |> should.equal("application/x-www-form-urlencoded")
+
+  content_type.to_string(content_type.ApplicationXml)
   |> should.equal("application/xml")
+
+  content_type.to_string(content_type.ApplicationOctetStream)
+  |> should.equal("application/octet-stream")
 }
 
 pub fn content_type_is_supported_test() {
@@ -1273,8 +1288,17 @@ pub fn content_type_is_supported_test() {
   content_type.is_supported(content_type.MultipartFormData)
   |> should.be_true()
 
+  content_type.is_supported(content_type.FormUrlEncoded)
+  |> should.be_true()
+
+  content_type.is_supported(content_type.ApplicationXml)
+  |> should.be_true()
+
+  content_type.is_supported(content_type.ApplicationOctetStream)
+  |> should.be_true()
+
   content_type.is_supported(content_type.UnsupportedContentType(
-    "application/xml",
+    "application/msgpack",
   ))
   |> should.be_false()
 }
@@ -1286,6 +1310,9 @@ pub fn content_type_is_supported_request_test() {
   content_type.is_supported_request(content_type.MultipartFormData)
   |> should.be_true()
 
+  content_type.is_supported_request(content_type.FormUrlEncoded)
+  |> should.be_true()
+
   content_type.is_supported_request(content_type.TextPlain)
   |> should.be_false()
 }
@@ -1295,6 +1322,12 @@ pub fn content_type_is_supported_response_test() {
   |> should.be_true()
 
   content_type.is_supported_response(content_type.TextPlain)
+  |> should.be_true()
+
+  content_type.is_supported_response(content_type.ApplicationXml)
+  |> should.be_true()
+
+  content_type.is_supported_response(content_type.ApplicationOctetStream)
   |> should.be_true()
 
   content_type.is_supported_response(content_type.MultipartFormData)
