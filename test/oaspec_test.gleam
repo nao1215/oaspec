@@ -1174,6 +1174,41 @@ components:
   string.contains(ref, "#/components/schemas/") |> should.be_true()
 }
 
+pub fn hoist_case_normalized_name_collision_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        address:
+          type: object
+          properties:
+            street: { type: string }
+    user_address:
+      type: object
+      properties:
+        zip: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let hoisted = hoist.hoist(spec)
+  let assert Some(components) = hoisted.components
+
+  dict.has_key(components.schemas, "user_address") |> should.be_true()
+  dict.size(components.schemas) |> should.equal(3)
+
+  let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
+    dict.get(components.schemas, "User")
+  let assert Ok(schema.Reference(ref: ref)) = dict.get(props, "address")
+  ref |> should.not_equal("#/components/schemas/UserAddress")
+}
+
 // --- ContentType Tests ---
 
 pub fn content_type_from_string_test() {

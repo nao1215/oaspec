@@ -17,8 +17,10 @@ type HoistState {
   HoistState(
     /// New schemas to add to components.schemas
     new_schemas: Dict(String, SchemaRef),
-    /// Set of all existing schema names (original + new) for collision checks
+    /// Set of all existing schema names (original + new) for raw collision checks
     existing_names: Dict(String, Nil),
+    /// Set of all generated type names after case normalization
+    existing_type_names: Dict(String, Nil),
   )
 }
 
@@ -34,8 +36,17 @@ pub fn hoist(spec: OpenApiSpec) -> OpenApiSpec {
     dict.keys(existing_schemas)
     |> list.map(fn(k) { #(k, Nil) })
     |> dict.from_list()
+  let existing_type_names =
+    dict.keys(existing_schemas)
+    |> list.map(fn(k) { #(naming.schema_to_type_name(k), Nil) })
+    |> dict.from_list()
 
-  let state = HoistState(new_schemas: dict.new(), existing_names: existing_names)
+  let state =
+    HoistState(
+      new_schemas: dict.new(),
+      existing_names: existing_names,
+      existing_type_names: existing_type_names,
+    )
 
   // 1. Hoist within existing component schemas (nested inline objects)
   let #(hoisted_component_schemas, state) =
@@ -78,16 +89,25 @@ fn needs_hoisting(schema_obj: SchemaObject) -> Bool {
 }
 
 /// Generate a unique schema name, handling collisions by appending 2, 3, etc.
-fn make_unique_name(base_name: String, state: HoistState) -> #(String, HoistState) {
+fn make_unique_name(
+  base_name: String,
+  state: HoistState,
+) -> #(String, HoistState) {
+  let type_name = naming.schema_to_type_name(base_name)
   case
     dict.has_key(state.existing_names, base_name)
-    || dict.has_key(state.new_schemas, base_name)
+    || dict.has_key(state.existing_type_names, type_name)
   {
     False -> {
       let state =
         HoistState(
           ..state,
           existing_names: dict.insert(state.existing_names, base_name, Nil),
+          existing_type_names: dict.insert(
+            state.existing_type_names,
+            type_name,
+            Nil,
+          ),
         )
       #(base_name, state)
     }
@@ -102,15 +122,21 @@ fn find_unique_name(
   state: HoistState,
 ) -> #(String, HoistState) {
   let candidate = base_name <> int.to_string(suffix)
+  let type_name = naming.schema_to_type_name(candidate)
   case
     dict.has_key(state.existing_names, candidate)
-    || dict.has_key(state.new_schemas, candidate)
+    || dict.has_key(state.existing_type_names, type_name)
   {
     False -> {
       let state =
         HoistState(
           ..state,
           existing_names: dict.insert(state.existing_names, candidate, Nil),
+          existing_type_names: dict.insert(
+            state.existing_type_names,
+            type_name,
+            Nil,
+          ),
         )
       #(candidate, state)
     }
@@ -286,8 +312,7 @@ fn hoist_component_schemas(
     let #(name, schema_ref) = entry
     case schema_ref {
       Inline(schema_obj) -> {
-        let #(hoisted_obj, state) =
-          hoist_within_schema(schema_obj, name, state)
+        let #(hoisted_obj, state) = hoist_within_schema(schema_obj, name, state)
         #(dict.insert(result, name, Inline(hoisted_obj)), state)
       }
       Reference(_) -> #(dict.insert(result, name, schema_ref), state)
@@ -316,7 +341,8 @@ fn hoist_path_item(
   state: HoistState,
 ) -> #(PathItem, HoistState) {
   let #(get, state) = hoist_maybe_operation(path_item.get, "get", path, state)
-  let #(post, state) = hoist_maybe_operation(path_item.post, "post", path, state)
+  let #(post, state) =
+    hoist_maybe_operation(path_item.post, "post", path, state)
   let #(put, state) = hoist_maybe_operation(path_item.put, "put", path, state)
   let #(delete, state) =
     hoist_maybe_operation(path_item.delete, "delete", path, state)
@@ -424,8 +450,7 @@ fn hoist_responses(
           None -> #(dict.insert(ct_result, media_type_name, media_type), state)
         }
       })
-    let hoisted_response =
-      spec.Response(..response, content: new_content)
+    let hoisted_response = spec.Response(..response, content: new_content)
     #(dict.insert(result, status_code, hoisted_response), state)
   })
 }
