@@ -7,11 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+#### Architecture (Phase 0)
+- Schema hoisting pre-processing pass: inline complex schemas (objects, allOf, oneOf, anyOf, complex array items) are auto-extracted to `components.schemas` with `$ref` references
+- Name collision auto-resolution: property names, enum variants, and function/type names get `_2`, `_3` suffixes instead of hard errors
+- `ContentType` type abstraction for extensible content type handling
+
+#### High-impact features (Phase 1)
+- Array parameters in query/header/cookie: generates `List(T)` types with comma-separated serialization
+- Percent-encoding for all path/query/cookie parameter values via `uri.percent_encode`
+- `text/plain` response content type: body returned as `String` directly without JSON decoding
+
+#### Core features (Phase 2)
+- Typed `additionalProperties`: generates `Dict(String, T)` fields with dict decoder/encoder
+- Untyped `additionalProperties: true`: generates `Dict(String, Dynamic)` (decode-only)
+- `multipart/form-data` request bodies with boundary-based multipart encoding
+
+#### Extensions (Phase 3)
+- `style: deepObject` query parameters with flattened key serialization (`filter[status]=active`)
+- Complex schema parameters (object/allOf/oneOf/anyOf) serialized as JSON strings in query params
+- OAuth2 security schemes parsed and applied as Bearer token headers
+- `apiKey` in cookie position: generates cookie headers
+
+#### Low-priority items (Phase 4)
+- HTTP Basic and Digest authentication support
+- Validation constraint guard functions (minLength, maxLength, minimum, maximum, minItems, maxItems)
+- Callbacks safely ignored by the generator
+- allOf with non-object sub-schemas: primitives silently skipped
+
 ### Changed
 
 - Extract duplicated `status_code_suffix` and `status_code_to_int_pattern` into shared `oaspec/util/http` module
 - Replace hand-rolled `list_last` and `list_length` helpers with `gleam/list` stdlib equivalents
 - Simplify CLI flag parsing with `result.unwrap` instead of verbose case expressions
+- Property name, enum variant, and function/type name collisions now auto-resolved instead of hard errors
+- Validation for unsupported features significantly reduced (most patterns now supported)
 
 ## [0.3.0] - 2026-04-08
 
