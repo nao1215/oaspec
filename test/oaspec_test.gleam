@@ -275,7 +275,7 @@ pub fn parse_global_security_inherited_test() {
   get_public.security |> should.equal(Some([]))
 }
 
-pub fn validate_accepts_array_parameter_test() {
+pub fn validate_rejects_array_parameter_test() {
   let yaml =
     "
 openapi: 3.0.3
@@ -300,10 +300,10 @@ paths:
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
-  |> should.be_false()
+  |> should.be_true()
 }
 
-pub fn validate_accepts_optional_array_parameter_test() {
+pub fn validate_rejects_optional_array_parameter_test() {
   let yaml =
     "
 openapi: 3.0.3
@@ -327,7 +327,9 @@ paths:
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
   let errors = validate.validate(ctx)
-  errors |> should.equal([])
+  let error_strings = list.map(errors, validate.error_to_string)
+  list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
+  |> should.be_true()
 }
 
 pub fn validate_accepts_text_plain_response_test() {
@@ -354,9 +356,7 @@ paths:
   errors |> should.equal([])
 }
 
-pub fn validate_accepts_property_name_collision_test() {
-  // Property name collisions after snake_case are now auto-resolved
-  // by deduplicate_names during code generation, not validation errors.
+pub fn validate_rejects_property_name_collision_test() {
   let yaml =
     "
 openapi: 3.0.3
@@ -385,7 +385,7 @@ components:
   list.any(error_strings, fn(s) {
     string.contains(s, "Property name collision")
   })
-  |> should.be_false()
+  |> should.be_true()
 }
 
 pub fn parse_rejects_optional_path_parameter_test() {
@@ -485,25 +485,22 @@ fn make_ctx(spec_path: String) -> context.Context {
   context.new(spec, cfg)
 }
 
-pub fn validate_accepts_deep_object_test() {
+pub fn validate_rejects_deep_object_test() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
-  // deepObject style is now supported, so it should NOT appear as a validation error
   list.any(error_strings, fn(s) { string.contains(s, "deepObject") })
-  |> should.be_false()
+  |> should.be_true()
 }
 
-pub fn validate_accepts_complex_schema_parameter_test() {
+pub fn validate_rejects_complex_schema_parameter_test() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
-  // Complex schema parameters (object/allOf/oneOf/anyOf) are now supported,
-  // so they should NOT appear as validation errors
   list.any(error_strings, fn(s) {
     string.contains(s, "Complex schema parameters")
   })
-  |> should.be_false()
+  |> should.be_true()
 }
 
 pub fn validate_accepts_multipart_form_data_test() {

@@ -10,6 +10,7 @@ import oaspec/openapi/schema.{
 }
 import oaspec/openapi/spec
 import oaspec/util/content_type
+import oaspec/util/naming
 
 /// A validation error representing an unsupported OpenAPI feature.
 pub type ValidationError {
@@ -50,13 +51,50 @@ fn validate_parameters(
   op_id: String,
   params: List(spec.Parameter),
 ) -> List(ValidationError) {
-  list.flat_map(params, fn(_param) {
-    let _path = op_id <> ".parameters."
-    // deepObject style and complex schema parameters (object/allOf/oneOf/anyOf)
-    // are now supported. deepObject params generate flattened key serialization
-    // (e.g. filter[status]=active&filter[type]=dog), and complex schema params
-    // are JSON-serialized in the query string.
-    []
+  list.flat_map(params, fn(param) {
+    let path = op_id <> ".parameters." <> param.name
+    let deep_object_errors = case param.style {
+      Some("deepObject") -> [
+        UnsupportedFeature(
+          path: path,
+          detail: "Parameter style 'deepObject' is not supported.",
+        ),
+      ]
+      _ -> []
+    }
+    let complex_schema_errors = case param.in_, param.schema {
+      spec.InPath, _ -> []
+      _, Some(Inline(ObjectSchema(..)))
+      | _, Some(Inline(AllOfSchema(..)))
+      | _, Some(Inline(OneOfSchema(..)))
+      | _, Some(Inline(AnyOfSchema(..))) -> [
+        UnsupportedFeature(
+          path: path,
+          detail: "Complex schema parameters (object/allOf/oneOf/anyOf) in query/header/cookie are not supported.",
+        ),
+      ]
+      _, _ -> []
+    }
+    let array_errors = case param.in_, param.schema {
+      spec.InPath, _ -> []
+      _, Some(Inline(ArraySchema(..))) -> [
+        UnsupportedFeature(
+          path: path,
+          detail: "Array parameters in query/header/cookie are not supported.",
+        ),
+      ]
+      _, _ -> []
+    }
+    let required_errors = case param.in_, param.required {
+      spec.InPath, False -> [
+        UnsupportedFeature(
+          path: path,
+          detail: "Path parameters with required: false are not supported.",
+        ),
+      ]
+      _, _ -> []
+    }
+    list.flatten([deep_object_errors, complex_schema_errors, array_errors, required_errors])
   })
 }
 
@@ -203,9 +241,23 @@ fn validate_schema_recursive(
             validate_schema_ref_recursive(prop_path, prop_ref),
           )
         })
-      // Property name collisions after snake_case are auto-resolved
-      // by deduplicate_names during code generation.
-      list.flatten([ap_errors, typed_ap_errors, prop_errors])
+      // Property name collisions after snake_case conversion
+      let prop_names =
+        dict.to_list(properties)
+        |> list.map(fn(entry) {
+          let #(prop_name, _) = entry
+          naming.to_snake_case(prop_name)
+        })
+      let prop_collision_errors =
+        find_name_collisions(prop_names, fn(dup) {
+          UnsupportedFeature(
+            path: path,
+            detail: "Property name collision after snake_case conversion: '"
+              <> dup
+              <> "'",
+          )
+        })
+      list.flatten([ap_errors, typed_ap_errors, prop_errors, prop_collision_errors])
     }
 
     ArraySchema(items:, ..) -> {
@@ -236,8 +288,6 @@ fn validate_schema_recursive(
         validate_schema_ref_recursive(path <> ".allOf", s_ref)
       })
 
-    // Enum variant collisions after PascalCase are auto-resolved
-    // by deduplicate_names during code generation.
     _ -> []
   }
 }
@@ -296,9 +346,39 @@ fn validate_name_collisions(ctx: Context) -> List(ValidationError) {
       },
     )
 
-  // Function/type name collisions after case conversion are auto-resolved
-  // by deduplicate_names during code generation.
-  op_id_errors
+  // Function name collisions after snake_case conversion
+  let fn_names =
+    list.map(operations, fn(op) {
+      let #(op_id, _, _, _) = op
+      naming.operation_to_function_name(op_id)
+    })
+  let fn_collision_errors =
+    find_name_collisions(fn_names, fn(dup) {
+      UnsupportedFeature(
+        path: "paths",
+        detail: "Function name collision after case conversion: '"
+          <> dup
+          <> "'",
+      )
+    })
+
+  // Type name collisions after PascalCase conversion
+  let type_names =
+    list.map(operations, fn(op) {
+      let #(op_id, _, _, _) = op
+      naming.schema_to_type_name(op_id)
+    })
+  let type_collision_errors =
+    find_name_collisions(type_names, fn(dup) {
+      UnsupportedFeature(
+        path: "paths",
+        detail: "Type name collision after case conversion: '"
+          <> dup
+          <> "'",
+      )
+    })
+
+  list.flatten([op_id_errors, fn_collision_errors, type_collision_errors])
 }
 
 /// Find duplicates in a list using a key function, producing errors via an
@@ -318,4 +398,12 @@ fn find_duplicates(
       }
     })
   list.reverse(errors)
+}
+
+/// Find duplicate names in a simple list of strings.
+fn find_name_collisions(
+  names: List(String),
+  error_fn: fn(String) -> ValidationError,
+) -> List(ValidationError) {
+  find_duplicates(names, fn(name) { name }, error_fn)
 }
