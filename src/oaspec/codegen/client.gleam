@@ -6,8 +6,7 @@ import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
 import oaspec/codegen/types as type_gen
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{
-  AllOfSchema, AnyOfSchema, Inline, IntegerSchema, NumberSchema, ObjectSchema,
-  OneOfSchema, Reference, StringSchema,
+  Inline, IntegerSchema, NumberSchema, Reference, StringSchema,
 }
 import oaspec/openapi/spec
 import oaspec/util/http
@@ -446,42 +445,37 @@ fn generate_client_function(
       let sb =
         list.fold(query_params, sb, fn(sb, p) {
           let param_name = naming.to_snake_case(p.name)
-          // deepObject style with ObjectSchema: generate flattened key serialization
-          case is_deep_object_param(p) {
-            True -> build_deep_object_query_parts(sb, p, param_name)
-            False ->
-              case p.required {
-                True -> {
-                  let to_str = to_str_for_required(p, param_name, ctx)
-                  sb
-                  |> se.indent(
-                    1,
-                    "let query_parts = [\""
-                      <> p.name
-                      <> "=\" <> uri.percent_encode("
-                      <> to_str
-                      <> "), ..query_parts]",
-                  )
-                }
-                False -> {
-                  let to_str = to_str_for_optional_value(p, ctx)
-                  sb
-                  |> se.indent(
-                    1,
-                    "let query_parts = case " <> param_name <> " {",
-                  )
-                  |> se.indent(
-                    2,
-                    "Some(v) -> [\""
-                      <> p.name
-                      <> "=\" <> uri.percent_encode("
-                      <> to_str
-                      <> "), ..query_parts]",
-                  )
-                  |> se.indent(2, "None -> query_parts")
-                  |> se.indent(1, "}")
-                }
-              }
+          case p.required {
+            True -> {
+              let to_str = to_str_for_required(p, param_name, ctx)
+              sb
+              |> se.indent(
+                1,
+                "let query_parts = [\""
+                  <> p.name
+                  <> "=\" <> uri.percent_encode("
+                  <> to_str
+                  <> "), ..query_parts]",
+              )
+            }
+            False -> {
+              let to_str = to_str_for_optional_value(p, ctx)
+              sb
+              |> se.indent(
+                1,
+                "let query_parts = case " <> param_name <> " {",
+              )
+              |> se.indent(
+                2,
+                "Some(v) -> [\""
+                  <> p.name
+                  <> "=\" <> uri.percent_encode("
+                  <> to_str
+                  <> "), ..query_parts]",
+              )
+              |> se.indent(2, "None -> query_parts")
+              |> se.indent(1, "}")
+            }
           }
         })
       let sb =
@@ -877,7 +871,7 @@ fn build_param_list(
 }
 
 /// Convert a parameter to its Gleam type string.
-fn param_to_type(param: spec.Parameter, ctx: Context) -> String {
+fn param_to_type(param: spec.Parameter, _ctx: Context) -> String {
   let base = case param.schema {
     Some(Inline(StringSchema(..))) -> "String"
     Some(Inline(IntegerSchema(..))) -> "Int"
@@ -895,15 +889,6 @@ fn param_to_type(param: spec.Parameter, ctx: Context) -> String {
       }
       "List(" <> item_type <> ")"
     }
-    // Object schema parameters (used by deepObject style or JSON-serialized)
-    Some(Inline(ObjectSchema(..))) -> "String"
-    // Complex schema parameters: resolve allOf/oneOf/anyOf to get type name
-    Some(Inline(AllOfSchema(schemas:, ..))) ->
-      resolve_complex_param_type(schemas, ctx)
-    Some(Inline(OneOfSchema(schemas:, ..))) ->
-      resolve_complex_param_type(schemas, ctx)
-    Some(Inline(AnyOfSchema(schemas:, ..))) ->
-      resolve_complex_param_type(schemas, ctx)
     Some(Reference(ref:)) ->
       "types." <> naming.schema_to_type_name(resolver.ref_to_name(ref))
     _ -> "String"
@@ -911,52 +896,6 @@ fn param_to_type(param: spec.Parameter, ctx: Context) -> String {
   case param.required {
     True -> base
     False -> "Option(" <> base <> ")"
-  }
-}
-
-/// Resolve the type name for a complex schema parameter (allOf/oneOf/anyOf).
-/// If the first sub-schema is a $ref, use its type name; otherwise fallback to String.
-fn resolve_complex_param_type(
-  schemas: List(schema.SchemaRef),
-  _ctx: Context,
-) -> String {
-  case schemas {
-    [Reference(ref:), ..] ->
-      "types." <> naming.schema_to_type_name(resolver.ref_to_name(ref))
-    _ -> "String"
-  }
-}
-
-/// Check if a parameter uses deepObject style with an object schema.
-fn is_deep_object_param(param: spec.Parameter) -> Bool {
-  case param.style, param.schema {
-    Some("deepObject"), Some(Inline(ObjectSchema(..))) -> True
-    _, _ -> False
-  }
-}
-
-/// Build query parts for a deepObject-style parameter.
-/// The parameter is typed as String and should contain pre-serialized
-/// deep object query parts (e.g. "filter[status]=active&filter[type]=dog").
-/// The value is appended directly to query_parts without adding a key= prefix.
-fn build_deep_object_query_parts(
-  sb: se.StringBuilder,
-  param: spec.Parameter,
-  param_name: String,
-) -> se.StringBuilder {
-  case param.required {
-    True ->
-      sb
-      |> se.indent(
-        1,
-        "let query_parts = [" <> param_name <> ", ..query_parts]",
-      )
-    False ->
-      sb
-      |> se.indent(1, "let query_parts = case " <> param_name <> " {")
-      |> se.indent(2, "Some(v) -> [v, ..query_parts]")
-      |> se.indent(2, "None -> query_parts")
-      |> se.indent(1, "}")
   }
 }
 

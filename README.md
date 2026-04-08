@@ -174,6 +174,7 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 - Paths and operations (GET, POST, PUT, DELETE, PATCH)
 - Path, query, header, cookie parameters (path-level merged by `(name, in)`)
 - Parameter serialization for Bool, Float, Int, String, `$ref` enum types
+- Percent-encoding for path/query/cookie parameter values via `uri.percent_encode`
 - Cookie parameters combined into single header
 - Request bodies with `$ref` resolution (typed, auto-encoded)
 - allOf in request body (property merging from `$ref` + inline objects)
@@ -195,21 +196,16 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 - Client typed body (auto-encoded) and typed response (auto-decoded)
 - `default` response handling in client
 - Top-level security inheritance (operation-level overrides, `security: []` opts out)
-- Security schemes: `apiKey` in header/query/cookie, HTTP bearer/basic/digest, OAuth2 (first OR alternative applied; AND within one alternative supported)
-- Schema hoisting: inline complex schemas auto-extracted to `components.schemas` with `$ref`
-- Name collision auto-resolution: property names, enum variants, function/type names get `_2`, `_3` suffixes
-- Array parameters (query/header/cookie with `type: array`): `List(T)` with comma-separated serialization
-- Percent-encoding for path/query/cookie parameter values via `uri.percent_encode`
+- Security schemes: `apiKey` in header/query/cookie, HTTP bearer (first OR alternative applied; AND within one alternative supported)
 - `text/plain` response content type: body returned as `String` directly
-- Typed `additionalProperties`: `Dict(String, T)` with dict decoder/encoder
-- Untyped `additionalProperties: true`: `Dict(String, Dynamic)` (decode-only)
+- Typed `additionalProperties`: `Dict(String, T)` with dict decoder/encoder (known keys excluded)
+- Untyped `additionalProperties: true`: `Dict(String, Dynamic)` (decode-only, known keys excluded)
 - `multipart/form-data` request bodies with boundary-based encoding
-- `style: deepObject` query parameters with flattened key serialization (`filter[status]=active`)
-- Complex schema parameters (object/allOf/oneOf/anyOf in query/header/cookie): JSON-serialized
 - Validation constraint guards (minLength, maxLength, minimum, maximum, minItems, maxItems)
-- Callbacks: safely ignored by the generator
-- allOf with non-object sub-schemas: primitives silently skipped
 - Duplicate operationId detection
+- Function/type name collision detection after case conversion
+- Property name collision detection after snake_case conversion
+- Enum variant collision detection after PascalCase conversion
 - Config validation: output directory basename must match package name
 - Gleam keyword escaping in generated field names
 
@@ -217,8 +213,28 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 
 These are detected before code generation. The generator prints an error and exits non-zero.
 
-- Duplicate operationId (OpenAPI spec violation)
-- Path parameters with `required: false` (OpenAPI spec requires `required: true`)
+- `style: deepObject` query parameters
+- `multipart/form-data` request bodies (only `application/json`)
+- Inline oneOf/anyOf schemas (variants must be `$ref`)
+- Nested inline object/allOf in properties (use `$ref`)
+- Array parameters (query/header/cookie with `type: array`)
+- Complex schema parameters (object/allOf/oneOf/anyOf in query/header/cookie)
+- Inline complex array items (object/allOf/oneOf/anyOf; use `$ref`)
+- Duplicate operationId
+- Function/type name collisions after case conversion
+- Property name collisions after snake_case conversion
+- Enum variant collisions after PascalCase conversion
+- Non-JSON response content types (only `application/json` and `text/plain`)
+- Path parameters with `required: false`
+
+### Not yet supported
+
+- Validation constraints enforcement at runtime (guards are generated but not auto-called)
+- Callbacks: ignored by the generator
+- OAuth2 / OpenID Connect: rejected at parse time
+- HTTP Basic / Digest: rejected at parse time (only bearer supported)
+- allOf with non-object sub-schemas
+- `additionalProperties` with inline complex schemas
 
 ### Schema-to-type mapping
 
