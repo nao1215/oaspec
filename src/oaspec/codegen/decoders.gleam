@@ -44,6 +44,14 @@ fn generate_decoders(ctx: Context) -> String {
     None -> []
   }
 
+  // First pass: generate inline enum decoders from object/allOf properties
+  let sb =
+    list.fold(schemas, sb, fn(sb, entry) {
+      let #(name, schema_ref) = entry
+      generate_inline_enum_decoders(sb, name, schema_ref, ctx)
+    })
+
+  // Second pass: generate main type decoders
   let sb =
     list.fold(schemas, sb, fn(sb, entry) {
       let #(name, schema_ref) = entry
@@ -162,6 +170,46 @@ fn status_code_suffix(code: String) -> String {
   }
 }
 
+/// Generate inline enum decoders found in object/allOf properties.
+fn generate_inline_enum_decoders(
+  sb: se.StringBuilder,
+  parent_name: String,
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> se.StringBuilder {
+  let props = case schema_ref {
+    Inline(ObjectSchema(properties:, ..)) -> dict.to_list(properties)
+    Inline(AllOfSchema(schemas:, ..)) -> {
+      let merged =
+        list.fold(schemas, dict.new(), fn(acc, s_ref) {
+          case s_ref {
+            Inline(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
+            Reference(_) ->
+              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
+                Ok(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
+                _ -> acc
+              }
+            _ -> acc
+          }
+        })
+      dict.to_list(merged)
+    }
+    _ -> []
+  }
+  list.fold(props, sb, fn(sb, entry) {
+    let #(prop_name, prop_ref) = entry
+    case prop_ref {
+      Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
+        let enum_name =
+          naming.schema_to_type_name(parent_name)
+          <> naming.schema_to_type_name(prop_name)
+        generate_decoder(sb, enum_name, prop_ref, ctx)
+      }
+      _ -> sb
+    }
+  })
+}
+
 /// Generate decoder functions for a schema.
 fn generate_decoder(
   sb: se.StringBuilder,
@@ -192,11 +240,17 @@ fn generate_decoder(
           let #(prop_name, prop_ref) = entry
           let field_name = naming.to_snake_case(prop_name)
           let is_required = list.contains(required, prop_name)
-          let field_decoder = schema_ref_to_decoder(prop_ref, ctx)
+          let field_decoder =
+            schema_ref_to_decoder(prop_ref, name, prop_name, ctx)
           let is_nullable_schema = schema_ref_is_nullable(prop_ref)
 
-          // Avoid Option(Option(T)): if schema is already nullable,
-          // don't wrap again for optional fields.
+          // For nullable schemas, the Gleam type is Option(T),
+          // so the decoder must be decode.optional(inner_decoder).
+          let effective_decoder = case is_nullable_schema {
+            True -> "decode.optional(" <> field_decoder <> ")"
+            False -> field_decoder
+          }
+
           case is_required {
             True ->
               sb
@@ -207,14 +261,13 @@ fn generate_decoder(
                   <> " <- decode.field(\""
                   <> prop_name
                   <> "\", "
-                  <> field_decoder
+                  <> effective_decoder
                   <> ")",
               )
             False ->
               case is_nullable_schema {
                 True ->
-                  // Schema is nullable → type is already Option(T),
-                  // use optional_field with None default
+                  // Type is Option(T), default is None
                   sb
                   |> se.indent(
                     1,
@@ -223,7 +276,7 @@ fn generate_decoder(
                       <> " <- decode.optional_field(\""
                       <> prop_name
                       <> "\", option.None, "
-                      <> field_decoder
+                      <> effective_decoder
                       <> ")",
                   )
                 False ->
@@ -644,15 +697,30 @@ fn get_discriminator_value(
 }
 
 /// Convert a SchemaRef to a decoder expression string.
-fn schema_ref_to_decoder(ref: SchemaRef, ctx: Context) -> String {
+/// parent_name is used to resolve inline enum decoder names.
+fn schema_ref_to_decoder(
+  ref: SchemaRef,
+  parent_name: String,
+  prop_name: String,
+  ctx: Context,
+) -> String {
   let _ = ctx
   case ref {
+    Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
+      // Inline enum: use the generated enum decoder
+      let decoder_name =
+        naming.to_snake_case(
+          naming.schema_to_type_name(parent_name)
+          <> naming.schema_to_type_name(prop_name),
+        )
+      decoder_name <> "_decoder()"
+    }
     Inline(StringSchema(..)) -> "decode.string"
     Inline(IntegerSchema(..)) -> "decode.int"
     Inline(NumberSchema(..)) -> "decode.float"
     Inline(BooleanSchema(..)) -> "decode.bool"
     Inline(ArraySchema(items:, ..)) -> {
-      let inner = schema_ref_to_decoder(items, ctx)
+      let inner = schema_ref_to_decoder(items, parent_name, prop_name, ctx)
       "decode.list(" <> inner <> ")"
     }
     Reference(ref:) -> {
@@ -689,6 +757,14 @@ fn generate_encoders(ctx: Context) -> String {
     None -> []
   }
 
+  // First pass: generate inline enum encoders
+  let sb =
+    list.fold(schemas, sb, fn(sb, entry) {
+      let #(name, schema_ref) = entry
+      generate_inline_enum_encoders(sb, name, schema_ref, ctx)
+    })
+
+  // Second pass: generate main type encoders
   let sb =
     list.fold(schemas, sb, fn(sb, entry) {
       let #(name, schema_ref) = entry
@@ -699,6 +775,46 @@ fn generate_encoders(ctx: Context) -> String {
   let sb = generate_anonymous_encoders(sb, ctx)
 
   se.to_string(sb)
+}
+
+/// Generate inline enum encoders found in object/allOf properties.
+fn generate_inline_enum_encoders(
+  sb: se.StringBuilder,
+  parent_name: String,
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> se.StringBuilder {
+  let props = case schema_ref {
+    Inline(ObjectSchema(properties:, ..)) -> dict.to_list(properties)
+    Inline(AllOfSchema(schemas:, ..)) -> {
+      let merged =
+        list.fold(schemas, dict.new(), fn(acc, s_ref) {
+          case s_ref {
+            Inline(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
+            Reference(_) ->
+              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
+                Ok(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
+                _ -> acc
+              }
+            _ -> acc
+          }
+        })
+      dict.to_list(merged)
+    }
+    _ -> []
+  }
+  list.fold(props, sb, fn(sb, entry) {
+    let #(prop_name, prop_ref) = entry
+    case prop_ref {
+      Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
+        let enum_name =
+          naming.schema_to_type_name(parent_name)
+          <> naming.schema_to_type_name(prop_name)
+        generate_encoder(sb, enum_name, prop_ref, ctx)
+      }
+      _ -> sb
+    }
+  })
 }
 
 /// Generate encoders for anonymous inline schemas (response/requestBody).
@@ -780,7 +896,13 @@ fn generate_encoder(
           }
 
           let encoder_expr =
-            schema_ref_to_json_encoder("value." <> field_name, prop_ref, ctx)
+            schema_ref_to_json_encoder(
+              "value." <> field_name,
+              prop_ref,
+              name,
+              prop_name,
+              ctx,
+            )
 
           case is_required {
             True ->
@@ -798,7 +920,12 @@ fn generate_encoder(
                   <> "\", json.nullable(value."
                   <> field_name
                   <> ", "
-                  <> schema_ref_to_json_encoder_fn(prop_ref, ctx)
+                  <> schema_ref_to_json_encoder_fn(
+                  prop_ref,
+                  name,
+                  prop_name,
+                  ctx,
+                )
                   <> "))"
                   <> trailing,
               )
@@ -1017,15 +1144,28 @@ fn generate_encoder(
 fn schema_ref_to_json_encoder(
   value_expr: String,
   ref: SchemaRef,
+  parent_name: String,
+  prop_name: String,
   ctx: Context,
 ) -> String {
   case ref {
+    Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
+      let fn_name =
+        "encode_"
+        <> naming.to_snake_case(
+          naming.schema_to_type_name(parent_name)
+          <> naming.schema_to_type_name(prop_name),
+        )
+        <> "_json"
+      fn_name <> "(" <> value_expr <> ")"
+    }
     Inline(StringSchema(..)) -> "json.string(" <> value_expr <> ")"
     Inline(IntegerSchema(..)) -> "json.int(" <> value_expr <> ")"
     Inline(NumberSchema(..)) -> "json.float(" <> value_expr <> ")"
     Inline(BooleanSchema(..)) -> "json.bool(" <> value_expr <> ")"
     Inline(ArraySchema(items:, ..)) -> {
-      let inner_fn = schema_ref_to_json_encoder_fn(items, ctx)
+      let inner_fn =
+        schema_ref_to_json_encoder_fn(items, parent_name, prop_name, ctx)
       "json.array(" <> value_expr <> ", " <> inner_fn <> ")"
     }
     Reference(ref:) -> {
@@ -1038,9 +1178,22 @@ fn schema_ref_to_json_encoder(
 
 /// Convert a SchemaRef to a json.Json encoder function reference.
 /// Used for json.nullable(value, <fn>) and json.array(list, <fn>).
-fn schema_ref_to_json_encoder_fn(ref: SchemaRef, ctx: Context) -> String {
+fn schema_ref_to_json_encoder_fn(
+  ref: SchemaRef,
+  parent_name: String,
+  prop_name: String,
+  ctx: Context,
+) -> String {
   let _ = ctx
   case ref {
+    Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
+      "encode_"
+      <> naming.to_snake_case(
+        naming.schema_to_type_name(parent_name)
+        <> naming.schema_to_type_name(prop_name),
+      )
+      <> "_json"
+    }
     Inline(StringSchema(..)) -> "json.string"
     Inline(IntegerSchema(..)) -> "json.int"
     Inline(NumberSchema(..)) -> "json.float"

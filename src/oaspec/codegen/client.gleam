@@ -44,12 +44,28 @@ fn generate_client(ctx: Context) -> String {
       }
     })
 
+  // Check if any response has an inline array with non-$ref items
+  let needs_json_decode =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      let responses = dict.to_list(operation.responses)
+      list.any(responses, fn(entry) {
+        let #(_, response) = entry
+        let content = dict.to_list(response.content)
+        list.any(content, fn(ce) {
+          let #(_, mt) = ce
+          case mt.schema {
+            Some(Inline(schema.ArraySchema(items: Inline(_), ..))) -> True
+            _ -> False
+          }
+        })
+      })
+    })
+
   let base_imports = [
-    "gleam/dynamic/decode as dyn_decode",
     "gleam/http/request",
     "gleam/http",
     "gleam/int",
-    "gleam/json",
     "gleam/option.{type Option, None, Some}",
     "gleam/string",
     ctx.config.package <> "/types",
@@ -57,9 +73,13 @@ fn generate_client(ctx: Context) -> String {
     ctx.config.package <> "/decode",
     ctx.config.package <> "/response_types",
   ]
-  let imports = case needs_bool {
-    True -> ["gleam/bool", ..base_imports]
+  let imports = case needs_json_decode {
+    True -> ["gleam/dynamic/decode as dyn_decode", "gleam/json", ..base_imports]
     False -> base_imports
+  }
+  let imports = case needs_bool {
+    True -> ["gleam/bool", ..imports]
+    False -> imports
   }
   let imports = case needs_float {
     True -> ["gleam/float", ..imports]
