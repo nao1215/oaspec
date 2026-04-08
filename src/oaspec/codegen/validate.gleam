@@ -178,12 +178,31 @@ fn validate_schema_recursive(
         ]
         None -> []
       }
-      // Recurse into properties
+      // Recurse into properties, also catching inline objects
       let prop_errors =
         dict.to_list(properties)
         |> list.flat_map(fn(entry) {
           let #(prop_name, prop_ref) = entry
-          validate_schema_ref_recursive(path <> "." <> prop_name, prop_ref)
+          let prop_path = path <> "." <> prop_name
+          let inline_obj_errors = case prop_ref {
+            Inline(ObjectSchema(..)) -> [
+              UnsupportedFeature(
+                path: prop_path,
+                detail: "Nested inline object properties are not supported. Extract to a named schema in components.schemas and use $ref.",
+              ),
+            ]
+            Inline(AllOfSchema(..)) -> [
+              UnsupportedFeature(
+                path: prop_path,
+                detail: "Nested inline allOf properties are not supported. Extract to a named schema in components.schemas and use $ref.",
+              ),
+            ]
+            _ -> []
+          }
+          list.append(
+            inline_obj_errors,
+            validate_schema_ref_recursive(prop_path, prop_ref),
+          )
         })
       list.flatten([ap_errors, typed_ap_errors, prop_errors])
     }

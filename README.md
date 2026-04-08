@@ -185,7 +185,7 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 - Component schemas with `$ref` resolution (types, decoders, encoders)
 - String enums with unknown-value rejection (decode returns Error, not silent fallback)
 - Inline enums in properties (auto-named types generated)
-- Inline objects in response/requestBody (anonymous types auto-generated)
+- Inline objects in top-level response/requestBody (anonymous types auto-generated; nested inline objects in properties are unsupported)
 - oneOf/anyOf with `$ref` variants (sum types, decoders, encoders generated)
 - oneOf discriminator-based decoding (dispatches by discriminator field value)
 - anyOf try-each decoding (tries each variant decoder in order)
@@ -211,6 +211,7 @@ These patterns are detected before code generation. The generator prints a clear
 - **`additionalProperties: true`** (untyped map — Gleam has no untyped map type)
 - **Typed `additionalProperties`** (e.g., `additionalProperties: { type: string }`)
 - **Inline oneOf/anyOf schemas** (all variants must be `$ref` to named schemas)
+- **Nested inline object/allOf in properties** (extract to `components.schemas` and use `$ref`)
 - **Duplicate operationId** across paths
 - **Function/type name collisions** after case conversion
 
