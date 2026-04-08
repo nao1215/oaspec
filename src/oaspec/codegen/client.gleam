@@ -1101,6 +1101,19 @@ fn generate_multipart_body(
         Inline(schema.StringSchema(format: Some("binary"), ..)) -> True
         _ -> False
       }
+      let value_expr = case is_binary {
+        True -> "body." <> gleam_field
+        False ->
+          case field_schema {
+            Inline(schema.IntegerSchema(..)) ->
+              "int.to_string(body." <> gleam_field <> ")"
+            Inline(schema.NumberSchema(..)) ->
+              "float.to_string(body." <> gleam_field <> ")"
+            Inline(schema.BooleanSchema(..)) ->
+              "bool.to_string(body." <> gleam_field <> ")"
+            _ -> "body." <> gleam_field
+          }
+      }
       case is_binary {
         True ->
           sb
@@ -1110,8 +1123,8 @@ fn generate_multipart_body(
               <> field_name
               <> "\\\"; filename=\\\""
               <> field_name
-              <> "\\\"\\r\\nContent-Type: application/octet-stream\\r\\n\\r\\n\" <> body."
-              <> gleam_field
+              <> "\\\"\\r\\nContent-Type: application/octet-stream\\r\\n\\r\\n\" <> "
+              <> value_expr
               <> " <> \"\\r\\n\", ..parts]",
           )
         False ->
@@ -1120,8 +1133,8 @@ fn generate_multipart_body(
             1,
             "let parts = [\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
               <> field_name
-              <> "\\\"\\r\\n\\r\\n\" <> body."
-              <> gleam_field
+              <> "\\\"\\r\\n\\r\\n\" <> "
+              <> value_expr
               <> " <> \"\\r\\n\", ..parts]",
           )
       }

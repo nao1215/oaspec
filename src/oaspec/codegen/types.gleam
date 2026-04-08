@@ -810,17 +810,29 @@ fn generate_response_type(
 
           case content_entries {
             [] -> sb |> se.indent(1, variant_name)
-            [#(_media_type, media_type), ..] ->
-              case media_type.schema {
-                Some(ref) -> {
-                  let suffix =
-                    "Response" <> http.status_code_suffix(status_code)
-                  let inner_type =
-                    schema_ref_to_type_qualified(ref, op_id, suffix, ctx)
-                  sb
-                  |> se.indent(1, variant_name <> "(" <> inner_type <> ")")
-                }
-                None -> sb |> se.indent(1, variant_name)
+            [#(media_type_name, media_type), ..] ->
+              case media_type_name {
+                // text/plain responses always use String type regardless of schema
+                "text/plain" ->
+                  case media_type.schema {
+                    Some(_) ->
+                      sb
+                      |> se.indent(1, variant_name <> "(String)")
+                    None -> sb |> se.indent(1, variant_name)
+                  }
+                // JSON and other content types use schema-derived type
+                _ ->
+                  case media_type.schema {
+                    Some(ref) -> {
+                      let suffix =
+                        "Response" <> http.status_code_suffix(status_code)
+                      let inner_type =
+                        schema_ref_to_type_qualified(ref, op_id, suffix, ctx)
+                      sb
+                      |> se.indent(1, variant_name <> "(" <> inner_type <> ")")
+                    }
+                    None -> sb |> se.indent(1, variant_name)
+                  }
               }
           }
         })
