@@ -407,7 +407,7 @@ fn generate_encoder(
         |> se.line("}")
         |> se.blank_line()
 
-      // String version
+      // String version (JSON-encoded with quotes)
       let sb =
         sb
         |> se.line(
@@ -418,6 +418,32 @@ fn generate_encoder(
           <> ") -> String {",
         )
         |> se.indent(1, json_fn_name <> "(value) |> json.to_string()")
+        |> se.line("}")
+        |> se.blank_line()
+
+      // Plain string version for URL/header serialization (no JSON quotes)
+      let to_string_fn_name = fn_name <> "_to_string"
+      let sb =
+        sb
+        |> se.line(
+          "pub fn "
+          <> to_string_fn_name
+          <> "(value: types."
+          <> type_name
+          <> ") -> String {",
+        )
+        |> se.indent(1, "case value {")
+
+      let sb =
+        list.fold(enum_values, sb, fn(sb, value) {
+          let variant = naming.schema_to_type_name(type_name <> "_" <> value)
+          sb
+          |> se.indent(2, "types." <> variant <> " -> \"" <> value <> "\"")
+        })
+
+      let sb =
+        sb
+        |> se.indent(1, "}")
         |> se.line("}")
         |> se.blank_line()
 

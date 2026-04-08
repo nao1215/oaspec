@@ -4,7 +4,9 @@ import gleam/string
 import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
 import oaspec/codegen/types as type_gen
 import oaspec/openapi/resolver
-import oaspec/openapi/schema.{Inline, IntegerSchema, Reference, StringSchema}
+import oaspec/openapi/schema.{
+  Inline, IntegerSchema, NumberSchema, Reference, StringSchema,
+}
 import oaspec/openapi/spec
 import oaspec/util/naming
 import oaspec/util/string_extra as se
@@ -32,6 +34,8 @@ fn generate_client(ctx: Context) -> String {
     })
 
   let base_imports = [
+    "gleam/bool",
+    "gleam/float",
     "gleam/http/request",
     "gleam/http",
     "gleam/int",
@@ -39,7 +43,11 @@ fn generate_client(ctx: Context) -> String {
     "gleam/string",
   ]
   let imports = case needs_types {
-    True -> list.append(base_imports, [ctx.config.package <> "/types"])
+    True ->
+      list.append(base_imports, [
+        ctx.config.package <> "/types",
+        ctx.config.package <> "/encode",
+      ])
     False -> base_imports
   }
 
@@ -101,8 +109,6 @@ fn generate_client(ctx: Context) -> String {
     |> se.blank_line()
 
   // Generate operation functions
-  let operations = type_gen.collect_operations(ctx)
-
   let sb =
     list.fold(operations, sb, fn(sb, op) {
       let #(op_id, operation, path, method) = op
@@ -119,7 +125,7 @@ fn generate_client_function(
   operation: spec.Operation,
   path: String,
   method: spec.HttpMethod,
-  _ctx: Context,
+  ctx: Context,
 ) -> se.StringBuilder {
   let fn_name = naming.operation_to_function_name(op_id)
 
@@ -172,6 +178,7 @@ fn generate_client_function(
       header_params,
       cookie_params,
       operation,
+      ctx,
     )
   let sb =
     sb
@@ -188,10 +195,7 @@ fn generate_client_function(
   let sb =
     list.fold(path_params, sb, fn(sb, p) {
       let param_name = naming.to_snake_case(p.name)
-      let to_string_expr = case p.schema {
-        Some(Inline(IntegerSchema(..))) -> "int.to_string(" <> param_name <> ")"
-        _ -> param_name
-      }
+      let to_string_expr = param_to_string_expr(p, param_name)
       sb
       |> se.indent(
         1,
@@ -211,22 +215,21 @@ fn generate_client_function(
       let sb =
         list.fold(query_params, sb, fn(sb, p) {
           let param_name = naming.to_snake_case(p.name)
-          let to_str = case p.schema {
-            Some(Inline(IntegerSchema(..))) -> "int.to_string(v)"
-            _ -> "v"
-          }
           case p.required {
-            True ->
+            True -> {
+              let to_str = to_str_for_required(p, param_name)
               sb
               |> se.indent(
                 1,
                 "let query_parts = [\""
                   <> p.name
                   <> "=\" <> "
-                  <> to_str_for_required(p, param_name)
+                  <> to_str
                   <> ", ..query_parts]",
               )
-            False ->
+            }
+            False -> {
+              let to_str = to_str_for_optional_value(p)
               sb
               |> se.indent(1, "let query_parts = case " <> param_name <> " {")
               |> se.indent(
@@ -239,6 +242,7 @@ fn generate_client_function(
               )
               |> se.indent(2, "None -> query_parts")
               |> se.indent(1, "}")
+            }
           }
         })
       let sb =
@@ -286,56 +290,84 @@ fn generate_client_function(
       let param_name = naming.to_snake_case(p.name)
       let header_name = string.lowercase(p.name)
       case p.required {
-        True ->
+        True -> {
+          let to_str = param_to_string_expr(p, param_name)
           sb
           |> se.indent(
             1,
             "let req = request.set_header(req, \""
               <> header_name
               <> "\", "
-              <> param_name
+              <> to_str
               <> ")",
           )
-        False ->
+        }
+        False -> {
+          let to_str = to_str_for_optional_value(p)
           sb
           |> se.indent(1, "let req = case " <> param_name <> " {")
           |> se.indent(
             2,
-            "Some(v) -> request.set_header(req, \"" <> header_name <> "\", v)",
+            "Some(v) -> request.set_header(req, \""
+              <> header_name
+              <> "\", "
+              <> to_str
+              <> ")",
           )
           |> se.indent(2, "None -> req")
           |> se.indent(1, "}")
+        }
       }
     })
 
-  // Set cookie parameters via Cookie header
-  let sb =
-    list.fold(cookie_params, sb, fn(sb, p) {
-      let param_name = naming.to_snake_case(p.name)
-      case p.required {
-        True ->
-          sb
-          |> se.indent(
-            1,
-            "let req = request.set_header(req, \"cookie\", \""
-              <> p.name
-              <> "=\" <> "
-              <> param_name
-              <> ")",
-          )
-        False ->
-          sb
-          |> se.indent(1, "let req = case " <> param_name <> " {")
-          |> se.indent(
-            2,
-            "Some(v) -> request.set_header(req, \"cookie\", \""
-              <> p.name
-              <> "=\" <> v)",
-          )
-          |> se.indent(2, "None -> req")
-          |> se.indent(1, "}")
-      }
-    })
+  // Set cookie parameters: combine all into a single "cookie" header
+  let sb = case list.is_empty(cookie_params) {
+    True -> sb
+    False -> {
+      let sb = sb |> se.indent(1, "let cookie_parts = []")
+      let sb =
+        list.fold(cookie_params, sb, fn(sb, p) {
+          let param_name = naming.to_snake_case(p.name)
+          case p.required {
+            True -> {
+              let to_str = param_to_string_expr(p, param_name)
+              sb
+              |> se.indent(
+                1,
+                "let cookie_parts = [\""
+                  <> p.name
+                  <> "=\" <> "
+                  <> to_str
+                  <> ", ..cookie_parts]",
+              )
+            }
+            False -> {
+              let to_str = to_str_for_optional_value(p)
+              sb
+              |> se.indent(1, "let cookie_parts = case " <> param_name <> " {")
+              |> se.indent(
+                2,
+                "Some(v) -> [\""
+                  <> p.name
+                  <> "=\" <> "
+                  <> to_str
+                  <> ", ..cookie_parts]",
+              )
+              |> se.indent(2, "None -> cookie_parts")
+              |> se.indent(1, "}")
+            }
+          }
+        })
+      sb
+      |> se.indent(1, "let req = case cookie_parts {")
+      |> se.indent(2, "[] -> req")
+      |> se.indent(
+        2,
+        "_ -> request.set_header(req, \"cookie\", string.join(cookie_parts, \"; \"))",
+      )
+      |> se.indent(1, "}")
+    }
+  }
 
   let sb =
     sb
@@ -353,6 +385,7 @@ fn build_param_list(
   header_params: List(spec.Parameter),
   cookie_params: List(spec.Parameter),
   operation: spec.Operation,
+  ctx: Context,
 ) -> String {
   let all_params =
     list.append(path_params, query_params)
@@ -362,7 +395,7 @@ fn build_param_list(
   let param_strs =
     list.map(all_params, fn(p) {
       let param_name = naming.to_snake_case(p.name)
-      let param_type = param_to_type(p)
+      let param_type = param_to_type(p, ctx)
       ", " <> param_name <> ": " <> param_type
     })
 
@@ -374,15 +407,15 @@ fn build_param_list(
   string.join(list.append(param_strs, body_param), "")
 }
 
-/// Convert a parameter to its Gleam type.
-fn param_to_type(param: spec.Parameter) -> String {
+/// Convert a parameter to its Gleam type string.
+fn param_to_type(param: spec.Parameter, _ctx: Context) -> String {
   let base = case param.schema {
     Some(Inline(StringSchema(..))) -> "String"
     Some(Inline(IntegerSchema(..))) -> "Int"
     Some(Inline(schema.NumberSchema(..))) -> "Float"
     Some(Inline(schema.BooleanSchema(..))) -> "Bool"
     Some(Reference(ref:)) ->
-      naming.schema_to_type_name(resolver.ref_to_name(ref))
+      "types." <> naming.schema_to_type_name(resolver.ref_to_name(ref))
     _ -> "String"
   }
   case param.required {
@@ -391,10 +424,40 @@ fn param_to_type(param: spec.Parameter) -> String {
   }
 }
 
-/// Convert a required param to string for query building.
-fn to_str_for_required(param: spec.Parameter, param_name: String) -> String {
+/// Convert a parameter value to its String representation for URL/header use.
+fn param_to_string_expr(param: spec.Parameter, param_name: String) -> String {
   case param.schema {
     Some(Inline(IntegerSchema(..))) -> "int.to_string(" <> param_name <> ")"
+    Some(Inline(NumberSchema(..))) -> "float.to_string(" <> param_name <> ")"
+    Some(Inline(schema.BooleanSchema(..))) ->
+      "bool.to_string(" <> param_name <> ")"
+    Some(Reference(ref:)) -> {
+      let name = resolver.ref_to_name(ref)
+      "encode.encode_"
+      <> naming.to_snake_case(name)
+      <> "_to_string("
+      <> param_name
+      <> ")"
+    }
     _ -> param_name
+  }
+}
+
+/// Convert a required param to string for query building.
+fn to_str_for_required(param: spec.Parameter, param_name: String) -> String {
+  param_to_string_expr(param, param_name)
+}
+
+/// Convert an optional param value (bound to `v`) to string.
+fn to_str_for_optional_value(param: spec.Parameter) -> String {
+  case param.schema {
+    Some(Inline(IntegerSchema(..))) -> "int.to_string(v)"
+    Some(Inline(NumberSchema(..))) -> "float.to_string(v)"
+    Some(Inline(schema.BooleanSchema(..))) -> "bool.to_string(v)"
+    Some(Reference(ref:)) -> {
+      let name = resolver.ref_to_name(ref)
+      "encode.encode_" <> naming.to_snake_case(name) <> "_to_string(v)"
+    }
+    _ -> "v"
   }
 }
