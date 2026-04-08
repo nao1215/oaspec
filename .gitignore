@@ -11,3 +11,4 @@ integration_test/src/api/
 integration_test/build/
 integration_test/manifest.toml
 /oaspec
+test_output_client/
