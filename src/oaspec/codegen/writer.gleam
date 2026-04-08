@@ -1,4 +1,3 @@
-import gleam/io
 import gleam/list
 import gleam/result
 import oaspec/codegen/client
@@ -17,7 +16,10 @@ pub type WriteError {
 }
 
 /// Generate and write all files based on configuration.
-pub fn generate_all(ctx: Context) -> Result(List(String), WriteError) {
+pub fn generate_all(
+  ctx: Context,
+  on_write: fn(String) -> Nil,
+) -> Result(List(String), WriteError) {
   let shared_files = generate_shared(ctx)
   let server_files = case ctx.config.mode {
     Server | Both -> server.generate(ctx)
@@ -37,8 +39,10 @@ pub fn generate_all(ctx: Context) -> Result(List(String), WriteError) {
   use written_files <- result.try(case ctx.config.mode {
     Server | Both -> {
       use _ <- result.try(ensure_directory(server_path))
-      write_files(shared_files, server_path, written_files)
-      |> result.try(fn(w) { write_files(server_files, server_path, w) })
+      write_files(shared_files, server_path, written_files, on_write)
+      |> result.try(fn(w) {
+        write_files(server_files, server_path, w, on_write)
+      })
     }
     Client -> Ok(written_files)
   })
@@ -46,8 +50,10 @@ pub fn generate_all(ctx: Context) -> Result(List(String), WriteError) {
   use written_files <- result.try(case ctx.config.mode {
     Client | Both -> {
       use _ <- result.try(ensure_directory(client_path))
-      write_files(shared_files, client_path, written_files)
-      |> result.try(fn(w) { write_files(client_files, client_path, w) })
+      write_files(shared_files, client_path, written_files, on_write)
+      |> result.try(fn(w) {
+        write_files(client_files, client_path, w, on_write)
+      })
     }
     Server -> Ok(written_files)
   })
@@ -77,6 +83,7 @@ fn write_files(
   files: List(GeneratedFile),
   base_path: String,
   written: List(String),
+  on_write: fn(String) -> Nil,
 ) -> Result(List(String), WriteError) {
   list.try_fold(files, written, fn(acc, file) {
     let full_path = base_path <> "/" <> file.path
@@ -86,7 +93,7 @@ fn write_files(
         FileWriteError(path: full_path, detail: "Failed to write file")
       }),
     )
-    io.println("  Generated: " <> full_path)
+    on_write(full_path)
     Ok([full_path, ..acc])
   })
 }

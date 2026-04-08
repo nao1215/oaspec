@@ -218,7 +218,9 @@ fn run_generate(
 
   // Generate files
   io.println("Generating code...")
-  case writer.generate_all(ctx) {
+  case
+    writer.generate_all(ctx, fn(path) { io.println("  Generated: " <> path) })
+  {
     Ok(files) -> {
       io.println("")
       io.println(
