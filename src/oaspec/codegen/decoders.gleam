@@ -2,12 +2,14 @@ import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
+import oaspec/codegen/types as type_gen
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{
-  type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema, BooleanSchema, Inline,
-  IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema, Reference,
-  StringSchema,
+  type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
+  BooleanSchema, Inline, IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema,
+  Reference, StringSchema,
 }
+import oaspec/openapi/spec
 import oaspec/util/naming
 import oaspec/util/string_extra as se
 
@@ -26,7 +28,7 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
 // Decoders
 // ===================================================================
 
-/// Generate JSON decoders for all component schemas.
+/// Generate JSON decoders for all component schemas and anonymous types.
 fn generate_decoders(ctx: Context) -> String {
   let sb =
     se.file_header(context.version)
@@ -48,7 +50,116 @@ fn generate_decoders(ctx: Context) -> String {
       generate_decoder(sb, name, schema_ref, ctx)
     })
 
+  // Generate decoders for anonymous inline schemas from operations
+  let sb = generate_anonymous_decoders(sb, ctx)
+
   se.to_string(sb)
+}
+
+/// Generate decoders for anonymous inline schemas (response/requestBody).
+fn generate_anonymous_decoders(
+  sb: se.StringBuilder,
+  ctx: Context,
+) -> se.StringBuilder {
+  let operations = type_gen.collect_operations(ctx)
+  list.fold(operations, sb, fn(sb, op) {
+    let #(op_id, operation, _path, _method) = op
+    let sb = generate_anonymous_response_decoders(sb, op_id, operation, ctx)
+    let sb = generate_anonymous_request_body_decoder(sb, op_id, operation, ctx)
+    sb
+  })
+}
+
+/// Generate decoders for inline response schemas.
+fn generate_anonymous_response_decoders(
+  sb: se.StringBuilder,
+  op_id: String,
+  operation: spec.Operation,
+  ctx: Context,
+) -> se.StringBuilder {
+  let responses = dict.to_list(operation.responses)
+  list.fold(responses, sb, fn(sb, entry) {
+    let #(status_code, response) = entry
+    let content_entries = dict.to_list(response.content)
+    case content_entries {
+      [#(_, media_type), ..] ->
+        case media_type.schema {
+          Some(Inline(schema_obj)) -> {
+            let suffix = "Response" <> status_code_suffix(status_code)
+            generate_anonymous_schema_decoder(
+              sb,
+              op_id,
+              suffix,
+              schema_obj,
+              ctx,
+            )
+          }
+          _ -> sb
+        }
+      _ -> sb
+    }
+  })
+}
+
+/// Generate decoder for an inline requestBody schema.
+fn generate_anonymous_request_body_decoder(
+  sb: se.StringBuilder,
+  op_id: String,
+  operation: spec.Operation,
+  ctx: Context,
+) -> se.StringBuilder {
+  case operation.request_body {
+    Some(rb) -> {
+      let content_entries = dict.to_list(rb.content)
+      case content_entries {
+        [#(_, media_type), ..] ->
+          case media_type.schema {
+            Some(Inline(schema_obj)) ->
+              generate_anonymous_schema_decoder(
+                sb,
+                op_id,
+                "RequestBody",
+                schema_obj,
+                ctx,
+              )
+            _ -> sb
+          }
+        _ -> sb
+      }
+    }
+    None -> sb
+  }
+}
+
+/// Generate decoder for an anonymous schema with a composed name.
+fn generate_anonymous_schema_decoder(
+  sb: se.StringBuilder,
+  op_id: String,
+  suffix: String,
+  schema_obj: SchemaObject,
+  ctx: Context,
+) -> se.StringBuilder {
+  let name = naming.to_snake_case(op_id) <> "_" <> naming.to_snake_case(suffix)
+  let schema_ref = Inline(schema_obj)
+  generate_decoder(sb, name, schema_ref, ctx)
+}
+
+/// Status code suffix for anonymous type naming (shared with types.gleam).
+fn status_code_suffix(code: String) -> String {
+  case code {
+    "200" -> "Ok"
+    "201" -> "Created"
+    "204" -> "NoContent"
+    "400" -> "BadRequest"
+    "401" -> "Unauthorized"
+    "403" -> "Forbidden"
+    "404" -> "NotFound"
+    "409" -> "Conflict"
+    "422" -> "UnprocessableEntity"
+    "500" -> "InternalServerError"
+    "default" -> "Default"
+    other -> "Status" <> other
+  }
 }
 
 /// Generate decoder functions for a schema.
@@ -552,7 +663,7 @@ fn schema_ref_is_nullable(ref: SchemaRef) -> Bool {
 // Encoders
 // ===================================================================
 
-/// Generate JSON encoders for all component schemas.
+/// Generate JSON encoders for all component schemas and anonymous types.
 fn generate_encoders(ctx: Context) -> String {
   let sb =
     se.file_header(context.version)
@@ -572,7 +683,49 @@ fn generate_encoders(ctx: Context) -> String {
       generate_encoder(sb, name, schema_ref, ctx)
     })
 
+  // Generate encoders for anonymous inline schemas from operations
+  let sb = generate_anonymous_encoders(sb, ctx)
+
   se.to_string(sb)
+}
+
+/// Generate encoders for anonymous inline schemas (response/requestBody).
+fn generate_anonymous_encoders(
+  sb: se.StringBuilder,
+  ctx: Context,
+) -> se.StringBuilder {
+  let operations = type_gen.collect_operations(ctx)
+  list.fold(operations, sb, fn(sb, op) {
+    let #(op_id, operation, _path, _method) = op
+    // Only requestBody inline schemas need encoders (for client body encoding)
+    generate_anonymous_request_body_encoder(sb, op_id, operation, ctx)
+  })
+}
+
+/// Generate encoder for an inline requestBody schema.
+fn generate_anonymous_request_body_encoder(
+  sb: se.StringBuilder,
+  op_id: String,
+  operation: spec.Operation,
+  ctx: Context,
+) -> se.StringBuilder {
+  case operation.request_body {
+    Some(rb) -> {
+      let content_entries = dict.to_list(rb.content)
+      case content_entries {
+        [#(_, media_type), ..] ->
+          case media_type.schema {
+            Some(Inline(schema_obj)) -> {
+              let name = naming.to_snake_case(op_id) <> "_request_body"
+              generate_encoder(sb, name, Inline(schema_obj), ctx)
+            }
+            _ -> sb
+          }
+        _ -> sb
+      }
+    }
+    None -> sb
+  }
 }
 
 /// Generate an encoder function for a schema.
