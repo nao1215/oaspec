@@ -278,7 +278,7 @@ pub fn parse_global_security_inherited_test() {
   get_public.security |> should.equal(Some([]))
 }
 
-pub fn validate_rejects_array_parameter_test() {
+pub fn validate_accepts_array_parameter_test() {
   let yaml =
     "
 openapi: 3.0.3
@@ -303,10 +303,10 @@ paths:
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
-  |> should.be_true()
+  |> should.be_false()
 }
 
-pub fn validate_rejects_optional_array_parameter_test() {
+pub fn validate_accepts_optional_array_parameter_test() {
   let yaml =
     "
 openapi: 3.0.3
@@ -332,7 +332,7 @@ paths:
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
-  |> should.be_true()
+  |> should.be_false()
 }
 
 pub fn validate_accepts_text_plain_response_test() {
@@ -518,25 +518,25 @@ fn make_ctx(spec_path: String) -> context.Context {
   context.new(spec, cfg)
 }
 
-pub fn validate_rejects_deep_object_test() {
+pub fn validate_accepts_deep_object_test() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "deepObject") })
-  |> should.be_true()
+  |> should.be_false()
 }
 
-pub fn validate_rejects_complex_schema_parameter_test() {
+pub fn validate_accepts_complex_schema_parameter_test() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "Complex schema parameters")
   })
-  |> should.be_true()
+  |> should.be_false()
 }
 
-pub fn validate_rejects_referenced_unsupported_parameter_schemas_test() {
+pub fn validate_accepts_referenced_parameter_schemas_test() {
   let yaml =
     "
 openapi: 3.0.3
@@ -574,14 +574,7 @@ components:
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, validate.error_to_string)
-
-  list.any(error_strings, fn(s) {
-    string.contains(s, "Complex schema parameters")
-  })
-  |> should.be_true()
-  list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
-  |> should.be_true()
+  errors |> should.equal([])
 }
 
 pub fn validate_accepts_multipart_form_data_test() {

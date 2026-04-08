@@ -712,7 +712,7 @@ fn generate_request_type(
               "List(" <> item_type <> ")"
             }
             Some(Reference(ref:)) ->
-              naming.schema_to_type_name(resolver.ref_to_name(ref))
+              "types." <> naming.schema_to_type_name(resolver.ref_to_name(ref))
             _ -> "String"
           }
           let final_type = case param.required {

@@ -416,6 +416,10 @@ fn hoist_operation(
   op_id: String,
   state: HoistState,
 ) -> #(spec.Operation, HoistState) {
+  // Hoist parameter schemas (complex object/array params)
+  let #(parameters, state) =
+    hoist_parameters(operation.parameters, op_id, state)
+
   // Hoist request body schemas
   let #(request_body, state) = case operation.request_body {
     None -> #(None, state)
@@ -428,8 +432,30 @@ fn hoist_operation(
   // Hoist response schemas
   let #(responses, state) = hoist_responses(operation.responses, op_id, state)
 
-  let result = spec.Operation(..operation, request_body:, responses:)
+  let result =
+    spec.Operation(..operation, parameters:, request_body:, responses:)
   #(result, state)
+}
+
+/// Hoist complex schemas within operation parameters.
+fn hoist_parameters(
+  params: List(spec.Parameter),
+  op_id: String,
+  state: HoistState,
+) -> #(List(spec.Parameter), HoistState) {
+  list.fold(params, #([], state), fn(acc, param) {
+    let #(params_acc, state) = acc
+    case param.schema {
+      Some(schema_ref) -> {
+        let suffix = "Param" <> naming.to_pascal_case(param.name)
+        let #(hoisted, state) =
+          hoist_schema_ref(schema_ref, op_id, suffix, state)
+        let new_param = spec.Parameter(..param, schema: Some(hoisted))
+        #(list.append(params_acc, [new_param]), state)
+      }
+      None -> #(list.append(params_acc, [param]), state)
+    }
+  })
 }
 
 /// Hoist schemas within a RequestBody.

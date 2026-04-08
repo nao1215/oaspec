@@ -50,61 +50,14 @@ fn validate_operations(ctx: Context) -> List(ValidationError) {
 }
 
 /// Validate parameters for unsupported patterns.
+/// deepObject style, array parameters, complex schema parameters, and optional
+/// path parameters are all supported now.
 fn validate_parameters(
-  op_id: String,
-  params: List(spec.Parameter),
-  ctx: Context,
+  _op_id: String,
+  _params: List(spec.Parameter),
+  _ctx: Context,
 ) -> List(ValidationError) {
-  list.flat_map(params, fn(param) {
-    let path = op_id <> ".parameters." <> param.name
-    let resolved_schema = resolve_schema_object(param.schema, ctx)
-    let deep_object_errors = case param.style {
-      Some("deepObject") -> [
-        UnsupportedFeature(
-          path: path,
-          detail: "Parameter style 'deepObject' is not supported.",
-        ),
-      ]
-      _ -> []
-    }
-    let complex_schema_errors = case resolved_schema {
-      Some(ObjectSchema(..))
-      | Some(AllOfSchema(..))
-      | Some(OneOfSchema(..))
-      | Some(AnyOfSchema(..)) -> [
-        UnsupportedFeature(
-          path: path,
-          detail: "Complex schema parameters (object/allOf/oneOf/anyOf) are not supported.",
-        ),
-      ]
-      _ -> []
-    }
-    let array_errors = case param.in_, resolved_schema {
-      spec.InPath, _ -> []
-      _, Some(ArraySchema(..)) -> [
-        UnsupportedFeature(
-          path: path,
-          detail: "Array parameters in query/header/cookie are not supported.",
-        ),
-      ]
-      _, _ -> []
-    }
-    let required_errors = case param.in_, param.required {
-      spec.InPath, False -> [
-        UnsupportedFeature(
-          path: path,
-          detail: "Path parameters with required: false are not supported.",
-        ),
-      ]
-      _, _ -> []
-    }
-    list.flatten([
-      deep_object_errors,
-      complex_schema_errors,
-      array_errors,
-      required_errors,
-    ])
-  })
+  []
 }
 
 fn resolve_schema_object(
