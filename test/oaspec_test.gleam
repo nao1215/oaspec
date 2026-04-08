@@ -53,8 +53,8 @@ pub fn capitalize_test() {
 pub fn load_config_test() {
   let assert Ok(cfg) = config.load("test/fixtures/oaspec.yaml")
   cfg.input |> should.equal("test/fixtures/petstore.yaml")
-  cfg.output_server |> should.equal("./test_output/server")
-  cfg.output_client |> should.equal("./test_output/client")
+  cfg.output_server |> should.equal("./test_output/api")
+  cfg.output_client |> should.equal("./test_output/api_client")
   cfg.package |> should.equal("api")
 }
 
@@ -71,6 +71,45 @@ pub fn parse_mode_test() {
   config.parse_mode("client") |> should.be_ok()
   config.parse_mode("both") |> should.be_ok()
   config.parse_mode("invalid") |> should.be_error()
+}
+
+pub fn config_package_dir_mismatch_test() {
+  let cfg =
+    config.Config(
+      input: "openapi.yaml",
+      output_server: "./gen/wrong_name",
+      output_client: "./gen/api_client",
+      package: "api",
+      mode: config.Both,
+    )
+  let result = config.validate_output_package_match(cfg)
+  should.be_error(result)
+}
+
+pub fn config_client_dir_mismatch_test() {
+  let cfg =
+    config.Config(
+      input: "openapi.yaml",
+      output_server: "./gen/api",
+      output_client: "./gen/wrong_client",
+      package: "api",
+      mode: config.Both,
+    )
+  let result = config.validate_output_package_match(cfg)
+  should.be_error(result)
+}
+
+pub fn config_package_dir_match_test() {
+  let cfg =
+    config.Config(
+      input: "openapi.yaml",
+      output_server: "./gen/api",
+      output_client: "./gen/api_client",
+      package: "api",
+      mode: config.Both,
+    )
+  let result = config.validate_output_package_match(cfg)
+  should.be_ok(result)
 }
 
 // --- Parser Tests ---
@@ -152,8 +191,8 @@ fn make_ctx(spec_path: String) -> context.Context {
   let cfg =
     config.Config(
       input: spec_path,
-      output_server: "./test_output/server",
-      output_client: "./test_output/client",
+      output_server: "./test_output/api",
+      output_client: "./test_output/api_client",
       package: "api",
       mode: config.Both,
     )

@@ -1,5 +1,6 @@
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import simplifile
 import yay
 
@@ -103,7 +104,9 @@ pub fn load(path: String) -> Result(Config, ConfigError) {
     },
   )
 
-  Ok(Config(input:, output_server:, output_client:, package:, mode:))
+  let cfg = Config(input:, output_server:, output_client:, package:, mode:)
+  use _ <- result.try(validate_output_package_match(cfg))
+  Ok(cfg)
 }
 
 /// Apply CLI overrides to a config.
@@ -122,6 +125,63 @@ pub fn with_output(config: Config, output: Option(String)) -> Config {
         output_client: dir <> "/" <> config.package <> "_client",
       )
     None -> config
+  }
+}
+
+/// Validate that output directory basenames match the package name.
+/// Gleam imports require `import <package>/types`, so the directory must match.
+pub fn validate_output_package_match(config: Config) -> Result(Nil, ConfigError) {
+  let server_basename = basename(config.output_server)
+  let client_expected = config.package <> "_client"
+
+  case config.mode {
+    Server | Both ->
+      case server_basename == config.package {
+        True -> Ok(Nil)
+        False ->
+          Error(InvalidValue(
+            field: "output.server",
+            detail: "Directory basename '"
+              <> server_basename
+              <> "' must match package '"
+              <> config.package
+              <> "'",
+          ))
+      }
+    Client -> Ok(Nil)
+  }
+  |> result.try(fn(_) {
+    case config.mode {
+      Client | Both ->
+        case basename(config.output_client) == client_expected {
+          True -> Ok(Nil)
+          False ->
+            Error(InvalidValue(
+              field: "output.client",
+              detail: "Directory basename '"
+                <> basename(config.output_client)
+                <> "' must match '"
+                <> client_expected
+                <> "'",
+            ))
+        }
+      Server -> Ok(Nil)
+    }
+  })
+}
+
+/// Get the basename of a path (last segment after /).
+fn basename(path: String) -> String {
+  path
+  |> string.split("/")
+  |> list_last
+}
+
+fn list_last(items: List(String)) -> String {
+  case items {
+    [] -> ""
+    [last] -> last
+    [_, ..rest] -> list_last(rest)
   }
 }
 

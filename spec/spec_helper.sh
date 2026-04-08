@@ -27,14 +27,14 @@ clean_test_output() {
 
 # Helper: generate petstore once (idempotent)
 generate_petstore_once() {
-  if [ ! -f "$TEST_OUTPUT_DIR/server/types.gleam" ]; then
+  if [ ! -f "$TEST_OUTPUT_DIR/api/types.gleam" ]; then
     cd "$PROJECT_ROOT" && gleam run -- generate --config=test/fixtures/oaspec.yaml 2>/dev/null
   fi
 }
 
 # Helper: generate complex supported spec once (idempotent)
+# Note: uses same output dir as petstore (both package=api), so clean first
 generate_complex_supported_once() {
-  if [ ! -f "$TEST_OUTPUT_DIR/complex_server/types.gleam" ]; then
-    cd "$PROJECT_ROOT" && gleam run -- generate --config=test/fixtures/complex-supported-oaspec.yaml 2>/dev/null
-  fi
+  clean_test_output
+  cd "$PROJECT_ROOT" && gleam run -- generate --config=test/fixtures/complex-supported-oaspec.yaml 2>/dev/null
 }
