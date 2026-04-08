@@ -5,6 +5,82 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-04-08
+
+### Added
+
+#### Parser
+- Top-level `security` field parsed and inherited by operations
+- Operation-level `security: []` explicitly opts out of inherited security
+- Security schemes: `apiKey` (header/query), HTTP `bearer` token
+- Security requirement OR/AND semantics preserved in AST (`SecurityRequirement` contains AND-ed `SecuritySchemeRef` list; outer list is OR)
+- Primitive component schema (string, integer, number, boolean) decoder/encoder generation
+- Gleam keyword escaping for generated field names (e.g. `type` → `type_`)
+
+#### Validation
+- Recursive validation across all schema positions (requestBody, response, nested properties, array items, allOf/oneOf/anyOf sub-schemas)
+- Reject `style: deepObject`, `multipart/form-data`, `additionalProperties: true`, typed `additionalProperties`
+- Reject all inline oneOf/anyOf variants (not just primitives; all must be `$ref`)
+- Reject nested inline object/allOf in property positions
+- Reject array parameters and complex schema parameters (object/allOf/oneOf/anyOf)
+- Reject inline complex array items
+- Reject non-JSON content types in both requestBody and response
+- Reject `apiKey` in cookie, HTTP Basic/Digest, OAuth2/OpenID Connect at parse time
+- Reject path parameters with `required: false`
+- Duplicate operationId detection
+- Function name collision after snake_case, type name collision after PascalCase
+- Property name collision after snake_case, enum variant collision after PascalCase
+- Config validation: output directory basename must match package name
+
+#### Client
+- Typed request body parameters (auto-encoded via generated encoders)
+- Typed response variants (auto-decoded via generated decoders with status code matching)
+- Parameter serialization for Bool, Float, Int, String, `$ref` enum types
+- `$ref` parameters resolved to determine correct string conversion (not blind `encode_X_to_string`)
+- Cookie parameters combined into single header (`"a=1; b=2"`)
+- Security schemes applied to client functions (first OR alternative, all AND-ed schemes)
+- `default` response handling without duplicate catch-all branches
+- Inline primitive requestBody/response uses raw types directly
+- Inline array response with non-`$ref` items decoded correctly
+- Conditional imports: `gleam/bool`, `gleam/float`, `gleam/string`, `gleam/option`, `gleam/json`, `gleam/dynamic/decode`, `api/types`, `api/encode` only imported when needed (generated code passes `--warnings-as-errors`)
+
+#### Decoders/Encoders
+- allOf decoder/encoder by merging sub-schema properties
+- oneOf/anyOf decoder with discriminator support (dispatches by field value)
+- oneOf/anyOf encoder wrapping each variant
+- anyOf try-each decoder (no discriminator)
+- Discriminator mapping lookup corrected (key = payload value, not schema name)
+- Discriminator unknown branch uses `decode.then` instead of `todo`
+- Inline enum decoders/encoders generated for properties in object and allOf schemas
+- Nullable fields always wrapped in `decode.optional()`
+- Optional array property encoder uses lambda for `json.nullable`
+- List decoder (`decode_X_list`) for typed client array responses
+- Primitive schema decoder/encoder wrappers for `$ref` to primitives
+- Inline enum `encode_X_to_string` for URL/header serialization
+
+#### Testing
+- 45 unit tests (parser fail-fast, validator recursion, naming, config validation, collision detection, security parsing)
+- 55 ShellSpec CLI tests
+- Integration tests: petstore server (40 tests), petstore client compile, complex spec compile, security client compile, primitive API client compile
+- Client compile tests use `--warnings-as-errors`
+- Test fixtures: secure_api.yaml, primitive_api.yaml, global_security_api.yaml, deep_unsupported.yaml, collision.yaml, missing_responses.yaml, invalid_param_location.yaml
+
+### Changed
+
+- Parser propagates errors instead of silent fallback via `option.from_result` / `result.unwrap`
+- `responses` field required per OpenAPI 3.x (missing → parse error)
+- `items` field required for array schemas
+- Path-level parameter merge key changed from name-only to `(name, in)`
+- Client output default path changed from `<dir>/<package>_client` to `<dir>_client/<package>` (basename must match package)
+- Security requirement AST changed from flat list to two-level OR/AND structure
+
+### Fixed
+
+- Query apiKey security no longer rebuilds the request (preserves body/headers/cookies)
+- Discriminator mapping lookup direction (was reversed: looked up by schema name instead of payload value)
+- `default` response no longer generates duplicate `_` catch-all branch
+- Nullable `$ref` now resolved to check target schema's nullable flag (prevents `Option(Option(T))`)
+
 ## [0.1.2] - 2026-04-08
 
 ### Changed

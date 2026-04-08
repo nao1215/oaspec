@@ -110,7 +110,7 @@ package: api
 # output:
 #   dir: ./gen                    # Base output directory (default: ./gen)
 #   server: ./gen/api             # Override server output path
-#   client: ./gen/api_client      # Override client output path
+#   client: ./gen_client/api      # Override client output path
 "
 
   case simplifile.is_file(path) {
@@ -167,6 +167,15 @@ fn run_generate(
   let cfg = case output_str {
     "" -> cfg
     path -> config.with_output(cfg, Some(path))
+  }
+
+  // Validate config after all overrides
+  case config.validate_output_package_match(cfg) {
+    Ok(_) -> Nil
+    Error(e) -> {
+      io.println("Error: " <> config.error_to_string(e))
+      halt(1)
+    }
   }
 
   io.println("Parsing OpenAPI spec: " <> cfg.input)

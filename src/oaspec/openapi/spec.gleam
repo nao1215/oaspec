@@ -10,6 +10,7 @@ pub type OpenApiSpec {
     paths: Dict(String, PathItem),
     components: Option(Components),
     servers: List(Server),
+    security: List(SecurityRequirement),
   )
 }
 
@@ -30,7 +31,26 @@ pub type Components {
     parameters: Dict(String, Parameter),
     request_bodies: Dict(String, RequestBody),
     responses: Dict(String, Response),
+    security_schemes: Dict(String, SecurityScheme),
   )
+}
+
+/// Security scheme definition.
+pub type SecurityScheme {
+  ApiKeyScheme(name: String, in_: String)
+  HttpScheme(scheme: String, bearer_format: Option(String))
+}
+
+/// A single scheme reference within a security requirement (AND element).
+pub type SecuritySchemeRef {
+  SecuritySchemeRef(scheme_name: String, scopes: List(String))
+}
+
+/// A security requirement: all schemes in the list must be satisfied (AND).
+/// The outer list in operation/top-level security is OR — any one
+/// SecurityRequirement suffices.
+pub type SecurityRequirement {
+  SecurityRequirement(schemes: List(SecuritySchemeRef))
 }
 
 /// A path item containing operations for each HTTP method.
@@ -58,6 +78,7 @@ pub type Operation {
     request_body: Option(RequestBody),
     responses: Dict(String, Response),
     deprecated: Bool,
+    security: Option(List(SecurityRequirement)),
   )
 }
 

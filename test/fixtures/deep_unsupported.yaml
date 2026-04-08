@@ -1,0 +1,33 @@
+openapi: 3.0.3
+info:
+  title: Deep Unsupported
+  version: 1.0.0
+paths:
+  /search:
+    post:
+      operationId: search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: string
+                - type: integer
+      responses:
+        '200':
+          description: ok
+  /events:
+    get:
+      operationId: listEvents
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payload:
+                    type: object
+                    additionalProperties: true

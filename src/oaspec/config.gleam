@@ -1,5 +1,6 @@
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import simplifile
 import yay
 
@@ -87,7 +88,7 @@ pub fn load(path: String) -> Result(Config, ConfigError) {
 
   let output_client =
     extract_nested_string(root, "output", "client")
-    |> option.unwrap(output_dir <> "/" <> package <> "_client")
+    |> option.unwrap(output_dir <> "_client/" <> package)
 
   use mode <- result.try(
     case yay.extract_optional_string(root, "mode") |> result.unwrap(None) {
@@ -112,16 +113,70 @@ pub fn with_mode(config: Config, mode: GenerateMode) -> Config {
 }
 
 /// Apply output base directory override.
-/// Derives server/client paths as <dir>/<package> and <dir>/<package>_client.
+/// Derives server/client paths as <dir>/<package> and <dir>_client/<package>.
 pub fn with_output(config: Config, output: Option(String)) -> Config {
   case output {
     Some(dir) ->
       Config(
         ..config,
         output_server: dir <> "/" <> config.package,
-        output_client: dir <> "/" <> config.package <> "_client",
+        output_client: dir <> "_client/" <> config.package,
       )
     None -> config
+  }
+}
+
+/// Validate that output directory basenames match the package name.
+/// Gleam imports require `import <package>/types`, so the directory must match.
+pub fn validate_output_package_match(config: Config) -> Result(Nil, ConfigError) {
+  case config.mode {
+    Server | Both ->
+      case basename(config.output_server) == config.package {
+        True -> Ok(Nil)
+        False ->
+          Error(InvalidValue(
+            field: "output.server",
+            detail: "Directory basename '"
+              <> basename(config.output_server)
+              <> "' must match package '"
+              <> config.package
+              <> "'",
+          ))
+      }
+    Client -> Ok(Nil)
+  }
+  |> result.try(fn(_) {
+    case config.mode {
+      Client | Both ->
+        case basename(config.output_client) == config.package {
+          True -> Ok(Nil)
+          False ->
+            Error(InvalidValue(
+              field: "output.client",
+              detail: "Directory basename '"
+                <> basename(config.output_client)
+                <> "' must match package '"
+                <> config.package
+                <> "'",
+            ))
+        }
+      Server -> Ok(Nil)
+    }
+  })
+}
+
+/// Get the basename of a path (last segment after /).
+fn basename(path: String) -> String {
+  path
+  |> string.split("/")
+  |> list_last
+}
+
+fn list_last(items: List(String)) -> String {
+  case items {
+    [] -> ""
+    [last] -> last
+    [_, ..rest] -> list_last(rest)
   }
 }
 

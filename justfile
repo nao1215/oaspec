@@ -55,4 +55,4 @@ all: clean deps
 
 clean:
   gleam clean
-  rm -rf test_output integration_test/src/api integration_test/build oaspec
+  rm -rf test_output test_output_client integration_test/src/api integration_test/build oaspec

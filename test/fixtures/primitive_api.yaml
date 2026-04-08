@@ -1,0 +1,37 @@
+openapi: 3.0.3
+info:
+  title: Primitive API
+  version: 1.0.0
+paths:
+  /echo:
+    post:
+      operationId: postEcho
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+  /status:
+    get:
+      operationId: getStatus
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        default:
+          description: fallback
+components:
+  schemas:
+    HealthStatus:
+      type: string

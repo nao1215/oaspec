@@ -28,15 +28,27 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
 
 /// Generate types from component schemas and anonymous types from operations.
 fn generate_types(ctx: Context) -> String {
-  let sb =
-    se.file_header(context.version)
-    |> se.imports(["gleam/option.{type Option}"])
-
   // Generate component schema types
   let schemas = case ctx.spec.components {
     Some(components) -> dict.to_list(components.schemas)
     None -> []
   }
+
+  // Check if Option is needed (any optional/nullable fields)
+  let needs_option =
+    list.any(schemas, fn(entry) {
+      let #(_, schema_ref) = entry
+      schema_has_optional_fields(schema_ref, ctx)
+    })
+
+  let imports = case needs_option {
+    True -> ["gleam/option.{type Option}"]
+    False -> []
+  }
+
+  let sb =
+    se.file_header(context.version)
+    |> se.imports(imports)
 
   // First pass: collect inline enum types from object properties
   let sb =
@@ -169,7 +181,7 @@ fn generate_schema_type(
               ctx,
             )
           let is_required = list.contains(required, prop_name)
-          let is_already_optional = schema_ref_is_nullable(prop_ref)
+          let is_already_optional = schema_ref_is_nullable(prop_ref, ctx)
           // Avoid Option(Option(T)): if schema is nullable, type is
           // already Option(T), so don't wrap again for optional fields.
           let final_type = case is_required, is_already_optional {
@@ -608,14 +620,54 @@ pub fn schema_to_gleam_type(schema: SchemaObject, _ctx: Context) -> String {
 
 /// Generate request types for all operations.
 fn generate_request_types(ctx: Context) -> String {
+  let operations = collect_operations(ctx)
+
+  // Only import Option if any operation has optional parameters
+  let needs_option =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(operation.parameters, fn(p) { !p.required })
+    })
+
+  // Check if types module is needed ($ref params or non-primitive body)
+  let needs_types =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      let has_ref_params =
+        list.any(operation.parameters, fn(p) {
+          case p.schema {
+            Some(Reference(_)) -> True
+            _ -> False
+          }
+        })
+      let has_typed_body = case operation.request_body {
+        Some(rb) ->
+          list.any(dict.to_list(rb.content), fn(ce) {
+            let #(_, mt) = ce
+            case mt.schema {
+              Some(Reference(_)) -> True
+              Some(Inline(schema.ObjectSchema(..))) -> True
+              Some(Inline(schema.AllOfSchema(..))) -> True
+              _ -> False
+            }
+          })
+        _ -> False
+      }
+      has_ref_params || has_typed_body
+    })
+
+  let base_imports = case needs_types {
+    True -> [ctx.config.package <> "/types"]
+    False -> []
+  }
+  let imports = case needs_option {
+    True -> ["gleam/option.{type Option}", ..base_imports]
+    False -> base_imports
+  }
+
   let sb =
     se.file_header(context.version)
-    |> se.imports([
-      "gleam/option.{type Option}",
-      ctx.config.package <> "/types",
-    ])
-
-  let operations = collect_operations(ctx)
+    |> se.imports(imports)
 
   let sb =
     list.fold(operations, sb, fn(sb, op) {
@@ -787,15 +839,28 @@ pub fn collect_operations(
       case maybe_op {
         Some(operation) -> {
           // Merge path-level parameters with operation parameters.
-          // Operation params take precedence (by name) over path-level ones.
-          let op_param_names = list.map(operation.parameters, fn(p) { p.name })
+          // Operation params take precedence by (name, in) key per OpenAPI spec.
+          let op_param_keys =
+            list.map(operation.parameters, fn(p) { #(p.name, p.in_) })
           let inherited_params =
             list.filter(path_item.parameters, fn(p) {
-              !list.contains(op_param_names, p.name)
+              !list.contains(op_param_keys, #(p.name, p.in_))
             })
           let merged_params =
             list.append(inherited_params, operation.parameters)
-          let operation = spec.Operation(..operation, parameters: merged_params)
+          // Inherit top-level security if operation doesn't define its own.
+          // operation.security = None → inherit, Some([]) → no security,
+          // Some([...]) → use operation-level.
+          let effective_security = case operation.security {
+            Some(sec) -> sec
+            None -> ctx.spec.security
+          }
+          let operation =
+            spec.Operation(
+              ..operation,
+              parameters: merged_params,
+              security: Some(effective_security),
+            )
 
           let op_id = case operation.operation_id {
             Some(id) -> id
@@ -814,11 +879,39 @@ pub fn collect_operations(
   })
 }
 
-/// Check if a SchemaRef is nullable (avoids wrapping in Option twice).
-fn schema_ref_is_nullable(ref: SchemaRef) -> Bool {
+/// Check if a schema has any optional or nullable fields that would need Option.
+pub fn schema_has_optional_fields(schema_ref: SchemaRef, ctx: Context) -> Bool {
+  case schema_ref {
+    Inline(ObjectSchema(properties:, required:, ..)) -> {
+      let has_optional =
+        dict.to_list(properties)
+        |> list.any(fn(entry) {
+          let #(prop_name, prop_ref) = entry
+          !list.contains(required, prop_name)
+          || schema_ref_is_nullable(prop_ref, ctx)
+        })
+      has_optional
+    }
+    Inline(AllOfSchema(schemas:, ..)) ->
+      list.any(schemas, fn(s) { schema_has_optional_fields(s, ctx) })
+    Reference(_) ->
+      case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
+        Ok(schema_obj) -> schema_has_optional_fields(Inline(schema_obj), ctx)
+        Error(_) -> False
+      }
+    _ -> False
+  }
+}
+
+/// Check if a SchemaRef is nullable, resolving $ref if needed.
+fn schema_ref_is_nullable(ref: SchemaRef, ctx: Context) -> Bool {
   case ref {
     Inline(s) -> schema.is_nullable(s)
-    Reference(_) -> False
+    Reference(_) ->
+      case resolver.resolve_schema_ref(ref, ctx.spec) {
+        Ok(s) -> schema.is_nullable(s)
+        Error(_) -> False
+      }
   }
 }
 

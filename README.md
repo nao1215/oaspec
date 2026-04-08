@@ -4,25 +4,25 @@
 [![Integration Tests](https://github.com/nao1215/oaspec/actions/workflows/integration.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/integration.yml)
 
 > [!IMPORTANT]
-> Not fully supporting the entire OpenAPI 3.x specification, oaspec can only perform limited code generation at this stage. Support will be expanded incrementally.
+> oaspec does not cover the full OpenAPI 3.x specification. Support is expanded incrementally.
 
-Generate strongly typed Gleam code from OpenAPI 3.x specifications.
+Generate Gleam code from OpenAPI 3.x specifications.
 
-- Custom types for every component schema (no generic maps)
-- JSON decoders and encoders
-- Server handler stubs with TODO placeholders
-- Client SDK with query parameter serialization
-- Composable middleware system (logging, retry)
-- OpenAPI descriptions propagated as doc comments
+- Custom types for component schemas
+- JSON decoders and encoders (allOf, oneOf/anyOf with discriminator)
+- Server handler stubs
+- Client SDK with parameter serialization and response decoding
+- Middleware (logging, retry)
+- Security scheme support (apiKey header/query, Bearer token)
+- OpenAPI descriptions as doc comments
 
 ## Install
 
-### From GitHub Release (recommended)
+### From GitHub Release
 
-Download the `oaspec` escript binary from the [Releases](https://github.com/nao1215/oaspec/releases) page. Requires Erlang/OTP 27+ runtime.
+Download the `oaspec` escript binary from the [Releases](https://github.com/nao1215/oaspec/releases) page. Requires Erlang/OTP 27+.
 
 ```sh
-# Download (replace URL with the latest release)
 curl -fSL -o oaspec https://github.com/nao1215/oaspec/releases/latest/download/oaspec
 chmod +x oaspec
 sudo mv oaspec /usr/local/bin/
@@ -57,18 +57,18 @@ output:
   dir: ./gen          # base directory (default: ./gen)
 ```
 
-Generated code is placed at `<dir>/<package>` and `<dir>/<package>_client`. To use the generated code in your Gleam project, copy or symlink the output into `src/`.
+Generated code is placed at `<dir>/<package>` (server) and `<dir>_client/<package>` (client). Both directory basenames must match `package` so that Gleam imports resolve correctly. Copy or symlink the output into `src/` to use it.
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `input` | yes | - | Path to OpenAPI 3.x spec (YAML or JSON) |
 | `package` | no | `api` | Gleam module namespace prefix |
-| `mode` | no | `both` | Generation mode: `server`, `client`, or `both` |
+| `mode` | no | `both` | `server`, `client`, or `both` |
 | `output.dir` | no | `./gen` | Base output directory |
-| `output.server` | no | `<dir>/<package>` | Server code output (overrides dir-based default) |
-| `output.client` | no | `<dir>/<package>_client` | Client code output (overrides dir-based default) |
+| `output.server` | no | `<dir>/<package>` | Server code output path |
+| `output.client` | no | `<dir>_client/<package>` | Client code output path |
 
-The directory basename must match `package` so that Gleam imports (`import my_api/types`) resolve correctly. The CLI `--output` flag works the same as `output.dir` in the config file.
+The directory basename must match `package` so that `import my_api/types` resolves. The CLI `--output` flag works the same as `output.dir`. A mismatch is an early error.
 
 ### 2. Run the generator
 
@@ -84,7 +84,7 @@ Options:
 --output=<path>   Override output base directory
 ```
 
-When developing oaspec itself, you can also run via `gleam run -- generate --config=oaspec.yaml`.
+You can also run via `gleam run -- generate --config=oaspec.yaml`.
 
 ### 3. Generated output
 
@@ -99,11 +99,11 @@ gen/my_api/                 # server (package = "my_api")
   handlers.gleam            # Handler stubs (TODO placeholders)
   router.gleam              # Route dispatcher skeleton
 
-gen/my_api_client/          # client
-  types.gleam               # Same domain types
-  decode.gleam              # Same decoders
-  encode.gleam              # Same encoders
-  middleware.gleam           # Same middleware (with retry)
+gen_client/my_api/          # client
+  types.gleam
+  decode.gleam
+  encode.gleam
+  middleware.gleam
   client.gleam              # HTTP client functions
   request_types.gleam
   response_types.gleam
@@ -111,7 +111,7 @@ gen/my_api_client/          # client
 
 ## Generated code examples
 
-Given a Petstore OpenAPI spec, oaspec generates:
+Given a Petstore OpenAPI spec:
 
 ### Types
 
@@ -126,7 +126,6 @@ pub type Pet {
   )
 }
 
-/// The status of a pet in the store
 pub type PetStatus {
   PetStatusAvailable
   PetStatusPending
@@ -137,7 +136,6 @@ pub type PetStatus {
 ### Server handlers
 
 ```gleam
-/// List all pets
 pub fn list_pets(req: request_types.ListPetsRequest) -> response_types.ListPetsResponse {
   let _ = req
   // TODO: Implement list_pets
@@ -145,15 +143,12 @@ pub fn list_pets(req: request_types.ListPetsRequest) -> response_types.ListPetsR
 }
 ```
 
-### Client SDK
+### Client
 
 ```gleam
-pub fn get_pet(config: ClientConfig, pet_id: Int) -> Result(ClientResponse, ClientError) {
-  let path = "/pets/{petId}"
-  let path = string.replace(path, "{petId}", int.to_string(pet_id))
-  let assert Ok(req) = request.to(config.base_url <> path)
-  let req = request.set_method(req, http.Get)
-  config.send(req)
+pub fn create_pet(config: ClientConfig, body: types.CreatePetRequest)
+  -> Result(response_types.CreatePetResponse, ClientError) {
+  // ...
 }
 ```
 
@@ -175,42 +170,67 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 
 ### Supported
 
-- OpenAPI 3.x (YAML and JSON input)
+- OpenAPI 3.x (YAML and JSON)
 - Paths and operations (GET, POST, PUT, DELETE, PATCH)
-- Path, query, header, and cookie parameters (path-level merged into operations, serialized in client)
-- Request bodies with `$ref` schema resolution (typed, not raw String)
-- Inline allOf in request body (property merging from `$ref` + inline objects)
-- Responses with status codes, including `$ref` responses from `components.responses`
-- `$ref` parameters, requestBodies, and responses resolved from `components`
-- Component schemas with `$ref` resolution (types, decoders, encoders)
-- String enums with unknown-value rejection (decode returns Error, not silent fallback)
-- Inline enums in properties (auto-named types generated)
-- Inline objects in response/requestBody (anonymous types auto-generated)
-- oneOf/anyOf with `$ref` variants (sum types generated)
-- Nullable fields, arrays (including array of `$ref`)
-- allOf (property merging from inline and `$ref` schemas, including required fields)
-- Encode/decode roundtrip safety: `decode(encode(value)) == Ok(value)`
-- Circular `$ref` detection (returns error instead of infinite recursion)
-- Fail-fast parser: missing required fields and unknown parameter locations return Error
+- Path, query, header, cookie parameters (path-level merged by `(name, in)`)
+- Parameter serialization for Bool, Float, Int, String, `$ref` enum types
+- Cookie parameters combined into single header
+- Request bodies with `$ref` resolution (typed, auto-encoded)
+- allOf in request body (property merging from `$ref` + inline objects)
+- Responses with status codes, `$ref` responses from `components.responses`
+- `$ref` resolution for parameters, requestBodies, responses, schemas
+- Component schemas: types, decoders, encoders
+- Primitive component schemas (string, integer, number, boolean): type alias, decoder, encoder
+- String enums with unknown-value rejection
+- Inline enums in properties (auto-named)
+- Inline objects in top-level response/requestBody (anonymous types generated)
+- oneOf/anyOf with `$ref` variants: sum types, decoders, encoders
+- oneOf discriminator-based decoding
+- anyOf try-each decoding
+- allOf property merging with decoders/encoders
+- Nullable fields, arrays (including `$ref` items)
+- Encode/decode roundtrip: `decode(encode(value)) == Ok(value)`
+- Circular `$ref` detection
+- Fail-fast parser for missing required fields, invalid parameter locations, malformed content
+- Client typed body (auto-encoded) and typed response (auto-decoded)
+- `default` response handling in client
+- Top-level security inheritance (operation-level overrides, `security: []` opts out)
+- Security schemes: `apiKey` in header/query, HTTP bearer (first OR alternative applied; AND within one alternative supported)
+- Duplicate operationId detection
+- Function/type name collision detection after case conversion
+- Config validation: output directory basename must match package name
+- Gleam keyword escaping in generated field names
 
-### Explicitly unsupported (generator exits with error)
+### Unsupported (exits with error)
 
-These patterns are detected before code generation. The generator prints a clear error message and exits non-zero instead of generating broken code.
+These are detected before code generation. The generator prints an error and exits non-zero.
 
-- **`style: deepObject`** query parameters
-- **`multipart/form-data`** request bodies
-- **`additionalProperties: true`** (untyped map)
-- **Inline oneOf/anyOf with primitive types** (`String | Int | Bool`)
+- `style: deepObject` query parameters
+- `multipart/form-data` request bodies (only `application/json`)
+- `additionalProperties: true` (untyped map)
+- Typed `additionalProperties`
+- Inline oneOf/anyOf schemas (variants must be `$ref`)
+- Nested inline object/allOf in properties (use `$ref`)
+- Array parameters (query/header/cookie with `type: array`)
+- Complex schema parameters (object/allOf/oneOf/anyOf in query/header/cookie)
+- Inline complex array items (object/allOf/oneOf/anyOf; use `$ref`)
+- Duplicate operationId
+- Function/type name collisions after case conversion
+- Property name collisions after snake_case conversion
+- Enum variant collisions after PascalCase conversion
+- Non-JSON response content types (only `application/json`)
+- Path parameters with `required: false`
 
 ### Not yet supported
 
-- **Client response decoding**: Client returns raw `ClientResponse`, not typed response variants
-- **Client request body encoding**: Client accepts `body: String`, not typed body parameter
-- **oneOf / anyOf decoders/encoders**: Types generated for `$ref` variants, but no decoder/encoder
-- **Discriminator in decoders**: Parsed but not used in generated decoder logic
-- **Validation constraints** (minLength, maxLength, pattern, minimum, maximum): Parsed but not enforced
-- **Callbacks**: Parsed but ignored
-- **Security schemes**: Parsed but not applied to generated client
+- Percent-encoding for path/query/cookie parameter values: values are inserted as-is; reserved characters may break URLs
+- Validation constraints (minLength, maxLength, pattern, minimum, maximum): parsed but not enforced
+- Callbacks: ignored by the generator
+- OAuth2 / OpenID Connect: rejected at parse time
+- `apiKey` in cookie: rejected at parse time
+- HTTP Basic / Digest: rejected at parse time (only bearer supported)
+- allOf with non-object sub-schemas
+- `text/plain` and other non-JSON response types
 
 ### Schema-to-type mapping
 
@@ -224,6 +244,8 @@ These patterns are detected before code generation. The generator prints a clear
 | `object` | Custom type |
 | `enum` | Custom type with variants |
 | nullable | `Option(T)` |
+| `allOf` | Merged custom type |
+| `oneOf`/`anyOf` (`$ref` variants) | Sum type |
 
 ## Development
 
@@ -240,8 +262,8 @@ just integration      # generated code compile + roundtrip tests
 
 | Command | Tool | What it tests |
 |---------|------|---------------|
-| `just test` | gleeunit | Unit tests (parser, naming, config) |
-| `just shellspec` | ShellSpec | CLI behaviour, file generation, content verification |
+| `just test` | gleeunit | Parser, validator, naming, config, collision detection |
+| `just shellspec` | ShellSpec | CLI behaviour, file generation, content, unsupported feature detection |
 | `just integration` | gleeunit | Generated code compiles, types/decoders/encoders/handlers/middleware work |
 
 ## License

@@ -1,10 +1,13 @@
+import gleam/dict
 import gleam/list
 import gleam/option.{Some}
 import gleam/string
 import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
 import oaspec/codegen/types as type_gen
 import oaspec/openapi/resolver
-import oaspec/openapi/schema.{Inline, IntegerSchema, Reference, StringSchema}
+import oaspec/openapi/schema.{
+  Inline, IntegerSchema, NumberSchema, Reference, StringSchema,
+}
 import oaspec/openapi/spec
 import oaspec/util/naming
 import oaspec/util/string_extra as se
@@ -18,34 +21,180 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
 
 /// Generate the client module with functions for each operation.
 fn generate_client(ctx: Context) -> String {
-  // Only import types if operations reference $ref schemas in parameters
   let operations = type_gen.collect_operations(ctx)
-  let needs_types =
+
+  // Determine which imports are needed based on parameter types
+  let all_params =
+    list.flat_map(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      operation.parameters
+    })
+  let needs_bool =
+    list.any(all_params, fn(p) {
+      case p.schema {
+        Some(Inline(schema.BooleanSchema(..))) -> True
+        _ -> False
+      }
+    })
+  let needs_float =
+    list.any(all_params, fn(p) {
+      case p.schema {
+        Some(Inline(schema.NumberSchema(..))) -> True
+        _ -> False
+      }
+    })
+
+  // dyn_decode + json needed for inline primitive response decoding
+  let needs_dyn_decode =
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
-      list.any(operation.parameters, fn(p) {
-        case p.schema {
-          Some(Reference(_)) -> True
+      list.any(dict.to_list(operation.responses), fn(entry) {
+        let #(_, response) = entry
+        list.any(dict.to_list(response.content), fn(ce) {
+          let #(_, mt) = ce
+          case mt.schema {
+            Some(Inline(schema.ArraySchema(items: Inline(_), ..))) -> True
+            Some(Inline(schema.StringSchema(..))) -> True
+            Some(Inline(schema.IntegerSchema(..))) -> True
+            Some(Inline(schema.NumberSchema(..))) -> True
+            Some(Inline(schema.BooleanSchema(..))) -> True
+            _ -> False
+          }
+        })
+      })
+    })
+
+  // json needed for inline primitive body encoding (without dyn_decode)
+  let needs_json =
+    needs_dyn_decode
+    || list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      case operation.request_body {
+        Some(rb) ->
+          list.any(dict.to_list(rb.content), fn(ce) {
+            let #(_, mt) = ce
+            case mt.schema {
+              Some(Inline(schema.StringSchema(..))) -> True
+              Some(Inline(schema.IntegerSchema(..))) -> True
+              Some(Inline(schema.NumberSchema(..))) -> True
+              Some(Inline(schema.BooleanSchema(..))) -> True
+              _ -> False
+            }
+          })
+        _ -> False
+      }
+    })
+
+  // string module needed for path/query/cookie parameter handling and
+  // security query apiKey
+  let needs_string =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      !list.is_empty(operation.parameters)
+    })
+    || {
+      let security_schemes = case ctx.spec.components {
+        Some(c) -> dict.to_list(c.security_schemes)
+        _ -> []
+      }
+      list.any(security_schemes, fn(entry) {
+        case entry {
+          #(_, spec.ApiKeyScheme(in_: "query", ..)) -> True
           _ -> False
         }
       })
+    }
+
+  // Check which modules are actually needed
+  let needs_typed_schemas =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      // Need types/encode when $ref body or $ref params exist
+      let has_ref_body = case operation.request_body {
+        Some(rb) ->
+          list.any(dict.to_list(rb.content), fn(ce) {
+            let #(_, mt) = ce
+            case mt.schema {
+              Some(Reference(_)) -> True
+              Some(Inline(schema.ObjectSchema(..))) -> True
+              Some(Inline(schema.AllOfSchema(..))) -> True
+              _ -> False
+            }
+          })
+        _ -> False
+      }
+      let has_ref_params =
+        list.any(operation.parameters, fn(p) {
+          case p.schema {
+            Some(Reference(_)) -> True
+            _ -> False
+          }
+        })
+      has_ref_body || has_ref_params
     })
+
+  let needs_option =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(operation.parameters, fn(p) { !p.required })
+    })
+    || {
+      let security_schemes = case ctx.spec.components {
+        Some(c) -> dict.to_list(c.security_schemes)
+        _ -> []
+      }
+      !list.is_empty(security_schemes)
+    }
 
   let base_imports = [
     "gleam/http/request",
     "gleam/http",
     "gleam/int",
-    "gleam/option.{type Option, None, Some}",
-    "gleam/string",
+    ctx.config.package <> "/decode",
+    ctx.config.package <> "/response_types",
   ]
-  let imports = case needs_types {
-    True -> list.append(base_imports, [ctx.config.package <> "/types"])
+  let base_imports = case needs_option {
+    True -> ["gleam/option.{type Option, None, Some}", ..base_imports]
     False -> base_imports
+  }
+  let base_imports = case needs_typed_schemas {
+    True ->
+      list.append(
+        [ctx.config.package <> "/types", ctx.config.package <> "/encode"],
+        base_imports,
+      )
+    False -> base_imports
+  }
+  let base_imports = case needs_string {
+    True -> ["gleam/string", ..base_imports]
+    False -> base_imports
+  }
+  let imports = case needs_dyn_decode {
+    True -> ["gleam/dynamic/decode as dyn_decode", ..base_imports]
+    False -> base_imports
+  }
+  let imports = case needs_json {
+    True -> ["gleam/json", ..imports]
+    False -> imports
+  }
+  let imports = case needs_bool {
+    True -> ["gleam/bool", ..imports]
+    False -> imports
+  }
+  let imports = case needs_float {
+    True -> ["gleam/float", ..imports]
+    False -> imports
   }
 
   let sb =
     se.file_header(context.version)
     |> se.imports(imports)
+
+  // Collect security schemes
+  let security_schemes = case ctx.spec.components {
+    Some(components) -> dict.to_list(components.security_schemes)
+    _ -> []
+  }
 
   // Client configuration type
   let sb =
@@ -58,6 +207,17 @@ fn generate_client(ctx: Context) -> String {
       2,
       "send: fn(request.Request(String)) -> Result(ClientResponse, ClientError),",
     )
+
+  // Add security credential fields
+  let sb =
+    list.fold(security_schemes, sb, fn(sb, entry) {
+      let #(scheme_name, _scheme) = entry
+      let field_name = naming.to_snake_case(scheme_name)
+      sb |> se.indent(2, field_name <> ": Option(String),")
+    })
+
+  let sb =
+    sb
     |> se.indent(1, ")")
     |> se.line("}")
     |> se.blank_line()
@@ -96,13 +256,23 @@ fn generate_client(ctx: Context) -> String {
       "send: fn(request.Request(String)) -> Result(ClientResponse, ClientError),",
     )
     |> se.line(") -> ClientConfig {")
-    |> se.indent(1, "ClientConfig(base_url:, send:)")
+    |> se.indent(1, "ClientConfig(base_url:, send:,")
+
+  // Initialize security fields to None
+  let sb =
+    list.fold(security_schemes, sb, fn(sb, entry) {
+      let #(scheme_name, _scheme) = entry
+      let field_name = naming.to_snake_case(scheme_name)
+      sb |> se.indent(2, field_name <> ": None,")
+    })
+
+  let sb =
+    sb
+    |> se.indent(1, ")")
     |> se.line("}")
     |> se.blank_line()
 
   // Generate operation functions
-  let operations = type_gen.collect_operations(ctx)
-
   let sb =
     list.fold(operations, sb, fn(sb, op) {
       let #(op_id, operation, path, method) = op
@@ -119,7 +289,7 @@ fn generate_client_function(
   operation: spec.Operation,
   path: String,
   method: spec.HttpMethod,
-  _ctx: Context,
+  ctx: Context,
 ) -> se.StringBuilder {
   let fn_name = naming.operation_to_function_name(op_id)
 
@@ -165,6 +335,7 @@ fn generate_client_function(
     })
 
   // Function signature
+  let response_type = naming.schema_to_type_name(op_id) <> "Response"
   let params =
     build_param_list(
       path_params,
@@ -172,6 +343,8 @@ fn generate_client_function(
       header_params,
       cookie_params,
       operation,
+      op_id,
+      ctx,
     )
   let sb =
     sb
@@ -180,7 +353,9 @@ fn generate_client_function(
       <> fn_name
       <> "(config: ClientConfig"
       <> params
-      <> ") -> Result(ClientResponse, ClientError) {",
+      <> ") -> Result(response_types."
+      <> response_type
+      <> ", ClientError) {",
     )
 
   // Build URL with path params
@@ -188,10 +363,7 @@ fn generate_client_function(
   let sb =
     list.fold(path_params, sb, fn(sb, p) {
       let param_name = naming.to_snake_case(p.name)
-      let to_string_expr = case p.schema {
-        Some(Inline(IntegerSchema(..))) -> "int.to_string(" <> param_name <> ")"
-        _ -> param_name
-      }
+      let to_string_expr = param_to_string_expr(p, param_name, ctx)
       sb
       |> se.indent(
         1,
@@ -211,22 +383,21 @@ fn generate_client_function(
       let sb =
         list.fold(query_params, sb, fn(sb, p) {
           let param_name = naming.to_snake_case(p.name)
-          let to_str = case p.schema {
-            Some(Inline(IntegerSchema(..))) -> "int.to_string(v)"
-            _ -> "v"
-          }
           case p.required {
-            True ->
+            True -> {
+              let to_str = to_str_for_required(p, param_name, ctx)
               sb
               |> se.indent(
                 1,
                 "let query_parts = [\""
                   <> p.name
                   <> "=\" <> "
-                  <> to_str_for_required(p, param_name)
+                  <> to_str
                   <> ", ..query_parts]",
               )
-            False ->
+            }
+            False -> {
+              let to_str = to_str_for_optional_value(p, ctx)
               sb
               |> se.indent(1, "let query_parts = case " <> param_name <> " {")
               |> se.indent(
@@ -239,6 +410,7 @@ fn generate_client_function(
               )
               |> se.indent(2, "None -> query_parts")
               |> se.indent(1, "}")
+            }
           }
         })
       let sb =
@@ -261,23 +433,26 @@ fn generate_client_function(
     spec.Patch -> "http.Patch"
   }
 
-  let has_body = option.is_some(operation.request_body)
-
   let sb =
     sb
     |> se.indent(1, "let assert Ok(req) = request.to(config.base_url <> path)")
     |> se.indent(1, "let req = request.set_method(req, " <> http_method <> ")")
 
   // Only set content-type for requests with body
-  let sb = case has_body {
-    True ->
+  let sb = case operation.request_body {
+    Some(rb) -> {
+      let body_encode_expr = get_body_encode_expr(rb, op_id, ctx)
       sb
       |> se.indent(
         1,
         "let req = request.set_header(req, \"content-type\", \"application/json\")",
       )
-      |> se.indent(1, "let req = request.set_body(req, body)")
-    False -> sb
+      |> se.indent(
+        1,
+        "let req = request.set_body(req, " <> body_encode_expr <> ")",
+      )
+    }
+    _ -> sb
   }
 
   // Set header parameters
@@ -286,60 +461,233 @@ fn generate_client_function(
       let param_name = naming.to_snake_case(p.name)
       let header_name = string.lowercase(p.name)
       case p.required {
-        True ->
+        True -> {
+          let to_str = param_to_string_expr(p, param_name, ctx)
           sb
           |> se.indent(
             1,
             "let req = request.set_header(req, \""
               <> header_name
               <> "\", "
-              <> param_name
+              <> to_str
               <> ")",
           )
-        False ->
+        }
+        False -> {
+          let to_str = to_str_for_optional_value(p, ctx)
           sb
           |> se.indent(1, "let req = case " <> param_name <> " {")
           |> se.indent(
             2,
-            "Some(v) -> request.set_header(req, \"" <> header_name <> "\", v)",
+            "Some(v) -> request.set_header(req, \""
+              <> header_name
+              <> "\", "
+              <> to_str
+              <> ")",
           )
           |> se.indent(2, "None -> req")
           |> se.indent(1, "}")
+        }
       }
     })
 
-  // Set cookie parameters via Cookie header
+  // Set cookie parameters: combine all into a single "cookie" header
+  let sb = case list.is_empty(cookie_params) {
+    True -> sb
+    False -> {
+      let sb = sb |> se.indent(1, "let cookie_parts = []")
+      let sb =
+        list.fold(cookie_params, sb, fn(sb, p) {
+          let param_name = naming.to_snake_case(p.name)
+          case p.required {
+            True -> {
+              let to_str = param_to_string_expr(p, param_name, ctx)
+              sb
+              |> se.indent(
+                1,
+                "let cookie_parts = [\""
+                  <> p.name
+                  <> "=\" <> "
+                  <> to_str
+                  <> ", ..cookie_parts]",
+              )
+            }
+            False -> {
+              let to_str = to_str_for_optional_value(p, ctx)
+              sb
+              |> se.indent(1, "let cookie_parts = case " <> param_name <> " {")
+              |> se.indent(
+                2,
+                "Some(v) -> [\""
+                  <> p.name
+                  <> "=\" <> "
+                  <> to_str
+                  <> ", ..cookie_parts]",
+              )
+              |> se.indent(2, "None -> cookie_parts")
+              |> se.indent(1, "}")
+            }
+          }
+        })
+      sb
+      |> se.indent(1, "let req = case cookie_parts {")
+      |> se.indent(2, "[] -> req")
+      |> se.indent(
+        2,
+        "_ -> request.set_header(req, \"cookie\", string.join(cookie_parts, \"; \"))",
+      )
+      |> se.indent(1, "}")
+    }
+  }
+
+  // Apply security schemes.
+  // OpenAPI security is OR of alternatives; each alternative is AND of
+  // schemes. We apply ALL scheme refs from the FIRST alternative only,
+  // since the generated client cannot dynamically choose at runtime.
+  let effective_security = option.unwrap(operation.security, [])
+  let first_alternative_schemes = case effective_security {
+    [first, ..] -> first.schemes
+    [] -> []
+  }
   let sb =
-    list.fold(cookie_params, sb, fn(sb, p) {
-      let param_name = naming.to_snake_case(p.name)
-      case p.required {
-        True ->
-          sb
-          |> se.indent(
-            1,
-            "let req = request.set_header(req, \"cookie\", \""
-              <> p.name
-              <> "=\" <> "
-              <> param_name
-              <> ")",
-          )
-        False ->
-          sb
-          |> se.indent(1, "let req = case " <> param_name <> " {")
-          |> se.indent(
-            2,
-            "Some(v) -> request.set_header(req, \"cookie\", \""
-              <> p.name
-              <> "=\" <> v)",
-          )
-          |> se.indent(2, "None -> req")
-          |> se.indent(1, "}")
+    list.fold(first_alternative_schemes, sb, fn(sb, sec_ref) {
+      let field_name = naming.to_snake_case(sec_ref.scheme_name)
+      // Look up the scheme definition
+      case ctx.spec.components {
+        Some(components) ->
+          case dict.get(components.security_schemes, sec_ref.scheme_name) {
+            Ok(spec.ApiKeyScheme(name: header_name, in_: "header")) ->
+              sb
+              |> se.indent(1, "let req = case config." <> field_name <> " {")
+              |> se.indent(
+                2,
+                "Some(key) -> request.set_header(req, \""
+                  <> string.lowercase(header_name)
+                  <> "\", key)",
+              )
+              |> se.indent(2, "None -> req")
+              |> se.indent(1, "}")
+            Ok(spec.ApiKeyScheme(name: query_name, in_: "query")) ->
+              sb
+              |> se.indent(1, "let req = case config." <> field_name <> " {")
+              |> se.indent(2, "Some(key) -> {")
+              |> se.indent(
+                3,
+                "let sep = case string.contains(req.path, \"?\") {",
+              )
+              |> se.indent(4, "True -> \"&\"")
+              |> se.indent(4, "False -> \"?\"")
+              |> se.indent(3, "}")
+              |> se.indent(
+                3,
+                "request.Request(..req, path: req.path <> sep <> \""
+                  <> query_name
+                  <> "=\" <> key)",
+              )
+              |> se.indent(2, "}")
+              |> se.indent(2, "None -> req")
+              |> se.indent(1, "}")
+            Ok(spec.HttpScheme(scheme: "bearer", ..)) ->
+              sb
+              |> se.indent(1, "let req = case config." <> field_name <> " {")
+              |> se.indent(
+                2,
+                "Some(token) -> request.set_header(req, \"authorization\", \"Bearer \" <> token)",
+              )
+              |> se.indent(2, "None -> req")
+              |> se.indent(1, "}")
+            _ -> sb
+          }
+        _ -> sb
       }
     })
 
+  // Send request and decode response into typed variant
   let sb =
     sb
-    |> se.indent(1, "config.send(req)")
+    |> se.indent(1, "case config.send(req) {")
+    |> se.indent(2, "Error(e) -> Error(e)")
+    |> se.indent(2, "Ok(resp) -> {")
+
+  let responses = dict.to_list(operation.responses)
+  let sb =
+    sb
+    |> se.indent(3, "case resp.status {")
+
+  let sb =
+    list.fold(responses, sb, fn(sb, entry) {
+      let #(status_code, response) = entry
+      let variant_name =
+        "response_types."
+        <> naming.schema_to_type_name(op_id)
+        <> "Response"
+        <> status_code_suffix(status_code)
+      let content_entries = dict.to_list(response.content)
+      case content_entries {
+        [] ->
+          sb
+          |> se.indent(
+            4,
+            status_code_to_int_pattern(status_code)
+              <> " -> Ok("
+              <> variant_name
+              <> ")",
+          )
+        [#(_media_type, media_type), ..] ->
+          case media_type.schema {
+            Some(schema_ref) -> {
+              let decode_expr =
+                get_response_decode_expr(schema_ref, op_id, status_code, ctx)
+              sb
+              |> se.indent(
+                4,
+                status_code_to_int_pattern(status_code) <> " -> {",
+              )
+              |> se.indent(5, "case " <> decode_expr <> " {")
+              |> se.indent(
+                6,
+                "Ok(decoded) -> Ok(" <> variant_name <> "(decoded))",
+              )
+              |> se.indent(
+                6,
+                "Error(_) -> Error(DecodeError(detail: \"Failed to decode response body\"))",
+              )
+              |> se.indent(5, "}")
+              |> se.indent(4, "}")
+            }
+            _ ->
+              sb
+              |> se.indent(
+                4,
+                status_code_to_int_pattern(status_code)
+                  <> " -> Ok("
+                  <> variant_name
+                  <> ")",
+              )
+          }
+      }
+    })
+
+  // Only add a fallback _ branch if no "default" response exists
+  let has_default =
+    list.any(responses, fn(entry) {
+      let #(code, _) = entry
+      code == "default"
+    })
+  let sb = case has_default {
+    True -> sb
+    False ->
+      sb
+      |> se.indent(
+        4,
+        "_ -> Error(DecodeError(detail: \"Unexpected status: \" <> int.to_string(resp.status)))",
+      )
+  }
+  let sb =
+    sb
+    |> se.indent(3, "}")
+    |> se.indent(2, "}")
+    |> se.indent(1, "}")
 
   sb
   |> se.line("}")
@@ -353,6 +701,8 @@ fn build_param_list(
   header_params: List(spec.Parameter),
   cookie_params: List(spec.Parameter),
   operation: spec.Operation,
+  op_id: String,
+  ctx: Context,
 ) -> String {
   let all_params =
     list.append(path_params, query_params)
@@ -362,27 +712,31 @@ fn build_param_list(
   let param_strs =
     list.map(all_params, fn(p) {
       let param_name = naming.to_snake_case(p.name)
-      let param_type = param_to_type(p)
+      let param_type = param_to_type(p, ctx)
       ", " <> param_name <> ": " <> param_type
     })
 
+  let _ = ctx
   let body_param = case operation.request_body {
-    Some(_) -> [", body: String"]
+    Some(rb) -> {
+      let body_type = get_body_type(rb, op_id)
+      [", body: " <> body_type]
+    }
     _ -> []
   }
 
   string.join(list.append(param_strs, body_param), "")
 }
 
-/// Convert a parameter to its Gleam type.
-fn param_to_type(param: spec.Parameter) -> String {
+/// Convert a parameter to its Gleam type string.
+fn param_to_type(param: spec.Parameter, _ctx: Context) -> String {
   let base = case param.schema {
     Some(Inline(StringSchema(..))) -> "String"
     Some(Inline(IntegerSchema(..))) -> "Int"
     Some(Inline(schema.NumberSchema(..))) -> "Float"
     Some(Inline(schema.BooleanSchema(..))) -> "Bool"
     Some(Reference(ref:)) ->
-      naming.schema_to_type_name(resolver.ref_to_name(ref))
+      "types." <> naming.schema_to_type_name(resolver.ref_to_name(ref))
     _ -> "String"
   }
   case param.required {
@@ -391,10 +745,198 @@ fn param_to_type(param: spec.Parameter) -> String {
   }
 }
 
-/// Convert a required param to string for query building.
-fn to_str_for_required(param: spec.Parameter, param_name: String) -> String {
+/// Convert a parameter value to its String representation for URL/header use.
+fn param_to_string_expr(
+  param: spec.Parameter,
+  param_name: String,
+  ctx: Context,
+) -> String {
   case param.schema {
     Some(Inline(IntegerSchema(..))) -> "int.to_string(" <> param_name <> ")"
+    Some(Inline(NumberSchema(..))) -> "float.to_string(" <> param_name <> ")"
+    Some(Inline(schema.BooleanSchema(..))) ->
+      "bool.to_string(" <> param_name <> ")"
+    Some(Reference(ref:) as schema_ref) -> {
+      // Resolve the $ref to determine the actual schema type
+      case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
+        Ok(StringSchema(enum_values:, ..)) if enum_values != [] -> {
+          let name = resolver.ref_to_name(ref)
+          "encode.encode_"
+          <> naming.to_snake_case(name)
+          <> "_to_string("
+          <> param_name
+          <> ")"
+        }
+        Ok(IntegerSchema(..)) -> "int.to_string(" <> param_name <> ")"
+        Ok(NumberSchema(..)) -> "float.to_string(" <> param_name <> ")"
+        Ok(schema.BooleanSchema(..)) -> "bool.to_string(" <> param_name <> ")"
+        Ok(StringSchema(..)) -> param_name
+        _ -> param_name
+      }
+    }
     _ -> param_name
+  }
+}
+
+/// Convert a required param to string for query building.
+fn to_str_for_required(
+  param: spec.Parameter,
+  param_name: String,
+  ctx: Context,
+) -> String {
+  param_to_string_expr(param, param_name, ctx)
+}
+
+/// Convert an optional param value (bound to `v`) to string.
+fn to_str_for_optional_value(param: spec.Parameter, ctx: Context) -> String {
+  case param.schema {
+    Some(Inline(IntegerSchema(..))) -> "int.to_string(v)"
+    Some(Inline(NumberSchema(..))) -> "float.to_string(v)"
+    Some(Inline(schema.BooleanSchema(..))) -> "bool.to_string(v)"
+    Some(Reference(ref:) as schema_ref) -> {
+      case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
+        Ok(StringSchema(enum_values:, ..)) if enum_values != [] -> {
+          let name = resolver.ref_to_name(ref)
+          "encode.encode_" <> naming.to_snake_case(name) <> "_to_string(v)"
+        }
+        Ok(IntegerSchema(..)) -> "int.to_string(v)"
+        Ok(NumberSchema(..)) -> "float.to_string(v)"
+        Ok(schema.BooleanSchema(..)) -> "bool.to_string(v)"
+        Ok(StringSchema(..)) -> "v"
+        _ -> "v"
+      }
+    }
+    _ -> "v"
+  }
+}
+
+/// Get the Gleam type for a request body parameter.
+fn get_body_type(rb: spec.RequestBody, op_id: String) -> String {
+  let content_entries = dict.to_list(rb.content)
+  case content_entries {
+    [#(_, media_type), ..] ->
+      case media_type.schema {
+        Some(Reference(ref:)) ->
+          "types." <> naming.schema_to_type_name(resolver.ref_to_name(ref))
+        Some(Inline(schema.StringSchema(..))) -> "String"
+        Some(Inline(schema.IntegerSchema(..))) -> "Int"
+        Some(Inline(schema.NumberSchema(..))) -> "Float"
+        Some(Inline(schema.BooleanSchema(..))) -> "Bool"
+        Some(Inline(_)) ->
+          "types." <> naming.schema_to_type_name(op_id) <> "RequestBody"
+        _ -> "String"
+      }
+    [] -> "String"
+  }
+}
+
+/// Get the encode expression for a request body.
+fn get_body_encode_expr(
+  rb: spec.RequestBody,
+  op_id: String,
+  _ctx: Context,
+) -> String {
+  let content_entries = dict.to_list(rb.content)
+  case content_entries {
+    [#(_, media_type), ..] ->
+      case media_type.schema {
+        Some(Reference(ref:)) -> {
+          let name = resolver.ref_to_name(ref)
+          "encode.encode_" <> naming.to_snake_case(name) <> "(body)"
+        }
+        Some(Inline(schema.StringSchema(..))) ->
+          "json.to_string(json.string(body))"
+        Some(Inline(schema.IntegerSchema(..))) ->
+          "json.to_string(json.int(body))"
+        Some(Inline(schema.NumberSchema(..))) ->
+          "json.to_string(json.float(body))"
+        Some(Inline(schema.BooleanSchema(..))) ->
+          "json.to_string(json.bool(body))"
+        Some(Inline(_)) -> {
+          let fn_name =
+            "encode_" <> naming.to_snake_case(op_id) <> "_request_body"
+          "encode." <> fn_name <> "(body)"
+        }
+        _ -> "body"
+      }
+    [] -> "body"
+  }
+}
+
+/// Get the decode expression for a response body.
+fn get_response_decode_expr(
+  schema_ref: schema.SchemaRef,
+  op_id: String,
+  status_code: String,
+  _ctx: Context,
+) -> String {
+  case schema_ref {
+    Reference(ref:) -> {
+      let name = resolver.ref_to_name(ref)
+      "decode.decode_" <> naming.to_snake_case(name) <> "(resp.body)"
+    }
+    Inline(schema.ArraySchema(items:, ..)) ->
+      case items {
+        Reference(ref:) -> {
+          let name = resolver.ref_to_name(ref)
+          "decode.decode_" <> naming.to_snake_case(name) <> "_list(resp.body)"
+        }
+        Inline(inner) -> {
+          let inner_decoder = inline_schema_to_decoder(inner)
+          "json.parse(resp.body, decode.list(" <> inner_decoder <> "))"
+        }
+      }
+    Inline(schema.StringSchema(..)) ->
+      "json.parse(resp.body, dyn_decode.string)"
+    Inline(schema.IntegerSchema(..)) -> "json.parse(resp.body, dyn_decode.int)"
+    Inline(schema.NumberSchema(..)) -> "json.parse(resp.body, dyn_decode.float)"
+    Inline(schema.BooleanSchema(..)) -> "json.parse(resp.body, dyn_decode.bool)"
+    Inline(_) -> {
+      let fn_name =
+        "decode_"
+        <> naming.to_snake_case(op_id)
+        <> "_response_"
+        <> naming.to_snake_case(status_code_suffix(status_code))
+      "decode." <> fn_name <> "(resp.body)"
+    }
+  }
+}
+
+/// Get a status code suffix for type names.
+fn status_code_suffix(code: String) -> String {
+  case code {
+    "200" -> "Ok"
+    "201" -> "Created"
+    "204" -> "NoContent"
+    "400" -> "BadRequest"
+    "401" -> "Unauthorized"
+    "403" -> "Forbidden"
+    "404" -> "NotFound"
+    "409" -> "Conflict"
+    "422" -> "UnprocessableEntity"
+    "500" -> "InternalServerError"
+    "default" -> "Default"
+    other -> "Status" <> other
+  }
+}
+
+/// Convert a status code string to an int pattern for case matching.
+fn status_code_to_int_pattern(code: String) -> String {
+  case code {
+    "default" -> "_"
+    _ -> code
+  }
+}
+
+/// Convert an inline schema to a decoder expression for use in generated client.
+/// Uses dyn_decode (gleam/dynamic/decode) to avoid collision with the generated
+/// decode module.
+fn inline_schema_to_decoder(s: schema.SchemaObject) -> String {
+  case s {
+    schema.StringSchema(..) -> "dyn_decode.string"
+    schema.IntegerSchema(..) -> "dyn_decode.int"
+    schema.NumberSchema(..) -> "dyn_decode.float"
+    schema.BooleanSchema(..) -> "dyn_decode.bool"
+    _ -> "dyn_decode.string"
   }
 }

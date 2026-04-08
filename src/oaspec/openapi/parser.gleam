@@ -11,9 +11,9 @@ import oaspec/openapi/schema.{
 import oaspec/openapi/spec.{
   type Components, type HttpMethod, type Info, type MediaType, type OpenApiSpec,
   type Operation, type Parameter, type ParameterIn, type PathItem,
-  type RequestBody, type Response, type Server, Components, Delete, Get, Info,
-  MediaType, OpenApiSpec, Operation, Parameter, Patch, PathItem, Post, Put,
-  RequestBody, Response, Server,
+  type RequestBody, type Response, type SecurityRequirement, type Server,
+  Components, Delete, Get, Info, MediaType, OpenApiSpec, Operation, Parameter,
+  Patch, PathItem, Post, Put, RequestBody, Response, SecurityRequirement, Server,
 }
 import simplifile
 import yay
@@ -64,13 +64,29 @@ fn parse_root(node: yay.Node) -> Result(OpenApiSpec, ParseError) {
 
   use info <- result.try(parse_info(node))
 
-  // Parse components FIRST so we can resolve $ref during path parsing
-  let components = parse_components(node) |> option.from_result
+  // Parse components FIRST so we can resolve $ref during path parsing.
+  // Components section is optional, but if present it must parse correctly.
+  use components <- result.try(parse_optional_components(node))
 
   use paths <- result.try(parse_paths(node, components))
-  let servers = parse_servers(node) |> result.unwrap([])
+  use servers <- result.try(parse_servers(node))
+  use security <- result.try(parse_security_requirements(node, ""))
 
-  Ok(OpenApiSpec(openapi:, info:, paths:, components:, servers:))
+  Ok(OpenApiSpec(openapi:, info:, paths:, components:, servers:, security:))
+}
+
+/// Parse optional components section.
+/// Returns Ok(None) if not present, Ok(Some(..)) if valid, Error if malformed.
+fn parse_optional_components(
+  root: yay.Node,
+) -> Result(Option(Components), ParseError) {
+  case yay.select_sugar(from: root, selector: "components") {
+    Ok(_) -> {
+      use comps <- result.try(parse_components(root))
+      Ok(Some(comps))
+    }
+    Error(_) -> Ok(None)
+  }
 }
 
 /// Parse the info object.
@@ -159,23 +175,44 @@ fn parse_path_item(
     yay.extract_optional_string(node, "description")
     |> result.unwrap(None)
 
-  let get =
-    parse_operation_at(node, "get", path, Get, components)
-    |> option.from_result
-  let post =
-    parse_operation_at(node, "post", path, Post, components)
-    |> option.from_result
-  let put =
-    parse_operation_at(node, "put", path, Put, components)
-    |> option.from_result
-  let delete =
-    parse_operation_at(node, "delete", path, Delete, components)
-    |> option.from_result
-  let patch =
-    parse_operation_at(node, "patch", path, Patch, components)
-    |> option.from_result
+  // Operations are optional, but if present must parse correctly.
+  use get <- result.try(parse_optional_operation(
+    node,
+    "get",
+    path,
+    Get,
+    components,
+  ))
+  use post <- result.try(parse_optional_operation(
+    node,
+    "post",
+    path,
+    Post,
+    components,
+  ))
+  use put <- result.try(parse_optional_operation(
+    node,
+    "put",
+    path,
+    Put,
+    components,
+  ))
+  use delete <- result.try(parse_optional_operation(
+    node,
+    "delete",
+    path,
+    Delete,
+    components,
+  ))
+  use patch <- result.try(parse_optional_operation(
+    node,
+    "patch",
+    path,
+    Patch,
+    components,
+  ))
 
-  let parameters = parse_parameters_list(node, components) |> result.unwrap([])
+  use parameters <- result.try(parse_parameters_list(node, components))
 
   Ok(PathItem(
     summary:,
@@ -187,6 +224,30 @@ fn parse_path_item(
     patch:,
     parameters:,
   ))
+}
+
+/// Parse an optional operation: Ok(None) if key absent, Ok(Some(..)) if valid,
+/// Error if present but malformed.
+fn parse_optional_operation(
+  node: yay.Node,
+  method_key: String,
+  path: String,
+  method: HttpMethod,
+  components: Option(Components),
+) -> Result(Option(Operation), ParseError) {
+  case yay.select_sugar(from: node, selector: method_key) {
+    Ok(_) -> {
+      use op <- result.try(parse_operation_at(
+        node,
+        method_key,
+        path,
+        method,
+        components,
+      ))
+      Ok(Some(op))
+    }
+    Error(_) -> Ok(None)
+  }
 }
 
 /// Parse an operation at a specific HTTP method key.
@@ -233,11 +294,23 @@ fn parse_operation(
     |> result.unwrap(None)
     |> option.unwrap(False)
 
-  let parameters = parse_parameters_list(node, components) |> result.unwrap([])
-  let request_body =
-    parse_request_body_at(node, context, components) |> option.from_result
-  let responses =
-    parse_responses(node, context, components) |> result.unwrap(dict.new())
+  use parameters <- result.try(parse_parameters_list(node, components))
+
+  // requestBody is optional; absent is Ok(None), present-but-broken is Error.
+  use request_body <- result.try(parse_optional_request_body(
+    node,
+    context,
+    components,
+  ))
+
+  // responses is REQUIRED per OpenAPI 3.x
+  use responses <- result.try(parse_responses_required(
+    node,
+    context,
+    components,
+  ))
+
+  use security <- result.try(parse_optional_security_requirements(node, context))
 
   Ok(Operation(
     operation_id:,
@@ -248,7 +321,36 @@ fn parse_operation(
     request_body:,
     responses:,
     deprecated:,
+    security:,
   ))
+}
+
+/// Parse optional requestBody: Ok(None) if absent, Ok(Some(..)) if valid,
+/// Error if present but malformed.
+fn parse_optional_request_body(
+  node: yay.Node,
+  context: String,
+  components: Option(Components),
+) -> Result(Option(RequestBody), ParseError) {
+  case yay.select_sugar(from: node, selector: "requestBody") {
+    Ok(_) -> {
+      use rb <- result.try(parse_request_body_at(node, context, components))
+      Ok(Some(rb))
+    }
+    Error(_) -> Ok(None)
+  }
+}
+
+/// Parse responses, requiring the field to be present.
+fn parse_responses_required(
+  node: yay.Node,
+  context: String,
+  components: Option(Components),
+) -> Result(dict.Dict(String, Response), ParseError) {
+  case yay.select_sugar(from: node, selector: "responses") {
+    Ok(_) -> parse_responses(node, context, components)
+    Error(_) -> Error(MissingField(path: context, field: "responses"))
+  }
 }
 
 /// Parse parameters list from a node.
@@ -294,23 +396,36 @@ fn parse_parameter(
         yay.extract_optional_string(node, "description")
         |> result.unwrap(None)
 
-      let required =
+      let explicit_required =
         yay.extract_optional_bool(node, "required")
         |> result.unwrap(None)
-        |> option.unwrap(case in_ {
-          spec.InPath -> True
-          _ -> False
-        })
+
+      // OpenAPI 3.x: path parameters MUST have required: true
+      use required <- result.try(case in_, explicit_required {
+        spec.InPath, Some(False) ->
+          Error(InvalidValue(
+            path: "parameter." <> name,
+            detail: "Path parameters must have required: true",
+          ))
+        spec.InPath, _ -> Ok(True)
+        _, Some(v) -> Ok(v)
+        _, None -> Ok(False)
+      })
 
       let deprecated =
         yay.extract_optional_bool(node, "deprecated")
         |> result.unwrap(None)
         |> option.unwrap(False)
 
-      let param_schema = case yay.select_sugar(from: node, selector: "schema") {
-        Ok(schema_node) -> parse_schema_ref(schema_node) |> option.from_result
-        _ -> None
-      }
+      use param_schema <- result.try(
+        case yay.select_sugar(from: node, selector: "schema") {
+          Ok(schema_node) -> {
+            use sr <- result.try(parse_schema_ref(schema_node))
+            Ok(Some(sr))
+          }
+          _ -> Ok(None)
+        },
+      )
 
       let style =
         yay.extract_optional_string(node, "style")
@@ -467,7 +582,7 @@ fn parse_request_body(
     |> result.unwrap(None)
     |> option.unwrap(False)
 
-  let content = parse_content(node, context) |> result.unwrap(dict.new())
+  use content <- result.try(parse_content(node, context))
 
   Ok(RequestBody(description:, content:, required:))
 }
@@ -483,13 +598,15 @@ fn parse_content(
         let #(key_node, value_node) = entry
         case key_node {
           yay.NodeStr(media_type_name) -> {
-            let mt_schema = case
-              yay.select_sugar(from: value_node, selector: "schema")
-            {
-              Ok(schema_node) ->
-                parse_schema_ref(schema_node) |> option.from_result
-              _ -> None
-            }
+            use mt_schema <- result.try(
+              case yay.select_sugar(from: value_node, selector: "schema") {
+                Ok(schema_node) -> {
+                  use sr <- result.try(parse_schema_ref(schema_node))
+                  Ok(Some(sr))
+                }
+                _ -> Ok(None)
+              },
+            )
             Ok(dict.insert(acc, media_type_name, MediaType(schema: mt_schema)))
           }
           _ -> Ok(acc)
@@ -541,7 +658,7 @@ fn parse_response(
         yay.extract_optional_string(node, "description")
         |> result.unwrap(None)
 
-      let content = parse_content(node, "response") |> result.unwrap(dict.new())
+      use content <- result.try(parse_content(node, "response"))
 
       Ok(Response(description:, content:))
     }
@@ -555,15 +672,19 @@ fn parse_components(root: yay.Node) -> Result(Components, ParseError) {
     |> result.map_error(fn(_) { MissingField(path: "", field: "components") }),
   )
 
-  let schemas = parse_schemas_map(components_node) |> result.unwrap(dict.new())
-  let parameters =
-    parse_parameters_map(components_node) |> result.unwrap(dict.new())
-  let request_bodies =
-    parse_request_bodies_map(components_node) |> result.unwrap(dict.new())
-  let responses =
-    parse_responses_map(components_node) |> result.unwrap(dict.new())
+  use schemas <- result.try(parse_schemas_map(components_node))
+  use parameters <- result.try(parse_parameters_map(components_node))
+  use request_bodies <- result.try(parse_request_bodies_map(components_node))
+  use responses <- result.try(parse_responses_map(components_node))
+  use security_schemes <- result.try(parse_security_schemes_map(components_node))
 
-  Ok(Components(schemas:, parameters:, request_bodies:, responses:))
+  Ok(Components(
+    schemas:,
+    parameters:,
+    request_bodies:,
+    responses:,
+    security_schemes:,
+  ))
 }
 
 /// Parse the schemas map from components.
@@ -687,7 +808,15 @@ pub fn parse_schema_object(node: yay.Node) -> Result(SchemaObject, ParseError) {
       case yay.select_sugar(from: node, selector: "oneOf") {
         Ok(yay.NodeSeq(items)) -> {
           use schemas <- result.try(list.try_map(items, parse_schema_ref))
-          let discriminator = parse_discriminator(node) |> option.from_result
+          use discriminator <- result.try(
+            case yay.select_sugar(from: node, selector: "discriminator") {
+              Ok(_) -> {
+                use d <- result.try(parse_discriminator(node))
+                Ok(Some(d))
+              }
+              Error(_) -> Ok(None)
+            },
+          )
           Ok(OneOfSchema(description:, schemas:, discriminator:))
         }
         _ ->
@@ -759,31 +888,12 @@ fn parse_typed_schema(
     "boolean" -> Ok(BooleanSchema(description:, nullable:))
 
     "array" -> {
-      let items = case yay.select_sugar(from: node, selector: "items") {
-        Ok(items_node) ->
-          parse_schema_ref(items_node)
-          |> result.unwrap(
-            Inline(StringSchema(
-              description: None,
-              format: None,
-              enum_values: [],
-              min_length: None,
-              max_length: None,
-              pattern: None,
-              nullable: False,
-            )),
-          )
-        _ ->
-          Inline(StringSchema(
-            description: None,
-            format: None,
-            enum_values: [],
-            min_length: None,
-            max_length: None,
-            pattern: None,
-            nullable: False,
-          ))
-      }
+      use items <- result.try(
+        case yay.select_sugar(from: node, selector: "items") {
+          Ok(items_node) -> parse_schema_ref(items_node)
+          _ -> Error(MissingField(path: "schema(type=array)", field: "items"))
+        },
+      )
       let min_items =
         yay.extract_optional_int(node, "minItems") |> result.unwrap(None)
       let max_items =
@@ -793,19 +903,22 @@ fn parse_typed_schema(
 
     // Default: object
     _ -> {
-      let properties = parse_properties(node) |> result.unwrap(dict.new())
+      use properties <- result.try(parse_properties(node))
       let required = case yay.extract_string_list(node, "required") {
         Ok(r) -> r
         _ -> []
       }
-      let #(additional_properties, additional_properties_untyped) = case
-        yay.select_sugar(from: node, selector: "additionalProperties")
-      {
-        Ok(yay.NodeBool(True)) -> #(None, True)
-        Ok(yay.NodeBool(False)) -> #(None, False)
-        Ok(ap_node) -> #(parse_schema_ref(ap_node) |> option.from_result, False)
-        _ -> #(None, False)
-      }
+      use #(additional_properties, additional_properties_untyped) <- result.try(
+        case yay.select_sugar(from: node, selector: "additionalProperties") {
+          Ok(yay.NodeBool(True)) -> Ok(#(None, True))
+          Ok(yay.NodeBool(False)) -> Ok(#(None, False))
+          Ok(ap_node) -> {
+            use sr <- result.try(parse_schema_ref(ap_node))
+            Ok(#(Some(sr), False))
+          }
+          _ -> Ok(#(None, False))
+        },
+      )
       Ok(ObjectSchema(
         description:,
         properties:,
@@ -871,6 +984,184 @@ pub fn parse_error_to_string(error: ParseError) -> String {
     MissingField(path:, field:) -> "Missing field '" <> field <> "' at " <> path
     InvalidValue(path:, detail:) ->
       "Invalid value at " <> path <> ": " <> detail
+  }
+}
+
+/// Parse security schemes from components.
+/// Returns Ok(empty dict) if the section is absent, Error if present but
+/// malformed.
+fn parse_security_schemes_map(
+  components_node: yay.Node,
+) -> Result(Dict(String, spec.SecurityScheme), ParseError) {
+  case yay.select_sugar(from: components_node, selector: "securitySchemes") {
+    Ok(yay.NodeMap(entries)) -> {
+      list.try_fold(entries, dict.new(), fn(acc, entry) {
+        let #(key_node, value_node) = entry
+        case key_node {
+          yay.NodeStr(name) -> {
+            use scheme <- result.try(parse_security_scheme(value_node))
+            Ok(dict.insert(acc, name, scheme))
+          }
+          _ -> Ok(acc)
+        }
+      })
+    }
+    _ -> Ok(dict.new())
+  }
+}
+
+/// Parse a single security scheme.
+fn parse_security_scheme(
+  node: yay.Node,
+) -> Result(spec.SecurityScheme, ParseError) {
+  use type_str <- result.try(
+    yay.extract_string(node, "type")
+    |> result.map_error(fn(_) {
+      MissingField(path: "securityScheme", field: "type")
+    }),
+  )
+
+  case type_str {
+    "apiKey" -> {
+      use name <- result.try(
+        yay.extract_string(node, "name")
+        |> result.map_error(fn(_) {
+          MissingField(path: "securityScheme.apiKey", field: "name")
+        }),
+      )
+      use in_str <- result.try(
+        yay.extract_string(node, "in")
+        |> result.map_error(fn(_) {
+          MissingField(path: "securityScheme.apiKey", field: "in")
+        }),
+      )
+      case in_str {
+        "header" | "query" -> Ok(spec.ApiKeyScheme(name:, in_: in_str))
+        _ ->
+          Error(InvalidValue(
+            path: "securityScheme.apiKey.in",
+            detail: "Only 'header' and 'query' are supported for apiKey. Got: '"
+              <> in_str
+              <> "'",
+          ))
+      }
+    }
+    "http" -> {
+      use scheme <- result.try(
+        yay.extract_string(node, "scheme")
+        |> result.map_error(fn(_) {
+          MissingField(path: "securityScheme.http", field: "scheme")
+        }),
+      )
+      case scheme {
+        "bearer" -> {
+          let bearer_format =
+            yay.extract_optional_string(node, "bearerFormat")
+            |> result.unwrap(None)
+          Ok(spec.HttpScheme(scheme:, bearer_format:))
+        }
+        _ ->
+          Error(InvalidValue(
+            path: "securityScheme.http.scheme",
+            detail: "Only 'bearer' is supported for http security scheme. Got: '"
+              <> scheme
+              <> "'",
+          ))
+      }
+    }
+    _ ->
+      Error(InvalidValue(
+        path: "securityScheme.type",
+        detail: "Unsupported security scheme type: " <> type_str,
+      ))
+  }
+}
+
+/// Parse top-level security requirements.
+/// Returns Ok([]) if absent, Error if present but malformed.
+fn parse_security_requirements(
+  node: yay.Node,
+  context: String,
+) -> Result(List(SecurityRequirement), ParseError) {
+  case yay.select_sugar(from: node, selector: "security") {
+    Ok(yay.NodeSeq(items)) ->
+      list.try_map(items, fn(item) {
+        parse_security_requirement_object(item, context)
+      })
+    _ -> Ok([])
+  }
+}
+
+/// Parse operation-level security requirements.
+/// Returns Ok(None) if absent (inherits top-level), Ok(Some([])) if explicitly
+/// empty (opts out), Ok(Some([...])) if specified.
+fn parse_optional_security_requirements(
+  node: yay.Node,
+  context: String,
+) -> Result(Option(List(SecurityRequirement)), ParseError) {
+  case yay.select_sugar(from: node, selector: "security") {
+    Ok(yay.NodeSeq(items)) -> {
+      use reqs <- result.try(
+        list.try_map(items, fn(item) {
+          parse_security_requirement_object(item, context)
+        }),
+      )
+      Ok(Some(reqs))
+    }
+    _ -> Ok(None)
+  }
+}
+
+/// Parse a single security requirement object.
+/// Returns one SecurityRequirement whose schemes list contains all AND-ed
+/// scheme refs. The outer list (caller) represents OR alternatives.
+fn parse_security_requirement_object(
+  node: yay.Node,
+  context: String,
+) -> Result(SecurityRequirement, ParseError) {
+  case node {
+    yay.NodeMap(entries) -> {
+      use scheme_refs <- result.try(
+        list.try_map(entries, fn(entry) {
+          let #(key_node, scopes_node) = entry
+          case key_node {
+            yay.NodeStr(scheme_name) -> {
+              use scopes <- result.try(case scopes_node {
+                yay.NodeSeq(scope_items) ->
+                  list.try_map(scope_items, fn(s) {
+                    case s {
+                      yay.NodeStr(v) -> Ok(v)
+                      _ ->
+                        Error(InvalidValue(
+                          path: context <> ".security." <> scheme_name,
+                          detail: "Scope must be a string",
+                        ))
+                    }
+                  })
+                yay.NodeNil -> Ok([])
+                _ ->
+                  Error(InvalidValue(
+                    path: context <> ".security." <> scheme_name,
+                    detail: "Scopes must be an array of strings",
+                  ))
+              })
+              Ok(spec.SecuritySchemeRef(scheme_name:, scopes:))
+            }
+            _ ->
+              Error(InvalidValue(
+                path: context <> ".security",
+                detail: "Security requirement key must be a string",
+              ))
+          }
+        }),
+      )
+      Ok(SecurityRequirement(schemes: scheme_refs))
+    }
+    _ ->
+      Error(InvalidValue(
+        path: context <> ".security",
+        detail: "Security requirement must be an object",
+      ))
   }
 }
 

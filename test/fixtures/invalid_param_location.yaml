@@ -1,0 +1,16 @@
+openapi: 3.0.3
+info:
+  title: Broken
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      parameters:
+        - name: filter
+          in: body
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
