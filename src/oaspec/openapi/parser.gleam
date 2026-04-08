@@ -309,7 +309,7 @@ fn parse_operation(
     components,
   ))
 
-  let security = parse_security_requirements(node)
+  use security <- result.try(parse_security_requirements(node, context))
 
   Ok(Operation(
     operation_id:,
@@ -667,7 +667,7 @@ fn parse_components(root: yay.Node) -> Result(Components, ParseError) {
   use parameters <- result.try(parse_parameters_map(components_node))
   use request_bodies <- result.try(parse_request_bodies_map(components_node))
   use responses <- result.try(parse_responses_map(components_node))
-  let security_schemes = parse_security_schemes_map(components_node)
+  use security_schemes <- result.try(parse_security_schemes_map(components_node))
 
   Ok(Components(
     schemas:,
@@ -979,24 +979,25 @@ pub fn parse_error_to_string(error: ParseError) -> String {
 }
 
 /// Parse security schemes from components.
+/// Returns Ok(empty dict) if the section is absent, Error if present but
+/// malformed.
 fn parse_security_schemes_map(
   components_node: yay.Node,
-) -> Dict(String, spec.SecurityScheme) {
+) -> Result(Dict(String, spec.SecurityScheme), ParseError) {
   case yay.select_sugar(from: components_node, selector: "securitySchemes") {
     Ok(yay.NodeMap(entries)) -> {
-      list.fold(entries, dict.new(), fn(acc, entry) {
+      list.try_fold(entries, dict.new(), fn(acc, entry) {
         let #(key_node, value_node) = entry
         case key_node {
-          yay.NodeStr(name) ->
-            case parse_security_scheme(value_node) {
-              Ok(scheme) -> dict.insert(acc, name, scheme)
-              Error(_) -> acc
-            }
-          _ -> acc
+          yay.NodeStr(name) -> {
+            use scheme <- result.try(parse_security_scheme(value_node))
+            Ok(dict.insert(acc, name, scheme))
+          }
+          _ -> Ok(acc)
         }
       })
     }
-    _ -> dict.new()
+    _ -> Ok(dict.new())
   }
 }
 
@@ -1048,21 +1049,57 @@ fn parse_security_scheme(
 }
 
 /// Parse security requirements from an operation.
-fn parse_security_requirements(node: yay.Node) -> List(SecurityRequirement) {
+/// Returns Ok([]) if absent, Error if present but malformed.
+fn parse_security_requirements(
+  node: yay.Node,
+  context: String,
+) -> Result(List(SecurityRequirement), ParseError) {
   case yay.select_sugar(from: node, selector: "security") {
     Ok(yay.NodeSeq(items)) ->
-      list.filter_map(items, fn(item) {
-        case item {
-          yay.NodeMap(entries) ->
-            case entries {
-              [#(yay.NodeStr(scheme_name), _scopes_node)] ->
-                Ok(SecurityRequirement(scheme_name:, scopes: []))
-              _ -> Error(Nil)
+      list.try_map(items, fn(item) {
+        parse_security_requirement_object(item, context)
+      })
+      |> result.map(list.flatten)
+    _ -> Ok([])
+  }
+}
+
+/// Parse a single security requirement object.
+/// Each object may contain multiple scheme entries: { "ApiKey": [], "OAuth": ["read"] }
+fn parse_security_requirement_object(
+  node: yay.Node,
+  context: String,
+) -> Result(List(SecurityRequirement), ParseError) {
+  case node {
+    yay.NodeMap(entries) ->
+      list.try_map(entries, fn(entry) {
+        let #(key_node, scopes_node) = entry
+        case key_node {
+          yay.NodeStr(scheme_name) -> {
+            let scopes = case scopes_node {
+              yay.NodeSeq(scope_items) ->
+                list.filter_map(scope_items, fn(s) {
+                  case s {
+                    yay.NodeStr(v) -> Ok(v)
+                    _ -> Error(Nil)
+                  }
+                })
+              _ -> []
             }
-          _ -> Error(Nil)
+            Ok(SecurityRequirement(scheme_name:, scopes:))
+          }
+          _ ->
+            Error(InvalidValue(
+              path: context <> ".security",
+              detail: "Security requirement key must be a string",
+            ))
         }
       })
-    _ -> []
+    _ ->
+      Error(InvalidValue(
+        path: context <> ".security",
+        detail: "Security requirement must be an object",
+      ))
   }
 }
 
