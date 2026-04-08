@@ -54,11 +54,12 @@ fn generate_decoders(ctx: Context) -> String {
       type_gen.schema_has_additional_properties(schema_ref, ctx)
     })
 
-  // Check if dynamic module is needed (any schema with untyped additionalProperties)
+  // Check if dynamic module is needed (any schema with additionalProperties —
+  // both typed and untyped use dynamic.dynamic for safe initial dict decode)
   let needs_dynamic =
     list.any(schemas, fn(entry) {
       let #(_, schema_ref) = entry
-      type_gen.schema_has_untyped_additional_properties(schema_ref, ctx)
+      type_gen.schema_has_additional_properties(schema_ref, ctx)
     })
 
   // Check if types module is needed (any non-primitive schema)
@@ -362,6 +363,9 @@ fn generate_decoder(
           )
           <> "]"
       }
+      // For additionalProperties, decode the raw dict with dynamic values first
+      // to avoid forcing the value decoder on known properties (which may have
+      // incompatible types). Then drop known keys and decode remaining values.
       let sb = case additional_properties, additional_properties_untyped {
         Some(ap_ref), _ -> {
           let inner_decoder =
@@ -369,16 +373,21 @@ fn generate_decoder(
           sb
           |> se.indent(
             1,
-            "use all_props <- decode.then(decode.dict(decode.string, "
-              <> inner_decoder
-              <> "))",
+            "use all_props <- decode.then(decode.dict(decode.string, dynamic.dynamic))",
           )
           |> se.indent(
             1,
-            "let additional_properties = dict.drop(all_props, "
-              <> known_keys_expr
-              <> ")",
+            "let extra_props = dict.drop(all_props, " <> known_keys_expr <> ")",
           )
+          |> se.indent(
+            1,
+            "let additional_properties = dict.fold(extra_props, dict.new(), fn(acc, k, v) {",
+          )
+          |> se.indent(2, "case decode.run(v, " <> inner_decoder <> ") {")
+          |> se.indent(3, "Ok(decoded) -> dict.insert(acc, k, decoded)")
+          |> se.indent(3, "Error(_) -> acc")
+          |> se.indent(2, "}")
+          |> se.indent(1, "})")
         }
         None, True -> {
           sb
