@@ -554,38 +554,14 @@ fn generate_decoder(
     }
 
     Inline(AllOfSchema(description:, schemas:)) -> {
-      // Merge properties from all sub-schemas (same as type generator)
-      let merged_props =
-        list.fold(schemas, dict.new(), fn(acc, s_ref) {
-          case s_ref {
-            Inline(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-            Reference(_) ->
-              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
-                Ok(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-                _ -> acc
-              }
-            _ -> acc
-          }
-        })
-      let merged_required =
-        list.flat_map(schemas, fn(s_ref) {
-          case s_ref {
-            Inline(ObjectSchema(required:, ..)) -> required
-            Reference(_) ->
-              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
-                Ok(ObjectSchema(required:, ..)) -> required
-                _ -> []
-              }
-            _ -> []
-          }
-        })
+      let merged = type_gen.merge_allof_schemas(schemas, ctx)
       let merged_schema =
         Inline(ObjectSchema(
           description:,
-          properties: merged_props,
-          required: merged_required,
-          additional_properties: None,
-          additional_properties_untyped: False,
+          properties: merged.properties,
+          required: merged.required,
+          additional_properties: merged.additional_properties,
+          additional_properties_untyped: merged.additional_properties_untyped,
           nullable: False,
         ))
       generate_decoder(sb, name, merged_schema, ctx)
@@ -1330,38 +1306,14 @@ fn generate_encoder(
     }
 
     Inline(AllOfSchema(description:, schemas:)) -> {
-      // Merge properties from all sub-schemas (same as type generator)
-      let merged_props =
-        list.fold(schemas, dict.new(), fn(acc, s_ref) {
-          case s_ref {
-            Inline(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-            Reference(_) ->
-              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
-                Ok(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-                _ -> acc
-              }
-            _ -> acc
-          }
-        })
-      let merged_required =
-        list.flat_map(schemas, fn(s_ref) {
-          case s_ref {
-            Inline(ObjectSchema(required:, ..)) -> required
-            Reference(_) ->
-              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
-                Ok(ObjectSchema(required:, ..)) -> required
-                _ -> []
-              }
-            _ -> []
-          }
-        })
+      let merged = type_gen.merge_allof_schemas(schemas, ctx)
       let merged_schema =
         Inline(ObjectSchema(
           description:,
-          properties: merged_props,
-          required: merged_required,
-          additional_properties: None,
-          additional_properties_untyped: False,
+          properties: merged.properties,
+          required: merged.required,
+          additional_properties: merged.additional_properties,
+          additional_properties_untyped: merged.additional_properties_untyped,
           nullable: False,
         ))
       generate_encoder(sb, name, merged_schema, ctx)

@@ -292,39 +292,15 @@ fn generate_schema_type(
     AllOfSchema(description:, schemas:) -> {
       // Merge all properties into a single object type
       let sb = maybe_doc_comment(sb, description)
-      let merged_props =
-        list.fold(schemas, dict.new(), fn(acc, s_ref) {
-          case s_ref {
-            Inline(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-            Reference(_) -> {
-              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
-                Ok(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-                _ -> acc
-              }
-            }
-            _ -> acc
-          }
-        })
-      let merged_required =
-        list.flat_map(schemas, fn(s_ref) {
-          case s_ref {
-            Inline(ObjectSchema(required:, ..)) -> required
-            Reference(_) ->
-              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
-                Ok(ObjectSchema(required:, ..)) -> required
-                _ -> []
-              }
-            _ -> []
-          }
-        })
+      let merged = merge_allof_schemas(schemas, ctx)
 
       let merged_schema =
         ObjectSchema(
           description:,
-          properties: merged_props,
-          required: merged_required,
-          additional_properties: None,
-          additional_properties_untyped: False,
+          properties: merged.properties,
+          required: merged.required,
+          additional_properties: merged.additional_properties,
+          additional_properties_untyped: merged.additional_properties_untyped,
           nullable: False,
         )
       generate_schema_type(sb, type_name, raw_name, merged_schema, ctx)
@@ -493,38 +469,14 @@ fn generate_anonymous_type_for_schema(
       }
     }
     AllOfSchema(description:, schemas:) -> {
-      // Merge properties from allOf
-      let merged_props =
-        list.fold(schemas, dict.new(), fn(acc, s_ref) {
-          case s_ref {
-            Inline(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-            Reference(_) ->
-              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
-                Ok(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-                _ -> acc
-              }
-            _ -> acc
-          }
-        })
-      let merged_required =
-        list.flat_map(schemas, fn(s_ref) {
-          case s_ref {
-            Inline(ObjectSchema(required:, ..)) -> required
-            Reference(_) ->
-              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
-                Ok(ObjectSchema(required:, ..)) -> required
-                _ -> []
-              }
-            _ -> []
-          }
-        })
+      let merged = merge_allof_schemas(schemas, ctx)
       let merged_schema =
         ObjectSchema(
           description:,
-          properties: merged_props,
-          required: merged_required,
-          additional_properties: None,
-          additional_properties_untyped: False,
+          properties: merged.properties,
+          required: merged.required,
+          additional_properties: merged.additional_properties,
+          additional_properties_untyped: merged.additional_properties_untyped,
           nullable: False,
         )
       generate_schema_type(sb, type_name, raw_name, merged_schema, ctx)
@@ -870,6 +822,64 @@ fn generate_response_type(
 /// Prefixed with the type name to avoid duplicate constructors across types.
 fn status_code_to_variant(code: String, type_name: String) -> String {
   type_name <> http.status_code_suffix(code)
+}
+
+/// Result of merging allOf sub-schemas.
+pub type MergedAllOf {
+  MergedAllOf(
+    properties: dict.Dict(String, SchemaRef),
+    required: List(String),
+    additional_properties: Option(SchemaRef),
+    additional_properties_untyped: Bool,
+  )
+}
+
+/// Merge allOf sub-schemas: properties, required, and additionalProperties.
+pub fn merge_allof_schemas(
+  schemas: List(SchemaRef),
+  ctx: Context,
+) -> MergedAllOf {
+  list.fold(
+    schemas,
+    MergedAllOf(
+      properties: dict.new(),
+      required: [],
+      additional_properties: None,
+      additional_properties_untyped: False,
+    ),
+    fn(acc, s_ref) {
+      let resolved = case s_ref {
+        Inline(obj) -> Ok(obj)
+        Reference(_) -> resolver.resolve_schema_ref(s_ref, ctx.spec)
+      }
+      case resolved {
+        Ok(ObjectSchema(
+          properties:,
+          required:,
+          additional_properties:,
+          additional_properties_untyped:,
+          ..,
+        )) -> {
+          let merged_ap = case
+            acc.additional_properties,
+            additional_properties
+          {
+            None, ap -> ap
+            existing, _ -> existing
+          }
+          let merged_ap_untyped =
+            acc.additional_properties_untyped || additional_properties_untyped
+          MergedAllOf(
+            properties: dict.merge(acc.properties, properties),
+            required: list.append(acc.required, required),
+            additional_properties: merged_ap,
+            additional_properties_untyped: merged_ap_untyped,
+          )
+        }
+        _ -> acc
+      }
+    },
+  )
 }
 
 /// Collect all operations from the spec with their IDs, paths, and methods.
