@@ -1,4 +1,5 @@
 import gleam/dict
+import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -33,7 +34,7 @@ fn generate_guards(ctx: Context) -> String {
 
   let sb =
     se.file_header(context.version)
-    |> se.imports(["gleam/int", "gleam/string"])
+    |> se.imports(["gleam/float", "gleam/int", "gleam/list", "gleam/string"])
 
   let sb =
     list.fold(schemas, sb, fn(sb, entry) {
@@ -163,8 +164,28 @@ fn generate_string_guard(
         )
       let sb =
         sb |> se.indent(1, "let len = string.length(value)")
-      let sb = case min_length {
-        Some(min) ->
+      let sb = case min_length, max_length {
+        Some(min), Some(max) ->
+          sb
+          |> se.indent(1, "case len < " <> int.to_string(min) <> " {")
+          |> se.indent(
+            2,
+            "True -> Error(\"must be at least "
+              <> int.to_string(min)
+              <> " characters\")",
+          )
+          |> se.indent(2, "False ->")
+          |> se.indent(3, "case len > " <> int.to_string(max) <> " {")
+          |> se.indent(
+            4,
+            "True -> Error(\"must be at most "
+              <> int.to_string(max)
+              <> " characters\")",
+          )
+          |> se.indent(4, "False -> Ok(value)")
+          |> se.indent(3, "}")
+          |> se.indent(1, "}")
+        Some(min), None ->
           sb
           |> se.indent(1, "case len < " <> int.to_string(min) <> " {")
           |> se.indent(
@@ -175,37 +196,18 @@ fn generate_string_guard(
           )
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
-        None -> sb
-      }
-      let sb = case max_length {
-        Some(max) -> {
-          // If we already have a min_length guard, we need to chain
-          let sb = case min_length {
-            Some(_) -> {
-              // Replace the last Ok(value) with a nested check
-              // Actually, let's just use a simpler approach with use
-              sb
-            }
-            None -> sb
-          }
-          case min_length {
-            Some(_) ->
-              // Already generated min check, add max as separate function
-              sb
-            None ->
-              sb
-              |> se.indent(1, "case len > " <> int.to_string(max) <> " {")
-              |> se.indent(
-                2,
-                "True -> Error(\"must be at most "
-                  <> int.to_string(max)
-                  <> " characters\")",
-              )
-              |> se.indent(2, "False -> Ok(value)")
-              |> se.indent(1, "}")
-          }
-        }
-        None -> sb
+        None, Some(max) ->
+          sb
+          |> se.indent(1, "case len > " <> int.to_string(max) <> " {")
+          |> se.indent(
+            2,
+            "True -> Error(\"must be at most "
+              <> int.to_string(max)
+              <> " characters\")",
+          )
+          |> se.indent(2, "False -> Ok(value)")
+          |> se.indent(1, "}")
+        None, None -> sb
       }
       sb
       |> se.line("}")
@@ -239,8 +241,28 @@ fn generate_integer_guard(
         |> se.line(
           "pub fn " <> fn_name <> "(value: Int) -> Result(Int, String) {",
         )
-      let sb = case minimum {
-        Some(min) ->
+      let sb = case minimum, maximum {
+        Some(min), Some(max) ->
+          sb
+          |> se.indent(1, "case value < " <> int.to_string(min) <> " {")
+          |> se.indent(
+            2,
+            "True -> Error(\"must be at least "
+              <> int.to_string(min)
+              <> "\")",
+          )
+          |> se.indent(2, "False ->")
+          |> se.indent(3, "case value > " <> int.to_string(max) <> " {")
+          |> se.indent(
+            4,
+            "True -> Error(\"must be at most "
+              <> int.to_string(max)
+              <> "\")",
+          )
+          |> se.indent(4, "False -> Ok(value)")
+          |> se.indent(3, "}")
+          |> se.indent(1, "}")
+        Some(min), None ->
           sb
           |> se.indent(1, "case value < " <> int.to_string(min) <> " {")
           |> se.indent(
@@ -251,10 +273,7 @@ fn generate_integer_guard(
           )
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
-        None -> sb
-      }
-      let sb = case maximum, minimum {
-        Some(max), None ->
+        None, Some(max) ->
           sb
           |> se.indent(1, "case value > " <> int.to_string(max) <> " {")
           |> se.indent(
@@ -265,7 +284,7 @@ fn generate_integer_guard(
           )
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
-        _, _ -> sb
+        None, None -> sb
       }
       sb
       |> se.line("}")
@@ -301,10 +320,63 @@ fn generate_float_guard(
           <> fn_name
           <> "(value: Float) -> Result(Float, String) {",
         )
-      let sb =
-        sb
-        |> se.indent(1, "// Range validation for float field")
-        |> se.indent(1, "Ok(value)")
+      let sb = case minimum, maximum {
+        Some(min), Some(max) ->
+          sb
+          |> se.indent(
+            1,
+            "case value <. " <> float.to_string(min) <> " {",
+          )
+          |> se.indent(
+            2,
+            "True -> Error(\"must be at least "
+              <> float.to_string(min)
+              <> "\")",
+          )
+          |> se.indent(2, "False ->")
+          |> se.indent(
+            3,
+            "case value >. " <> float.to_string(max) <> " {",
+          )
+          |> se.indent(
+            4,
+            "True -> Error(\"must be at most "
+              <> float.to_string(max)
+              <> "\")",
+          )
+          |> se.indent(4, "False -> Ok(value)")
+          |> se.indent(3, "}")
+          |> se.indent(1, "}")
+        Some(min), None ->
+          sb
+          |> se.indent(
+            1,
+            "case value <. " <> float.to_string(min) <> " {",
+          )
+          |> se.indent(
+            2,
+            "True -> Error(\"must be at least "
+              <> float.to_string(min)
+              <> "\")",
+          )
+          |> se.indent(2, "False -> Ok(value)")
+          |> se.indent(1, "}")
+        None, Some(max) ->
+          sb
+          |> se.indent(
+            1,
+            "case value >. " <> float.to_string(max) <> " {",
+          )
+          |> se.indent(
+            2,
+            "True -> Error(\"must be at most "
+              <> float.to_string(max)
+              <> "\")",
+          )
+          |> se.indent(2, "False -> Ok(value)")
+          |> se.indent(1, "}")
+        None, None -> sb
+      }
       sb
       |> se.line("}")
       |> se.blank_line()
@@ -342,8 +414,28 @@ fn generate_list_guard(
       let sb =
         sb
         |> se.indent(1, "let len = list.length(value)")
-      let sb = case min_items {
-        Some(min) ->
+      let sb = case min_items, max_items {
+        Some(min), Some(max) ->
+          sb
+          |> se.indent(1, "case len < " <> int.to_string(min) <> " {")
+          |> se.indent(
+            2,
+            "True -> Error(\"must have at least "
+              <> int.to_string(min)
+              <> " items\")",
+          )
+          |> se.indent(2, "False ->")
+          |> se.indent(3, "case len > " <> int.to_string(max) <> " {")
+          |> se.indent(
+            4,
+            "True -> Error(\"must have at most "
+              <> int.to_string(max)
+              <> " items\")",
+          )
+          |> se.indent(4, "False -> Ok(value)")
+          |> se.indent(3, "}")
+          |> se.indent(1, "}")
+        Some(min), None ->
           sb
           |> se.indent(1, "case len < " <> int.to_string(min) <> " {")
           |> se.indent(
@@ -354,10 +446,7 @@ fn generate_list_guard(
           )
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
-        None -> sb
-      }
-      let sb = case max_items, min_items {
-        Some(max), None ->
+        None, Some(max) ->
           sb
           |> se.indent(1, "case len > " <> int.to_string(max) <> " {")
           |> se.indent(
@@ -368,7 +457,7 @@ fn generate_list_guard(
           )
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
-        _, _ -> sb
+        None, None -> sb
       }
       sb
       |> se.line("}")
