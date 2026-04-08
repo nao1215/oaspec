@@ -632,14 +632,15 @@ components:
   |> should.be_true()
 }
 
-pub fn validate_broken_spec_detects_inline_oneof_test() {
+pub fn validate_broken_spec_accepts_inline_oneof_after_hoisting_test() {
+  // Inline oneOf variants are now handled by hoisting, so no validation error
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "oneOf/anyOf with inline schemas")
   })
-  |> should.be_true()
+  |> should.be_false()
 }
 
 pub fn validate_broken_spec_accepts_untyped_additional_properties_test() {
@@ -704,16 +705,16 @@ paths: {}
   let assert Error(parser.MissingField(path: "info", field: "title")) = result
 }
 
-pub fn validate_deep_inline_oneof_in_request_body_test() {
+pub fn validate_deep_inline_oneof_in_request_body_accepted_test() {
+  // Inline oneOf in requestBody is now handled by hoisting
   let ctx = make_ctx("test/fixtures/deep_unsupported.yaml")
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
-  // oneOf with inline primitives in requestBody should be caught
   list.any(error_strings, fn(s) {
     string.contains(s, "oneOf/anyOf with inline schemas")
     && string.contains(s, "requestBody")
   })
-  |> should.be_true()
+  |> should.be_false()
 }
 
 pub fn validate_deep_additional_properties_in_response_test() {

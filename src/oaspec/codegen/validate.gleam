@@ -293,31 +293,13 @@ fn validate_schema_recursive(
           validate_schema_ref_recursive(path <> ".additionalProperties", ap_ref)
         None -> []
       }
-      // Recurse into properties, also catching inline objects
+      // Recurse into properties
       let prop_errors =
         dict.to_list(properties)
         |> list.flat_map(fn(entry) {
           let #(prop_name, prop_ref) = entry
           let prop_path = path <> "." <> prop_name
-          let inline_obj_errors = case prop_ref {
-            Inline(ObjectSchema(..)) -> [
-              UnsupportedFeature(
-                path: prop_path,
-                detail: "Nested inline object properties are not supported. Extract to a named schema in components.schemas and use $ref.",
-              ),
-            ]
-            Inline(AllOfSchema(..)) -> [
-              UnsupportedFeature(
-                path: prop_path,
-                detail: "Nested inline allOf properties are not supported. Extract to a named schema in components.schemas and use $ref.",
-              ),
-            ]
-            _ -> []
-          }
-          list.append(
-            inline_obj_errors,
-            validate_schema_ref_recursive(prop_path, prop_ref),
-          )
+          validate_schema_ref_recursive(prop_path, prop_ref)
         })
       // Property name collisions after snake_case conversion
       let prop_names =
@@ -344,27 +326,17 @@ fn validate_schema_recursive(
     }
 
     ArraySchema(items:, ..) -> {
-      // Reject inline complex array items
-      let item_errors = case items {
-        Inline(ObjectSchema(..))
-        | Inline(AllOfSchema(..))
-        | Inline(OneOfSchema(..))
-        | Inline(AnyOfSchema(..)) -> [
-          UnsupportedFeature(
-            path: path <> ".items",
-            detail: "Inline complex array items (object/allOf/oneOf/anyOf) are not supported. Extract to components.schemas and use $ref.",
-          ),
-        ]
-        _ -> []
-      }
-      list.append(
-        item_errors,
-        validate_schema_ref_recursive(path <> ".items", items),
-      )
+      validate_schema_ref_recursive(path <> ".items", items)
     }
 
-    OneOfSchema(schemas:, ..) -> validate_compound_schemas(path, schemas)
-    AnyOfSchema(schemas:, ..) -> validate_compound_schemas(path, schemas)
+    OneOfSchema(schemas:, ..) ->
+      list.flat_map(schemas, fn(s_ref) {
+        validate_schema_ref_recursive(path <> ".oneOf", s_ref)
+      })
+    AnyOfSchema(schemas:, ..) ->
+      list.flat_map(schemas, fn(s_ref) {
+        validate_schema_ref_recursive(path <> ".anyOf", s_ref)
+      })
 
     AllOfSchema(schemas:, ..) ->
       list.flat_map(schemas, fn(s_ref) {
@@ -373,40 +345,6 @@ fn validate_schema_recursive(
 
     _ -> []
   }
-}
-
-/// Validate oneOf/anyOf schemas: only $ref variants are supported.
-/// Inline schemas (primitives, objects, arrays) cannot be generated as
-/// union variants.
-fn validate_compound_schemas(
-  path: String,
-  schemas: List(SchemaRef),
-) -> List(ValidationError) {
-  let inline_errors = case has_any_inline_schemas(schemas) {
-    True -> [
-      UnsupportedFeature(
-        path: path,
-        detail: "oneOf/anyOf with inline schemas is not supported. All variants must be $ref to named schemas.",
-      ),
-    ]
-    False -> []
-  }
-  // Recurse into each sub-schema
-  let child_errors =
-    list.flat_map(schemas, fn(s_ref) {
-      validate_schema_ref_recursive(path, s_ref)
-    })
-  list.append(inline_errors, child_errors)
-}
-
-/// Check if any schema in a list is inline (not a $ref).
-fn has_any_inline_schemas(schemas: List(SchemaRef)) -> Bool {
-  list.any(schemas, fn(s) {
-    case s {
-      Inline(_) -> True
-      Reference(_) -> False
-    }
-  })
 }
 
 /// Validate for operationId duplicates and naming collisions.

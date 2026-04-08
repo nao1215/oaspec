@@ -185,6 +185,38 @@ fn hoist_schema_ref(
   }
 }
 
+/// Hoist a single SchemaRef unconditionally if it is inline.
+/// Used for oneOf/anyOf variants where codegen requires all variants to be $ref.
+fn hoist_schema_ref_always(
+  schema_ref: SchemaRef,
+  name_prefix: String,
+  name_suffix: String,
+  state: HoistState,
+) -> #(SchemaRef, HoistState) {
+  case schema_ref {
+    Reference(_) -> #(schema_ref, state)
+    Inline(schema_obj) -> {
+      let base_name =
+        naming.to_pascal_case(name_prefix)
+        <> naming.to_pascal_case(name_suffix)
+      let #(hoisted_obj, state) =
+        hoist_within_schema(schema_obj, base_name, state)
+      let #(unique_name, state) = make_unique_name(base_name, state)
+      let state =
+        HoistState(
+          ..state,
+          new_schemas: dict.insert(
+            state.new_schemas,
+            unique_name,
+            Inline(hoisted_obj),
+          ),
+        )
+      let ref = "#/components/schemas/" <> unique_name
+      #(Reference(ref: ref), state)
+    }
+  }
+}
+
 /// Recursively hoist within a SchemaObject's children.
 fn hoist_within_schema(
   schema_obj: SchemaObject,
@@ -254,7 +286,7 @@ fn hoist_within_schema(
           let #(schemas_acc, state) = acc
           let suffix = "Variant" <> int.to_string(idx)
           let #(hoisted, state) =
-            hoist_schema_ref(s_ref, name_prefix, suffix, state)
+            hoist_schema_ref_always(s_ref, name_prefix, suffix, state)
           #([hoisted, ..schemas_acc], state)
         })
       #(
@@ -273,7 +305,7 @@ fn hoist_within_schema(
           let #(schemas_acc, state) = acc
           let suffix = "Variant" <> int.to_string(idx)
           let #(hoisted, state) =
-            hoist_schema_ref(s_ref, name_prefix, suffix, state)
+            hoist_schema_ref_always(s_ref, name_prefix, suffix, state)
           #([hoisted, ..schemas_acc], state)
         })
       #(
