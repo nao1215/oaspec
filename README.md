@@ -195,7 +195,7 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 - Client typed body (auto-encoded) and typed response (auto-decoded)
 - `default` response handling in client
 - Top-level security inheritance (operation-level overrides, `security: []` opts out)
-- Security schemes: `apiKey` in header/query, HTTP bearer
+- Security schemes: `apiKey` in header/query, HTTP bearer (first OR alternative applied; AND within one alternative supported)
 - Duplicate operationId detection
 - Function/type name collision detection after case conversion
 - Config validation: output directory basename must match package name
@@ -216,15 +216,21 @@ These are detected before code generation. The generator prints an error and exi
 - Inline complex array items (object/allOf/oneOf/anyOf; use `$ref`)
 - Duplicate operationId
 - Function/type name collisions after case conversion
+- Property name collisions after snake_case conversion
+- Enum variant collisions after PascalCase conversion
+- Non-JSON response content types (only `application/json`)
+- Path parameters with `required: false`
 
 ### Not yet supported
 
+- Percent-encoding for path/query/cookie parameter values: values are inserted as-is; reserved characters may break URLs
 - Validation constraints (minLength, maxLength, pattern, minimum, maximum): parsed but not enforced
 - Callbacks: ignored by the generator
 - OAuth2 / OpenID Connect: rejected at parse time
 - `apiKey` in cookie: rejected at parse time
 - HTTP Basic / Digest: rejected at parse time (only bearer supported)
 - allOf with non-object sub-schemas
+- `text/plain` and other non-JSON response types
 
 ### Schema-to-type mapping
 
