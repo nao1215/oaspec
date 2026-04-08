@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Extract duplicated `status_code_suffix` and `status_code_to_int_pattern` into shared `oaspec/util/http` module
+- Replace hand-rolled `list_last` and `list_length` helpers with `gleam/list` stdlib equivalents
+- Simplify CLI flag parsing with `result.unwrap` instead of verbose case expressions
+
 ## [0.3.0] - 2026-04-08
 
 ### Changed
