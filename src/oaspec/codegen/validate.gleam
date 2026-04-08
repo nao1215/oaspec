@@ -23,7 +23,8 @@ pub fn validate(ctx: Context) -> List(ValidationError) {
   let op_errors = validate_operations(ctx)
   let schema_errors = validate_component_schemas(ctx)
   let collision_errors = validate_name_collisions(ctx)
-  list.flatten([op_errors, schema_errors, collision_errors])
+  let security_errors = validate_security_schemes(ctx)
+  list.flatten([op_errors, schema_errors, collision_errors, security_errors])
 }
 
 /// Convert a validation error to a human-readable string.
@@ -414,4 +415,35 @@ fn find_name_collisions(
   error_fn: fn(String) -> ValidationError,
 ) -> List(ValidationError) {
   find_duplicates(names, fn(name) { name }, error_fn)
+}
+
+/// Validate security schemes for unsupported types.
+fn validate_security_schemes(ctx: Context) -> List(ValidationError) {
+  let schemes = case ctx.spec.components {
+    Some(components) -> dict.to_list(components.security_schemes)
+    None -> []
+  }
+  list.flat_map(schemes, fn(entry) {
+    let #(name, scheme) = entry
+    case scheme {
+      spec.ApiKeyScheme(..) -> []
+      spec.HttpScheme(scheme: "bearer", ..) -> []
+      spec.HttpScheme(scheme: "basic", ..) -> []
+      spec.HttpScheme(scheme: "digest", ..) -> []
+      spec.HttpScheme(scheme: scheme_name, ..) -> [
+        UnsupportedFeature(
+          path: "components.securitySchemes." <> name,
+          detail: "HTTP security scheme '"
+            <> scheme_name
+            <> "' is not supported. Supported schemes: bearer, basic, digest.",
+        ),
+      ]
+      spec.OAuth2Scheme(..) -> [
+        UnsupportedFeature(
+          path: "components.securitySchemes." <> name,
+          detail: "OAuth2 security scheme is not supported.",
+        ),
+      ]
+    }
+  })
 }
