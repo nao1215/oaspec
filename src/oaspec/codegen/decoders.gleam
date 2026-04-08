@@ -11,6 +11,7 @@ import oaspec/openapi/schema.{
   Reference, StringSchema,
 }
 import oaspec/openapi/spec
+import oaspec/util/http
 import oaspec/util/naming
 import oaspec/util/string_extra as se
 
@@ -131,7 +132,7 @@ fn generate_anonymous_response_decoders(
       [#(_, media_type), ..] ->
         case media_type.schema {
           Some(Inline(schema_obj)) -> {
-            let suffix = "Response" <> status_code_suffix(status_code)
+            let suffix = "Response" <> http.status_code_suffix(status_code)
             generate_anonymous_schema_decoder(
               sb,
               op_id,
@@ -188,24 +189,6 @@ fn generate_anonymous_schema_decoder(
   let name = naming.to_snake_case(op_id) <> "_" <> naming.to_snake_case(suffix)
   let schema_ref = Inline(schema_obj)
   generate_decoder(sb, name, schema_ref, ctx)
-}
-
-/// Status code suffix for anonymous type naming (shared with types.gleam).
-fn status_code_suffix(code: String) -> String {
-  case code {
-    "200" -> "Ok"
-    "201" -> "Created"
-    "204" -> "NoContent"
-    "400" -> "BadRequest"
-    "401" -> "Unauthorized"
-    "403" -> "Forbidden"
-    "404" -> "NotFound"
-    "409" -> "Conflict"
-    "422" -> "UnprocessableEntity"
-    "500" -> "InternalServerError"
-    "default" -> "Default"
-    other -> "Status" <> other
-  }
 }
 
 /// Generate inline enum decoders found in object/allOf properties.

@@ -10,6 +10,7 @@ import oaspec/openapi/schema.{
   Reference, StringSchema,
 }
 import oaspec/openapi/spec
+import oaspec/util/http
 import oaspec/util/naming
 import oaspec/util/string_extra as se
 
@@ -332,7 +333,7 @@ fn generate_anonymous_response_types(
             generate_anonymous_type_for_schema(
               sb,
               op_id,
-              "Response" <> status_code_suffix(status_code),
+              "Response" <> http.status_code_suffix(status_code),
               schema_obj,
               ctx,
             )
@@ -474,24 +475,6 @@ fn generate_anonymous_type_for_schema(
       generate_schema_type(sb, type_name, raw_name, merged_schema, ctx)
     }
     _ -> sb
-  }
-}
-
-/// Get a status code suffix for anonymous type names.
-fn status_code_suffix(code: String) -> String {
-  case code {
-    "200" -> "Ok"
-    "201" -> "Created"
-    "204" -> "NoContent"
-    "400" -> "BadRequest"
-    "401" -> "Unauthorized"
-    "403" -> "Forbidden"
-    "404" -> "NotFound"
-    "409" -> "Conflict"
-    "422" -> "UnprocessableEntity"
-    "500" -> "InternalServerError"
-    "default" -> "Default"
-    other -> "Status" <> other
   }
 }
 
@@ -785,7 +768,8 @@ fn generate_response_type(
             [#(_media_type, media_type), ..] ->
               case media_type.schema {
                 Some(ref) -> {
-                  let suffix = "Response" <> status_code_suffix(status_code)
+                  let suffix =
+                    "Response" <> http.status_code_suffix(status_code)
                   let inner_type =
                     schema_ref_to_type_qualified(ref, op_id, suffix, ctx)
                   sb
@@ -806,21 +790,7 @@ fn generate_response_type(
 /// Convert an HTTP status code to a Gleam variant name.
 /// Prefixed with the type name to avoid duplicate constructors across types.
 fn status_code_to_variant(code: String, type_name: String) -> String {
-  let suffix = case code {
-    "200" -> "Ok"
-    "201" -> "Created"
-    "204" -> "NoContent"
-    "400" -> "BadRequest"
-    "401" -> "Unauthorized"
-    "403" -> "Forbidden"
-    "404" -> "NotFound"
-    "409" -> "Conflict"
-    "422" -> "UnprocessableEntity"
-    "500" -> "InternalServerError"
-    "default" -> "Default"
-    other -> "Status" <> other
-  }
-  type_name <> suffix
+  type_name <> http.status_code_suffix(code)
 }
 
 /// Collect all operations from the spec with their IDs, paths, and methods.

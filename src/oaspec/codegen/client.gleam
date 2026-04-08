@@ -9,6 +9,7 @@ import oaspec/openapi/schema.{
   Inline, IntegerSchema, NumberSchema, Reference, StringSchema,
 }
 import oaspec/openapi/spec
+import oaspec/util/http
 import oaspec/util/naming
 import oaspec/util/string_extra as se
 
@@ -621,14 +622,14 @@ fn generate_client_function(
         "response_types."
         <> naming.schema_to_type_name(op_id)
         <> "Response"
-        <> status_code_suffix(status_code)
+        <> http.status_code_suffix(status_code)
       let content_entries = dict.to_list(response.content)
       case content_entries {
         [] ->
           sb
           |> se.indent(
             4,
-            status_code_to_int_pattern(status_code)
+            http.status_code_to_int_pattern(status_code)
               <> " -> Ok("
               <> variant_name
               <> ")",
@@ -641,7 +642,7 @@ fn generate_client_function(
               sb
               |> se.indent(
                 4,
-                status_code_to_int_pattern(status_code) <> " -> {",
+                http.status_code_to_int_pattern(status_code) <> " -> {",
               )
               |> se.indent(5, "case " <> decode_expr <> " {")
               |> se.indent(
@@ -659,7 +660,7 @@ fn generate_client_function(
               sb
               |> se.indent(
                 4,
-                status_code_to_int_pattern(status_code)
+                http.status_code_to_int_pattern(status_code)
                   <> " -> Ok("
                   <> variant_name
                   <> ")",
@@ -896,35 +897,9 @@ fn get_response_decode_expr(
         "decode_"
         <> naming.to_snake_case(op_id)
         <> "_response_"
-        <> naming.to_snake_case(status_code_suffix(status_code))
+        <> naming.to_snake_case(http.status_code_suffix(status_code))
       "decode." <> fn_name <> "(resp.body)"
     }
-  }
-}
-
-/// Get a status code suffix for type names.
-fn status_code_suffix(code: String) -> String {
-  case code {
-    "200" -> "Ok"
-    "201" -> "Created"
-    "204" -> "NoContent"
-    "400" -> "BadRequest"
-    "401" -> "Unauthorized"
-    "403" -> "Forbidden"
-    "404" -> "NotFound"
-    "409" -> "Conflict"
-    "422" -> "UnprocessableEntity"
-    "500" -> "InternalServerError"
-    "default" -> "Default"
-    other -> "Status" <> other
-  }
-}
-
-/// Convert a status code string to an int pattern for case matching.
-fn status_code_to_int_pattern(code: String) -> String {
-  case code {
-    "default" -> "_"
-    _ -> code
   }
 }
 
