@@ -28,15 +28,27 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
 
 /// Generate types from component schemas and anonymous types from operations.
 fn generate_types(ctx: Context) -> String {
-  let sb =
-    se.file_header(context.version)
-    |> se.imports(["gleam/option.{type Option}"])
-
   // Generate component schema types
   let schemas = case ctx.spec.components {
     Some(components) -> dict.to_list(components.schemas)
     None -> []
   }
+
+  // Check if Option is needed (any optional/nullable fields)
+  let needs_option =
+    list.any(schemas, fn(entry) {
+      let #(_, schema_ref) = entry
+      schema_has_optional_fields(schema_ref, ctx)
+    })
+
+  let imports = case needs_option {
+    True -> ["gleam/option.{type Option}"]
+    False -> []
+  }
+
+  let sb =
+    se.file_header(context.version)
+    |> se.imports(imports)
 
   // First pass: collect inline enum types from object properties
   let sb =
@@ -617,7 +629,37 @@ fn generate_request_types(ctx: Context) -> String {
       list.any(operation.parameters, fn(p) { !p.required })
     })
 
-  let base_imports = [ctx.config.package <> "/types"]
+  // Check if types module is needed ($ref params or non-primitive body)
+  let needs_types =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      let has_ref_params =
+        list.any(operation.parameters, fn(p) {
+          case p.schema {
+            Some(Reference(_)) -> True
+            _ -> False
+          }
+        })
+      let has_typed_body = case operation.request_body {
+        Some(rb) ->
+          list.any(dict.to_list(rb.content), fn(ce) {
+            let #(_, mt) = ce
+            case mt.schema {
+              Some(Reference(_)) -> True
+              Some(Inline(schema.ObjectSchema(..))) -> True
+              Some(Inline(schema.AllOfSchema(..))) -> True
+              _ -> False
+            }
+          })
+        _ -> False
+      }
+      has_ref_params || has_typed_body
+    })
+
+  let base_imports = case needs_types {
+    True -> [ctx.config.package <> "/types"]
+    False -> []
+  }
   let imports = case needs_option {
     True -> ["gleam/option.{type Option}", ..base_imports]
     False -> base_imports
@@ -835,6 +877,30 @@ pub fn collect_operations(
       }
     })
   })
+}
+
+/// Check if a schema has any optional or nullable fields that would need Option.
+pub fn schema_has_optional_fields(schema_ref: SchemaRef, ctx: Context) -> Bool {
+  case schema_ref {
+    Inline(ObjectSchema(properties:, required:, ..)) -> {
+      let has_optional =
+        dict.to_list(properties)
+        |> list.any(fn(entry) {
+          let #(prop_name, prop_ref) = entry
+          !list.contains(required, prop_name)
+          || schema_ref_is_nullable(prop_ref, ctx)
+        })
+      has_optional
+    }
+    Inline(AllOfSchema(schemas:, ..)) ->
+      list.any(schemas, fn(s) { schema_has_optional_fields(s, ctx) })
+    Reference(_) ->
+      case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
+        Ok(schema_obj) -> schema_has_optional_fields(Inline(schema_obj), ctx)
+        Error(_) -> False
+      }
+    _ -> False
+  }
 }
 
 /// Check if a SchemaRef is nullable, resolving $ref if needed.

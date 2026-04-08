@@ -44,27 +44,32 @@ fn generate_client(ctx: Context) -> String {
       }
     })
 
-  // Check if any response/requestBody has inline schemas that need
-  // gleam/json + gleam/dynamic/decode for direct parsing
-  let needs_json_decode =
+  // dyn_decode + json needed for inline primitive response decoding
+  let needs_dyn_decode =
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
-      let response_needs =
-        list.any(dict.to_list(operation.responses), fn(entry) {
-          let #(_, response) = entry
-          list.any(dict.to_list(response.content), fn(ce) {
-            let #(_, mt) = ce
-            case mt.schema {
-              Some(Inline(schema.ArraySchema(items: Inline(_), ..))) -> True
-              Some(Inline(schema.StringSchema(..))) -> True
-              Some(Inline(schema.IntegerSchema(..))) -> True
-              Some(Inline(schema.NumberSchema(..))) -> True
-              Some(Inline(schema.BooleanSchema(..))) -> True
-              _ -> False
-            }
-          })
+      list.any(dict.to_list(operation.responses), fn(entry) {
+        let #(_, response) = entry
+        list.any(dict.to_list(response.content), fn(ce) {
+          let #(_, mt) = ce
+          case mt.schema {
+            Some(Inline(schema.ArraySchema(items: Inline(_), ..))) -> True
+            Some(Inline(schema.StringSchema(..))) -> True
+            Some(Inline(schema.IntegerSchema(..))) -> True
+            Some(Inline(schema.NumberSchema(..))) -> True
+            Some(Inline(schema.BooleanSchema(..))) -> True
+            _ -> False
+          }
         })
-      let body_needs = case operation.request_body {
+      })
+    })
+
+  // json needed for inline primitive body encoding (without dyn_decode)
+  let needs_json =
+    needs_dyn_decode
+    || list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      case operation.request_body {
         Some(rb) ->
           list.any(dict.to_list(rb.content), fn(ce) {
             let #(_, mt) = ce
@@ -78,23 +83,99 @@ fn generate_client(ctx: Context) -> String {
           })
         _ -> False
       }
-      response_needs || body_needs
     })
+
+  // string module needed for path/query/cookie parameter handling and
+  // security query apiKey
+  let needs_string =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      !list.is_empty(operation.parameters)
+    })
+    || {
+      let security_schemes = case ctx.spec.components {
+        Some(c) -> dict.to_list(c.security_schemes)
+        _ -> []
+      }
+      list.any(security_schemes, fn(entry) {
+        case entry {
+          #(_, spec.ApiKeyScheme(in_: "query", ..)) -> True
+          _ -> False
+        }
+      })
+    }
+
+  // Check which modules are actually needed
+  let needs_typed_schemas =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      // Need types/encode when $ref body or $ref params exist
+      let has_ref_body = case operation.request_body {
+        Some(rb) ->
+          list.any(dict.to_list(rb.content), fn(ce) {
+            let #(_, mt) = ce
+            case mt.schema {
+              Some(Reference(_)) -> True
+              Some(Inline(schema.ObjectSchema(..))) -> True
+              Some(Inline(schema.AllOfSchema(..))) -> True
+              _ -> False
+            }
+          })
+        _ -> False
+      }
+      let has_ref_params =
+        list.any(operation.parameters, fn(p) {
+          case p.schema {
+            Some(Reference(_)) -> True
+            _ -> False
+          }
+        })
+      has_ref_body || has_ref_params
+    })
+
+  let needs_option =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(operation.parameters, fn(p) { !p.required })
+    })
+    || {
+      let security_schemes = case ctx.spec.components {
+        Some(c) -> dict.to_list(c.security_schemes)
+        _ -> []
+      }
+      !list.is_empty(security_schemes)
+    }
 
   let base_imports = [
     "gleam/http/request",
     "gleam/http",
     "gleam/int",
-    "gleam/option.{type Option, None, Some}",
-    "gleam/string",
-    ctx.config.package <> "/types",
-    ctx.config.package <> "/encode",
     ctx.config.package <> "/decode",
     ctx.config.package <> "/response_types",
   ]
-  let imports = case needs_json_decode {
-    True -> ["gleam/dynamic/decode as dyn_decode", "gleam/json", ..base_imports]
+  let base_imports = case needs_option {
+    True -> ["gleam/option.{type Option, None, Some}", ..base_imports]
     False -> base_imports
+  }
+  let base_imports = case needs_typed_schemas {
+    True ->
+      list.append(
+        [ctx.config.package <> "/types", ctx.config.package <> "/encode"],
+        base_imports,
+      )
+    False -> base_imports
+  }
+  let base_imports = case needs_string {
+    True -> ["gleam/string", ..base_imports]
+    False -> base_imports
+  }
+  let imports = case needs_dyn_decode {
+    True -> ["gleam/dynamic/decode as dyn_decode", ..base_imports]
+    False -> base_imports
+  }
+  let imports = case needs_json {
+    True -> ["gleam/json", ..imports]
+    False -> imports
   }
   let imports = case needs_bool {
     True -> ["gleam/bool", ..imports]

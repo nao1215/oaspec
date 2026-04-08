@@ -30,14 +30,45 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
 
 /// Generate JSON decoders for all component schemas and anonymous types.
 fn generate_decoders(ctx: Context) -> String {
+  let schemas = case ctx.spec.components {
+    Some(components) -> dict.to_list(components.schemas)
+    None -> []
+  }
+
+  // Check if option module is needed (any schema with optional fields)
+  let needs_option =
+    list.any(schemas, fn(entry) {
+      let #(_, schema_ref) = entry
+      type_gen.schema_has_optional_fields(schema_ref, ctx)
+    })
+
+  // Check if types module is needed (any non-primitive schema)
+  let needs_types =
+    list.any(schemas, fn(entry) {
+      let #(_, schema_ref) = entry
+      case schema_ref {
+        Inline(ObjectSchema(..))
+        | Inline(AllOfSchema(..))
+        | Inline(OneOfSchema(..))
+        | Inline(AnyOfSchema(..)) -> True
+        Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> True
+        _ -> False
+      }
+    })
+
+  let base_imports = ["gleam/dynamic/decode", "gleam/json"]
+  let base_imports = case needs_types {
+    True -> list.append(base_imports, [ctx.config.package <> "/types"])
+    False -> base_imports
+  }
+  let imports = case needs_option {
+    True -> list.append(base_imports, ["gleam/option"])
+    False -> base_imports
+  }
+
   let sb =
     se.file_header(context.version)
-    |> se.imports([
-      "gleam/dynamic/decode",
-      "gleam/json",
-      "gleam/option",
-      ctx.config.package <> "/types",
-    ])
+    |> se.imports(imports)
 
   let schemas = case ctx.spec.components {
     Some(components) -> dict.to_list(components.schemas)
@@ -843,17 +874,34 @@ fn schema_ref_is_nullable(ref: SchemaRef, ctx: Context) -> Bool {
 
 /// Generate JSON encoders for all component schemas and anonymous types.
 fn generate_encoders(ctx: Context) -> String {
-  let sb =
-    se.file_header(context.version)
-    |> se.imports([
-      "gleam/json",
-      ctx.config.package <> "/types",
-    ])
-
   let schemas = case ctx.spec.components {
     Some(components) -> dict.to_list(components.schemas)
     None -> []
   }
+
+  // Check if types module is needed
+  let needs_types =
+    list.any(schemas, fn(entry) {
+      let #(_, schema_ref) = entry
+      case schema_ref {
+        Inline(ObjectSchema(..))
+        | Inline(AllOfSchema(..))
+        | Inline(OneOfSchema(..))
+        | Inline(AnyOfSchema(..)) -> True
+        Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> True
+        _ -> False
+      }
+    })
+
+  let base_imports = ["gleam/json"]
+  let imports = case needs_types {
+    True -> list.append(base_imports, [ctx.config.package <> "/types"])
+    False -> base_imports
+  }
+
+  let sb =
+    se.file_header(context.version)
+    |> se.imports(imports)
 
   // First pass: generate inline enum encoders
   let sb =
