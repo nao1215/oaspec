@@ -443,11 +443,17 @@ fn generate_client_function(
               |> se.indent(2, "Some(key) -> {")
               |> se.indent(
                 3,
-                "let assert Ok(base) = request.to(config.base_url <> path <> \"&"
+                "let sep = case string.contains(req.path, \"?\") {",
+              )
+              |> se.indent(4, "True -> \"&\"")
+              |> se.indent(4, "False -> \"?\"")
+              |> se.indent(3, "}")
+              |> se.indent(
+                3,
+                "request.Request(..req, path: req.path <> sep <> \""
                   <> query_name
                   <> "=\" <> key)",
               )
-              |> se.indent(3, "request.set_method(base, req.method)")
               |> se.indent(2, "}")
               |> se.indent(2, "None -> req")
               |> se.indent(1, "}")
