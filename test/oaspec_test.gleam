@@ -460,12 +460,12 @@ pub fn validate_broken_spec_detects_deep_object_test() {
   |> should.be_true()
 }
 
-pub fn validate_broken_spec_detects_multipart_test() {
+pub fn validate_accepts_multipart_form_data_test() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "multipart/form-data") })
-  |> should.be_true()
+  |> should.be_false()
 }
 
 pub fn validate_broken_spec_detects_inline_oneof_test() {
@@ -478,12 +478,14 @@ pub fn validate_broken_spec_detects_inline_oneof_test() {
   |> should.be_true()
 }
 
-pub fn validate_broken_spec_detects_additional_properties_test() {
+pub fn validate_broken_spec_accepts_untyped_additional_properties_test() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
+  // additionalProperties: true is now supported via Dict(String, Dynamic),
+  // so it should NOT appear as a validation error
   list.any(error_strings, fn(s) { string.contains(s, "additionalProperties") })
-  |> should.be_true()
+  |> should.be_false()
 }
 
 // --- Parser: fail-fast tests ---
@@ -554,11 +556,11 @@ pub fn validate_deep_additional_properties_in_response_test() {
   let ctx = make_ctx("test/fixtures/deep_unsupported.yaml")
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
-  // additionalProperties: true nested in response object property should be caught
+  // additionalProperties: true is now supported, so no error for it
   list.any(error_strings, fn(s) {
     string.contains(s, "additionalProperties") && string.contains(s, "payload")
   })
-  |> should.be_true()
+  |> should.be_false()
 }
 
 pub fn validate_duplicate_operation_id_test() {
@@ -593,6 +595,34 @@ components:
         name: { type: string }
       additionalProperties:
         type: string
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  errors |> should.equal([])
+}
+
+pub fn validate_accepts_untyped_additional_properties_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /data:
+    get:
+      operationId: getData
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Payload:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+      additionalProperties: true
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
@@ -1050,7 +1080,7 @@ pub fn content_type_is_supported_test() {
   |> should.be_true()
 
   content_type.is_supported(content_type.MultipartFormData)
-  |> should.be_false()
+  |> should.be_true()
 
   content_type.is_supported(content_type.UnsupportedContentType("application/xml"))
   |> should.be_false()

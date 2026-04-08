@@ -34,6 +34,7 @@ pub fn is_supported(content_type: ContentType) -> Bool {
   case content_type {
     ApplicationJson -> True
     TextPlain -> True
+    MultipartFormData -> True
     _ -> False
   }
 }

@@ -98,12 +98,23 @@ fn generate_client(ctx: Context) -> String {
       }
     })
 
-  // string module needed for path/query/cookie parameter handling and
-  // security query apiKey
+  // string module needed for path/query/cookie parameter handling,
+  // security query apiKey, and multipart/form-data body building
   let needs_string =
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       !list.is_empty(operation.parameters)
+    })
+    || list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      case operation.request_body {
+        Some(rb) ->
+          list.any(dict.to_list(rb.content), fn(ce) {
+            let #(key, _) = ce
+            key == "multipart/form-data"
+          })
+        _ -> False
+      }
     })
     || {
       let security_schemes = case ctx.spec.components {
@@ -469,16 +480,26 @@ fn generate_client_function(
   // Only set content-type for requests with body
   let sb = case operation.request_body {
     Some(rb) -> {
-      let body_encode_expr = get_body_encode_expr(rb, op_id, ctx)
-      sb
-      |> se.indent(
-        1,
-        "let req = request.set_header(req, \"content-type\", \"application/json\")",
-      )
-      |> se.indent(
-        1,
-        "let req = request.set_body(req, " <> body_encode_expr <> ")",
-      )
+      let content_entries = dict.to_list(rb.content)
+      let is_multipart = case content_entries {
+        [#("multipart/form-data", _), ..] -> True
+        _ -> False
+      }
+      case is_multipart {
+        True -> generate_multipart_body(sb, rb, op_id, ctx)
+        False -> {
+          let body_encode_expr = get_body_encode_expr(rb, op_id, ctx)
+          sb
+          |> se.indent(
+            1,
+            "let req = request.set_header(req, \"content-type\", \"application/json\")",
+          )
+          |> se.indent(
+            1,
+            "let req = request.set_body(req, " <> body_encode_expr <> ")",
+          )
+        }
+      }
     }
     _ -> sb
   }
@@ -944,6 +965,84 @@ fn get_body_encode_expr(
       }
     [] -> "body"
   }
+}
+
+/// Generate multipart/form-data body encoding in the client function.
+fn generate_multipart_body(
+  sb: se.StringBuilder,
+  rb: spec.RequestBody,
+  _op_id: String,
+  ctx: Context,
+) -> se.StringBuilder {
+  let boundary = "----oaspec-boundary"
+  let content_entries = dict.to_list(rb.content)
+  let properties = case content_entries {
+    [#(_, media_type), ..] ->
+      case media_type.schema {
+        Some(Inline(schema.ObjectSchema(properties:, ..))) ->
+          dict.to_list(properties)
+        Some(Reference(ref:) as schema_ref) ->
+          case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
+            Ok(schema.ObjectSchema(properties:, ..)) -> {
+              let _ = ref
+              dict.to_list(properties)
+            }
+            _ -> []
+          }
+        _ -> []
+      }
+    _ -> []
+  }
+
+  let sb =
+    sb
+    |> se.indent(1, "let boundary = \"" <> boundary <> "\"")
+    |> se.indent(1, "let parts = []")
+
+  let sb =
+    list.fold(properties, sb, fn(sb, prop) {
+      let #(field_name, field_schema) = prop
+      let gleam_field = naming.to_snake_case(field_name)
+      let is_binary = case field_schema {
+        Inline(schema.StringSchema(format: Some("binary"), ..)) -> True
+        _ -> False
+      }
+      case is_binary {
+        True ->
+          sb
+          |> se.indent(
+            1,
+            "let parts = [\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
+              <> field_name
+              <> "\\\"; filename=\\\""
+              <> field_name
+              <> "\\\"\\r\\nContent-Type: application/octet-stream\\r\\n\\r\\n\" <> body."
+              <> gleam_field
+              <> " <> \"\\r\\n\", ..parts]",
+          )
+        False ->
+          sb
+          |> se.indent(
+            1,
+            "let parts = [\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
+              <> field_name
+              <> "\\\"\\r\\n\\r\\n\" <> body."
+              <> gleam_field
+              <> " <> \"\\r\\n\", ..parts]",
+          )
+      }
+    })
+
+  sb
+  |> se.indent(
+    1,
+    "let body_str = string.join(parts, \"\") <> \"--\" <> boundary <> \"--\\r\\n\"",
+  )
+  |> se.indent(
+    1,
+    "let req = request.set_header(req, \"content-type\", \"multipart/form-data; boundary=\" <> boundary)",
+  )
+  |> se.indent(1, "let req = request.set_body(req, body_str)")
 }
 
 /// Get the decode expression for a response body.
