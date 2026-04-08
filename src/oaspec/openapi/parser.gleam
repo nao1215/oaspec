@@ -1065,6 +1065,21 @@ fn parse_security_scheme(
         |> result.unwrap(None)
       Ok(spec.OAuth2Scheme(description:))
     }
+    "openIdConnect" -> {
+      let description =
+        yay.extract_optional_string(node, "description")
+        |> result.unwrap(None)
+      use open_id_connect_url <- result.try(
+        yay.extract_string(node, "openIdConnectUrl")
+        |> result.map_error(fn(_) {
+          MissingField(
+            path: "securityScheme.openIdConnect",
+            field: "openIdConnectUrl",
+          )
+        }),
+      )
+      Ok(spec.OpenIdConnectScheme(open_id_connect_url:, description:))
+    }
     _ ->
       Error(InvalidValue(
         path: "securityScheme.type",

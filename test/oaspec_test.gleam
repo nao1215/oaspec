@@ -1785,7 +1785,7 @@ components:
 
 // --- Finding 3: unknown HTTP security schemes must produce a validation error
 // or a warning, not be silently ignored at code generation time.
-pub fn unknown_http_security_scheme_rejected_test() {
+pub fn unknown_http_security_scheme_accepted_test() {
   let yaml =
     "
 openapi: 3.0.3
@@ -1809,12 +1809,8 @@ security:
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, validate.error_to_string)
-  // Unknown HTTP scheme "hoba" should be flagged
-  list.any(error_strings, fn(s) {
-    string.contains(s, "hoba") || string.contains(s, "security")
-  })
-  |> should.be_true()
+  // All HTTP schemes are now accepted
+  errors |> should.equal([])
 }
 
 // --- Finding 4: allOf merge must preserve additionalProperties from sub-schemas.

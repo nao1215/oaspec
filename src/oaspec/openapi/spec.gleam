@@ -40,6 +40,10 @@ pub type SecurityScheme {
   ApiKeyScheme(name: String, in_: String)
   HttpScheme(scheme: String, bearer_format: Option(String))
   OAuth2Scheme(description: Option(String))
+  OpenIdConnectScheme(
+    open_id_connect_url: String,
+    description: Option(String),
+  )
 }
 
 /// A single scheme reference within a security requirement (AND element).

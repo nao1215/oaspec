@@ -709,12 +709,25 @@ fn generate_client_function(
               |> se.indent(2, "None -> req")
               |> se.indent(1, "}")
             Ok(spec.HttpScheme(scheme: "bearer", ..))
-            | Ok(spec.OAuth2Scheme(..)) ->
+            | Ok(spec.OAuth2Scheme(..))
+            | Ok(spec.OpenIdConnectScheme(..)) ->
               sb
               |> se.indent(1, "let req = case config." <> field_name <> " {")
               |> se.indent(
                 2,
                 "Some(token) -> request.set_header(req, \"authorization\", \"Bearer \" <> token)",
+              )
+              |> se.indent(2, "None -> req")
+              |> se.indent(1, "}")
+            // Other HTTP schemes (hoba, negotiate, mutual, etc.) use the scheme name as prefix
+            Ok(spec.HttpScheme(scheme: scheme_name, ..)) ->
+              sb
+              |> se.indent(1, "let req = case config." <> field_name <> " {")
+              |> se.indent(
+                2,
+                "Some(token) -> request.set_header(req, \"authorization\", \""
+                  <> capitalize_first(scheme_name)
+                  <> " \" <> token)",
               )
               |> se.indent(2, "None -> req")
               |> se.indent(1, "}")
@@ -1500,5 +1513,13 @@ fn schema_ref_to_string_expr(
         _ -> accessor
       }
     _ -> accessor
+  }
+}
+
+/// Capitalize the first letter of a string (for HTTP scheme prefix).
+fn capitalize_first(s: String) -> String {
+  case string.pop_grapheme(s) {
+    Ok(#(first, rest)) -> string.uppercase(first) <> rest
+    Error(_) -> s
   }
 }

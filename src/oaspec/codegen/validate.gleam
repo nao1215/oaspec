@@ -379,32 +379,8 @@ fn find_name_collisions(
 }
 
 /// Validate security schemes for unsupported types.
-fn validate_security_schemes(ctx: Context) -> List(ValidationError) {
-  let schemes = case ctx.spec.components {
-    Some(components) -> dict.to_list(components.security_schemes)
-    None -> []
-  }
-  list.flat_map(schemes, fn(entry) {
-    let #(name, scheme) = entry
-    case scheme {
-      spec.ApiKeyScheme(..) -> []
-      spec.HttpScheme(scheme: "bearer", ..) -> []
-      spec.HttpScheme(scheme: "basic", ..) -> []
-      spec.HttpScheme(scheme: "digest", ..) -> []
-      spec.HttpScheme(scheme: scheme_name, ..) -> [
-        UnsupportedFeature(
-          path: "components.securitySchemes." <> name,
-          detail: "HTTP security scheme '"
-            <> scheme_name
-            <> "' is not supported. Supported schemes: bearer, basic, digest.",
-        ),
-      ]
-      spec.OAuth2Scheme(..) -> [
-        UnsupportedFeature(
-          path: "components.securitySchemes." <> name,
-          detail: "OAuth2 security scheme is not supported.",
-        ),
-      ]
-    }
-  })
+/// All scheme types are now supported: apiKey, HTTP (any scheme), OAuth2,
+/// and OpenID Connect.
+fn validate_security_schemes(_ctx: Context) -> List(ValidationError) {
+  []
 }
