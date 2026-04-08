@@ -60,10 +60,20 @@ fn generate_types(ctx: Context) -> String {
     })
 
   let imports = case needs_option, needs_dict, needs_dynamic {
-    True, True, True -> ["gleam/dict.{type Dict}", "gleam/dynamic.{type Dynamic}", "gleam/option.{type Option}"]
-    True, True, False -> ["gleam/dict.{type Dict}", "gleam/option.{type Option}"]
+    True, True, True -> [
+      "gleam/dict.{type Dict}",
+      "gleam/dynamic.{type Dynamic}",
+      "gleam/option.{type Option}",
+    ]
+    True, True, False -> [
+      "gleam/dict.{type Dict}",
+      "gleam/option.{type Option}",
+    ]
     True, False, _ -> ["gleam/option.{type Option}"]
-    False, True, True -> ["gleam/dict.{type Dict}", "gleam/dynamic.{type Dynamic}"]
+    False, True, True -> [
+      "gleam/dict.{type Dict}",
+      "gleam/dynamic.{type Dynamic}",
+    ]
     False, True, False -> ["gleam/dict.{type Dict}"]
     False, False, _ -> []
   }
@@ -185,13 +195,21 @@ fn generate_schema_type(
   ctx: Context,
 ) -> se.StringBuilder {
   case schema {
-    ObjectSchema(description:, properties:, required:, additional_properties:, additional_properties_untyped:, ..) -> {
+    ObjectSchema(
+      description:,
+      properties:,
+      required:,
+      additional_properties:,
+      additional_properties_untyped:,
+      ..,
+    ) -> {
       let sb = maybe_doc_comment(sb, description)
       let sb = sb |> se.line("pub type " <> type_name <> " {")
       let sb = sb |> se.indent(1, type_name <> "(")
 
       let props = dict.to_list(properties)
-      let has_additional_props = option.is_some(additional_properties) || additional_properties_untyped
+      let has_additional_props =
+        option.is_some(additional_properties) || additional_properties_untyped
       let sb =
         list.index_fold(props, sb, fn(sb, entry, idx) {
           let #(prop_name, prop_ref) = entry
@@ -225,7 +243,11 @@ fn generate_schema_type(
       let sb = case additional_properties, additional_properties_untyped {
         Some(ap_ref), _ -> {
           let inner_type = schema_ref_to_type(ap_ref, ctx)
-          sb |> se.indent(2, "additional_properties: Dict(String, " <> inner_type <> ")")
+          sb
+          |> se.indent(
+            2,
+            "additional_properties: Dict(String, " <> inner_type <> ")",
+          )
         }
         None, True -> {
           sb |> se.indent(2, "additional_properties: Dict(String, Dynamic)")
@@ -913,7 +935,10 @@ pub fn collect_operations(
 }
 
 /// Check if a schema has typed or untyped additionalProperties that would need Dict.
-pub fn schema_has_additional_properties(schema_ref: SchemaRef, ctx: Context) -> Bool {
+pub fn schema_has_additional_properties(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Bool {
   case schema_ref {
     Inline(ObjectSchema(additional_properties: Some(_), ..)) -> True
     Inline(ObjectSchema(additional_properties_untyped: True, ..)) -> True
@@ -921,7 +946,8 @@ pub fn schema_has_additional_properties(schema_ref: SchemaRef, ctx: Context) -> 
       list.any(schemas, fn(s) { schema_has_additional_properties(s, ctx) })
     Reference(_) ->
       case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
-        Ok(schema_obj) -> schema_has_additional_properties(Inline(schema_obj), ctx)
+        Ok(schema_obj) ->
+          schema_has_additional_properties(Inline(schema_obj), ctx)
         Error(_) -> False
       }
     _ -> False
@@ -929,14 +955,20 @@ pub fn schema_has_additional_properties(schema_ref: SchemaRef, ctx: Context) -> 
 }
 
 /// Check if a schema has untyped additionalProperties (needs Dynamic import).
-pub fn schema_has_untyped_additional_properties(schema_ref: SchemaRef, ctx: Context) -> Bool {
+pub fn schema_has_untyped_additional_properties(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Bool {
   case schema_ref {
     Inline(ObjectSchema(additional_properties_untyped: True, ..)) -> True
     Inline(AllOfSchema(schemas:, ..)) ->
-      list.any(schemas, fn(s) { schema_has_untyped_additional_properties(s, ctx) })
+      list.any(schemas, fn(s) {
+        schema_has_untyped_additional_properties(s, ctx)
+      })
     Reference(_) ->
       case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
-        Ok(schema_obj) -> schema_has_untyped_additional_properties(Inline(schema_obj), ctx)
+        Ok(schema_obj) ->
+          schema_has_untyped_additional_properties(Inline(schema_obj), ctx)
         Error(_) -> False
       }
     _ -> False

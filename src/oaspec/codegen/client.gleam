@@ -461,10 +461,7 @@ fn generate_client_function(
             False -> {
               let to_str = to_str_for_optional_value(p, ctx)
               sb
-              |> se.indent(
-                1,
-                "let query_parts = case " <> param_name <> " {",
-              )
+              |> se.indent(1, "let query_parts = case " <> param_name <> " {")
               |> se.indent(
                 2,
                 "Some(v) -> [\""
@@ -670,7 +667,10 @@ fn generate_client_function(
                 3,
                 "let existing = list.key_find(req.headers, \"cookie\") |> result.unwrap(\"\")",
               )
-              |> se.indent(3, "let cookie_val = \"" <> cookie_name <> "=\" <> value")
+              |> se.indent(
+                3,
+                "let cookie_val = \"" <> cookie_name <> "=\" <> value",
+              )
               |> se.indent(3, "let new_cookie = case existing {")
               |> se.indent(4, "\"\" -> cookie_val")
               |> se.indent(4, "_ -> existing <> \"; \" <> cookie_val")
@@ -1174,10 +1174,7 @@ fn inline_schema_to_decoder(s: schema.SchemaObject) -> String {
 
 /// Return a function expression that converts an array item to String.
 /// Used in generated code: `list.map(param, <fn>)`.
-fn array_item_to_string_fn(
-  items: schema.SchemaRef,
-  ctx: Context,
-) -> String {
+fn array_item_to_string_fn(items: schema.SchemaRef, ctx: Context) -> String {
   case items {
     Inline(IntegerSchema(..)) -> "int.to_string"
     Inline(NumberSchema(..)) -> "float.to_string"

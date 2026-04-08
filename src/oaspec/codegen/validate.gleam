@@ -67,7 +67,8 @@ fn validate_parameters(
       _, Some(Inline(ObjectSchema(..)))
       | _, Some(Inline(AllOfSchema(..)))
       | _, Some(Inline(OneOfSchema(..)))
-      | _, Some(Inline(AnyOfSchema(..))) -> [
+      | _, Some(Inline(AnyOfSchema(..)))
+      -> [
         UnsupportedFeature(
           path: path,
           detail: "Complex schema parameters (object/allOf/oneOf/anyOf) in query/header/cookie are not supported.",
@@ -94,7 +95,12 @@ fn validate_parameters(
       ]
       _, _ -> []
     }
-    list.flatten([deep_object_errors, complex_schema_errors, array_errors, required_errors])
+    list.flatten([
+      deep_object_errors,
+      complex_schema_errors,
+      array_errors,
+      required_errors,
+    ])
   })
 }
 
@@ -212,7 +218,8 @@ fn validate_schema_recursive(
       let _ = additional_properties_untyped
       // Recurse into typed additionalProperties schema
       let typed_ap_errors = case additional_properties {
-        Some(ap_ref) -> validate_schema_ref_recursive(path <> ".additionalProperties", ap_ref)
+        Some(ap_ref) ->
+          validate_schema_ref_recursive(path <> ".additionalProperties", ap_ref)
         None -> []
       }
       // Recurse into properties, also catching inline objects
@@ -257,7 +264,12 @@ fn validate_schema_recursive(
               <> "'",
           )
         })
-      list.flatten([ap_errors, typed_ap_errors, prop_errors, prop_collision_errors])
+      list.flatten([
+        ap_errors,
+        typed_ap_errors,
+        prop_errors,
+        prop_collision_errors,
+      ])
     }
 
     ArraySchema(items:, ..) -> {
@@ -356,9 +368,7 @@ fn validate_name_collisions(ctx: Context) -> List(ValidationError) {
     find_name_collisions(fn_names, fn(dup) {
       UnsupportedFeature(
         path: "paths",
-        detail: "Function name collision after case conversion: '"
-          <> dup
-          <> "'",
+        detail: "Function name collision after case conversion: '" <> dup <> "'",
       )
     })
 
@@ -372,9 +382,7 @@ fn validate_name_collisions(ctx: Context) -> List(ValidationError) {
     find_name_collisions(type_names, fn(dup) {
       UnsupportedFeature(
         path: "paths",
-        detail: "Type name collision after case conversion: '"
-          <> dup
-          <> "'",
+        detail: "Type name collision after case conversion: '" <> dup <> "'",
       )
     })
 

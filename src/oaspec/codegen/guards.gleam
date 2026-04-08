@@ -32,9 +32,24 @@ fn generate_guards(ctx: Context) -> String {
     None -> []
   }
 
+  // Determine which imports are needed based on constraint types present.
+  // Generated guard functions use string/list.length for validation;
+  // constraint values (min/max) are baked as literals at generation time,
+  // so gleam/int and gleam/float are NOT needed in the generated output.
+  let constraint_types = collect_constraint_types(schemas, ctx)
+  let imports = []
+  let imports = case constraint_types.has_string {
+    True -> ["gleam/string", ..imports]
+    False -> imports
+  }
+  let imports = case constraint_types.has_list {
+    True -> ["gleam/list", ..imports]
+    False -> imports
+  }
+
   let sb =
     se.file_header(context.version)
-    |> se.imports(["gleam/float", "gleam/int", "gleam/list", "gleam/string"])
+    |> se.imports(imports)
 
   let sb =
     list.fold(schemas, sb, fn(sb, entry) {
@@ -43,6 +58,68 @@ fn generate_guards(ctx: Context) -> String {
     })
 
   se.to_string(sb)
+}
+
+/// Track which constraint types exist in the schema set.
+type ConstraintTypes {
+  ConstraintTypes(
+    has_string: Bool,
+    has_integer: Bool,
+    has_float: Bool,
+    has_list: Bool,
+  )
+}
+
+/// Scan all schemas to find which constraint types are present.
+fn collect_constraint_types(
+  schemas: List(#(String, SchemaRef)),
+  ctx: Context,
+) -> ConstraintTypes {
+  list.fold(
+    schemas,
+    ConstraintTypes(False, False, False, False),
+    fn(acc, entry) {
+      let #(_name, schema_ref) = entry
+      collect_schema_constraint_types(acc, schema_ref, ctx)
+    },
+  )
+}
+
+/// Collect constraint types from a single schema ref.
+fn collect_schema_constraint_types(
+  acc: ConstraintTypes,
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> ConstraintTypes {
+  let schema = case schema_ref {
+    Inline(s) -> Ok(s)
+    Reference(_) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
+  }
+  case schema {
+    Ok(StringSchema(min_length: Some(_), ..))
+    | Ok(StringSchema(max_length: Some(_), ..)) ->
+      ConstraintTypes(..acc, has_string: True)
+    Ok(IntegerSchema(minimum: Some(_), ..))
+    | Ok(IntegerSchema(maximum: Some(_), ..)) ->
+      ConstraintTypes(..acc, has_integer: True)
+    Ok(NumberSchema(minimum: Some(_), ..))
+    | Ok(NumberSchema(maximum: Some(_), ..)) ->
+      ConstraintTypes(..acc, has_float: True)
+    Ok(ArraySchema(min_items: Some(_), ..))
+    | Ok(ArraySchema(max_items: Some(_), ..)) ->
+      ConstraintTypes(..acc, has_list: True)
+    Ok(ObjectSchema(properties:, ..)) ->
+      dict.to_list(properties)
+      |> list.fold(acc, fn(a, prop) {
+        let #(_, prop_ref) = prop
+        collect_schema_constraint_types(a, prop_ref, ctx)
+      })
+    Ok(AllOfSchema(schemas:, ..)) ->
+      list.fold(schemas, acc, fn(a, s) {
+        collect_schema_constraint_types(a, s, ctx)
+      })
+    _ -> acc
+  }
 }
 
 /// Generate guard functions for a single schema's constrained fields.
@@ -162,8 +239,7 @@ fn generate_string_guard(
         |> se.line(
           "pub fn " <> fn_name <> "(value: String) -> Result(String, String) {",
         )
-      let sb =
-        sb |> se.indent(1, "let len = string.length(value)")
+      let sb = sb |> se.indent(1, "let len = string.length(value)")
       let sb = case min_length, max_length {
         Some(min), Some(max) ->
           sb
@@ -247,17 +323,13 @@ fn generate_integer_guard(
           |> se.indent(1, "case value < " <> int.to_string(min) <> " {")
           |> se.indent(
             2,
-            "True -> Error(\"must be at least "
-              <> int.to_string(min)
-              <> "\")",
+            "True -> Error(\"must be at least " <> int.to_string(min) <> "\")",
           )
           |> se.indent(2, "False ->")
           |> se.indent(3, "case value > " <> int.to_string(max) <> " {")
           |> se.indent(
             4,
-            "True -> Error(\"must be at most "
-              <> int.to_string(max)
-              <> "\")",
+            "True -> Error(\"must be at most " <> int.to_string(max) <> "\")",
           )
           |> se.indent(4, "False -> Ok(value)")
           |> se.indent(3, "}")
@@ -267,9 +339,7 @@ fn generate_integer_guard(
           |> se.indent(1, "case value < " <> int.to_string(min) <> " {")
           |> se.indent(
             2,
-            "True -> Error(\"must be at least "
-              <> int.to_string(min)
-              <> "\")",
+            "True -> Error(\"must be at least " <> int.to_string(min) <> "\")",
           )
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
@@ -278,9 +348,7 @@ fn generate_integer_guard(
           |> se.indent(1, "case value > " <> int.to_string(max) <> " {")
           |> se.indent(
             2,
-            "True -> Error(\"must be at most "
-              <> int.to_string(max)
-              <> "\")",
+            "True -> Error(\"must be at most " <> int.to_string(max) <> "\")",
           )
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
@@ -316,62 +384,40 @@ fn generate_float_guard(
       let sb =
         sb
         |> se.line(
-          "pub fn "
-          <> fn_name
-          <> "(value: Float) -> Result(Float, String) {",
+          "pub fn " <> fn_name <> "(value: Float) -> Result(Float, String) {",
         )
       let sb = case minimum, maximum {
         Some(min), Some(max) ->
           sb
-          |> se.indent(
-            1,
-            "case value <. " <> float.to_string(min) <> " {",
-          )
+          |> se.indent(1, "case value <. " <> float.to_string(min) <> " {")
           |> se.indent(
             2,
-            "True -> Error(\"must be at least "
-              <> float.to_string(min)
-              <> "\")",
+            "True -> Error(\"must be at least " <> float.to_string(min) <> "\")",
           )
           |> se.indent(2, "False ->")
-          |> se.indent(
-            3,
-            "case value >. " <> float.to_string(max) <> " {",
-          )
+          |> se.indent(3, "case value >. " <> float.to_string(max) <> " {")
           |> se.indent(
             4,
-            "True -> Error(\"must be at most "
-              <> float.to_string(max)
-              <> "\")",
+            "True -> Error(\"must be at most " <> float.to_string(max) <> "\")",
           )
           |> se.indent(4, "False -> Ok(value)")
           |> se.indent(3, "}")
           |> se.indent(1, "}")
         Some(min), None ->
           sb
-          |> se.indent(
-            1,
-            "case value <. " <> float.to_string(min) <> " {",
-          )
+          |> se.indent(1, "case value <. " <> float.to_string(min) <> " {")
           |> se.indent(
             2,
-            "True -> Error(\"must be at least "
-              <> float.to_string(min)
-              <> "\")",
+            "True -> Error(\"must be at least " <> float.to_string(min) <> "\")",
           )
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
         None, Some(max) ->
           sb
-          |> se.indent(
-            1,
-            "case value >. " <> float.to_string(max) <> " {",
-          )
+          |> se.indent(1, "case value >. " <> float.to_string(max) <> " {")
           |> se.indent(
             2,
-            "True -> Error(\"must be at most "
-              <> float.to_string(max)
-              <> "\")",
+            "True -> Error(\"must be at most " <> float.to_string(max) <> "\")",
           )
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
@@ -475,7 +521,13 @@ fn guard_function_name(
   let base = naming.to_snake_case(schema_name)
   case prop_name {
     "" -> "validate_" <> base <> "_" <> constraint
-    _ -> "validate_" <> base <> "_" <> naming.to_snake_case(prop_name) <> "_" <> constraint
+    _ ->
+      "validate_"
+      <> base
+      <> "_"
+      <> naming.to_snake_case(prop_name)
+      <> "_"
+      <> constraint
   }
 }
 

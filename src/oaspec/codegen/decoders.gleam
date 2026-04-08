@@ -76,7 +76,12 @@ fn generate_decoders(ctx: Context) -> String {
     })
 
   let base_imports = case needs_dict, needs_dynamic {
-    True, True -> ["gleam/dict", "gleam/dynamic", "gleam/dynamic/decode", "gleam/json"]
+    True, True -> [
+      "gleam/dict",
+      "gleam/dynamic",
+      "gleam/dynamic/decode",
+      "gleam/json",
+    ]
     True, False -> ["gleam/dict", "gleam/dynamic/decode", "gleam/json"]
     False, True -> ["gleam/dynamic", "gleam/dynamic/decode", "gleam/json"]
     False, False -> ["gleam/dynamic/decode", "gleam/json"]
@@ -262,7 +267,14 @@ fn generate_decoder(
   let decoder_fn_name = naming.to_snake_case(name) <> "_decoder"
 
   case schema_ref {
-    Inline(ObjectSchema(description:, properties:, required:, nullable:, additional_properties:, additional_properties_untyped:)) -> {
+    Inline(ObjectSchema(
+      description:,
+      properties:,
+      required:,
+      nullable:,
+      additional_properties:,
+      additional_properties_untyped:,
+    )) -> {
       let sb = maybe_doc_comment(sb, description)
       let sb =
         sb
@@ -352,15 +364,20 @@ fn generate_decoder(
       }
       let sb = case additional_properties, additional_properties_untyped {
         Some(ap_ref), _ -> {
-          let inner_decoder = schema_ref_to_decoder(ap_ref, name, "additional_properties", ctx)
+          let inner_decoder =
+            schema_ref_to_decoder(ap_ref, name, "additional_properties", ctx)
           sb
           |> se.indent(
             1,
-            "use all_props <- decode.then(decode.dict(decode.string, " <> inner_decoder <> "))",
+            "use all_props <- decode.then(decode.dict(decode.string, "
+              <> inner_decoder
+              <> "))",
           )
           |> se.indent(
             1,
-            "let additional_properties = dict.drop(all_props, " <> known_keys_expr <> ")",
+            "let additional_properties = dict.drop(all_props, "
+              <> known_keys_expr
+              <> ")",
           )
         }
         None, True -> {
@@ -371,7 +388,9 @@ fn generate_decoder(
           )
           |> se.indent(
             1,
-            "let additional_properties = dict.drop(all_props, " <> known_keys_expr <> ")",
+            "let additional_properties = dict.drop(all_props, "
+              <> known_keys_expr
+              <> ")",
           )
         }
         None, False -> sb
@@ -385,9 +404,18 @@ fn generate_decoder(
         })
 
       // Add additional_properties to param names if present
-      let param_names = case additional_properties, additional_properties_untyped {
-        Some(_), _ -> list.append(param_names, ["additional_properties: additional_properties"])
-        None, True -> list.append(param_names, ["additional_properties: additional_properties"])
+      let param_names = case
+        additional_properties,
+        additional_properties_untyped
+      {
+        Some(_), _ ->
+          list.append(param_names, [
+            "additional_properties: additional_properties",
+          ])
+        None, True ->
+          list.append(param_names, [
+            "additional_properties: additional_properties",
+          ])
         None, False -> param_names
       }
 
@@ -1091,7 +1119,13 @@ fn generate_encoder(
   let json_fn_name = fn_name <> "_json"
 
   case schema_ref {
-    Inline(ObjectSchema(properties:, required:, additional_properties:, additional_properties_untyped:, ..)) -> {
+    Inline(ObjectSchema(
+      properties:,
+      required:,
+      additional_properties:,
+      additional_properties_untyped:,
+      ..,
+    )) -> {
       // _json version: returns json.Json
       let sb =
         sb
@@ -1104,7 +1138,8 @@ fn generate_encoder(
         )
 
       // When additional_properties exist, we merge fixed props with dict entries
-      let has_ap = option.is_some(additional_properties) || additional_properties_untyped
+      let has_ap =
+        option.is_some(additional_properties) || additional_properties_untyped
       let sb = case has_ap {
         True ->
           sb
@@ -1164,10 +1199,21 @@ fn generate_encoder(
 
       let sb = case additional_properties, additional_properties_untyped {
         Some(ap_ref), _ -> {
-          let inner_encoder_fn = schema_ref_to_json_encoder_fn(ap_ref, name, "additional_properties", ctx)
+          let inner_encoder_fn =
+            schema_ref_to_json_encoder_fn(
+              ap_ref,
+              name,
+              "additional_properties",
+              ctx,
+            )
           sb
           |> se.indent(1, "]")
-          |> se.indent(1, "let extra_props = dict.to_list(value.additional_properties) |> list.map(fn(entry) { let #(k, v) = entry; #(k, " <> inner_encoder_fn <> "(v)) })")
+          |> se.indent(
+            1,
+            "let extra_props = dict.to_list(value.additional_properties) |> list.map(fn(entry) { let #(k, v) = entry; #(k, "
+              <> inner_encoder_fn
+              <> "(v)) })",
+          )
           |> se.indent(1, "json.object(list.append(base_props, extra_props))")
         }
         None, True -> {

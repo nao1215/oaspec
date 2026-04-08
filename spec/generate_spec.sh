@@ -34,7 +34,7 @@ Describe 'oaspec generate'
       When run generate --config=test/fixtures/oaspec.yaml
       The status should be success
       The output should include 'Successfully generated'
-      The output should include '15 files'
+      The output should include '17 files'
     End
   End
 
@@ -316,17 +316,8 @@ Describe 'oaspec generate'
       The output should include 'deepObject'
     End
 
-    It 'reports multipart/form-data as unsupported'
-      When run generate --config=test/fixtures/broken-oaspec.yaml
-      The status should be failure
-      The output should include 'multipart/form-data'
-    End
-
-    It 'reports additionalProperties as unsupported'
-      When run generate --config=test/fixtures/broken-oaspec.yaml
-      The status should be failure
-      The output should include 'additionalProperties'
-    End
+    # multipart/form-data and additionalProperties are now supported,
+    # so they are no longer reported as unsupported.
 
     It 'reports inline oneOf primitives as unsupported'
       When run generate --config=test/fixtures/broken-oaspec.yaml
@@ -375,7 +366,7 @@ Describe 'oaspec generate'
     # Inline object in response
 
     It 'generates anonymous type for inline response object'
-      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'pub type PostSearchResponseOk {'
+      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'pub type PostSearchResponse200 {'
       The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'results: Option(List(User))'
       The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'total: Option(Int)'
     End
@@ -383,15 +374,15 @@ Describe 'oaspec generate'
     # oneOf with $ref in response
 
     It 'generates oneOf type with $ref variants'
-      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'pub type GetUserResponseOk {'
-      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'GetUserResponseOkAdminUser(AdminUser)'
-      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'GetUserResponseOkRegularUser(RegularUser)'
+      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'pub type GetUserResponse200 {'
+      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'GetUserResponse200AdminUser(AdminUser)'
+      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'GetUserResponse200RegularUser(RegularUser)'
     End
 
     # allOf merged requestBody
 
     It 'generates merged allOf type for request body'
-      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'pub type PostSearchRequestBody {'
+      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'pub type PostSearchRequest {'
       The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'page: Option(Int)'
       The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'query: Option(String)'
     End
@@ -399,14 +390,14 @@ Describe 'oaspec generate'
     # Response types reference anonymous types
 
     It 'response types reference anonymous types correctly'
-      The contents of file "$TEST_OUTPUT_DIR/api/response_types.gleam" should include 'PostSearchResponseOk(types.PostSearchResponseOk)'
-      The contents of file "$TEST_OUTPUT_DIR/api/response_types.gleam" should include 'GetUserResponseOk(types.GetUserResponseOk)'
+      The contents of file "$TEST_OUTPUT_DIR/api/response_types.gleam" should include 'PostSearchResponseOk(types.PostSearchResponse200)'
+      The contents of file "$TEST_OUTPUT_DIR/api/response_types.gleam" should include 'GetUserResponseOk(types.GetUserResponse200)'
     End
 
     # Request types reference merged allOf type
 
     It 'request types reference merged allOf body type'
-      The contents of file "$TEST_OUTPUT_DIR/api/request_types.gleam" should include 'body: types.PostSearchRequestBody'
+      The contents of file "$TEST_OUTPUT_DIR/api/request_types.gleam" should include 'body: types.PostSearchRequest'
     End
   End
 End

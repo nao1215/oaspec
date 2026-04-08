@@ -920,10 +920,8 @@ components:
   |> should.equal("#/components/schemas/CompanyHeadquartersCoordinates")
 
   // CompanyHeadquartersCoordinates should have lat and lon
-  let assert Ok(schema.Inline(schema.ObjectSchema(
-    properties: coord_props,
-    ..,
-  ))) = dict.get(components.schemas, "CompanyHeadquartersCoordinates")
+  let assert Ok(schema.Inline(schema.ObjectSchema(properties: coord_props, ..))) =
+    dict.get(components.schemas, "CompanyHeadquartersCoordinates")
   dict.has_key(coord_props, "lat") |> should.be_true()
   dict.has_key(coord_props, "lon") |> should.be_true()
 }
@@ -1125,7 +1123,9 @@ pub fn content_type_is_supported_test() {
   content_type.is_supported(content_type.MultipartFormData)
   |> should.be_true()
 
-  content_type.is_supported(content_type.UnsupportedContentType("application/xml"))
+  content_type.is_supported(content_type.UnsupportedContentType(
+    "application/xml",
+  ))
   |> should.be_false()
 }
 
@@ -1205,8 +1205,7 @@ components:
   let assert Some(components) = parsed.components
   let assert Ok(scheme) = dict.get(components.security_schemes, "cookieAuth")
   case scheme {
-    spec.ApiKeyScheme(name: "session_id", in_: "cookie") ->
-      should.be_true(True)
+    spec.ApiKeyScheme(name: "session_id", in_: "cookie") -> should.be_true(True)
     _ -> should.fail()
   }
 }
