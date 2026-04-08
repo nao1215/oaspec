@@ -139,6 +139,64 @@ pub fn parse_file_not_found_test() {
   should.be_error(result)
 }
 
+pub fn parse_secure_api_has_security_schemes_test() {
+  let assert Ok(spec) = parser.parse_file("test/fixtures/secure_api.yaml")
+  let assert Some(components) = spec.components
+  dict.size(components.security_schemes) |> should.equal(2)
+}
+
+pub fn parse_secure_api_operation_has_security_test() {
+  let assert Ok(spec) = parser.parse_file("test/fixtures/secure_api.yaml")
+  let assert Ok(path_item) = dict.get(spec.paths, "/pets")
+  let assert Some(get_op) = path_item.get
+  list.length(get_op.security) |> should.equal(1)
+}
+
+pub fn parse_rejects_basic_auth_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  securitySchemes:
+    BasicAuth:
+      type: http
+      scheme: basic
+"
+  let result = parser.parse_string(yaml)
+  should.be_error(result)
+}
+
+pub fn parse_rejects_malformed_security_scopes_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      security:
+        - ApiKeyAuth: 123
+      responses:
+        '200':
+          description: ok
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Key
+"
+  let result = parser.parse_string(yaml)
+  should.be_error(result)
+}
+
 // --- Resolver Tests ---
 
 pub fn ref_to_name_test() {

@@ -248,4 +248,60 @@ fi
 # Clean up
 rm -rf "$COMPLEX_DIR"
 
+info "Complex spec integration tests passed."
+
+# -------------------------------------------------------
+# Step 7: Generate security-bearing spec client and verify it compiles
+# -------------------------------------------------------
+info "Testing security scheme client code generation (apiKey header, bearer)..."
+
+SECURE_DIR="$SCRIPT_DIR/secure_test"
+rm -rf "$SECURE_DIR"
+mkdir -p "$SECURE_DIR/src"
+
+cat > "$SECURE_DIR/oaspec-secure.yaml" << 'YAML_EOF'
+input: test/fixtures/secure_api.yaml
+output:
+  client: ./integration_test/secure_test/src/api
+package: api
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$SECURE_DIR/oaspec-secure.yaml" \
+  --mode=client
+
+cat > "$SECURE_DIR/gleam.toml" << 'TOML_EOF'
+name = "secure_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$SECURE_DIR/src/secure_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$SECURE_DIR"
+gleam deps download
+
+if gleam build 2>&1; then
+  info "PASS: Generated security client code compiles successfully."
+else
+  fail "Generated security client code failed to compile."
+fi
+
+# Clean up
+rm -rf "$SECURE_DIR"
+
 info "All integration tests passed!"
