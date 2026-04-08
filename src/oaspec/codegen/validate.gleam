@@ -134,7 +134,7 @@ fn validate_request_body(
       let content_keys = dict.keys(rb.content)
       let unsupported =
         list.filter(content_keys, fn(key) {
-          !content_type.is_supported(content_type.from_string(key))
+          !content_type.is_supported_request(content_type.from_string(key))
         })
       let content_type_errors = case unsupported {
         [] -> []
@@ -143,7 +143,7 @@ fn validate_request_body(
             path: op_id <> ".requestBody",
             detail: "Content type '"
               <> media_type
-              <> "' is not supported. Only 'application/json' is supported.",
+              <> "' is not supported. Only 'application/json' and 'multipart/form-data' are supported for request bodies.",
           ),
         ]
       }
@@ -203,10 +203,7 @@ fn validate_multipart_request_body_fields(
   }
 }
 
-fn multipart_field_is_stringifiable(
-  schema_ref: SchemaRef,
-  ctx: Context,
-) -> Bool {
+fn multipart_field_is_stringifiable(schema_ref: SchemaRef, ctx: Context) -> Bool {
   case resolve_schema_object(Some(schema_ref), ctx) {
     Some(StringSchema(..))
     | Some(IntegerSchema(..))
@@ -229,7 +226,9 @@ fn validate_responses(
       let #(media_type_name, media_type) = ce
       let path = op_id <> ".responses." <> status_code
       let content_type_errors = case
-        content_type.is_supported(content_type.from_string(media_type_name))
+        content_type.is_supported_response(content_type.from_string(
+          media_type_name,
+        ))
       {
         True -> []
         False -> [
@@ -237,7 +236,7 @@ fn validate_responses(
             path: path,
             detail: "Response content type '"
               <> media_type_name
-              <> "' is not supported. Only 'application/json' is supported.",
+              <> "' is not supported. Only 'application/json' and 'text/plain' are supported.",
           ),
         ]
       }

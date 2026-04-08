@@ -26,15 +26,30 @@ pub fn to_string(content_type: ContentType) -> String {
   }
 }
 
-/// Check if a content type is currently supported for code generation.
-/// Initially only application/json is supported. As we add features,
-/// we expand this to include text/plain (Phase 1-3) and
-/// multipart/form-data (Phase 2-2).
+/// Check if a content type is supported anywhere in code generation.
 pub fn is_supported(content_type: ContentType) -> Bool {
   case content_type {
     ApplicationJson -> True
     TextPlain -> True
     MultipartFormData -> True
+    _ -> False
+  }
+}
+
+/// Check if a content type is supported for request bodies.
+pub fn is_supported_request(content_type: ContentType) -> Bool {
+  case content_type {
+    ApplicationJson -> True
+    MultipartFormData -> True
+    _ -> False
+  }
+}
+
+/// Check if a content type is supported for responses.
+pub fn is_supported_response(content_type: ContentType) -> Bool {
+  case content_type {
+    ApplicationJson -> True
+    TextPlain -> True
     _ -> False
   }
 }

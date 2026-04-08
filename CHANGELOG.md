@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-08
+
 ### Added
 
 - `ContentType` type abstraction for extensible content type handling
@@ -15,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `text/plain` response content type: body returned as `String` directly without JSON decoding
 - Typed `additionalProperties`: generates `Dict(String, T)` fields with dict decoder/encoder (known keys excluded from dict)
 - Untyped `additionalProperties: true`: generates `Dict(String, Dynamic)` (decode-only, known keys excluded)
-- `multipart/form-data` request bodies with boundary-based multipart encoding (optional fields handled)
+- `multipart/form-data` request bodies with boundary-based multipart encoding
 - `apiKey` in cookie position: generates cookie headers (appends, does not overwrite)
 - HTTP Basic and Digest authentication support
 - Validation constraint guard functions (minLength, maxLength, minimum, maximum, minItems, maxItems)
@@ -25,10 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Guard generation: missing `gleam/list` import, incomplete min+max checks, float validation stub
 - Typed `additionalProperties` decoder no longer forces value decoder on known fields with incompatible types
-- `multipart/form-data` client handles optional fields with case/Some/None instead of raw concatenation
+- Typed `additionalProperties` decoder now fails on invalid extra values instead of silently dropping them
+- `multipart/form-data` client handles optional fields and scalar `$ref` fields instead of raw concatenation
+- `multipart/form-data` validation rejects unstringifiable object-like fields before code generation
 - `allOf` merge now preserves `additionalProperties` from sub-schemas
 - Cookie `apiKey` auth appends to existing cookie header instead of overwriting
 - `text/plain` response types always use `String` regardless of schema type
+- Referenced unsupported parameter schemas are rejected during validation
+- Hoisted schema names avoid collisions after case normalization
+- `text/plain` request bodies are rejected during validation
+- `just all` no longer emits `BASH_ENV` shell warnings or integration `todo` warnings
 
 ### Changed
 

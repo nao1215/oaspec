@@ -203,17 +203,17 @@ import api/response_types
 
 pub fn get_user(req: request_types.GetUserRequest) -> response_types.GetUserResponse {
   let _ = req
-  todo
+  panic as "complex_test stub"
 }
 
 pub fn post_search(req: request_types.PostSearchRequest) -> response_types.PostSearchResponse {
   let _ = req
-  todo
+  panic as "complex_test stub"
 }
 
 pub fn post_webhook(req: request_types.PostWebhookRequest) -> response_types.PostWebhookResponse {
   let _ = req
-  todo
+  panic as "complex_test stub"
 }
 GLEAM_EOF
 

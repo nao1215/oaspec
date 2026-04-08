@@ -13,7 +13,7 @@ Generate Gleam code from OpenAPI 3.x specifications.
 - Server handler stubs
 - Client SDK with parameter serialization and response decoding
 - Middleware (logging, retry)
-- Security scheme support (apiKey header/query, Bearer token)
+- Security scheme support (`apiKey` header/query/cookie, HTTP bearer/basic/digest)
 - OpenAPI descriptions as doc comments
 
 ## Install
@@ -176,7 +176,7 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 - Parameter serialization for Bool, Float, Int, String, `$ref` enum types
 - Percent-encoding for path/query/cookie parameter values via `uri.percent_encode`
 - Cookie parameters combined into single header
-- Request bodies with `$ref` resolution (typed, auto-encoded)
+- `application/json` request bodies with `$ref` resolution (typed, auto-encoded)
 - allOf in request body (property merging from `$ref` + inline objects)
 - Responses with status codes, `$ref` responses from `components.responses`
 - `$ref` resolution for parameters, requestBodies, responses, schemas
@@ -200,7 +200,7 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 - `text/plain` response content type: body returned as `String` directly
 - Typed `additionalProperties`: `Dict(String, T)` with dict decoder/encoder (known keys excluded)
 - Untyped `additionalProperties: true`: `Dict(String, Dynamic)` (decode-only, known keys excluded)
-- `multipart/form-data` request bodies with boundary-based encoding (optional fields handled)
+- `multipart/form-data` request bodies with boundary-based encoding for string/integer/number/boolean/binary/string-enum fields (optional fields handled)
 - Validation constraint guards (minLength, maxLength, minimum, maximum, minItems, maxItems)
 - Duplicate operationId detection
 - Function/type name collision detection after case conversion
@@ -223,6 +223,7 @@ These are detected before code generation. The generator prints an error and exi
 - Function/type name collisions after case conversion
 - Property name collisions after snake_case conversion
 - Enum variant collisions after PascalCase conversion
+- Non-JSON/non-multipart request body content types (only `application/json` and `multipart/form-data`)
 - Non-JSON response content types (only `application/json` and `text/plain`)
 - Path parameters with `required: false`
 

@@ -386,13 +386,19 @@ fn generate_decoder(
           |> se.indent(2, "case acc {")
           |> se.indent(3, "Ok(decoded_acc) ->")
           |> se.indent(4, "case decode.run(v, " <> inner_decoder <> ") {")
-          |> se.indent(5, "Ok(decoded) -> Ok(dict.insert(decoded_acc, k, decoded))")
+          |> se.indent(
+            5,
+            "Ok(decoded) -> Ok(dict.insert(decoded_acc, k, decoded))",
+          )
           |> se.indent(5, "Error(_) -> Error(Nil)")
           |> se.indent(4, "}")
           |> se.indent(3, "Error(_) -> Error(Nil)")
           |> se.indent(2, "}")
           |> se.indent(1, "})")
-          |> se.indent(1, "use additional_properties <- decode.then(case additional_properties_result {")
+          |> se.indent(
+            1,
+            "use additional_properties <- decode.then(case additional_properties_result {",
+          )
           |> se.indent(2, "Ok(decoded) -> decode.success(decoded)")
           |> se.indent(
             2,

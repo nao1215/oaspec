@@ -359,6 +359,36 @@ paths:
   errors |> should.equal([])
 }
 
+pub fn validate_rejects_text_plain_request_body_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /echo:
+    post:
+      operationId: postEcho
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema: { type: string }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let error_strings = list.map(errors, validate.error_to_string)
+  list.any(error_strings, fn(s) {
+    string.contains(s, "multipart/form-data")
+    && string.contains(s, "request bodies")
+  })
+  |> should.be_true()
+}
+
 pub fn validate_rejects_property_name_collision_test() {
   let yaml =
     "
@@ -1255,6 +1285,28 @@ pub fn content_type_is_supported_test() {
   |> should.be_false()
 }
 
+pub fn content_type_is_supported_request_test() {
+  content_type.is_supported_request(content_type.ApplicationJson)
+  |> should.be_true()
+
+  content_type.is_supported_request(content_type.MultipartFormData)
+  |> should.be_true()
+
+  content_type.is_supported_request(content_type.TextPlain)
+  |> should.be_false()
+}
+
+pub fn content_type_is_supported_response_test() {
+  content_type.is_supported_response(content_type.ApplicationJson)
+  |> should.be_true()
+
+  content_type.is_supported_response(content_type.TextPlain)
+  |> should.be_true()
+
+  content_type.is_supported_response(content_type.MultipartFormData)
+  |> should.be_false()
+}
+
 pub fn content_type_roundtrip_test() {
   content_type.from_string("application/json")
   |> content_type.to_string()
@@ -1555,7 +1607,10 @@ components:
   // Invalid extra values must fail decoding rather than being silently dropped.
   string.contains(content, "Error(_) -> acc")
   |> should.be_false()
-  string.contains(content, "decode.failure(dict.new(), \"additionalProperties\")")
+  string.contains(
+    content,
+    "decode.failure(dict.new(), \"additionalProperties\")",
+  )
   |> should.be_true()
 }
 
@@ -1794,9 +1849,8 @@ pub fn readme_no_contradictory_multipart_test() {
   let assert Ok(unsupported_start) =
     find_substring_index(content, "### Unsupported")
   let unsupported_section = string.drop_start(content, unsupported_start)
-  // multipart/form-data should NOT appear in the Unsupported section
-  // (it's already in Supported)
-  string.contains(unsupported_section, "multipart/form-data")
+  // multipart/form-data itself should NOT be listed as unsupported
+  string.contains(unsupported_section, "- `multipart/form-data` request bodies")
   |> should.be_false()
 }
 
