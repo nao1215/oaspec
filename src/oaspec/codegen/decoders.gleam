@@ -4,8 +4,9 @@ import gleam/option.{type Option, None, Some}
 import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{
-  type SchemaRef, AllOfSchema, ArraySchema, BooleanSchema, Inline, IntegerSchema,
-  NumberSchema, ObjectSchema, Reference, StringSchema,
+  type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema, BooleanSchema, Inline,
+  IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema, Reference,
+  StringSchema,
 }
 import oaspec/util/naming
 import oaspec/util/string_extra as se
@@ -300,7 +301,222 @@ fn generate_decoder(
       generate_decoder(sb, name, merged_schema, ctx)
     }
 
+    Inline(OneOfSchema(description:, schemas:, discriminator:)) -> {
+      generate_oneof_decoder(
+        sb,
+        name,
+        type_name,
+        fn_name,
+        decoder_fn_name,
+        description,
+        schemas,
+        discriminator,
+        ctx,
+      )
+    }
+
+    Inline(AnyOfSchema(description:, schemas:)) -> {
+      // Treat anyOf the same as oneOf without discriminator
+      generate_oneof_decoder(
+        sb,
+        name,
+        type_name,
+        fn_name,
+        decoder_fn_name,
+        description,
+        schemas,
+        None,
+        ctx,
+      )
+    }
+
     _ -> sb
+  }
+}
+
+/// Generate decoder for oneOf/anyOf union types.
+/// With discriminator: decode based on discriminator field value.
+/// Without discriminator: try each variant decoder in order.
+fn generate_oneof_decoder(
+  sb: se.StringBuilder,
+  _name: String,
+  type_name: String,
+  fn_name: String,
+  decoder_fn_name: String,
+  description: Option(String),
+  schemas: List(SchemaRef),
+  discriminator: Option(schema.Discriminator),
+  ctx: Context,
+) -> se.StringBuilder {
+  // Only handle $ref variants (inline primitives blocked by validator)
+  let all_refs =
+    list.all(schemas, fn(s) {
+      case s {
+        Reference(_) -> True
+        _ -> False
+      }
+    })
+
+  case all_refs {
+    False -> sb
+    True -> {
+      let sb = maybe_doc_comment(sb, description)
+
+      case discriminator {
+        Some(disc) -> {
+          // Discriminator-based decoder
+          let sb =
+            sb
+            |> se.line(
+              "pub fn "
+              <> decoder_fn_name
+              <> "() -> decode.Decoder(types."
+              <> type_name
+              <> ") {",
+            )
+            |> se.indent(
+              1,
+              "use disc_value <- decode.field(\""
+                <> disc.property_name
+                <> "\", decode.string)",
+            )
+            |> se.indent(1, "case disc_value {")
+
+          let sb =
+            list.fold(schemas, sb, fn(sb, s_ref) {
+              case s_ref {
+                Reference(ref:) -> {
+                  let ref_name = resolver.ref_to_name(ref)
+                  let variant_type = naming.schema_to_type_name(ref_name)
+                  let variant_name = type_name <> variant_type
+                  let variant_decoder =
+                    naming.to_snake_case(ref_name) <> "_decoder()"
+                  // Check discriminator mapping first, fallback to ref name
+                  let disc_value = get_discriminator_value(disc, ref, ref_name)
+                  sb
+                  |> se.indent(2, "\"" <> disc_value <> "\" -> {")
+                  |> se.indent(
+                    3,
+                    "use inner <- decode.then(" <> variant_decoder <> ")",
+                  )
+                  |> se.indent(
+                    3,
+                    "decode.success(types." <> variant_name <> "(inner))",
+                  )
+                  |> se.indent(2, "}")
+                }
+                _ -> sb
+              }
+            })
+
+          let first_variant = case schemas {
+            [Reference(ref:), ..] -> {
+              let ref_name = resolver.ref_to_name(ref)
+              let variant_type = naming.schema_to_type_name(ref_name)
+              type_name <> variant_type
+            }
+            _ -> type_name
+          }
+
+          let sb =
+            sb
+            |> se.indent(
+              2,
+              "_ -> decode.failure(types."
+                <> first_variant
+                <> "(todo), \""
+                <> type_name
+                <> "\")",
+            )
+            |> se.indent(1, "}")
+            |> se.line("}")
+            |> se.blank_line()
+
+          // json.parse wrapper
+          let sb =
+            sb
+            |> se.line(
+              "pub fn "
+              <> fn_name
+              <> "(json_string: String) -> Result(types."
+              <> type_name
+              <> ", json.DecodeError) {",
+            )
+            |> se.indent(
+              1,
+              "json.parse(json_string, " <> decoder_fn_name <> "())",
+            )
+            |> se.line("}")
+            |> se.blank_line()
+
+          sb
+        }
+
+        None -> {
+          // No discriminator: try each variant decoder in order
+          let sb =
+            sb
+            |> se.line(
+              "pub fn "
+              <> fn_name
+              <> "(json_string: String) -> Result(types."
+              <> type_name
+              <> ", json.DecodeError) {",
+            )
+
+          let sb =
+            list.fold(schemas, sb, fn(sb, s_ref) {
+              case s_ref {
+                Reference(ref:) -> {
+                  let ref_name = resolver.ref_to_name(ref)
+                  let variant_type = naming.schema_to_type_name(ref_name)
+                  let variant_name = type_name <> variant_type
+                  let decode_fn = "decode_" <> naming.to_snake_case(ref_name)
+                  sb
+                  |> se.indent(1, "case " <> decode_fn <> "(json_string) {")
+                  |> se.indent(
+                    2,
+                    "Ok(v) -> Ok(types." <> variant_name <> "(v))",
+                  )
+                  |> se.indent(2, "Error(_) ->")
+                }
+                _ -> sb
+              }
+            })
+
+          // Final error case
+          let sb =
+            sb
+            |> se.indent(1, "Error(json.UnexpectedEndOfInput)")
+
+          // Close all the nested case blocks
+          let sb =
+            list.fold(list.repeat(Nil, list.length(schemas)), sb, fn(sb, _) {
+              sb |> se.indent(1, "}")
+            })
+
+          let sb =
+            sb
+            |> se.line("}")
+            |> se.blank_line()
+
+          let _ = ctx
+          sb
+        }
+      }
+    }
+  }
+}
+
+/// Get the discriminator value for a $ref. Checks mapping first, falls back to ref name.
+fn get_discriminator_value(
+  disc: schema.Discriminator,
+  _ref: String,
+  ref_name: String,
+) -> String {
+  case dict.get(disc.mapping, ref_name) {
+    Ok(mapped) -> mapped
+    Error(_) -> ref_name
   }
 }
 
@@ -553,6 +769,78 @@ fn generate_encoder(
           nullable: False,
         ))
       generate_encoder(sb, name, merged_schema, ctx)
+    }
+
+    Inline(OneOfSchema(schemas:, ..)) | Inline(AnyOfSchema(schemas:, ..)) -> {
+      // Generate encoder for oneOf/anyOf: pattern match on each variant
+      let all_refs =
+        list.all(schemas, fn(s) {
+          case s {
+            Reference(_) -> True
+            _ -> False
+          }
+        })
+      case all_refs {
+        False -> sb
+        True -> {
+          // _json version
+          let sb =
+            sb
+            |> se.line(
+              "pub fn "
+              <> json_fn_name
+              <> "(value: types."
+              <> type_name
+              <> ") -> json.Json {",
+            )
+            |> se.indent(1, "case value {")
+
+          let sb =
+            list.fold(schemas, sb, fn(sb, s_ref) {
+              case s_ref {
+                Reference(ref:) -> {
+                  let ref_name = resolver.ref_to_name(ref)
+                  let variant_type = naming.schema_to_type_name(ref_name)
+                  let variant_name = type_name <> variant_type
+                  let inner_encoder =
+                    "encode_" <> naming.to_snake_case(ref_name) <> "_json"
+                  sb
+                  |> se.indent(
+                    2,
+                    "types."
+                      <> variant_name
+                      <> "(inner) -> "
+                      <> inner_encoder
+                      <> "(inner)",
+                  )
+                }
+                _ -> sb
+              }
+            })
+
+          let sb =
+            sb
+            |> se.indent(1, "}")
+            |> se.line("}")
+            |> se.blank_line()
+
+          // String version
+          let sb =
+            sb
+            |> se.line(
+              "pub fn "
+              <> fn_name
+              <> "(value: types."
+              <> type_name
+              <> ") -> String {",
+            )
+            |> se.indent(1, json_fn_name <> "(value) |> json.to_string()")
+            |> se.line("}")
+            |> se.blank_line()
+
+          sb
+        }
+      }
     }
 
     _ -> sb
