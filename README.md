@@ -218,9 +218,10 @@ These patterns are detected before code generation. The generator prints a clear
 ### Not yet supported
 
 - **Validation constraints** (minLength, maxLength, pattern, minimum, maximum): Parsed but not enforced
-- **Callbacks**: Parsed but ignored
-- **OAuth2 / OpenID Connect security schemes**: Only `apiKey` (header/query) and HTTP Bearer supported
+- **Callbacks**: Ignored by the generator (no AST representation)
+- **OAuth2 / OpenID Connect security schemes**: Rejected at parse time
 - **`apiKey` in `cookie`**: Rejected at parse time
+- **HTTP Basic / Digest authentication**: Only `bearer` is supported for `type: http`; others rejected at parse time
 - **allOf with non-object sub-schemas**: Only object sub-schemas are merged
 
 ### Schema-to-type mapping
