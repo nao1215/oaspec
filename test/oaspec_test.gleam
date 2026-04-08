@@ -49,6 +49,26 @@ pub fn capitalize_test() {
   |> should.equal("Hello")
 }
 
+pub fn deduplicate_names_no_collision_test() {
+  naming.deduplicate_names(["foo", "bar", "baz"])
+  |> should.equal(["foo", "bar", "baz"])
+}
+
+pub fn deduplicate_names_with_collision_test() {
+  naming.deduplicate_names(["pet_id", "pet_id", "name"])
+  |> should.equal(["pet_id", "pet_id_2", "name"])
+}
+
+pub fn deduplicate_names_triple_collision_test() {
+  naming.deduplicate_names(["x", "x", "x"])
+  |> should.equal(["x", "x_2", "x_3"])
+}
+
+pub fn deduplicate_names_empty_test() {
+  naming.deduplicate_names([])
+  |> should.equal([])
+}
+
 // --- Config Tests ---
 
 pub fn load_config_test() {
@@ -275,7 +295,9 @@ paths:
   |> should.be_true()
 }
 
-pub fn validate_rejects_property_name_collision_test() {
+pub fn validate_accepts_property_name_collision_test() {
+  // Property name collisions after snake_case are now auto-resolved
+  // by deduplicate_names during code generation, not validation errors.
   let yaml =
     "
 openapi: 3.0.3
@@ -304,7 +326,7 @@ components:
   list.any(error_strings, fn(s) {
     string.contains(s, "Property name collision")
   })
-  |> should.be_true()
+  |> should.be_false()
 }
 
 pub fn parse_rejects_optional_path_parameter_test() {

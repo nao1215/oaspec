@@ -1,3 +1,5 @@
+import gleam/dict
+import gleam/int
 import gleam/list
 import gleam/regexp
 import gleam/string
@@ -102,4 +104,26 @@ fn split_camel_case(input: String) -> List(String) {
 fn insert_underscores_before_caps(input: String) -> String {
   let assert Ok(re) = regexp.from_string("([a-z0-9])([A-Z])")
   regexp.replace(re, input, "\\1_\\2")
+}
+
+/// Deduplicate a list of names by appending _2, _3, etc. to duplicates.
+/// Preserves order. First occurrence keeps original name.
+pub fn deduplicate_names(names: List(String)) -> List(String) {
+  let #(result_rev, _) =
+    list.fold(names, #([], dict.new()), fn(acc, name) {
+      let #(result, counts) = acc
+      case dict.get(counts, name) {
+        Error(_) -> {
+          let counts = dict.insert(counts, name, 1)
+          #([name, ..result], counts)
+        }
+        Ok(count) -> {
+          let new_count = count + 1
+          let unique_name = name <> "_" <> int.to_string(new_count)
+          let counts = dict.insert(counts, name, new_count)
+          #([unique_name, ..result], counts)
+        }
+      }
+    })
+  list.reverse(result_rev)
 }

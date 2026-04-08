@@ -9,7 +9,6 @@ import oaspec/openapi/schema.{
   Inline, ObjectSchema, OneOfSchema, Reference,
 }
 import oaspec/openapi/spec
-import oaspec/util/naming
 
 /// A validation error representing an unsupported OpenAPI feature.
 pub type ValidationError {
@@ -235,26 +234,9 @@ fn validate_schema_recursive(
             validate_schema_ref_recursive(prop_path, prop_ref),
           )
         })
-      // Check property name collisions after snake_case conversion
-      let prop_names =
-        dict.to_list(properties)
-        |> list.map(fn(entry) {
-          let #(prop_name, _) = entry
-          naming.to_snake_case(prop_name)
-        })
-      let prop_collision_errors =
-        find_string_duplicates(prop_names, fn(dup) {
-          UnsupportedFeature(
-            path: path,
-            detail: "Property name collision after snake_case: '" <> dup <> "'",
-          )
-        })
-      list.flatten([
-        ap_errors,
-        typed_ap_errors,
-        prop_errors,
-        prop_collision_errors,
-      ])
+      // Property name collisions after snake_case are auto-resolved
+      // by deduplicate_names during code generation.
+      list.flatten([ap_errors, typed_ap_errors, prop_errors])
     }
 
     ArraySchema(items:, ..) -> {
@@ -285,22 +267,9 @@ fn validate_schema_recursive(
         validate_schema_ref_recursive(path <> ".allOf", s_ref)
       })
 
-    _ -> {
-      // Check enum variant collisions for string enums
-      case schema_obj {
-        schema.StringSchema(enum_values:, ..) if enum_values != [] -> {
-          let variant_names =
-            list.map(enum_values, fn(v) { naming.schema_to_type_name(v) })
-          find_string_duplicates(variant_names, fn(dup) {
-            UnsupportedFeature(
-              path: path,
-              detail: "Enum variant collision after PascalCase: '" <> dup <> "'",
-            )
-          })
-        }
-        _ -> []
-      }
-    }
+    // Enum variant collisions after PascalCase are auto-resolved
+    // by deduplicate_names during code generation.
+    _ -> []
   }
 }
 
@@ -358,51 +327,9 @@ fn validate_name_collisions(ctx: Context) -> List(ValidationError) {
       },
     )
 
-  // Check snake_case function name collisions
-  let fn_name_errors =
-    find_duplicates(
-      operations,
-      fn(op) {
-        let #(op_id, _, _, _) = op
-        naming.operation_to_function_name(op_id)
-      },
-      fn(dup) {
-        UnsupportedFeature(
-          path: "paths",
-          detail: "Function name collision after snake_case conversion: '"
-            <> dup
-            <> "'",
-        )
-      },
-    )
-
-  // Check PascalCase type name collisions for response/request types
-  let type_name_errors =
-    find_duplicates(
-      operations,
-      fn(op) {
-        let #(op_id, _, _, _) = op
-        naming.schema_to_type_name(op_id)
-      },
-      fn(dup) {
-        UnsupportedFeature(
-          path: "paths",
-          detail: "Type name collision after PascalCase conversion: '"
-            <> dup
-            <> "'",
-        )
-      },
-    )
-
-  list.flatten([op_id_errors, fn_name_errors, type_name_errors])
-}
-
-/// Find duplicates in a list of strings.
-fn find_string_duplicates(
-  items: List(String),
-  error_fn: fn(String) -> ValidationError,
-) -> List(ValidationError) {
-  find_duplicates(items, fn(s) { s }, error_fn)
+  // Function/type name collisions after case conversion are auto-resolved
+  // by deduplicate_names during code generation.
+  op_id_errors
 }
 
 /// Find duplicates in a list using a key function, producing errors via an
