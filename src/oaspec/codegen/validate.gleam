@@ -187,16 +187,9 @@ fn validate_schema_recursive(
       additional_properties_untyped:,
       ..,
     ) -> {
-      // Check additionalProperties: true
-      let ap_errors = case additional_properties_untyped {
-        True -> [
-          UnsupportedFeature(
-            path: path,
-            detail: "additionalProperties: true is not supported. Gleam has no untyped map type.",
-          ),
-        ]
-        False -> []
-      }
+      // additionalProperties: true is supported via Dict(String, Dynamic)
+      let ap_errors = []
+      let _ = additional_properties_untyped
       // Recurse into typed additionalProperties schema
       let typed_ap_errors = case additional_properties {
         Some(ap_ref) -> validate_schema_ref_recursive(path <> ".additionalProperties", ap_ref)

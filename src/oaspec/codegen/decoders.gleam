@@ -47,11 +47,18 @@ fn generate_decoders(ctx: Context) -> String {
       type_gen.schema_has_optional_fields(schema_ref, ctx)
     })
 
-  // Check if dict module is needed (any schema with typed additionalProperties)
+  // Check if dict module is needed (any schema with typed or untyped additionalProperties)
   let needs_dict =
     list.any(schemas, fn(entry) {
       let #(_, schema_ref) = entry
       type_gen.schema_has_additional_properties(schema_ref, ctx)
+    })
+
+  // Check if dynamic module is needed (any schema with untyped additionalProperties)
+  let needs_dynamic =
+    list.any(schemas, fn(entry) {
+      let #(_, schema_ref) = entry
+      type_gen.schema_has_untyped_additional_properties(schema_ref, ctx)
     })
 
   // Check if types module is needed (any non-primitive schema)
@@ -68,9 +75,11 @@ fn generate_decoders(ctx: Context) -> String {
       }
     })
 
-  let base_imports = case needs_dict {
-    True -> ["gleam/dict", "gleam/dynamic/decode", "gleam/json"]
-    False -> ["gleam/dynamic/decode", "gleam/json"]
+  let base_imports = case needs_dict, needs_dynamic {
+    True, True -> ["gleam/dict", "gleam/dynamic", "gleam/dynamic/decode", "gleam/json"]
+    True, False -> ["gleam/dict", "gleam/dynamic/decode", "gleam/json"]
+    False, True -> ["gleam/dynamic", "gleam/dynamic/decode", "gleam/json"]
+    False, False -> ["gleam/dynamic/decode", "gleam/json"]
   }
   let base_imports = case needs_types {
     True -> list.append(base_imports, [ctx.config.package <> "/types"])
@@ -253,7 +262,7 @@ fn generate_decoder(
   let decoder_fn_name = naming.to_snake_case(name) <> "_decoder"
 
   case schema_ref {
-    Inline(ObjectSchema(description:, properties:, required:, nullable:, additional_properties:, ..)) -> {
+    Inline(ObjectSchema(description:, properties:, required:, nullable:, additional_properties:, additional_properties_untyped:)) -> {
       let sb = maybe_doc_comment(sb, description)
       let sb =
         sb
@@ -326,10 +335,10 @@ fn generate_decoder(
           }
         })
 
-      // Decode additional_properties as Dict if typed additionalProperties exists
+      // Decode additional_properties as Dict if typed or untyped additionalProperties exists
       // This decodes all string-keyed values; known property keys are included.
-      let sb = case additional_properties {
-        Some(ap_ref) -> {
+      let sb = case additional_properties, additional_properties_untyped {
+        Some(ap_ref), _ -> {
           let inner_decoder = schema_ref_to_decoder(ap_ref, name, "additional_properties", ctx)
           sb
           |> se.indent(
@@ -337,7 +346,14 @@ fn generate_decoder(
             "use additional_properties <- decode.then(decode.dict(decode.string, " <> inner_decoder <> "))",
           )
         }
-        None -> sb
+        None, True -> {
+          sb
+          |> se.indent(
+            1,
+            "use additional_properties <- decode.then(decode.dict(decode.string, dynamic.dynamic))",
+          )
+        }
+        None, False -> sb
       }
 
       let param_names =
@@ -348,9 +364,10 @@ fn generate_decoder(
         })
 
       // Add additional_properties to param names if present
-      let param_names = case additional_properties {
-        Some(_) -> list.append(param_names, ["additional_properties: additional_properties"])
-        None -> param_names
+      let param_names = case additional_properties, additional_properties_untyped {
+        Some(_), _ -> list.append(param_names, ["additional_properties: additional_properties"])
+        None, True -> list.append(param_names, ["additional_properties: additional_properties"])
+        None, False -> param_names
       }
 
       let sb =
@@ -916,14 +933,17 @@ fn generate_encoders(ctx: Context) -> String {
       }
     })
 
-  // Check if dict/list modules are needed (any schema with typed additionalProperties)
-  let needs_dict =
+  // Check if dict/list modules are needed (only for typed additionalProperties encoding)
+  let needs_typed_dict =
     list.any(schemas, fn(entry) {
       let #(_, schema_ref) = entry
-      type_gen.schema_has_additional_properties(schema_ref, ctx)
+      case schema_ref {
+        Inline(ObjectSchema(additional_properties: Some(_), ..)) -> True
+        _ -> False
+      }
     })
 
-  let base_imports = case needs_dict {
+  let base_imports = case needs_typed_dict {
     True -> ["gleam/dict", "gleam/json", "gleam/list"]
     False -> ["gleam/json"]
   }
@@ -1050,7 +1070,7 @@ fn generate_encoder(
   let json_fn_name = fn_name <> "_json"
 
   case schema_ref {
-    Inline(ObjectSchema(properties:, required:, additional_properties:, ..)) -> {
+    Inline(ObjectSchema(properties:, required:, additional_properties:, additional_properties_untyped:, ..)) -> {
       // _json version: returns json.Json
       let sb =
         sb
@@ -1063,7 +1083,7 @@ fn generate_encoder(
         )
 
       // When additional_properties exist, we merge fixed props with dict entries
-      let has_ap = option.is_some(additional_properties)
+      let has_ap = option.is_some(additional_properties) || additional_properties_untyped
       let sb = case has_ap {
         True ->
           sb
@@ -1121,15 +1141,22 @@ fn generate_encoder(
           }
         })
 
-      let sb = case additional_properties {
-        Some(ap_ref) -> {
+      let sb = case additional_properties, additional_properties_untyped {
+        Some(ap_ref), _ -> {
           let inner_encoder_fn = schema_ref_to_json_encoder_fn(ap_ref, name, "additional_properties", ctx)
           sb
           |> se.indent(1, "]")
           |> se.indent(1, "let extra_props = dict.to_list(value.additional_properties) |> list.map(fn(entry) { let #(k, v) = entry; #(k, " <> inner_encoder_fn <> "(v)) })")
           |> se.indent(1, "json.object(list.append(base_props, extra_props))")
         }
-        None ->
+        None, True -> {
+          // Untyped additional_properties (Dynamic) are decode-only;
+          // skip them during encoding as they cannot be reliably re-encoded.
+          sb
+          |> se.indent(1, "]")
+          |> se.indent(1, "json.object(base_props)")
+        }
+        None, False ->
           sb
           |> se.indent(1, "])")
       }
