@@ -1,0 +1,33 @@
+openapi: 3.0.3
+info:
+  title: AllOf AdditionalProps Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: getItems
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtendedItem'
+components:
+  schemas:
+    BaseItem:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: integer
+      additionalProperties:
+        type: string
+    ExtendedItem:
+      allOf:
+        - $ref: '#/components/schemas/BaseItem'
+        - type: object
+          properties:
+            label:
+              type: string

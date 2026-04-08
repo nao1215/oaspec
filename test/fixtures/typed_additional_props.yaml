@@ -1,0 +1,26 @@
+openapi: 3.0.3
+info:
+  title: Typed AdditionalProps Test
+  version: 1.0.0
+paths:
+  /config:
+    get:
+      operationId: getConfig
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Config'
+components:
+  schemas:
+    Config:
+      type: object
+      required:
+        - version
+      properties:
+        version:
+          type: integer
+      additionalProperties:
+        type: string

@@ -4,7 +4,9 @@ import gleam/option.{None, Some}
 import gleam/string
 import gleeunit
 import gleeunit/should
+import oaspec/codegen/client as client_gen
 import oaspec/codegen/context
+import oaspec/codegen/decoders
 import oaspec/codegen/guards
 import oaspec/codegen/types
 import oaspec/codegen/validate
@@ -16,6 +18,7 @@ import oaspec/openapi/schema
 import oaspec/openapi/spec
 import oaspec/util/content_type
 import oaspec/util/naming
+import simplifile
 
 pub fn main() {
   gleeunit.main()
@@ -1348,4 +1351,211 @@ paths:
   let assert Ok(path_item) = dict.get(spec.paths, "/subscribe")
   let assert Some(op) = path_item.post
   op.operation_id |> should.equal(Some("subscribe"))
+}
+
+// =========================================================================
+// Finding reproduction tests
+// =========================================================================
+
+// --- Finding 1: typed additionalProperties decoder must not apply value
+// decoder to known fields. When a schema has additionalProperties: {type: string}
+// but also has a fixed property of type integer, the decoder must not try
+// to decode ALL values as strings (which would fail on the integer field).
+// The fix: use dynamic.dynamic to read the raw dict, then filter + decode.
+pub fn typed_additional_props_decoder_uses_dynamic_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /config:
+    get:
+      operationId: getConfig
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Config:
+      type: object
+      required: [version]
+      properties:
+        version: { type: integer }
+      additionalProperties:
+        type: string
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = decoders.generate(ctx)
+  let assert [decode_file, ..] = files
+  let content = decode_file.content
+  // The decoder must NOT use decode.dict(decode.string, decode.string)
+  // because that would fail on the integer "version" field.
+  // It should use dynamic.dynamic for the initial dict read.
+  string.contains(content, "decode.dict(decode.string, decode.string)")
+  |> should.be_false()
+  // It should decode the dict with dynamic values first
+  string.contains(content, "dynamic.dynamic")
+  |> should.be_true()
+}
+
+// --- Finding 2: multipart/form-data client must handle optional and $ref fields.
+// Currently body.<field> is concatenated as-is, which breaks for Option(T) and
+// typed $ref fields.
+pub fn multipart_optional_field_generates_case_expr_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /upload:
+    post:
+      operationId: uploadFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                description: { type: string }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // Optional "description" field must have case/Some/None handling,
+  // not raw body.description string concatenation
+  string.contains(content, "case body.description")
+  |> should.be_true()
+}
+
+// --- Finding 3: unknown HTTP security schemes must produce a validation error
+// or a warning, not be silently ignored at code generation time.
+pub fn unknown_http_security_scheme_rejected_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /data:
+    get:
+      operationId: getData
+      responses:
+        '200': { description: ok }
+components:
+  securitySchemes:
+    myAuth:
+      type: http
+      scheme: hoba
+security:
+  - myAuth: []
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let error_strings = list.map(errors, validate.error_to_string)
+  // Unknown HTTP scheme "hoba" should be flagged
+  list.any(error_strings, fn(s) {
+    string.contains(s, "hoba") || string.contains(s, "security")
+  })
+  |> should.be_true()
+}
+
+// --- Finding 4: allOf merge must preserve additionalProperties from sub-schemas.
+// Currently, merged ObjectSchema hardcodes additional_properties: None.
+pub fn allof_merge_preserves_additional_properties_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: getItems
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    BaseItem:
+      type: object
+      required: [id]
+      properties:
+        id: { type: integer }
+      additionalProperties:
+        type: string
+    ExtendedItem:
+      allOf:
+        - $ref: '#/components/schemas/BaseItem'
+        - type: object
+          properties:
+            label: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = types.generate(ctx)
+  let assert [types_file, ..] = files
+  let content = types_file.content
+  // ExtendedItem must have additional_properties field since BaseItem has it
+  string.contains(content, "pub type ExtendedItem {")
+  |> should.be_true()
+  // Extract the ExtendedItem type block and check it has additional_properties
+  let assert Ok(extended_start) =
+    find_substring_index(content, "pub type ExtendedItem {")
+  let after_extended = string.drop_start(content, extended_start)
+  // The ExtendedItem block itself must contain additional_properties
+  // (not just the BaseItem block above it)
+  let assert Ok(closing_brace) = find_substring_index(after_extended, "\n}\n")
+  let extended_block = string.slice(after_extended, 0, closing_brace + 2)
+  string.contains(extended_block, "additional_properties:")
+  |> should.be_true()
+}
+
+// --- Finding 5: README must not list multipart/form-data in both Supported
+// and Unsupported sections.
+pub fn readme_no_contradictory_multipart_test() {
+  let assert Ok(content) = simplifile.read("README.md")
+  // Find the Unsupported section
+  let assert Ok(unsupported_start) =
+    find_substring_index(content, "### Unsupported")
+  let unsupported_section = string.drop_start(content, unsupported_start)
+  // multipart/form-data should NOT appear in the Unsupported section
+  // (it's already in Supported)
+  string.contains(unsupported_section, "multipart/form-data")
+  |> should.be_false()
+}
+
+fn find_substring_index(haystack: String, needle: String) -> Result(Int, Nil) {
+  case string.contains(haystack, needle) {
+    True -> {
+      let parts = string.split(haystack, needle)
+      case parts {
+        [before, ..] -> Ok(string.length(before))
+        _ -> Error(Nil)
+      }
+    }
+    False -> Error(Nil)
+  }
 }
