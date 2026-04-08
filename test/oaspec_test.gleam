@@ -5,6 +5,8 @@ import gleam/string
 import gleeunit
 import gleeunit/should
 import oaspec/codegen/context
+import oaspec/codegen/guards
+import oaspec/codegen/types
 import oaspec/codegen/validate
 import oaspec/config
 import oaspec/openapi/hoist
@@ -176,7 +178,7 @@ pub fn parse_secure_api_operation_has_security_test() {
   list.length(sec) |> should.equal(1)
 }
 
-pub fn parse_rejects_basic_auth_test() {
+pub fn parse_accepts_basic_auth_test() {
   let yaml =
     "
 openapi: 3.0.3
@@ -190,8 +192,38 @@ components:
       type: http
       scheme: basic
 "
-  let result = parser.parse_string(yaml)
-  should.be_error(result)
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let assert Some(components) = spec.components
+  let assert Ok(scheme) = dict.get(components.security_schemes, "BasicAuth")
+  case scheme {
+    spec.HttpScheme(scheme: "basic", bearer_format: None) ->
+      should.be_true(True)
+    _ -> should.fail()
+  }
+}
+
+pub fn parse_accepts_digest_auth_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  securitySchemes:
+    DigestAuth:
+      type: http
+      scheme: digest
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let assert Some(components) = spec.components
+  let assert Ok(scheme) = dict.get(components.security_schemes, "DigestAuth")
+  case scheme {
+    spec.HttpScheme(scheme: "digest", bearer_format: None) ->
+      should.be_true(True)
+    _ -> should.fail()
+  }
 }
 
 pub fn parse_rejects_malformed_security_scopes_test() {
@@ -1180,4 +1212,144 @@ components:
       should.be_true(True)
     _ -> should.fail()
   }
+}
+
+// --- Feature: allOf with primitive sub-schemas (Phase 4-2) ---
+
+pub fn allof_with_primitive_sub_schema_test() {
+  // allOf that mixes object and primitive schemas should not crash.
+  // Primitive sub-schemas are silently ignored; object properties are merged.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    MixedAllOf:
+      allOf:
+        - type: string
+        - type: object
+          required: [name]
+          properties:
+            name: { type: string }
+            age: { type: integer }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+
+  // Should generate types without crashing
+  let files = types.generate(ctx)
+  // Should produce at least one file
+  list.length(files) |> should.not_equal(0)
+
+  // The generated types file should contain the MixedAllOf type
+  // with properties from the object sub-schema
+  let assert [types_file, ..] = files
+  string.contains(types_file.content, "MixedAllOf") |> should.be_true()
+  string.contains(types_file.content, "name: String") |> should.be_true()
+}
+
+// --- Feature: Validation constraints generate guards (Phase 4-3) ---
+
+pub fn validate_constraints_generate_guards_test() {
+  // Schemas with minLength/maxLength/minimum/maximum should produce guard functions.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    User:
+      type: object
+      required: [username, age]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 50
+        age:
+          type: integer
+          minimum: 0
+          maximum: 150
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+
+  // Should generate guard files without crashing
+  let files = guards.generate(ctx)
+  // Should produce at least one file (guards.gleam)
+  list.length(files) |> should.not_equal(0)
+
+  let assert [guard_file] = files
+  guard_file.path |> should.equal("guards.gleam")
+
+  // Should contain validation functions for constrained fields
+  string.contains(guard_file.content, "validate_user_username_length")
+  |> should.be_true()
+  string.contains(guard_file.content, "validate_user_age_range")
+  |> should.be_true()
+}
+
+// --- Feature: Callbacks are ignored during parsing (Phase 4-4) ---
+
+pub fn parse_ignores_callbacks_test() {
+  // Operations with a callbacks field should parse without error.
+  // The callbacks field is simply ignored.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Callback Test
+  version: 1.0.0
+paths:
+  /subscribe:
+    post:
+      operationId: subscribe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                callbackUrl:
+                  type: string
+      callbacks:
+        onEvent:
+          '{$request.body#/callbackUrl}':
+            post:
+              requestBody:
+                content:
+                  application/json:
+                    schema:
+                      type: object
+                      properties:
+                        event: { type: string }
+              responses:
+                '200': { description: ok }
+      responses:
+        '201': { description: subscribed }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  spec.info.title |> should.equal("Callback Test")
+  // The operation should have parsed successfully
+  let assert Ok(path_item) = dict.get(spec.paths, "/subscribe")
+  let assert Some(op) = path_item.post
+  op.operation_id |> should.equal(Some("subscribe"))
 }

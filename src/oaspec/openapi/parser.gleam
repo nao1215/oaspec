@@ -1054,21 +1054,10 @@ fn parse_security_scheme(
           MissingField(path: "securityScheme.http", field: "scheme")
         }),
       )
-      case scheme {
-        "bearer" -> {
-          let bearer_format =
-            yay.extract_optional_string(node, "bearerFormat")
-            |> result.unwrap(None)
-          Ok(spec.HttpScheme(scheme:, bearer_format:))
-        }
-        _ ->
-          Error(InvalidValue(
-            path: "securityScheme.http.scheme",
-            detail: "Only 'bearer' is supported for http security scheme. Got: '"
-              <> scheme
-              <> "'",
-          ))
-      }
+      let bearer_format =
+        yay.extract_optional_string(node, "bearerFormat")
+        |> result.unwrap(None)
+      Ok(spec.HttpScheme(scheme:, bearer_format:))
     }
     "oauth2" -> {
       let description =

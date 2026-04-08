@@ -656,6 +656,24 @@ fn generate_client_function(
               )
               |> se.indent(2, "None -> req")
               |> se.indent(1, "}")
+            Ok(spec.HttpScheme(scheme: "basic", ..)) ->
+              sb
+              |> se.indent(1, "let req = case config." <> field_name <> " {")
+              |> se.indent(
+                2,
+                "Some(token) -> request.set_header(req, \"authorization\", \"Basic \" <> token)",
+              )
+              |> se.indent(2, "None -> req")
+              |> se.indent(1, "}")
+            Ok(spec.HttpScheme(scheme: "digest", ..)) ->
+              sb
+              |> se.indent(1, "let req = case config." <> field_name <> " {")
+              |> se.indent(
+                2,
+                "Some(token) -> request.set_header(req, \"authorization\", \"Digest \" <> token)",
+              )
+              |> se.indent(2, "None -> req")
+              |> se.indent(1, "}")
             Ok(spec.HttpScheme(scheme: "bearer", ..))
             | Ok(spec.OAuth2Scheme(..)) ->
               sb
