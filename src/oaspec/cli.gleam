@@ -225,7 +225,7 @@ fn run_generate(
       io.println("")
       io.println(
         "Successfully generated "
-        <> int.to_string(list_length(files))
+        <> int.to_string(list.length(files))
         <> " files",
       )
     }
@@ -239,11 +239,3 @@ fn run_generate(
 /// Exit the process with a status code.
 @external(erlang, "erlang", "halt")
 fn halt(code: Int) -> Nil
-
-/// Get list length.
-fn list_length(items: List(a)) -> Int {
-  case items {
-    [] -> 0
-    [_, ..rest] -> 1 + list_length(rest)
-  }
-}

@@ -1,3 +1,4 @@
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
@@ -169,15 +170,8 @@ pub fn validate_output_package_match(config: Config) -> Result(Nil, ConfigError)
 fn basename(path: String) -> String {
   path
   |> string.split("/")
-  |> list_last
-}
-
-fn list_last(items: List(String)) -> String {
-  case items {
-    [] -> ""
-    [last] -> last
-    [_, ..rest] -> list_last(rest)
-  }
+  |> list.last
+  |> result.unwrap("")
 }
 
 /// Convert config error to a human-readable string.

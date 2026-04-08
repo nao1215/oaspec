@@ -21,7 +21,7 @@ pub type ResolveError {
 pub fn ref_to_name(ref: String) -> String {
   ref
   |> string.split("/")
-  |> list_last
+  |> list.last
   |> result.unwrap("Unknown")
 }
 
@@ -137,13 +137,4 @@ fn resolve_one_ref(schema_ref: SchemaRef, spec: OpenApiSpec) -> SchemaRef {
 /// Map a list of schema refs, resolving each.
 fn list_map_ref(refs: List(SchemaRef), spec: OpenApiSpec) -> List(SchemaRef) {
   list.map(refs, fn(r) { resolve_one_ref(r, spec) })
-}
-
-/// Get the last element of a list.
-fn list_last(items: List(String)) -> Result(String, Nil) {
-  case items {
-    [] -> Error(Nil)
-    [last] -> Ok(last)
-    [_, ..rest] -> list_last(rest)
-  }
 }
