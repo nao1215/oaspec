@@ -562,6 +562,46 @@ pub fn validate_accepts_multipart_form_data_test() {
   |> should.be_false()
 }
 
+pub fn validate_rejects_unstringifiable_multipart_fields_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /upload:
+    post:
+      operationId: uploadFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [metadata]
+              properties:
+                metadata:
+                  $ref: '#/components/schemas/Metadata'
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Metadata:
+      type: object
+      properties:
+        title: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let error_strings = list.map(errors, validate.error_to_string)
+  list.any(error_strings, fn(s) {
+    string.contains(s, "multipart/form-data fields")
+  })
+  |> should.be_true()
+}
+
 pub fn validate_broken_spec_detects_inline_oneof_test() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors = validate.validate(ctx)
@@ -1529,6 +1569,54 @@ paths:
   // Optional "description" field must have case/Some/None handling,
   // not raw body.description string concatenation
   string.contains(content, "case body.description")
+  |> should.be_true()
+}
+
+pub fn multipart_ref_scalar_field_is_stringified_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /upload:
+    post:
+      operationId: uploadFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id:
+                  $ref: '#/components/schemas/UploadId'
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    UploadId:
+      type: integer
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+
+  string.contains(content, "int.to_string(body.id)")
   |> should.be_true()
 }
 

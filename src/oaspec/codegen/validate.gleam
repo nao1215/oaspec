@@ -7,7 +7,8 @@ import oaspec/codegen/types as type_gen
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
-  Inline, ObjectSchema, OneOfSchema, Reference,
+  BooleanSchema, Inline, IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema,
+  Reference, StringSchema,
 }
 import oaspec/openapi/spec
 import oaspec/util/content_type
@@ -42,7 +43,7 @@ fn validate_operations(ctx: Context) -> List(ValidationError) {
   list.flat_map(operations, fn(op) {
     let #(op_id, operation, _path, _method) = op
     let param_errors = validate_parameters(op_id, operation.parameters, ctx)
-    let body_errors = validate_request_body(op_id, operation.request_body)
+    let body_errors = validate_request_body(op_id, operation.request_body, ctx)
     let response_errors = validate_responses(op_id, operation.responses)
     list.flatten([param_errors, body_errors, response_errors])
   })
@@ -56,7 +57,7 @@ fn validate_parameters(
 ) -> List(ValidationError) {
   list.flat_map(params, fn(param) {
     let path = op_id <> ".parameters." <> param.name
-    let resolved_schema = resolve_parameter_schema(param.schema, ctx)
+    let resolved_schema = resolve_schema_object(param.schema, ctx)
     let deep_object_errors = case param.style {
       Some("deepObject") -> [
         UnsupportedFeature(
@@ -106,7 +107,7 @@ fn validate_parameters(
   })
 }
 
-fn resolve_parameter_schema(
+fn resolve_schema_object(
   schema_ref: Option(SchemaRef),
   ctx: Context,
 ) -> Option(SchemaObject) {
@@ -125,6 +126,7 @@ fn resolve_parameter_schema(
 fn validate_request_body(
   op_id: String,
   request_body: Option(spec.RequestBody),
+  ctx: Context,
 ) -> List(ValidationError) {
   case request_body {
     None -> []
@@ -156,8 +158,61 @@ fn validate_request_body(
             None -> []
           }
         })
-      list.append(content_type_errors, schema_errors)
+      let multipart_field_errors =
+        validate_multipart_request_body_fields(op_id, rb.content, ctx)
+      list.flatten([
+        content_type_errors,
+        schema_errors,
+        multipart_field_errors,
+      ])
     }
+  }
+}
+
+fn validate_multipart_request_body_fields(
+  op_id: String,
+  content: dict.Dict(String, spec.MediaType),
+  ctx: Context,
+) -> List(ValidationError) {
+  case dict.get(content, "multipart/form-data") {
+    Ok(media_type) ->
+      case resolve_schema_object(media_type.schema, ctx) {
+        Some(ObjectSchema(properties:, ..)) ->
+          dict.to_list(properties)
+          |> list.flat_map(fn(entry) {
+            let #(field_name, field_schema) = entry
+            case multipart_field_is_stringifiable(field_schema, ctx) {
+              True -> []
+              False -> [
+                UnsupportedFeature(
+                  path: op_id <> ".requestBody.multipart." <> field_name,
+                  detail: "multipart/form-data fields must be string, integer, number, boolean, binary, or string enums.",
+                ),
+              ]
+            }
+          })
+        Some(_) -> [
+          UnsupportedFeature(
+            path: op_id <> ".requestBody",
+            detail: "multipart/form-data request bodies must use an object schema.",
+          ),
+        ]
+        None -> []
+      }
+    Error(_) -> []
+  }
+}
+
+fn multipart_field_is_stringifiable(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Bool {
+  case resolve_schema_object(Some(schema_ref), ctx) {
+    Some(StringSchema(..))
+    | Some(IntegerSchema(..))
+    | Some(NumberSchema(..))
+    | Some(BooleanSchema(..)) -> True
+    _ -> False
   }
 }
 

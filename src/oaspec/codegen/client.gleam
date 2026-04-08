@@ -1080,20 +1080,11 @@ fn generate_multipart_body(
       let #(field_name, field_schema) = prop
       let gleam_field = naming.to_snake_case(field_name)
       let is_required = list.contains(required_fields, field_name)
-      let is_binary = case field_schema {
-        Inline(schema.StringSchema(format: Some("binary"), ..)) -> True
-        _ -> False
-      }
+      let is_binary = multipart_field_is_binary(field_schema, ctx)
       // Convert value to string for multipart encoding
       let to_string_fn = case is_binary {
         True -> ""
-        False ->
-          case field_schema {
-            Inline(schema.IntegerSchema(..)) -> "int.to_string"
-            Inline(schema.NumberSchema(..)) -> "float.to_string"
-            Inline(schema.BooleanSchema(..)) -> "bool.to_string"
-            _ -> ""
-          }
+        False -> multipart_field_to_string_fn(field_schema, ctx)
       }
       let part_header_binary =
         "\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
@@ -1157,6 +1148,44 @@ fn generate_multipart_body(
     "let req = request.set_header(req, \"content-type\", \"multipart/form-data; boundary=\" <> boundary)",
   )
   |> se.indent(1, "let req = request.set_body(req, body_str)")
+}
+
+fn multipart_field_is_binary(
+  field_schema: schema.SchemaRef,
+  ctx: Context,
+) -> Bool {
+  case field_schema {
+    Inline(schema.StringSchema(format: Some("binary"), ..)) -> True
+    Reference(_) as schema_ref ->
+      case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
+        Ok(schema.StringSchema(format: Some("binary"), ..)) -> True
+        _ -> False
+      }
+    _ -> False
+  }
+}
+
+fn multipart_field_to_string_fn(
+  field_schema: schema.SchemaRef,
+  ctx: Context,
+) -> String {
+  case field_schema {
+    Inline(schema.IntegerSchema(..)) -> "int.to_string"
+    Inline(schema.NumberSchema(..)) -> "float.to_string"
+    Inline(schema.BooleanSchema(..)) -> "bool.to_string"
+    Reference(ref:) as schema_ref ->
+      case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
+        Ok(schema.StringSchema(enum_values:, ..)) if enum_values != [] -> {
+          let name = resolver.ref_to_name(ref)
+          "encode.encode_" <> naming.to_snake_case(name) <> "_to_string"
+        }
+        Ok(schema.IntegerSchema(..)) -> "int.to_string"
+        Ok(schema.NumberSchema(..)) -> "float.to_string"
+        Ok(schema.BooleanSchema(..)) -> "bool.to_string"
+        _ -> ""
+      }
+    _ -> ""
+  }
 }
 
 /// Get the decode expression for a response body.
