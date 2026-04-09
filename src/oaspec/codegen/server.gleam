@@ -210,6 +210,7 @@ fn generate_router(ctx: Context) -> String {
       list.any(operation.parameters, fn(p) {
         case p.in_, p.schema {
           spec.InCookie, _ -> True
+          spec.InQuery, Some(Inline(schema.ArraySchema(..))) -> True
           spec.InHeader, Some(Inline(schema.ArraySchema(..))) -> True
           _, Some(Inline(schema.BooleanSchema(..))) -> True
           _, _ -> False
@@ -229,6 +230,7 @@ fn generate_router(ctx: Context) -> String {
       let #(_, operation, _, _) = op
       list.any(operation.parameters, fn(p) {
         case p.in_, p.schema {
+          spec.InQuery, Some(Inline(schema.ArraySchema(..))) -> True
           spec.InHeader, Some(Inline(schema.ArraySchema(..))) -> True
           _, _ -> False
         }
@@ -381,7 +383,7 @@ fn generate_router(ctx: Context) -> String {
     |> se.line(
       "pub fn route(method: String, path: List(String), "
       <> route_arg_name("query", uses_query)
-      <> ": Dict(String, String), "
+      <> ": Dict(String, List(String)), "
       <> route_arg_name("headers", uses_headers)
       <> ": Dict(String, String), "
       <> route_arg_name("body", uses_body)
@@ -606,18 +608,66 @@ fn param_parse_expr(var_name: String, param: spec.Parameter) -> String {
 
 /// Generate expression for a required query parameter.
 fn query_required_expr(key: String, param: spec.Parameter) -> String {
-  let base = "{ let assert Ok(v) = dict.get(query, \"" <> key <> "\") v }"
+  let base = "{ let assert Ok([v, ..]) = dict.get(query, \"" <> key <> "\") v }"
   case param.schema {
+    Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
+      case param.explode {
+        Some(False) ->
+          "{ let assert Ok([v, ..]) = dict.get(query, \""
+          <> key
+          <> "\") list.map(string.split(v, \",\"), fn(item) { string.trim(item) }) }"
+        _ ->
+          "{ let assert Ok(vs) = dict.get(query, \""
+          <> key
+          <> "\") list.map(vs, fn(item) { string.trim(item) }) }"
+      }
+    Some(Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..))) ->
+      case param.explode {
+        Some(False) ->
+          "{ let assert Ok([v, ..]) = dict.get(query, \""
+          <> key
+          <> "\") list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n }) }"
+        _ ->
+          "{ let assert Ok(vs) = dict.get(query, \""
+          <> key
+          <> "\") list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n }) }"
+      }
+    Some(Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..))) ->
+      case param.explode {
+        Some(False) ->
+          "{ let assert Ok([v, ..]) = dict.get(query, \""
+          <> key
+          <> "\") list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = float.parse(trimmed) n }) }"
+        _ ->
+          "{ let assert Ok(vs) = dict.get(query, \""
+          <> key
+          <> "\") list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = float.parse(trimmed) n }) }"
+      }
+    Some(Inline(schema.ArraySchema(items: Inline(schema.BooleanSchema(..)), ..))) ->
+      case param.explode {
+        Some(False) ->
+          "{ let assert Ok([v, ..]) = dict.get(query, \""
+          <> key
+          <> "\") list.map(string.split(v, \",\"), fn(item) { let v = string.trim(item) "
+          <> bool_parse_expr
+          <> " }) }"
+        _ ->
+          "{ let assert Ok(vs) = dict.get(query, \""
+          <> key
+          <> "\") list.map(vs, fn(item) { let v = string.trim(item) "
+          <> bool_parse_expr
+          <> " }) }"
+      }
     Some(Inline(schema.IntegerSchema(..))) ->
-      "{ let assert Ok(v) = dict.get(query, \""
+      "{ let assert Ok([v, ..]) = dict.get(query, \""
       <> key
       <> "\") let assert Ok(n) = int.parse(v) n }"
     Some(Inline(schema.NumberSchema(..))) ->
-      "{ let assert Ok(v) = dict.get(query, \""
+      "{ let assert Ok([v, ..]) = dict.get(query, \""
       <> key
       <> "\") let assert Ok(n) = float.parse(v) n }"
     Some(Inline(schema.BooleanSchema(..))) ->
-      "{ let assert Ok(v) = dict.get(query, \""
+      "{ let assert Ok([v, ..]) = dict.get(query, \""
       <> key
       <> "\") "
       <> bool_parse_expr
@@ -629,22 +679,70 @@ fn query_required_expr(key: String, param: spec.Parameter) -> String {
 /// Generate expression for an optional query parameter.
 fn query_optional_expr(key: String, param: spec.Parameter) -> String {
   case param.schema {
+    Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
+      case param.explode {
+        Some(False) ->
+          "case dict.get(query, \""
+          <> key
+          <> "\") { Ok([v, ..]) -> Some(list.map(string.split(v, \",\"), fn(item) { string.trim(item) })) _ -> None }"
+        _ ->
+          "case dict.get(query, \""
+          <> key
+          <> "\") { Ok(vs) -> Some(list.map(vs, fn(item) { string.trim(item) })) _ -> None }"
+      }
+    Some(Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..))) ->
+      case param.explode {
+        Some(False) ->
+          "case dict.get(query, \""
+          <> key
+          <> "\") { Ok([v, ..]) -> Some(list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n })) _ -> None }"
+        _ ->
+          "case dict.get(query, \""
+          <> key
+          <> "\") { Ok(vs) -> Some(list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n })) _ -> None }"
+      }
+    Some(Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..))) ->
+      case param.explode {
+        Some(False) ->
+          "case dict.get(query, \""
+          <> key
+          <> "\") { Ok([v, ..]) -> Some(list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = float.parse(trimmed) n })) _ -> None }"
+        _ ->
+          "case dict.get(query, \""
+          <> key
+          <> "\") { Ok(vs) -> Some(list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = float.parse(trimmed) n })) _ -> None }"
+      }
+    Some(Inline(schema.ArraySchema(items: Inline(schema.BooleanSchema(..)), ..))) ->
+      case param.explode {
+        Some(False) ->
+          "case dict.get(query, \""
+          <> key
+          <> "\") { Ok([v, ..]) -> Some(list.map(string.split(v, \",\"), fn(item) { let v = string.trim(item) "
+          <> bool_parse_expr
+          <> " })) _ -> None }"
+        _ ->
+          "case dict.get(query, \""
+          <> key
+          <> "\") { Ok(vs) -> Some(list.map(vs, fn(item) { let v = string.trim(item) "
+          <> bool_parse_expr
+          <> " })) _ -> None }"
+      }
     Some(Inline(schema.IntegerSchema(..))) ->
       "case dict.get(query, \""
       <> key
-      <> "\") { Ok(v) -> { case int.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }"
+      <> "\") { Ok([v, ..]) -> { case int.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }"
     Some(Inline(schema.NumberSchema(..))) ->
       "case dict.get(query, \""
       <> key
-      <> "\") { Ok(v) -> { case float.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }"
+      <> "\") { Ok([v, ..]) -> { case float.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }"
     Some(Inline(schema.BooleanSchema(..))) ->
       "case dict.get(query, \""
       <> key
-      <> "\") { Ok(v) -> Some("
+      <> "\") { Ok([v, ..]) -> Some("
       <> bool_parse_expr
       <> ") _ -> None }"
     _ ->
-      "case dict.get(query, \"" <> key <> "\") { Ok(v) -> Some(v) _ -> None }"
+      "case dict.get(query, \"" <> key <> "\") { Ok([v, ..]) -> Some(v) _ -> None }"
   }
 }
 

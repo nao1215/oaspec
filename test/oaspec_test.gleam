@@ -2930,7 +2930,7 @@ paths:
   // Router must have proper route signature with query/headers/body
   string.contains(
     router.content,
-    "pub fn route(method: String, path: List(String), _query: Dict(String, String), _headers: Dict(String, String), _body: String) -> ServerResponse",
+    "pub fn route(method: String, path: List(String), _query: Dict(String, List(String)), _headers: Dict(String, String), _body: String) -> ServerResponse",
   )
   |> should.be_true()
   // Router must convert response to ServerResponse
@@ -5862,7 +5862,10 @@ paths:
           schema:
             type: array
             items:
-              type: string
+              type: object
+              properties:
+                label:
+                  type: string
       responses:
         '200': { description: ok }
 "
@@ -5872,7 +5875,7 @@ paths:
   let server_errors =
     list.filter(errors, fn(e) {
       e.target == validate.TargetServer
-      && string.contains(e.detail, "Array parameters are not supported")
+      && string.contains(e.detail, "Query array parameters are only supported")
     })
   list.length(server_errors)
   |> should.equal(1)
@@ -6136,7 +6139,7 @@ paths:
   let assert Ok(router) = router_file
   string.contains(
     router.content,
-    "pub fn route(method: String, path: List(String), _query: Dict(String, String), _headers: Dict(String, String), _body: String) -> ServerResponse",
+    "pub fn route(method: String, path: List(String), _query: Dict(String, List(String)), _headers: Dict(String, String), _body: String) -> ServerResponse",
   )
   |> should.be_true()
 }
@@ -6225,7 +6228,7 @@ paths:
     list.find(files, fn(f) { f.path == "router.gleam" })
   let content = router_file.content
 
-  string.contains(content, "ratio: { let assert Ok(v) = dict.get(query, \"ratio\") let assert Ok(n) = float.parse(v) n },")
+  string.contains(content, "ratio: { let assert Ok([v, ..]) = dict.get(query, \"ratio\") let assert Ok(n) = float.parse(v) n },")
   |> should.be_true()
   string.contains(content, "x_enabled: case dict.get(headers, \"x-enabled\") { Ok(v) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None },")
   |> should.be_true()
@@ -6317,5 +6320,84 @@ paths:
   string.contains(content, "x_scores: case dict.get(headers, \"x-scores\") { Ok(v) -> Some(list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n })) _ -> None },")
   |> should.be_true()
   string.contains(content, "x_flags: { let assert Ok(v) = dict.get(headers, \"x-flags\") list.map(string.split(v, \",\"), fn(item) { let v = string.trim(item) case string.lowercase(v) { \"true\" -> True _ -> False } }) },")
+  |> should.be_true()
+}
+
+pub fn validate_accepts_query_array_params_for_server_codegen_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: tags
+          in: query
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "Array parameters")
+    })
+  list.length(server_errors)
+  |> should.equal(0)
+}
+
+pub fn server_query_array_params_use_query_multimap_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: search
+      parameters:
+        - name: tags
+          in: query
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+        - name: scores
+          in: query
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: integer
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(content, "pub fn route(method: String, path: List(String), query: Dict(String, List(String)), _headers: Dict(String, String), _body: String) -> ServerResponse")
+  |> should.be_true()
+  string.contains(content, "tags: { let assert Ok(vs) = dict.get(query, \"tags\") list.map(vs, fn(item) { string.trim(item) }) },")
+  |> should.be_true()
+  string.contains(content, "scores: case dict.get(query, \"scores\") { Ok([v, ..]) -> Some(list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n })) _ -> None },")
   |> should.be_true()
 }
