@@ -7509,3 +7509,82 @@ pub fn oss_oapi_codegen_illegal_enums_parses_test() {
   let assert Some(components) = spec.components
   dict.size(components.schemas) |> should.not_equal(0)
 }
+
+pub fn oss_oapi_codegen_nullable_parses_test() {
+  // Tests all combinations of required/optional + nullable/non-nullable
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_nullable.yaml")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+pub fn oss_oapi_codegen_nullable_generates_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_nullable.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let result = generate.generate(spec, ctx.config)
+  case result {
+    Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
+    Error(generate.ValidationErrors(errors:)) -> {
+      let blocking = validate.errors_only(errors)
+      list.length(blocking) |> should.equal(0)
+    }
+  }
+}
+
+pub fn oss_oapi_codegen_recursive_allof_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_recursive_allof.yaml")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+pub fn oss_oapi_codegen_allof_additional_parses_test() {
+  // allOf with additionalProperties: true
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_allof_additional.yaml")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+pub fn oss_oapi_codegen_allof_additional_generates_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_allof_additional.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let result = generate.generate(spec, ctx.config)
+  case result {
+    Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
+    Error(generate.ValidationErrors(errors:)) -> {
+      let blocking = validate.errors_only(errors)
+      list.length(blocking) |> should.equal(0)
+    }
+  }
+}
+
+pub fn oss_oapi_codegen_security_parses_test() {
+  // Bearer token authentication
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_security.yaml")
+  let assert Some(components) = spec.components
+  dict.size(components.security_schemes) |> should.not_equal(0)
+}
+
+pub fn oss_oapi_codegen_multi_content_parses_test() {
+  // Multiple content types in requestBody and responses
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_multi_content.yaml")
+  let paths = dict.to_list(spec.paths)
+  list.length(paths) |> should.not_equal(0)
+}
+
+pub fn oss_oapi_codegen_multi_content_rejects_unsupported_types_test() {
+  // This spec has text/json and application/*+json which are unsupported.
+  // Validation should catch them.
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_multi_content.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let blocking = validate.errors_only(errors)
+  // Should have blocking errors for unsupported content types
+  list.length(blocking) |> should.not_equal(0)
+}

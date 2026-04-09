@@ -1,0 +1,24 @@
+openapi: "3.0.1"
+info:
+  title: Security Test
+  version: "1.0.0"
+components:
+  securitySchemes:
+    bearerAuth:
+      scheme: bearer
+      type: http
+paths:
+  /auth-check:
+    get:
+      operationId: authCheck
+      security:
+        - bearerAuth: []
+      responses:
+        200:
+          description: good
+  /test:
+    get:
+      operationId: test
+      responses:
+        200:
+          description: good
