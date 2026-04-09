@@ -2799,9 +2799,12 @@ paths:
   let content = client_file.content
   // With explode: true, the query parameter must NOT be comma-joined.
   // It should produce tags=a&tags=b, not tags=a,b.
-  // The comma-join pattern indicates explode is being ignored.
-  string.contains(content, "string.join(")
+  // The comma-join with list.map pattern indicates explode is being ignored.
+  string.contains(content, "string.join(list.map(")
   |> should.be_false()
+  // Instead, must use list.fold to produce repeated key=value pairs
+  string.contains(content, "list.fold(")
+  |> should.be_true()
 }
 
 fn find_substring_index(haystack: String, needle: String) -> Result(Int, Nil) {

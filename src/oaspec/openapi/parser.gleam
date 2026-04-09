@@ -459,6 +459,10 @@ fn parse_parameter(
         yay.extract_optional_string(node, "style")
         |> result.unwrap(None)
 
+      let explode =
+        yay.extract_optional_bool(node, "explode")
+        |> result.unwrap(None)
+
       Ok(Parameter(
         name:,
         in_:,
@@ -466,6 +470,7 @@ fn parse_parameter(
         required:,
         schema: param_schema,
         style:,
+        explode:,
         deprecated:,
       ))
     }

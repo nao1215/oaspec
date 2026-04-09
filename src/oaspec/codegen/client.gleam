@@ -496,37 +496,42 @@ fn generate_client_function(
             Some("deepObject"), True ->
               generate_deep_object_query_param(sb, p, param_name, ctx)
             _, _ ->
-              case p.required {
-                True -> {
-                  let to_str = to_str_for_required(p, param_name, ctx)
-                  sb
-                  |> se.indent(
-                    1,
-                    "let query_parts = [\""
-                      <> p.name
-                      <> "=\" <> uri.percent_encode("
-                      <> to_str
-                      <> "), ..query_parts]",
-                  )
-                }
-                False -> {
-                  let to_str = to_str_for_optional_value(p, ctx)
-                  sb
-                  |> se.indent(
-                    1,
-                    "let query_parts = case " <> param_name <> " {",
-                  )
-                  |> se.indent(
-                    2,
-                    "Some(v) -> [\""
-                      <> p.name
-                      <> "=\" <> uri.percent_encode("
-                      <> to_str
-                      <> "), ..query_parts]",
-                  )
-                  |> se.indent(2, "None -> query_parts")
-                  |> se.indent(1, "}")
-                }
+              case is_exploded_array_param(p, ctx) {
+                True ->
+                  generate_exploded_array_query_param(sb, p, param_name, ctx)
+                False ->
+                  case p.required {
+                    True -> {
+                      let to_str = to_str_for_required(p, param_name, ctx)
+                      sb
+                      |> se.indent(
+                        1,
+                        "let query_parts = [\""
+                          <> p.name
+                          <> "=\" <> uri.percent_encode("
+                          <> to_str
+                          <> "), ..query_parts]",
+                      )
+                    }
+                    False -> {
+                      let to_str = to_str_for_optional_value(p, ctx)
+                      sb
+                      |> se.indent(
+                        1,
+                        "let query_parts = case " <> param_name <> " {",
+                      )
+                      |> se.indent(
+                        2,
+                        "Some(v) -> [\""
+                          <> p.name
+                          <> "=\" <> uri.percent_encode("
+                          <> to_str
+                          <> "), ..query_parts]",
+                      )
+                      |> se.indent(2, "None -> query_parts")
+                      |> se.indent(1, "}")
+                    }
+                  }
               }
           }
         })
@@ -1888,6 +1893,92 @@ fn deep_object_array_item_to_string(
         _ -> "item"
       }
     _ -> "item"
+  }
+}
+
+/// Check if a parameter is an array with explode behavior.
+/// OpenAPI default: style: form has explode: true by default.
+fn is_exploded_array_param(param: spec.Parameter, ctx: Context) -> Bool {
+  let is_array = case param.schema {
+    Some(Inline(schema.ArraySchema(..))) -> True
+    Some(Reference(_) as sr) ->
+      case resolver.resolve_schema_ref(sr, ctx.spec) {
+        Ok(schema.ArraySchema(..)) -> True
+        _ -> False
+      }
+    _ -> False
+  }
+  case is_array {
+    False -> False
+    True -> {
+      // explode defaults to true for style: form (which is the default for query params)
+      let effective_explode = case param.explode {
+        option.Some(v) -> v
+        option.None ->
+          case param.style {
+            option.Some("form") | option.None -> True
+            _ -> False
+          }
+      }
+      effective_explode
+    }
+  }
+}
+
+/// Generate exploded array query parameter: tags=a&tags=b
+fn generate_exploded_array_query_param(
+  sb: se.StringBuilder,
+  param: spec.Parameter,
+  param_name: String,
+  ctx: Context,
+) -> se.StringBuilder {
+  let item_to_str = case param.schema {
+    Some(Inline(schema.ArraySchema(items:, ..))) ->
+      array_item_to_string_fn(items, ctx)
+    Some(Reference(_) as sr) ->
+      case resolver.resolve_schema_ref(sr, ctx.spec) {
+        Ok(schema.ArraySchema(items:, ..)) ->
+          array_item_to_string_fn(items, ctx)
+        _ -> "fn(x) { x }"
+      }
+    _ -> "fn(x) { x }"
+  }
+  case param.required {
+    True ->
+      sb
+      |> se.indent(
+        1,
+        "let query_parts = list.fold("
+          <> param_name
+          <> ", query_parts, fn(acc, item) {",
+      )
+      |> se.indent(
+        2,
+        "[\""
+          <> param.name
+          <> "=\" <> uri.percent_encode("
+          <> item_to_str
+          <> "(item)), ..acc]",
+      )
+      |> se.indent(1, "})")
+    False ->
+      sb
+      |> se.indent(1, "let query_parts = case " <> param_name <> " {")
+      |> se.indent(
+        2,
+        "Some(items) -> list.fold(items, query_parts, fn(acc, item) {",
+      )
+      |> se.indent(
+        3,
+        "[\""
+          <> param.name
+          <> "=\" <> uri.percent_encode("
+          <> item_to_str
+          <> "(item)), ..acc]",
+      )
+      |> se.indent(2, "})")
+      |> se.indent(2, "None -> query_parts")
+      |> se.indent(1, "}")
   }
 }
 

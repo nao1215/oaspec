@@ -111,6 +111,7 @@ pub type Parameter {
     required: Bool,
     schema: Option(SchemaRef),
     style: Option(String),
+    explode: Option(Bool),
     deprecated: Bool,
   )
 }
