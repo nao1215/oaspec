@@ -74,13 +74,7 @@ pub fn resolve_schema_refs_in_schema(
   spec: OpenApiSpec,
 ) -> SchemaObject {
   case schema {
-    ObjectSchema(
-      metadata:,
-      properties:,
-      required:,
-      additional_properties:,
-      additional_properties_untyped:,
-    ) -> {
+    ObjectSchema(properties:, additional_properties:, ..) as obj -> {
       let resolved_props =
         dict.map_values(properties, fn(_k, v) { resolve_one_ref(v, spec) })
       let resolved_ap = case additional_properties {
@@ -88,20 +82,13 @@ pub fn resolve_schema_refs_in_schema(
         None -> None
       }
       ObjectSchema(
-        metadata:,
+        ..obj,
         properties: resolved_props,
-        required:,
         additional_properties: resolved_ap,
-        additional_properties_untyped:,
       )
     }
-    ArraySchema(metadata:, items:, min_items:, max_items:) ->
-      ArraySchema(
-        metadata:,
-        items: resolve_one_ref(items, spec),
-        min_items:,
-        max_items:,
-      )
+    ArraySchema(items:, ..) as arr ->
+      ArraySchema(..arr, items: resolve_one_ref(items, spec))
     AllOfSchema(metadata:, schemas:) -> {
       let resolved = list_map_ref(schemas, spec)
       AllOfSchema(metadata:, schemas: resolved)

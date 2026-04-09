@@ -279,11 +279,12 @@ fn generate_decoder(
 
   case schema_ref {
     Inline(ObjectSchema(
-      metadata:,
       properties:,
       required:,
       additional_properties:,
       additional_properties_untyped:,
+      metadata:,
+      ..,
     )) -> {
       let sb = maybe_doc_comment(sb, metadata.description)
       let sb =
@@ -591,6 +592,8 @@ fn generate_decoder(
           required: merged.required,
           additional_properties: merged.additional_properties,
           additional_properties_untyped: merged.additional_properties_untyped,
+          min_properties: option.None,
+          max_properties: option.None,
         ))
       generate_decoder(sb, name, merged_schema, ctx)
     }
@@ -1567,6 +1570,8 @@ fn generate_encoder(
           required: merged.required,
           additional_properties: merged.additional_properties,
           additional_properties_untyped: merged.additional_properties_untyped,
+          min_properties: option.None,
+          max_properties: option.None,
         ))
       generate_encoder(sb, name, merged_schema, ctx)
     }

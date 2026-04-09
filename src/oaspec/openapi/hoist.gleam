@@ -224,13 +224,7 @@ fn hoist_within_schema(
   state: HoistState,
 ) -> #(SchemaObject, HoistState) {
   case schema_obj {
-    ObjectSchema(
-      metadata:,
-      properties:,
-      required:,
-      additional_properties:,
-      additional_properties_untyped:,
-    ) -> {
+    ObjectSchema(properties:, additional_properties:, ..) as obj -> {
       // Hoist each property
       let #(new_props, state) =
         dict.to_list(properties)
@@ -254,22 +248,17 @@ fn hoist_within_schema(
 
       let result =
         ObjectSchema(
-          metadata:,
+          ..obj,
           properties: new_props,
-          required:,
           additional_properties: new_ap,
-          additional_properties_untyped:,
         )
       #(result, state)
     }
 
-    ArraySchema(metadata:, items:, min_items:, max_items:) -> {
+    ArraySchema(items:, ..) as arr -> {
       let #(hoisted_items, state) =
         hoist_schema_ref(items, name_prefix, "Item", state)
-      #(
-        ArraySchema(metadata:, items: hoisted_items, min_items:, max_items:),
-        state,
-      )
+      #(ArraySchema(..arr, items: hoisted_items), state)
     }
 
     OneOfSchema(metadata:, schemas:, discriminator:) -> {

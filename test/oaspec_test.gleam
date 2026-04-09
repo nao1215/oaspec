@@ -4184,6 +4184,9 @@ pub fn schema_dispatch_primitive_types_test() {
     format: None,
     minimum: None,
     maximum: None,
+    exclusive_minimum: None,
+    exclusive_maximum: None,
+    multiple_of: None,
   ))
   |> should.equal("Int")
 }
@@ -4196,6 +4199,9 @@ pub fn schema_dispatch_to_string_expr_test() {
       format: None,
       minimum: None,
       maximum: None,
+      exclusive_minimum: None,
+      exclusive_maximum: None,
+      multiple_of: None,
     ),
     "x",
   )

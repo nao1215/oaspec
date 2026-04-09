@@ -50,12 +50,18 @@ pub type SchemaObject {
     format: Option(String),
     minimum: Option(Int),
     maximum: Option(Int),
+    exclusive_minimum: Option(Int),
+    exclusive_maximum: Option(Int),
+    multiple_of: Option(Int),
   )
   NumberSchema(
     metadata: SchemaMetadata,
     format: Option(String),
     minimum: Option(Float),
     maximum: Option(Float),
+    exclusive_minimum: Option(Float),
+    exclusive_maximum: Option(Float),
+    multiple_of: Option(Float),
   )
   BooleanSchema(metadata: SchemaMetadata)
   ArraySchema(
@@ -63,6 +69,7 @@ pub type SchemaObject {
     items: SchemaRef,
     min_items: Option(Int),
     max_items: Option(Int),
+    unique_items: Bool,
   )
   ObjectSchema(
     metadata: SchemaMetadata,
@@ -70,6 +77,8 @@ pub type SchemaObject {
     required: List(String),
     additional_properties: Option(SchemaRef),
     additional_properties_untyped: Bool,
+    min_properties: Option(Int),
+    max_properties: Option(Int),
   )
   AllOfSchema(metadata: SchemaMetadata, schemas: List(SchemaRef))
   OneOfSchema(

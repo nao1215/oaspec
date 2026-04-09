@@ -222,6 +222,7 @@ fn generate_schema_type(
       required:,
       additional_properties:,
       additional_properties_untyped:,
+      ..,
     ) -> {
       let sb = maybe_doc_comment(sb, metadata.description)
       let sb = sb |> se.line("pub type " <> type_name <> " {")
@@ -347,6 +348,8 @@ fn generate_schema_type(
           required: merged.required,
           additional_properties: merged.additional_properties,
           additional_properties_untyped: merged.additional_properties_untyped,
+          min_properties: None,
+          max_properties: None,
         )
       generate_schema_type(sb, type_name, raw_name, merged_schema, ctx)
     }
@@ -501,6 +504,8 @@ fn generate_anonymous_type_for_schema(
           required: merged.required,
           additional_properties: merged.additional_properties,
           additional_properties_untyped: merged.additional_properties_untyped,
+          min_properties: None,
+          max_properties: None,
         )
       generate_schema_type(sb, type_name, raw_name, merged_schema, ctx)
     }

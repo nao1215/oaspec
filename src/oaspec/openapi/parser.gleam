@@ -1083,7 +1083,23 @@ fn parse_typed_schema(
         yay.extract_optional_int(node, "minimum") |> result.unwrap(None)
       let maximum =
         yay.extract_optional_int(node, "maximum") |> result.unwrap(None)
-      Ok(IntegerSchema(metadata:, format:, minimum:, maximum:))
+      let exclusive_minimum =
+        yay.extract_optional_int(node, "exclusiveMinimum")
+        |> result.unwrap(None)
+      let exclusive_maximum =
+        yay.extract_optional_int(node, "exclusiveMaximum")
+        |> result.unwrap(None)
+      let multiple_of =
+        yay.extract_optional_int(node, "multipleOf") |> result.unwrap(None)
+      Ok(IntegerSchema(
+        metadata:,
+        format:,
+        minimum:,
+        maximum:,
+        exclusive_minimum:,
+        exclusive_maximum:,
+        multiple_of:,
+      ))
     }
 
     "number" -> {
@@ -1091,7 +1107,24 @@ fn parse_typed_schema(
         yay.extract_optional_float(node, "minimum") |> result.unwrap(None)
       let maximum =
         yay.extract_optional_float(node, "maximum") |> result.unwrap(None)
-      Ok(NumberSchema(metadata:, format:, minimum:, maximum:))
+      let exclusive_minimum =
+        yay.extract_optional_float(node, "exclusiveMinimum")
+        |> result.unwrap(None)
+      let exclusive_maximum =
+        yay.extract_optional_float(node, "exclusiveMaximum")
+        |> result.unwrap(None)
+      let multiple_of =
+        yay.extract_optional_float(node, "multipleOf")
+        |> result.unwrap(None)
+      Ok(NumberSchema(
+        metadata:,
+        format:,
+        minimum:,
+        maximum:,
+        exclusive_minimum:,
+        exclusive_maximum:,
+        multiple_of:,
+      ))
     }
 
     "boolean" -> Ok(BooleanSchema(metadata:))
@@ -1107,7 +1140,11 @@ fn parse_typed_schema(
         yay.extract_optional_int(node, "minItems") |> result.unwrap(None)
       let max_items =
         yay.extract_optional_int(node, "maxItems") |> result.unwrap(None)
-      Ok(ArraySchema(metadata:, items:, min_items:, max_items:))
+      let unique_items =
+        yay.extract_optional_bool(node, "uniqueItems")
+        |> result.unwrap(None)
+        |> option.unwrap(False)
+      Ok(ArraySchema(metadata:, items:, min_items:, max_items:, unique_items:))
     }
 
     "object" -> {
@@ -1127,12 +1164,20 @@ fn parse_typed_schema(
           _ -> Ok(#(None, False))
         },
       )
+      let min_properties =
+        yay.extract_optional_int(node, "minProperties")
+        |> result.unwrap(None)
+      let max_properties =
+        yay.extract_optional_int(node, "maxProperties")
+        |> result.unwrap(None)
       Ok(ObjectSchema(
         metadata:,
         properties:,
         required:,
         additional_properties:,
         additional_properties_untyped:,
+        min_properties:,
+        max_properties:,
       ))
     }
 

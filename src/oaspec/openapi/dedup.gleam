@@ -176,17 +176,8 @@ fn dedup_schema_ref(schema_ref: SchemaRef) -> SchemaRef {
 
 fn dedup_schema_object(schema_obj: SchemaObject) -> SchemaObject {
   case schema_obj {
-    ObjectSchema(
-      metadata:,
-      properties:,
-      required:,
-      additional_properties:,
-      additional_properties_untyped:,
-    ) -> {
+    ObjectSchema(properties:, additional_properties:, ..) as obj -> {
       // Only recurse into child schemas — do NOT rename property keys.
-      // Property keys are JSON wire names and must be preserved exactly.
-      // Gleam name deduplication is handled at codegen time via
-      // dedup_property_names/1.
       let new_props =
         dict.to_list(properties)
         |> list.map(fn(entry) {
@@ -196,14 +187,12 @@ fn dedup_schema_object(schema_obj: SchemaObject) -> SchemaObject {
         |> dict.from_list()
 
       ObjectSchema(
-        metadata:,
+        ..obj,
         properties: new_props,
-        required:,
         additional_properties: case additional_properties {
           Some(ap) -> Some(dedup_schema_ref(ap))
           None -> None
         },
-        additional_properties_untyped:,
       )
     }
 
