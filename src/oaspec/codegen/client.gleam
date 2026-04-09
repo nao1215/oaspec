@@ -44,8 +44,18 @@ fn generate_client(ctx: Context) -> String {
         _ -> False
       }
     })
+  let has_multi_content_response =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(dict.to_list(operation.responses), fn(entry) {
+        let #(_, response) = entry
+        list.length(dict.to_list(response.content)) > 1
+      })
+    })
+
   let needs_list =
-    list.any(all_params, fn(p) {
+    has_multi_content_response
+    || list.any(all_params, fn(p) {
       case p.schema {
         Some(Inline(schema.ArraySchema(..))) -> True
         _ -> False
@@ -99,9 +109,11 @@ fn generate_client(ctx: Context) -> String {
     })
 
   // string module needed for path/query/cookie parameter handling,
-  // security query apiKey, and multipart/form-data body building
+  // security query apiKey, multipart/form-data body building,
+  // and multi-content-type response dispatch
   let needs_string =
-    list.any(operations, fn(op) {
+    has_multi_content_response
+    || list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       !list.is_empty(operation.parameters)
     })
@@ -768,72 +780,25 @@ fn generate_client_function(
               <> variant_name
               <> ")",
           )
-        [#(media_type_name, media_type), ..] ->
-          case media_type_name {
-            // text/plain, XML, octet-stream responses: return the body string directly
-            "text/plain"
-            | "application/xml"
-            | "text/xml"
-            | "application/octet-stream" ->
-              case media_type.schema {
-                Some(_) ->
-                  sb
-                  |> se.indent(
-                    4,
-                    http.status_code_to_int_pattern(status_code)
-                      <> " -> Ok("
-                      <> variant_name
-                      <> "(resp.body))",
-                  )
-                _ ->
-                  sb
-                  |> se.indent(
-                    4,
-                    http.status_code_to_int_pattern(status_code)
-                      <> " -> Ok("
-                      <> variant_name
-                      <> ")",
-                  )
-              }
-            // JSON and other content types: decode the response body
-            _ ->
-              case media_type.schema {
-                Some(schema_ref) -> {
-                  let decode_expr =
-                    get_response_decode_expr(
-                      schema_ref,
-                      op_id,
-                      status_code,
-                      ctx,
-                    )
-                  sb
-                  |> se.indent(
-                    4,
-                    http.status_code_to_int_pattern(status_code) <> " -> {",
-                  )
-                  |> se.indent(5, "case " <> decode_expr <> " {")
-                  |> se.indent(
-                    6,
-                    "Ok(decoded) -> Ok(" <> variant_name <> "(decoded))",
-                  )
-                  |> se.indent(
-                    6,
-                    "Error(_) -> Error(DecodeError(detail: \"Failed to decode response body\"))",
-                  )
-                  |> se.indent(5, "}")
-                  |> se.indent(4, "}")
-                }
-                _ ->
-                  sb
-                  |> se.indent(
-                    4,
-                    http.status_code_to_int_pattern(status_code)
-                      <> " -> Ok("
-                      <> variant_name
-                      <> ")",
-                  )
-              }
-          }
+        [#(single_ct, single_mt)] ->
+          generate_single_content_response(
+            sb,
+            status_code,
+            variant_name,
+            single_ct,
+            single_mt,
+            op_id,
+            ctx,
+          )
+        multiple ->
+          generate_multi_content_response(
+            sb,
+            status_code,
+            variant_name,
+            multiple,
+            op_id,
+            ctx,
+          )
       }
     })
 
@@ -861,6 +826,207 @@ fn generate_client_function(
   sb
   |> se.line("}")
   |> se.blank_line()
+}
+
+/// Generate response handling for a single content type.
+fn generate_single_content_response(
+  sb: se.StringBuilder,
+  status_code: String,
+  variant_name: String,
+  media_type_name: String,
+  media_type: spec.MediaType,
+  op_id: String,
+  ctx: Context,
+) -> se.StringBuilder {
+  case media_type_name {
+    "text/plain"
+    | "application/xml"
+    | "text/xml"
+    | "application/octet-stream" ->
+      case media_type.schema {
+        Some(_) ->
+          sb
+          |> se.indent(
+            4,
+            http.status_code_to_int_pattern(status_code)
+              <> " -> Ok("
+              <> variant_name
+              <> "(resp.body))",
+          )
+        _ ->
+          sb
+          |> se.indent(
+            4,
+            http.status_code_to_int_pattern(status_code)
+              <> " -> Ok("
+              <> variant_name
+              <> ")",
+          )
+      }
+    _ ->
+      case media_type.schema {
+        Some(schema_ref) -> {
+          let decode_expr =
+            get_response_decode_expr(
+              schema_ref,
+              op_id,
+              status_code,
+              ctx,
+            )
+          sb
+          |> se.indent(
+            4,
+            http.status_code_to_int_pattern(status_code) <> " -> {",
+          )
+          |> se.indent(5, "case " <> decode_expr <> " {")
+          |> se.indent(
+            6,
+            "Ok(decoded) -> Ok(" <> variant_name <> "(decoded))",
+          )
+          |> se.indent(
+            6,
+            "Error(_) -> Error(DecodeError(detail: \"Failed to decode response body\"))",
+          )
+          |> se.indent(5, "}")
+          |> se.indent(4, "}")
+        }
+        _ ->
+          sb
+          |> se.indent(
+            4,
+            http.status_code_to_int_pattern(status_code)
+              <> " -> Ok("
+              <> variant_name
+              <> ")",
+          )
+      }
+  }
+}
+
+/// Generate response handling for multiple content types.
+/// Dispatches based on the response content-type header.
+fn generate_multi_content_response(
+  sb: se.StringBuilder,
+  status_code: String,
+  variant_name: String,
+  content_entries: List(#(String, spec.MediaType)),
+  op_id: String,
+  ctx: Context,
+) -> se.StringBuilder {
+  let sb =
+    sb
+    |> se.indent(
+      4,
+      http.status_code_to_int_pattern(status_code) <> " -> {",
+    )
+    |> se.indent(
+      5,
+      "let content_type = list.find(resp.headers, fn(h) { h.0 == \"content-type\" })",
+    )
+    |> se.indent(5, "case content_type {")
+
+  let sb =
+    list.fold(content_entries, sb, fn(sb, entry) {
+      let #(ct_name, media_type) = entry
+      let sb =
+        sb
+        |> se.indent(
+          6,
+          "Ok(#(_, ct)) if string.contains(ct, \"" <> ct_name <> "\") ->",
+        )
+      case ct_name {
+        "text/plain"
+        | "application/xml"
+        | "text/xml"
+        | "application/octet-stream" ->
+          case media_type.schema {
+            Some(_) ->
+              sb
+              |> se.indent(
+                7,
+                "Ok(" <> variant_name <> "(resp.body))",
+              )
+            _ ->
+              sb
+              |> se.indent(
+                7,
+                "Ok(" <> variant_name <> ")",
+              )
+          }
+        _ ->
+          case media_type.schema {
+            Some(schema_ref) -> {
+              let decode_expr =
+                get_response_decode_expr(schema_ref, op_id, status_code, ctx)
+              sb
+              |> se.indent(7, "case " <> decode_expr <> " {")
+              |> se.indent(
+                8,
+                "Ok(decoded) -> Ok(" <> variant_name <> "(decoded))",
+              )
+              |> se.indent(
+                8,
+                "Error(_) -> Error(DecodeError(detail: \"Failed to decode response body\"))",
+              )
+              |> se.indent(7, "}")
+            }
+            _ ->
+              sb
+              |> se.indent(
+                7,
+                "Ok(" <> variant_name <> ")",
+              )
+          }
+      }
+    })
+
+  // Default: try first content type's approach as fallback
+  let sb =
+    sb
+    |> se.indent(
+      6,
+      "_ ->",
+    )
+  let sb = case content_entries {
+    [#(first_ct, first_mt), ..] ->
+      case first_ct {
+        "text/plain"
+        | "application/xml"
+        | "text/xml"
+        | "application/octet-stream" ->
+          case first_mt.schema {
+            Some(_) ->
+              sb |> se.indent(7, "Ok(" <> variant_name <> "(resp.body))")
+            _ ->
+              sb |> se.indent(7, "Ok(" <> variant_name <> ")")
+          }
+        _ ->
+          case first_mt.schema {
+            Some(schema_ref) -> {
+              let decode_expr =
+                get_response_decode_expr(schema_ref, op_id, status_code, ctx)
+              sb
+              |> se.indent(7, "case " <> decode_expr <> " {")
+              |> se.indent(
+                8,
+                "Ok(decoded) -> Ok(" <> variant_name <> "(decoded))",
+              )
+              |> se.indent(
+                8,
+                "Error(_) -> Error(DecodeError(detail: \"Failed to decode response body\"))",
+              )
+              |> se.indent(7, "}")
+            }
+            _ ->
+              sb |> se.indent(7, "Ok(" <> variant_name <> ")")
+          }
+      }
+    _ -> sb |> se.indent(7, "Ok(" <> variant_name <> ")")
+  }
+
+  sb
+  |> se.indent(5, "}")
+  |> se.indent(4, "}")
 }
 
 /// Build parameter list for function signature.

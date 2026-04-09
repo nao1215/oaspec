@@ -613,8 +613,7 @@ fn composite_validator_type(
     Ok(ObjectSchema(..)) | Ok(AllOfSchema(..)) ->
       "types." <> naming.schema_to_type_name(name)
     Ok(s) -> {
-      let assert Ok(ctx_for_type) = Ok(ctx)
-      type_gen.schema_to_gleam_type(s, ctx_for_type)
+      type_gen.schema_to_gleam_type(s, ctx)
     }
     _ -> "types." <> naming.schema_to_type_name(name)
   }
