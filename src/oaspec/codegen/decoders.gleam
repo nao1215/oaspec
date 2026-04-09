@@ -1108,19 +1108,33 @@ fn generate_encoders(ctx: Context) -> String {
       }
     })
 
-  // Check if dict/list modules are needed (only for typed additionalProperties encoding)
-  let needs_typed_dict =
+  // Check if dict/list modules are needed (for additionalProperties encoding)
+  let needs_dict =
     list.any(schemas, fn(entry) {
       let #(_, schema_ref) = entry
       case schema_ref {
         Inline(ObjectSchema(additional_properties: Some(_), ..)) -> True
+        Inline(ObjectSchema(additional_properties_untyped: True, ..)) -> True
         _ -> False
       }
     })
 
-  let base_imports = case needs_typed_dict {
-    True -> ["gleam/dict", "gleam/json", "gleam/list"]
-    False -> ["gleam/json"]
+  // Check if dynamic module is needed (for untyped additionalProperties encoding)
+  let needs_dynamic =
+    list.any(schemas, fn(entry) {
+      let #(_, schema_ref) = entry
+      case schema_ref {
+        Inline(ObjectSchema(additional_properties_untyped: True, ..)) -> True
+        _ -> False
+      }
+    })
+
+  let base_imports = case needs_dict, needs_dynamic {
+    True, True -> [
+      "gleam/dict", "gleam/dynamic", "gleam/json", "gleam/list",
+    ]
+    True, False -> ["gleam/dict", "gleam/json", "gleam/list"]
+    _, _ -> ["gleam/json"]
   }
   let imports = case needs_types {
     True -> list.append(base_imports, [ctx.config.package <> "/types"])
@@ -1147,6 +1161,51 @@ fn generate_encoders(ctx: Context) -> String {
 
   // Generate encoders for anonymous inline schemas from operations
   let sb = generate_anonymous_encoders(sb, ctx)
+
+  // Generate encode_dynamic helper if needed for untyped additionalProperties
+  let sb = case needs_dynamic {
+    True ->
+      sb
+      |> se.doc_comment(
+        "Encode a Dynamic value to JSON by inspecting its runtime type.",
+      )
+      |> se.line("fn encode_dynamic(value: dynamic.Dynamic) -> json.Json {")
+      |> se.indent(1, "case dynamic.classify(value) {")
+      |> se.indent(2, "\"String\" -> {")
+      |> se.indent(
+        3,
+        "let assert Ok(s) = dynamic.string(value)",
+      )
+      |> se.indent(3, "json.string(s)")
+      |> se.indent(2, "}")
+      |> se.indent(2, "\"Int\" -> {")
+      |> se.indent(
+        3,
+        "let assert Ok(i) = dynamic.int(value)",
+      )
+      |> se.indent(3, "json.int(i)")
+      |> se.indent(2, "}")
+      |> se.indent(2, "\"Float\" -> {")
+      |> se.indent(
+        3,
+        "let assert Ok(f) = dynamic.float(value)",
+      )
+      |> se.indent(3, "json.float(f)")
+      |> se.indent(2, "}")
+      |> se.indent(
+        2,
+        "\"Bool\" -> json.bool(dynamic.unsafe_coerce(value))",
+      )
+      |> se.indent(2, "\"Nil\" -> json.null()")
+      |> se.indent(
+        2,
+        "_ -> json.string(dynamic.classify(value))",
+      )
+      |> se.indent(1, "}")
+      |> se.line("}")
+      |> se.blank_line()
+    False -> sb
+  }
 
   se.to_string(sb)
 }
@@ -1350,11 +1409,15 @@ fn generate_encoder(
           |> se.indent(1, "json.object(list.append(base_props, extra_props))")
         }
         None, True -> {
-          // Untyped additional_properties (Dynamic) are decode-only;
-          // skip them during encoding as they cannot be reliably re-encoded.
+          // Untyped additional_properties (Dynamic) are re-encoded using
+          // dynamic type inspection to preserve round-trip fidelity.
           sb
           |> se.indent(1, "]")
-          |> se.indent(1, "json.object(base_props)")
+          |> se.indent(
+            1,
+            "let extra_props = dict.to_list(value.additional_properties) |> list.map(fn(entry) { let #(k, v) = entry; #(k, encode_dynamic(v)) })",
+          )
+          |> se.indent(1, "json.object(list.append(base_props, extra_props))")
         }
         None, False ->
           sb

@@ -3213,6 +3213,48 @@ pub fn status_code_suffix_range_test() {
   |> should.equal("Status4xx")
 }
 
+// --- additionalProperties: true encoder tests ---
+
+/// additionalProperties: true must NOT be silently dropped during encoding.
+/// The encoder must include additional_properties in its output.
+pub fn additional_properties_untyped_encoder_includes_extra_props_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Metadata:
+      type: object
+      properties:
+        name:
+          type: string
+      additionalProperties: true
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = decoders.generate(ctx)
+  let assert Ok(encode_file) =
+    list.find(files, fn(f) { string.contains(f.path, "encode") })
+  let content = encode_file.content
+  // The encoder must reference additional_properties, not just base_props
+  string.contains(content, "additional_properties")
+  |> should.be_true()
+  // It must NOT just use json.object(base_props) — that drops extra props
+  string.contains(content, "json.object(base_props)")
+  |> should.be_false()
+}
+
 // --- Complex parameter schema validation tests ---
 
 /// Object schema query parameter without deepObject style must be rejected.
