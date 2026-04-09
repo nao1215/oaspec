@@ -524,10 +524,8 @@ fn generate_request_construction(
     sb
     |> se.indent(3, "let request = request_types." <> request_type_name <> "(")
 
-  let params = operation.parameters
-
   let sb =
-    list.index_fold(params, sb, fn(sb, param, _idx) {
+    list.index_fold(operation.parameters, sb, fn(sb, param, _idx) {
       let field_name = naming.to_snake_case(param.name)
       let trailing = ","
       let value_expr = case param.in_ {
@@ -599,6 +597,10 @@ fn query_required_expr(key: String, param: spec.Parameter) -> String {
       "{ let assert Ok(v) = dict.get(query, \""
       <> key
       <> "\") let assert Ok(n) = int.parse(v) n }"
+    Some(Inline(schema.NumberSchema(..))) ->
+      "{ let assert Ok(v) = dict.get(query, \""
+      <> key
+      <> "\") let assert Ok(n) = float.parse(v) n }"
     Some(Inline(schema.BooleanSchema(..))) ->
       "{ let assert Ok(v) = dict.get(query, \""
       <> key
@@ -616,6 +618,10 @@ fn query_optional_expr(key: String, param: spec.Parameter) -> String {
       "case dict.get(query, \""
       <> key
       <> "\") { Ok(v) -> { case int.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }"
+    Some(Inline(schema.NumberSchema(..))) ->
+      "case dict.get(query, \""
+      <> key
+      <> "\") { Ok(v) -> { case float.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }"
     Some(Inline(schema.BooleanSchema(..))) ->
       "case dict.get(query, \""
       <> key
@@ -634,6 +640,16 @@ fn header_required_expr(key: String, param: spec.Parameter) -> String {
       "{ let assert Ok(v) = dict.get(headers, \""
       <> key
       <> "\") let assert Ok(n) = int.parse(v) n }"
+    Some(Inline(schema.NumberSchema(..))) ->
+      "{ let assert Ok(v) = dict.get(headers, \""
+      <> key
+      <> "\") let assert Ok(n) = float.parse(v) n }"
+    Some(Inline(schema.BooleanSchema(..))) ->
+      "{ let assert Ok(v) = dict.get(headers, \""
+      <> key
+      <> "\") "
+      <> bool_parse_expr
+      <> " }"
     _ -> "{ let assert Ok(v) = dict.get(headers, \"" <> key <> "\") v }"
   }
 }
@@ -645,6 +661,16 @@ fn header_optional_expr(key: String, param: spec.Parameter) -> String {
       "case dict.get(headers, \""
       <> key
       <> "\") { Ok(v) -> { case int.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }"
+    Some(Inline(schema.NumberSchema(..))) ->
+      "case dict.get(headers, \""
+      <> key
+      <> "\") { Ok(v) -> { case float.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }"
+    Some(Inline(schema.BooleanSchema(..))) ->
+      "case dict.get(headers, \""
+      <> key
+      <> "\") { Ok(v) -> Some("
+      <> bool_parse_expr
+      <> ") _ -> None }"
     _ ->
       "case dict.get(headers, \"" <> key <> "\") { Ok(v) -> Some(v) _ -> None }"
   }

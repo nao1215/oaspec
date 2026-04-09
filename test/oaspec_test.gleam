@@ -6187,3 +6187,48 @@ pub fn server_cookie_router_percent_decodes_cookie_values_test() {
   string.contains(router_file.content, "uri.percent_decode")
   |> should.be_true()
 }
+
+pub fn server_query_and_header_scalars_are_parsed_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /metrics:
+    get:
+      operationId: getMetrics
+      parameters:
+        - name: ratio
+          in: query
+          required: true
+          schema:
+            type: number
+        - name: x-enabled
+          in: header
+          required: false
+          schema:
+            type: boolean
+        - name: x-threshold
+          in: header
+          required: true
+          schema:
+            type: number
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(content, "ratio: { let assert Ok(v) = dict.get(query, \"ratio\") let assert Ok(n) = float.parse(v) n },")
+  |> should.be_true()
+  string.contains(content, "x_enabled: case dict.get(headers, \"x-enabled\") { Ok(v) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None },")
+  |> should.be_true()
+  string.contains(content, "x_threshold: { let assert Ok(v) = dict.get(headers, \"x-threshold\") let assert Ok(n) = float.parse(v) n },")
+  |> should.be_true()
+}
