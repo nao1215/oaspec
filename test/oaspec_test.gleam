@@ -8245,3 +8245,119 @@ pub fn oss_swagger_parser_js_relative_server_parses_test() {
   list.length(spec.servers) |> should.equal(1)
   dict.size(spec.paths) |> should.not_equal(0)
 }
+
+// ---------------------------------------------------------------------------
+// OSS: spectral (Apache-2.0)
+// Test data derived from https://github.com/stoplightio/spectral
+// ---------------------------------------------------------------------------
+
+/// spectral: valid minimal OpenAPI 3.0 spec with contact and tags.
+pub fn oss_spectral_valid_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_spectral_valid.yaml")
+  spec.info.title |> should.equal("OAS3")
+  spec.openapi |> should.equal("3.0.0")
+  list.length(spec.servers) |> should.equal(1)
+  list.length(spec.tags) |> should.equal(1)
+}
+
+/// spectral: minimal OpenAPI 3.0 spec without contact info.
+pub fn oss_spectral_no_contact_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_spectral_no_contact.yaml")
+  spec.info.title |> should.equal("OAS3")
+  spec.info.contact |> should.equal(None)
+}
+
+/// spectral: comprehensive spec with unused components in JSON.
+pub fn oss_spectral_unused_components_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_spectral_unused_components.json")
+  spec.info.title |> should.equal("Used Components")
+  list.length(spec.tags) |> should.not_equal(0)
+  dict.size(spec.paths) |> should.not_equal(0)
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+// ---------------------------------------------------------------------------
+// OSS: openapi-dotnet (MIT)
+// Test data derived from https://github.com/microsoft/OpenAPI.NET
+// ---------------------------------------------------------------------------
+
+/// openapi-dotnet: OAuth2 security scheme with authorization code flow.
+pub fn oss_openapi_dotnet_oauth2_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_dotnet_oauth2.yaml")
+  spec.info.title |> should.equal("Repair Service")
+  let assert Some(components) = spec.components
+  dict.size(components.security_schemes) |> should.equal(1)
+}
+
+/// openapi-dotnet: operation with empty security array (opt-out of global security).
+pub fn oss_openapi_dotnet_empty_security_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_dotnet_empty_security.yaml")
+  spec.info.title |> should.equal("Repair Service")
+  dict.size(spec.paths) |> should.equal(1)
+}
+
+/// openapi-dotnet: webhooks with $ref to components/pathItems (OpenAPI 3.1).
+pub fn oss_openapi_dotnet_webhooks_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_dotnet_webhooks.yaml")
+  spec.info.title |> should.equal("Webhook Example")
+  dict.size(spec.webhooks) |> should.not_equal(0)
+  let assert Some(components) = spec.components
+  dict.size(components.path_items) |> should.not_equal(0)
+}
+
+/// openapi-dotnet: spec without any security configuration.
+pub fn oss_openapi_dotnet_no_security_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_dotnet_no_security.yaml")
+  spec.info.title |> should.equal("Repair Service")
+  list.length(spec.security) |> should.equal(0)
+}
+
+/// openapi-dotnet: petstore with multiple content types, 4XX/5XX wildcards,
+/// contact info, license, and termsOfService.
+pub fn oss_openapi_dotnet_petstore_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_dotnet_petstore.yaml")
+  spec.info.title |> should.equal("Swagger Petstore (Simple)")
+  let assert Some(contact) = spec.info.contact
+  let assert Some(name) = contact.name
+  name |> should.equal("Swagger API team")
+  let assert Some(license) = spec.info.license
+  license.name |> should.equal("MIT")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.equal(3)
+  dict.size(spec.paths) |> should.equal(2)
+}
+
+/// openapi-dotnet: spec with reusable headers and examples in components.
+pub fn oss_openapi_dotnet_headers_examples_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file(
+      "test/fixtures/oss_openapi_dotnet_headers_examples.yaml",
+    )
+  spec.openapi |> should.equal("3.0.4")
+  let assert Some(components) = spec.components
+  dict.size(components.headers) |> should.not_equal(0)
+  dict.size(components.schemas) |> should.not_equal(0)
+  list.length(spec.tags) |> should.equal(1)
+}
+
+/// openapi-dotnet: OpenAPI 3.1 spec with $id schema references.
+/// Uses URL-style $ref (e.g. "$ref: https://foo.bar/Box") which the parser
+/// stores as Reference with the URL as ref string.
+pub fn oss_openapi_dotnet_dollar_id_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_dotnet_dollar_id.yaml")
+  spec.info.title |> should.equal("Simple API")
+  spec.openapi |> should.equal("3.1.2")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.equal(2)
+  dict.size(spec.paths) |> should.equal(2)
+}
