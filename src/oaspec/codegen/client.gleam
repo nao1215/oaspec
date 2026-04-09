@@ -848,7 +848,7 @@ fn generate_client_function(
     |> se.indent(2, "Error(e) -> Error(e)")
     |> se.indent(2, "Ok(resp) -> {")
 
-  let responses = dict.to_list(operation.responses)
+  let responses = http.sort_response_entries(dict.to_list(operation.responses))
   let sb =
     sb
     |> se.indent(3, "case resp.status {")

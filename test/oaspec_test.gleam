@@ -20,6 +20,7 @@ import oaspec/openapi/resolver
 import oaspec/openapi/schema
 import oaspec/openapi/spec
 import oaspec/util/content_type
+import oaspec/util/http
 import oaspec/util/naming
 import simplifile
 
@@ -2918,6 +2919,78 @@ paths:
   // Must have client files (client)
   { client_count > 0 }
   |> should.be_true()
+}
+
+// --- Response code range tests ---
+
+/// 2XX response code must generate a valid Gleam range pattern,
+/// not the literal "2XX" which is invalid Gleam syntax.
+pub fn response_code_range_2xx_generates_valid_gleam_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      responses:
+        '2XX':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: string
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // The generated code must NOT contain the literal "2XX" as a case pattern
+  string.contains(content, "2XX ->")
+  |> should.be_false()
+  // It should contain a valid range guard pattern
+  string.contains(content, "status if status >= 200")
+  |> should.be_true()
+}
+
+/// status_code_to_int_pattern must not pass through range codes like "2XX".
+pub fn status_code_range_pattern_test() {
+  // Range codes must produce valid Gleam patterns, not raw "2XX"
+  http.status_code_to_int_pattern("2XX")
+  |> should.not_equal("2XX")
+
+  // Exact codes still work
+  http.status_code_to_int_pattern("200")
+  |> should.equal("200")
+
+  // Default is wildcard
+  http.status_code_to_int_pattern("default")
+  |> should.equal("_")
+}
+
+/// status_code_suffix must handle range codes.
+pub fn status_code_suffix_range_test() {
+  http.status_code_suffix("2XX")
+  |> should.equal("Status2xx")
+
+  http.status_code_suffix("4XX")
+  |> should.equal("Status4xx")
 }
 
 fn find_substring_index(haystack: String, needle: String) -> Result(Int, Nil) {
