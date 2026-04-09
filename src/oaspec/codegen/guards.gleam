@@ -70,6 +70,20 @@ fn generate_guards(ctx: Context) -> String {
     True -> [ctx.config.package <> "/types", ..imports]
     False -> imports
   }
+  // Import option module when composite validators handle optional fields
+  let needs_option =
+    list.any(schemas, fn(entry) {
+      let #(name, schema_ref) = entry
+      let guard_calls = collect_guard_calls(name, schema_ref, ctx)
+      list.any(guard_calls, fn(call) {
+        let #(_, _, is_required) = call
+        !is_required
+      })
+    })
+  let imports = case needs_option {
+    True -> ["gleam/option", ..imports]
+    False -> imports
+  }
 
   let sb =
     se.file_header(context.version)
@@ -604,15 +618,27 @@ fn generate_composite_validator(
         |> se.indent(1, "let errors = []")
       let sb =
         list.fold(guard_calls, sb, fn(sb, call) {
-          let #(guard_fn, accessor) = call
-          sb
-          |> se.indent(
-            1,
-            "let errors = case " <> guard_fn <> "(" <> accessor <> ") {",
-          )
-          |> se.indent(2, "Ok(_) -> errors")
-          |> se.indent(2, "Error(msg) -> [msg, ..errors]")
-          |> se.indent(1, "}")
+          let #(guard_fn, accessor, is_required) = call
+          case is_required {
+            True ->
+              sb
+              |> se.indent(
+                1,
+                "let errors = case " <> guard_fn <> "(" <> accessor <> ") {",
+              )
+              |> se.indent(2, "Ok(_) -> errors")
+              |> se.indent(2, "Error(msg) -> [msg, ..errors]")
+              |> se.indent(1, "}")
+            False ->
+              sb
+              |> se.indent(1, "let errors = case " <> accessor <> " {")
+              |> se.indent(2, "option.Some(v) -> case " <> guard_fn <> "(v) {")
+              |> se.indent(3, "Ok(_) -> errors")
+              |> se.indent(3, "Error(msg) -> [msg, ..errors]")
+              |> se.indent(2, "}")
+              |> se.indent(2, "option.None -> errors")
+              |> se.indent(1, "}")
+          }
         })
       sb
       |> se.indent(1, "case errors {")
@@ -645,68 +671,64 @@ fn composite_validator_type(
   }
 }
 
+/// A guard call with metadata about whether the field is optional.
+/// #(guard_fn_name, accessor_expr, is_optional)
+type GuardCall =
+  #(String, String, Bool)
+
 /// Collect all guard function calls for a schema's constrained fields.
 fn collect_guard_calls(
   name: String,
   schema_ref: SchemaRef,
   ctx: Context,
-) -> List(#(String, String)) {
+) -> List(GuardCall) {
   let schema = case schema_ref {
     Inline(s) -> Ok(s)
     Reference(_) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
   }
   case schema {
-    Ok(ObjectSchema(properties:, ..)) ->
+    Ok(ObjectSchema(properties:, required:, ..)) ->
       dict.to_list(properties)
       |> list.flat_map(fn(entry) {
         let #(prop_name, prop_ref) = entry
-        collect_field_guard_calls(name, prop_name, prop_ref, ctx)
+        let is_required = list.contains(required, prop_name)
+        collect_field_guard_calls(name, prop_name, prop_ref, is_required, ctx)
       })
     Ok(AllOfSchema(schemas:, ..)) -> {
-      let merged_props =
-        list.fold(schemas, dict.new(), fn(acc, s_ref) {
-          case s_ref {
-            Inline(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-            Reference(_) ->
-              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
-                Ok(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-                _ -> acc
-              }
-            _ -> acc
-          }
-        })
-      dict.to_list(merged_props)
+      let merged = merge_allof_props_and_required(schemas, ctx)
+      dict.to_list(merged.properties)
       |> list.flat_map(fn(entry) {
         let #(prop_name, prop_ref) = entry
-        collect_field_guard_calls(name, prop_name, prop_ref, ctx)
+        let is_required = list.contains(merged.required, prop_name)
+        collect_field_guard_calls(name, prop_name, prop_ref, is_required, ctx)
       })
     }
     Ok(StringSchema(min_length:, max_length:, ..)) ->
       case min_length, max_length {
         None, None -> []
         _, _ -> [
-          #(guard_function_name(name, "", "length"), "value"),
+          #(guard_function_name(name, "", "length"), "value", True),
         ]
       }
     Ok(IntegerSchema(minimum:, maximum:, ..)) ->
       case minimum, maximum {
         None, None -> []
         _, _ -> [
-          #(guard_function_name(name, "", "range"), "value"),
+          #(guard_function_name(name, "", "range"), "value", True),
         ]
       }
     Ok(NumberSchema(minimum:, maximum:, ..)) ->
       case minimum, maximum {
         None, None -> []
         _, _ -> [
-          #(guard_function_name(name, "", "range"), "value"),
+          #(guard_function_name(name, "", "range"), "value", True),
         ]
       }
     Ok(ArraySchema(min_items:, max_items:, ..)) ->
       case min_items, max_items {
         None, None -> []
         _, _ -> [
-          #(guard_function_name(name, "", "length"), "value"),
+          #(guard_function_name(name, "", "length"), "value", True),
         ]
       }
     _ -> []
@@ -718,8 +740,9 @@ fn collect_field_guard_calls(
   schema_name: String,
   prop_name: String,
   prop_ref: SchemaRef,
+  is_required: Bool,
   ctx: Context,
-) -> List(#(String, String)) {
+) -> List(GuardCall) {
   let resolved = case prop_ref {
     Inline(schema) -> Ok(schema)
     Reference(_) -> resolver.resolve_schema_ref(prop_ref, ctx.spec)
@@ -730,30 +753,80 @@ fn collect_field_guard_calls(
       case min_length, max_length {
         None, None -> []
         _, _ -> [
-          #(guard_function_name(schema_name, prop_name, "length"), accessor),
+          #(
+            guard_function_name(schema_name, prop_name, "length"),
+            accessor,
+            is_required,
+          ),
         ]
       }
     Ok(IntegerSchema(minimum:, maximum:, ..)) ->
       case minimum, maximum {
         None, None -> []
         _, _ -> [
-          #(guard_function_name(schema_name, prop_name, "range"), accessor),
+          #(
+            guard_function_name(schema_name, prop_name, "range"),
+            accessor,
+            is_required,
+          ),
         ]
       }
     Ok(NumberSchema(minimum:, maximum:, ..)) ->
       case minimum, maximum {
         None, None -> []
         _, _ -> [
-          #(guard_function_name(schema_name, prop_name, "range"), accessor),
+          #(
+            guard_function_name(schema_name, prop_name, "range"),
+            accessor,
+            is_required,
+          ),
         ]
       }
     Ok(ArraySchema(min_items:, max_items:, ..)) ->
       case min_items, max_items {
         None, None -> []
         _, _ -> [
-          #(guard_function_name(schema_name, prop_name, "items"), accessor),
+          #(
+            guard_function_name(schema_name, prop_name, "length"),
+            accessor,
+            is_required,
+          ),
         ]
       }
     _ -> []
   }
+}
+
+/// Merge properties and required lists from allOf sub-schemas.
+type MergedProps {
+  MergedProps(properties: dict.Dict(String, SchemaRef), required: List(String))
+}
+
+fn merge_allof_props_and_required(
+  schemas: List(SchemaRef),
+  ctx: Context,
+) -> MergedProps {
+  list.fold(
+    schemas,
+    MergedProps(properties: dict.new(), required: []),
+    fn(acc, s_ref) {
+      case s_ref {
+        Inline(ObjectSchema(properties:, required:, ..)) ->
+          MergedProps(
+            properties: dict.merge(acc.properties, properties),
+            required: list.append(acc.required, required),
+          )
+        Reference(_) ->
+          case resolver.resolve_schema_ref(s_ref, ctx.spec) {
+            Ok(ObjectSchema(properties:, required:, ..)) ->
+              MergedProps(
+                properties: dict.merge(acc.properties, properties),
+                required: list.append(acc.required, required),
+              )
+            _ -> acc
+          }
+        _ -> acc
+      }
+    },
+  )
 }
