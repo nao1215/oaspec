@@ -8361,3 +8361,83 @@ pub fn oss_openapi_dotnet_dollar_id_parses_test() {
   dict.size(components.schemas) |> should.equal(2)
   dict.size(spec.paths) |> should.equal(2)
 }
+
+// ---------------------------------------------------------------------------
+// OSS: swagger-parser-java (Apache-2.0)
+// Test data derived from https://github.com/swagger-api/swagger-parser
+// ---------------------------------------------------------------------------
+
+/// swagger-parser-java issue1070: additionalProperties: false with nested $ref.
+pub fn oss_swagger_parser_java_additional_props_false_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file(
+      "test/fixtures/oss_swagger_parser_java_additional_props_false.yaml",
+    )
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.equal(2)
+}
+
+/// swagger-parser-java issue879: callback using $ref to components/callbacks.
+pub fn oss_swagger_parser_java_callback_ref_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file(
+      "test/fixtures/oss_swagger_parser_java_callback_ref.yaml",
+    )
+  spec.info.title |> should.equal("Callback with ref Example")
+  dict.size(spec.paths) |> should.equal(1)
+}
+
+/// swagger-parser-java issue1433: schema without explicit type field.
+pub fn oss_swagger_parser_java_no_type_schema_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file(
+      "test/fixtures/oss_swagger_parser_java_no_type_schema.yaml",
+    )
+  spec.info.title |> should.equal("no type resolution")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.equal(2)
+}
+
+/// swagger-parser-java issue1086: deeply nested object schemas with
+/// multipleOf and date format.
+pub fn oss_swagger_parser_java_nested_objects_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file(
+      "test/fixtures/oss_swagger_parser_java_nested_objects.yaml",
+    )
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.equal(1)
+}
+
+/// swagger-parser-java: API with duplicate tag names in JSON.
+pub fn oss_swagger_parser_java_multiple_tags_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file(
+      "test/fixtures/oss_swagger_parser_java_multiple_tags.json",
+    )
+  spec.info.title |> should.equal("Sample API")
+  list.length(spec.tags) |> should.not_equal(0)
+  dict.size(spec.paths) |> should.not_equal(0)
+}
+
+/// swagger-parser-java issue959: petstore with path-level parameters and tags.
+pub fn oss_swagger_parser_java_path_params_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file(
+      "test/fixtures/oss_swagger_parser_java_path_params.json",
+    )
+  spec.info.title |> should.equal("Swagger Petstore")
+  list.length(spec.tags) |> should.equal(1)
+}
+
+/// swagger-parser-java issue895: petstore with contact and license in JSON.
+pub fn oss_swagger_parser_java_petstore_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_swagger_parser_java_petstore.yaml")
+  spec.info.title |> should.equal("Swagger Petstore")
+  let assert Some(contact) = spec.info.contact
+  let assert Some(name) = contact.name
+  name |> should.equal("API Support")
+  let assert Some(license) = spec.info.license
+  license.name |> should.equal("Apache 2.0")
+}
