@@ -1348,9 +1348,24 @@ pub fn parse_error_to_string(error: ParseError) -> String {
   case error {
     FileError(detail:) -> detail
     YamlError(detail:) -> detail
-    MissingField(path:, field:) -> "Missing field '" <> field <> "' at " <> path
-    InvalidValue(path:, detail:) ->
-      "Invalid value at " <> path <> ": " <> detail
+    MissingField(path:, field:) -> {
+      let location = case path {
+        "" -> "root"
+        p -> p
+      }
+      "Missing required field '"
+      <> field
+      <> "' at "
+      <> location
+      <> ". Check your OpenAPI spec structure."
+    }
+    InvalidValue(path:, detail:) -> {
+      let location = case path {
+        "" -> "root"
+        p -> p
+      }
+      "Invalid value at " <> location <> ": " <> detail
+    }
   }
 }
 
