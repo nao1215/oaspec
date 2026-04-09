@@ -7,7 +7,7 @@ Generate Gleam code from OpenAPI 3.x specifications with strict codegen for a la
 
 - Custom types for component schemas
 - JSON decoders and encoders (allOf, oneOf/anyOf with discriminator)
-- Server handler stubs with callback support
+- Server handler stubs with callback support (scaffold — router dispatches to handler references but does not yet construct typed requests)
 - Client SDK with parameter serialization and response decoding
 - Middleware (logging, retry, validation)
 - Security scheme support (`apiKey`, HTTP all schemes, OAuth2, OpenID Connect)
@@ -203,7 +203,7 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 - Client typed body (auto-encoded) and typed response (auto-decoded) for single content-type operations; multi-content-type operations use `String` body with explicit `content_type` parameter
 - `default` response handling in client
 - Top-level security inheritance (operation-level overrides, `security: []` opts out, OR alternatives all applied)
-- Security schemes: `apiKey` in header/query/cookie, HTTP all schemes (bearer/basic/digest/hoba/negotiate/mutual/etc.), OAuth2, OpenID Connect
+- Security schemes: `apiKey` in header/query/cookie, HTTP all schemes (bearer/basic/digest/hoba/negotiate/mutual/etc.), OAuth2 (flows and scopes preserved in AST), OpenID Connect
 - `text/plain` response content type: body returned as `String` directly
 - `application/xml`, `text/xml` response content types: body returned as `String`
 - `application/octet-stream` response content type: body returned as `String`
