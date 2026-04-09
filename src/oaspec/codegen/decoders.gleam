@@ -608,19 +608,83 @@ fn generate_decoder(
       )
     }
 
-    Inline(AnyOfSchema(metadata:, schemas:, discriminator:)) -> {
-      // Treat anyOf the same as oneOf, using discriminator if present
-      generate_oneof_decoder(
-        sb,
-        name,
-        type_name,
-        fn_name,
-        decoder_fn_name,
-        metadata.description,
-        schemas,
-        discriminator,
-        ctx,
-      )
+    Inline(AnyOfSchema(metadata:, schemas:, ..)) -> {
+      // anyOf = inclusive union: try all sub-decoders, collect successes
+      let sb = maybe_doc_comment(sb, metadata.description)
+
+      // Generate field decoders that try each variant
+      let variant_fields =
+        list.map(schemas, fn(s_ref) {
+          case s_ref {
+            Reference(name: ref_name, ..) -> {
+              let field_name = naming.to_snake_case(ref_name)
+              let decoder_name =
+                "decode_" <> naming.to_snake_case(ref_name) <> "_decoder"
+              #(field_name, decoder_name, ref_name)
+            }
+            Inline(_) -> #("unknown", "decode.string", "Unknown")
+          }
+        })
+
+      // Decoder function
+      let sb =
+        sb
+        |> se.line(
+          "pub fn "
+          <> decoder_fn_name
+          <> "() -> decode.Decoder(types."
+          <> type_name
+          <> ") {",
+        )
+
+      // Try each variant decoder, wrap in Some on success, None on failure
+      let sb =
+        list.fold(variant_fields, sb, fn(sb, field) {
+          let #(field_name, decoder_name, _) = field
+          sb
+          |> se.indent(
+            1,
+            "use "
+              <> field_name
+              <> " <- decode.then(decode.one_of(["
+              <> decoder_name
+              <> "() |> decode.map(option.Some)], option.None))",
+          )
+        })
+
+      // Construct the record
+      let field_assignments =
+        list.map(variant_fields, fn(f) {
+          let #(field_name, _, _) = f
+          field_name <> ": " <> field_name
+        })
+      let sb =
+        sb
+        |> se.indent(
+          1,
+          "decode.success(types."
+            <> type_name
+            <> "("
+            <> string.join(field_assignments, ", ")
+            <> "))",
+        )
+      let sb = sb |> se.line("}") |> se.blank_line()
+
+      // JSON parse wrapper
+      let sb =
+        sb
+        |> se.line(
+          "pub fn "
+          <> fn_name
+          <> "(json_string: String) -> Result(types."
+          <> type_name
+          <> ", json.DecodeError) {",
+        )
+        |> se.indent(1, "json.parse(json_string, " <> decoder_fn_name <> "())")
+        |> se.line("}")
+        |> se.blank_line()
+
+      sb
     }
 
     // Primitive schemas: generate decoder/encoder wrappers
@@ -1513,8 +1577,8 @@ fn generate_encoder(
       generate_encoder(sb, name, merged_schema, ctx)
     }
 
-    Inline(OneOfSchema(schemas:, ..)) | Inline(AnyOfSchema(schemas:, ..)) -> {
-      // Generate encoder for oneOf/anyOf: pattern match on each variant
+    Inline(OneOfSchema(schemas:, ..)) -> {
+      // oneOf encoder: pattern match on tagged union variants
       let all_refs =
         list.all(schemas, fn(s) {
           case s {
@@ -1525,7 +1589,6 @@ fn generate_encoder(
       case all_refs {
         False -> sb
         True -> {
-          // _json version
           let sb =
             sb
             |> se.line(
@@ -1536,16 +1599,14 @@ fn generate_encoder(
               <> ") -> json.Json {",
             )
             |> se.indent(1, "case value {")
-
           let sb =
             list.fold(schemas, sb, fn(sb, s_ref) {
               case s_ref {
                 Reference(name:, ..) -> {
-                  let ref_name = name
-                  let variant_type = naming.schema_to_type_name(ref_name)
+                  let variant_type = naming.schema_to_type_name(name)
                   let variant_name = type_name <> variant_type
                   let inner_encoder =
-                    "encode_" <> naming.to_snake_case(ref_name) <> "_json"
+                    "encode_" <> naming.to_snake_case(name) <> "_json"
                   sb
                   |> se.indent(
                     2,
@@ -1559,13 +1620,78 @@ fn generate_encoder(
                 _ -> sb
               }
             })
-
           let sb =
             sb
             |> se.indent(1, "}")
             |> se.line("}")
             |> se.blank_line()
+          let sb =
+            sb
+            |> se.line(
+              "pub fn "
+              <> fn_name
+              <> "(value: types."
+              <> type_name
+              <> ") -> String {",
+            )
+            |> se.indent(1, json_fn_name <> "(value) |> json.to_string()")
+            |> se.line("}")
+            |> se.blank_line()
+          sb
+        }
+      }
+    }
 
+    Inline(AnyOfSchema(schemas:, ..)) -> {
+      // anyOf encoder: encode the first non-None field from the record
+      let all_refs =
+        list.all(schemas, fn(s) {
+          case s {
+            Reference(..) -> True
+            _ -> False
+          }
+        })
+      case all_refs {
+        False -> sb
+        True -> {
+          let variant_fields =
+            list.map(schemas, fn(s_ref) {
+              case s_ref {
+                Reference(name:, ..) -> #(
+                  naming.to_snake_case(name),
+                  "encode_" <> naming.to_snake_case(name) <> "_json",
+                )
+                Inline(_) -> #("unknown", "json.null")
+              }
+            })
+          // _json version: try each field in order, encode first Some
+          let sb =
+            sb
+            |> se.line(
+              "pub fn "
+              <> json_fn_name
+              <> "(value: types."
+              <> type_name
+              <> ") -> json.Json {",
+            )
+          let sb =
+            list.fold(variant_fields, sb, fn(sb, field) {
+              let #(field_name, encoder_fn) = field
+              sb
+              |> se.indent(1, "case value." <> field_name <> " {")
+              |> se.indent(2, "option.Some(v) -> " <> encoder_fn <> "(v)")
+              |> se.indent(2, "option.None ->")
+            })
+          let sb =
+            sb
+            |> se.indent({ list.length(variant_fields) + 1 }, "json.null()")
+          // Close all the case expressions
+          let sb =
+            list.fold(variant_fields, sb, fn(sb, _) { sb |> se.indent(1, "}") })
+          let sb =
+            sb
+            |> se.line("}")
+            |> se.blank_line()
           // String version
           let sb =
             sb
@@ -1579,7 +1705,6 @@ fn generate_encoder(
             |> se.indent(1, json_fn_name <> "(value) |> json.to_string()")
             |> se.line("}")
             |> se.blank_line()
-
           sb
         }
       }

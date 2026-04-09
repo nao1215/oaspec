@@ -3949,14 +3949,17 @@ components:
   let files = types.generate(ctx)
   let assert [types_file, ..] = files
   let content = types_file.content
-  // Pet must be a union type with Cat and Dog variants, NOT `pub type Pet = String`
+  // Pet must be a record with Option fields (anyOf = inclusive union)
   string.contains(content, "pub type Pet = String")
   |> should.be_false()
-  // It should have variant constructors
-  string.contains(content, "PetCat(")
+  // It should have Option fields, not tagged union constructors
+  string.contains(content, "Option(Cat)")
   |> should.be_true()
-  string.contains(content, "PetDog(")
+  string.contains(content, "Option(Dog)")
   |> should.be_true()
+  // Must NOT have tagged union variant constructors
+  string.contains(content, "PetCat(Cat)")
+  |> should.be_false()
 }
 
 // --- Security scopes comment tests ---
@@ -4156,6 +4159,109 @@ paths:
     Error(_) -> should.be_true(True)
     Ok(_) -> should.be_true(False)
   }
+}
+
+// --- oneOf vs anyOf semantic separation tests ---
+
+/// anyOf must generate a record with Option fields, NOT a tagged union.
+pub fn anyof_generates_record_with_option_fields_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+components:
+  schemas:
+    Card:
+      type: object
+      properties:
+        card_number:
+          type: string
+    Bank:
+      type: object
+      properties:
+        account:
+          type: string
+    Payment:
+      anyOf:
+        - $ref: '#/components/schemas/Card'
+        - $ref: '#/components/schemas/Bank'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = types.generate(ctx)
+  let assert [types_file, ..] = files
+  let content = types_file.content
+  // anyOf should generate a record with Option fields, not tagged union variants
+  string.contains(content, "Option(")
+  |> should.be_true()
+  // It must NOT have tagged union variant constructors like PaymentCard(Card)
+  string.contains(content, "PaymentCard(")
+  |> should.be_false()
+}
+
+/// oneOf must still generate a tagged union (existing behavior preserved).
+pub fn oneof_still_generates_tagged_union_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Shape'
+components:
+  schemas:
+    Circle:
+      type: object
+      properties:
+        radius:
+          type: number
+    Square:
+      type: object
+      properties:
+        side:
+          type: number
+    Shape:
+      oneOf:
+        - $ref: '#/components/schemas/Circle'
+        - $ref: '#/components/schemas/Square'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = types.generate(ctx)
+  let assert [types_file, ..] = files
+  let content = types_file.content
+  // oneOf must generate tagged union variants
+  string.contains(content, "ShapeCircle(")
+  |> should.be_true()
+  string.contains(content, "ShapeSquare(")
+  |> should.be_true()
 }
 
 fn find_substring_index(haystack: String, needle: String) -> Result(Int, Nil) {

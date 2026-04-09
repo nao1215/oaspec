@@ -56,7 +56,11 @@ fn generate_types(ctx: Context) -> String {
   let needs_option =
     list.any(schemas, fn(entry) {
       let #(_, schema_ref) = entry
-      schema_has_optional_fields(schema_ref, ctx)
+      // AnyOfSchema generates Option fields for each variant
+      case schema_ref {
+        Inline(AnyOfSchema(..)) -> True
+        _ -> schema_has_optional_fields(schema_ref, ctx)
+      }
     })
 
   // Check if Dict is needed (any schema with typed or untyped additionalProperties)
@@ -296,7 +300,8 @@ fn generate_schema_type(
       |> se.blank_line()
     }
 
-    OneOfSchema(metadata:, schemas:, ..) | AnyOfSchema(metadata:, schemas:, ..) -> {
+    OneOfSchema(metadata:, schemas:, ..) -> {
+      // oneOf = exclusive union: exactly one variant matches (tagged union)
       let sb = maybe_doc_comment(sb, metadata.description)
       let sb = sb |> se.line("pub type " <> type_name <> " {")
       let sb =
@@ -305,6 +310,25 @@ fn generate_schema_type(
           let variant_name = type_name <> variant_type
           sb |> se.indent(1, variant_name <> "(" <> variant_type <> ")")
         })
+      sb
+      |> se.line("}")
+      |> se.blank_line()
+    }
+
+    AnyOfSchema(metadata:, schemas:, ..) -> {
+      // anyOf = inclusive union: one or more variants can match
+      // Generate a record with all variants as Option fields
+      let sb = maybe_doc_comment(sb, metadata.description)
+      let sb = sb |> se.line("pub type " <> type_name <> " {")
+      let fields =
+        list.map(schemas, fn(s_ref) {
+          let variant_type = schema_ref_to_type(s_ref, ctx)
+          let field_name = naming.to_snake_case(variant_type)
+          field_name <> ": Option(" <> variant_type <> ")"
+        })
+      let sb =
+        sb
+        |> se.indent(1, type_name <> "(" <> string.join(fields, ", ") <> ")")
       sb
       |> se.line("}")
       |> se.blank_line()
@@ -439,7 +463,7 @@ fn generate_anonymous_type_for_schema(
   case schema_obj {
     ObjectSchema(..) ->
       generate_schema_type(sb, type_name, raw_name, schema_obj, ctx)
-    OneOfSchema(schemas:, ..) | AnyOfSchema(schemas:, ..) -> {
+    OneOfSchema(schemas:, ..) -> {
       // Only generate if all schemas are $ref (inline primitives are caught by validation)
       let all_refs =
         list.all(schemas, fn(s) {
@@ -464,6 +488,9 @@ fn generate_anonymous_type_for_schema(
         False -> sb
       }
     }
+    AnyOfSchema(..) ->
+      // anyOf delegates to generate_schema_type which handles it
+      generate_schema_type(sb, type_name, raw_name, schema_obj, ctx)
     AllOfSchema(metadata:, schemas:) -> {
       let merged = merge_allof_schemas(schemas, ctx)
       let merged_schema =
