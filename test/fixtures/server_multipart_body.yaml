@@ -1,0 +1,29 @@
+openapi: 3.0.3
+info:
+  title: Server Multipart Body Test API
+  version: 1.0.0
+paths:
+  /upload:
+    post:
+      operationId: uploadMultipart
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                active:
+                  type: boolean
+                ratio:
+                  type: number
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: ok

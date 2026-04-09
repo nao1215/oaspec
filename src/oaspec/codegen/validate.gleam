@@ -438,9 +438,17 @@ fn validate_request_body(
           content_keys,
           ctx,
         )
-      // Server router only handles application/json bodies with typed decoding.
-      // Non-JSON content types (multipart/form-data, x-www-form-urlencoded) are
-      // passed as raw String, which breaks the typed request body contract.
+      let server_multipart_errors =
+        validate_server_multipart_request_body(
+          op_id,
+          rb.content,
+          content_keys,
+          ctx,
+        )
+      // Server router has explicit typed support for application/json,
+      // application/x-www-form-urlencoded, and multipart/form-data. Other
+      // supported content types still fall back to raw String and must be
+      // rejected here.
       let server_body_errors =
         validate_server_request_body_content_types(op_id, content_keys, ctx)
       list.flatten([
@@ -449,6 +457,7 @@ fn validate_request_body(
         multipart_field_errors,
         form_urlencoded_errors,
         server_form_urlencoded_errors,
+        server_multipart_errors,
         server_body_errors,
       ])
     }
@@ -587,6 +596,7 @@ fn validate_server_request_body_content_types(
         list.filter(content_keys, fn(key) {
           key != "application/json"
           && key != "application/x-www-form-urlencoded"
+          && key != "multipart/form-data"
           && content_type.is_supported_request(content_type.from_string(key))
         })
       list.map(non_json_but_supported, fn(media_type) {
@@ -600,6 +610,56 @@ fn validate_server_request_body_content_types(
         )
       })
     }
+  }
+}
+
+fn validate_server_multipart_request_body(
+  op_id: String,
+  content: dict.Dict(String, spec.MediaType),
+  content_keys: List(String),
+  ctx: Context,
+) -> List(ValidationError) {
+  case ctx.config.mode {
+    config.Client -> []
+    _ ->
+      case dict.get(content, "multipart/form-data") {
+        Ok(media_type) -> {
+          let content_type_errors = case list.length(content_keys) > 1 {
+            True -> [
+              ValidationError(
+                severity: SeverityError,
+                target: TargetServer,
+                path: op_id <> ".requestBody",
+                detail: "multipart/form-data request bodies are only supported as the sole request content type for server code generation.",
+              ),
+            ]
+            False -> []
+          }
+          let field_errors = case
+            resolve_schema_object(media_type.schema, ctx)
+          {
+            Some(ObjectSchema(properties:, ..)) ->
+              dict.to_list(properties)
+              |> list.flat_map(fn(entry) {
+                let #(field_name, field_schema) = entry
+                case multipart_server_field_supported(field_schema, ctx) {
+                  True -> []
+                  False -> [
+                    ValidationError(
+                      severity: SeverityError,
+                      target: TargetServer,
+                      path: op_id <> ".requestBody.multipart." <> field_name,
+                      detail: "multipart/form-data server request bodies only support inline primitive scalar fields.",
+                    ),
+                  ]
+                }
+              })
+            _ -> []
+          }
+          list.append(content_type_errors, field_errors)
+        }
+        Error(_) -> []
+      }
   }
 }
 
@@ -633,6 +693,16 @@ fn form_urlencoded_server_field_supported(
           })
         _ -> False
       }
+    _ -> False
+  }
+}
+
+fn multipart_server_field_supported(schema_ref: SchemaRef, ctx: Context) -> Bool {
+  case resolve_schema_object(Some(schema_ref), ctx) {
+    Some(StringSchema(..))
+    | Some(IntegerSchema(..))
+    | Some(NumberSchema(..))
+    | Some(BooleanSchema(..)) -> True
     _ -> False
   }
 }

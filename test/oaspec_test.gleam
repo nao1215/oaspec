@@ -5598,9 +5598,8 @@ paths:
 }
 
 pub fn validate_non_json_request_body_unsupported_for_server_test() {
-  // Server router only properly handles application/json request bodies.
-  // multipart/form-data and application/x-www-form-urlencoded should produce
-  // a server-targeted validation error since the router passes them as raw String.
+  // Server multipart support is intentionally narrow. Nested/object-like fields
+  // should still produce server-targeted validation errors.
   let yaml =
     "
 openapi: 3.0.3
@@ -5618,9 +5617,12 @@ paths:
             schema:
               type: object
               properties:
-                file:
-                  type: string
-                  format: binary
+                meta:
+                  type: object
+                  properties:
+                    file:
+                      type: string
+                      format: binary
       responses:
         '200': { description: ok }
 "
@@ -5630,9 +5632,12 @@ paths:
   let server_errors =
     list.filter(errors, fn(e) {
       e.target == validate.TargetServer
-      && string.contains(e.detail, "not supported for server")
+      && string.contains(
+        e.detail,
+        "multipart/form-data server request bodies only support",
+      )
     })
-  // Should have at least one server-targeted error for non-JSON body
+  // Should have at least one server-targeted error for unsupported multipart shape
   list.length(server_errors)
   |> should.not_equal(0)
 }
@@ -6558,4 +6563,64 @@ pub fn server_nested_form_urlencoded_body_is_parsed_test() {
     "age: case dict.get(form_body, \"profile[age]\") { Ok([v, ..]) -> { case int.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }",
   )
   |> should.be_true()
+}
+
+pub fn validate_accepts_multipart_body_for_server_codegen_test() {
+  let ctx = make_ctx("test/fixtures/server_multipart_body.yaml")
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "multipart/form-data")
+    })
+  list.length(server_errors)
+  |> should.equal(0)
+}
+
+pub fn server_multipart_body_is_parsed_test() {
+  let ctx = make_ctx("test/fixtures/server_multipart_body.yaml")
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(
+    content,
+    "fn parse_multipart_body(body: String, headers: Dict(String, String)) -> Dict(String, List(String)) {",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "let multipart_body = parse_multipart_body(body, headers)",
+  )
+  |> should.be_true()
+  string.contains(content, "body: types.UploadMultipartRequest(")
+  |> should.be_true()
+  string.contains(
+    content,
+    "name: { let assert Ok([v, ..]) = dict.get(multipart_body, \"name\") v }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "active: case dict.get(multipart_body, \"active\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "ratio: case dict.get(multipart_body, \"ratio\") { Ok([v, ..]) -> { case float.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "file: case dict.get(multipart_body, \"file\") { Ok([v, ..]) -> Some(v) _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "let normalized_part = part |> string.remove_prefix(\"\\r\\n\") |> string.remove_suffix(\"\\r\\n\")",
+  )
+  |> should.be_true()
+  string.contains(content, "let value = string.trim(raw_value)")
+  |> should.be_false()
 }

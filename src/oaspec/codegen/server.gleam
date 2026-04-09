@@ -177,6 +177,11 @@ fn generate_router(ctx: Context) -> String {
       let #(_, operation, _, _) = op
       operation_uses_form_urlencoded_body(operation)
     })
+  let has_multipart_body =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      operation_uses_multipart_body(operation)
+    })
   let has_nested_form_urlencoded_body =
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
@@ -207,6 +212,10 @@ fn generate_router(ctx: Context) -> String {
         Some(rb) -> form_urlencoded_body_needs_int(rb, ctx)
         None -> False
       }
+      || case operation.request_body {
+        Some(rb) -> multipart_body_needs_int(rb, ctx)
+        None -> False
+      }
     })
 
   let needs_float =
@@ -220,10 +229,15 @@ fn generate_router(ctx: Context) -> String {
         Some(rb) -> form_urlencoded_body_needs_float(rb, ctx)
         None -> False
       }
+      || case operation.request_body {
+        Some(rb) -> multipart_body_needs_float(rb, ctx)
+        None -> False
+      }
     })
 
   let needs_string =
     has_form_urlencoded_body
+    || has_multipart_body
     || list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       list.any(operation.parameters, fn(p) {
@@ -251,6 +265,7 @@ fn generate_router(ctx: Context) -> String {
     needs_cookie_lookup
     || has_deep_object
     || has_form_urlencoded_body
+    || has_multipart_body
     || list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       list.any(operation.parameters, fn(p) {
@@ -276,6 +291,10 @@ fn generate_router(ctx: Context) -> String {
         Some(rb) -> form_urlencoded_body_has_optional_fields(rb, ctx)
         None -> False
       }
+      let has_optional_multipart_fields = case operation.request_body {
+        Some(rb) -> multipart_body_has_optional_fields(rb, ctx)
+        None -> False
+      }
       let has_optional_body = case operation.request_body {
         Some(rb) -> !rb.required
         None -> False
@@ -283,6 +302,7 @@ fn generate_router(ctx: Context) -> String {
       has_optional_params
       || has_optional_deep_object_fields
       || has_optional_form_urlencoded_fields
+      || has_optional_multipart_fields
       || has_optional_body
     })
 
@@ -324,7 +344,8 @@ fn generate_router(ctx: Context) -> String {
     })
 
   let uses_headers =
-    list.any(operations, fn(op) {
+    has_multipart_body
+    || list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       list.any(operation.parameters, fn(p) {
         p.in_ == spec.InHeader || p.in_ == spec.InCookie
@@ -377,7 +398,9 @@ fn generate_router(ctx: Context) -> String {
   }
 
   let pkg_imports = [ctx.config.package <> "/handlers"]
-  let pkg_imports = case has_deep_object || has_form_urlencoded_body {
+  let pkg_imports = case
+    has_deep_object || has_form_urlencoded_body || has_multipart_body
+  {
     True -> list.append(pkg_imports, [ctx.config.package <> "/types"])
     False -> pkg_imports
   }
@@ -478,6 +501,103 @@ fn generate_router(ctx: Context) -> String {
       |> se.indent(4, "}")
       |> se.indent(2, "}")
       |> se.indent(1, "})")
+      |> se.line("}")
+      |> se.blank_line()
+    False -> sb
+  }
+
+  let sb = case has_multipart_body {
+    True ->
+      sb
+      |> se.line(
+        "fn multipart_boundary(headers: Dict(String, String)) -> Result(String, Nil) {",
+      )
+      |> se.indent(1, "case dict.get(headers, \"content-type\") {")
+      |> se.indent(2, "Ok(content_type) ->")
+      |> se.indent(
+        3,
+        "list.find_map(string.split(content_type, \";\"), fn(part) {",
+      )
+      |> se.indent(4, "let trimmed = string.trim(part)")
+      |> se.indent(4, "case string.starts_with(trimmed, \"boundary=\") {")
+      |> se.indent(
+        5,
+        "True -> Ok(string.replace(trimmed, \"boundary=\", \"\"))",
+      )
+      |> se.indent(5, "False -> Error(Nil)")
+      |> se.indent(4, "}")
+      |> se.indent(3, "})")
+      |> se.indent(2, "Error(_) -> Error(Nil)")
+      |> se.indent(1, "}")
+      |> se.line("}")
+      |> se.blank_line()
+      |> se.line(
+        "fn multipart_name(raw_headers: String) -> Result(String, Nil) {",
+      )
+      |> se.indent(
+        1,
+        "list.find_map(string.split(raw_headers, \"\\r\\n\"), fn(line) {",
+      )
+      |> se.indent(2, "case string.contains(line, \"name=\") {")
+      |> se.indent(3, "True ->")
+      |> se.indent(4, "list.find_map(string.split(line, \";\"), fn(part) {")
+      |> se.indent(5, "let trimmed = string.trim(part)")
+      |> se.indent(5, "case string.starts_with(trimmed, \"name=\") {")
+      |> se.indent(
+        6,
+        "True -> Ok(string.replace(string.replace(trimmed, \"name=\", \"\"), \"\\\"\", \"\"))",
+      )
+      |> se.indent(6, "False -> Error(Nil)")
+      |> se.indent(5, "}")
+      |> se.indent(4, "})")
+      |> se.indent(3, "False -> Error(Nil)")
+      |> se.indent(2, "}")
+      |> se.indent(1, "})")
+      |> se.line("}")
+      |> se.blank_line()
+      |> se.line(
+        "fn parse_multipart_body(body: String, headers: Dict(String, String)) -> Dict(String, List(String)) {",
+      )
+      |> se.indent(1, "case multipart_boundary(headers) {")
+      |> se.indent(2, "Ok(boundary) -> {")
+      |> se.indent(3, "let delimiter = \"--\" <> boundary")
+      |> se.indent(3, "let parts = string.split(body, delimiter)")
+      |> se.indent(3, "list.fold(parts, dict.new(), fn(acc, part) {")
+      |> se.indent(
+        4,
+        "let normalized_part = part |> string.remove_prefix(\"\\r\\n\") |> string.remove_suffix(\"\\r\\n\")",
+      )
+      |> se.indent(
+        4,
+        "case normalized_part == \"\" || normalized_part == \"--\" {",
+      )
+      |> se.indent(5, "True -> acc")
+      |> se.indent(5, "False ->")
+      |> se.indent(
+        6,
+        "case string.split_once(normalized_part, on: \"\\r\\n\\r\\n\") {",
+      )
+      |> se.indent(7, "Ok(#(raw_part_headers, raw_value)) ->")
+      |> se.indent(8, "case multipart_name(raw_part_headers) {")
+      |> se.indent(9, "Ok(name) -> {")
+      |> se.indent(10, "let value = raw_value")
+      |> se.indent(10, "case dict.get(acc, name) {")
+      |> se.indent(
+        11,
+        "Ok(existing) -> dict.insert(acc, name, list.append(existing, [value]))",
+      )
+      |> se.indent(11, "Error(_) -> dict.insert(acc, name, [value])")
+      |> se.indent(10, "}")
+      |> se.indent(9, "}")
+      |> se.indent(9, "Error(_) -> acc")
+      |> se.indent(8, "}")
+      |> se.indent(7, "Error(_) -> acc")
+      |> se.indent(6, "}")
+      |> se.indent(4, "}")
+      |> se.indent(3, "})")
+      |> se.indent(2, "}")
+      |> se.indent(2, "Error(_) -> dict.new()")
+      |> se.indent(1, "}")
       |> se.line("}")
       |> se.blank_line()
     False -> sb
@@ -632,7 +752,16 @@ fn generate_request_construction(
     Some(rb) ->
       case request_body_uses_form_urlencoded(rb) {
         True -> sb |> se.indent(3, "let form_body = parse_form_body(body)")
-        False -> sb
+        False ->
+          case request_body_uses_multipart(rb) {
+            True ->
+              sb
+              |> se.indent(
+                3,
+                "let multipart_body = parse_multipart_body(body, headers)",
+              )
+            False -> sb
+          }
       }
     _ -> sb
   }
@@ -1033,9 +1162,20 @@ fn request_body_uses_form_urlencoded(rb: spec.RequestBody) -> Bool {
   dict.has_key(rb.content, "application/x-www-form-urlencoded")
 }
 
+fn request_body_uses_multipart(rb: spec.RequestBody) -> Bool {
+  dict.has_key(rb.content, "multipart/form-data")
+}
+
 fn operation_uses_form_urlencoded_body(operation: spec.Operation) -> Bool {
   case operation.request_body {
     Some(rb) -> request_body_uses_form_urlencoded(rb)
+    None -> False
+  }
+}
+
+fn operation_uses_multipart_body(operation: spec.Operation) -> Bool {
+  case operation.request_body {
+    Some(rb) -> request_body_uses_multipart(rb)
     None -> False
   }
 }
@@ -1081,6 +1221,20 @@ fn form_urlencoded_body_properties(
   }
 }
 
+fn multipart_body_properties(
+  rb: spec.RequestBody,
+  ctx: Context,
+) -> List(DeepObjectProperty) {
+  case dict.get(rb.content, "multipart/form-data") {
+    Ok(media_type) ->
+      case media_type.schema {
+        Some(schema_ref) -> object_properties_from_schema_ref(schema_ref, ctx)
+        None -> []
+      }
+    Error(_) -> []
+  }
+}
+
 fn schema_ref_resolves_to_object(schema_ref: SchemaRef, ctx: Context) -> Bool {
   case schema_ref {
     Inline(ObjectSchema(..)) -> True
@@ -1107,7 +1261,21 @@ fn form_urlencoded_body_type_name(rb: spec.RequestBody, op_id: String) -> String
         Some(Reference(name:, ..)) ->
           "types." <> naming.schema_to_type_name(name)
         Some(Inline(ObjectSchema(..))) ->
-          "types." <> naming.schema_to_type_name(op_id) <> "RequestBody"
+          "types." <> naming.schema_to_type_name(op_id) <> "Request"
+        _ -> "String"
+      }
+    Error(_) -> "String"
+  }
+}
+
+fn multipart_body_type_name(rb: spec.RequestBody, op_id: String) -> String {
+  case dict.get(rb.content, "multipart/form-data") {
+    Ok(media_type) ->
+      case media_type.schema {
+        Some(Reference(name:, ..)) ->
+          "types." <> naming.schema_to_type_name(name)
+        Some(Inline(ObjectSchema(..))) ->
+          "types." <> naming.schema_to_type_name(op_id) <> "Request"
         _ -> "String"
       }
     Error(_) -> "String"
@@ -1246,6 +1414,51 @@ fn form_urlencoded_body_has_nested_object(
 ) -> Bool {
   list.any(form_urlencoded_body_properties(rb, ctx), fn(prop) {
     schema_ref_resolves_to_object(prop.schema_ref, ctx)
+  })
+}
+
+fn multipart_body_constructor_expr(
+  rb: spec.RequestBody,
+  op_id: String,
+  ctx: Context,
+) -> String {
+  let fields =
+    multipart_body_properties(rb, ctx)
+    |> list.map(fn(prop) {
+      let value_expr = case prop.required {
+        True ->
+          multipart_body_required_expr_with_schema(
+            prop.name,
+            Some(prop.schema_ref),
+          )
+        False ->
+          multipart_body_optional_expr_with_schema(
+            prop.name,
+            Some(prop.schema_ref),
+          )
+      }
+      prop.field_name <> ": " <> value_expr
+    })
+    |> string.join(", ")
+  multipart_body_type_name(rb, op_id) <> "(" <> fields <> ")"
+}
+
+fn multipart_body_has_optional_fields(
+  rb: spec.RequestBody,
+  ctx: Context,
+) -> Bool {
+  list.any(multipart_body_properties(rb, ctx), fn(prop) { !prop.required })
+}
+
+fn multipart_body_needs_int(rb: spec.RequestBody, ctx: Context) -> Bool {
+  list.any(multipart_body_properties(rb, ctx), fn(prop) {
+    query_schema_needs_int(Some(prop.schema_ref))
+  })
+}
+
+fn multipart_body_needs_float(rb: spec.RequestBody, ctx: Context) -> Bool {
+  list.any(multipart_body_properties(rb, ctx), fn(prop) {
+    query_schema_needs_float(Some(prop.schema_ref))
   })
 }
 
@@ -1450,6 +1663,57 @@ fn form_body_optional_expr_with_schema(
   }
 }
 
+fn multipart_body_required_expr_with_schema(
+  key: String,
+  schema_ref: Option(SchemaRef),
+) -> String {
+  let base =
+    "{ let assert Ok([v, ..]) = dict.get(multipart_body, \"" <> key <> "\") v }"
+  case schema_ref {
+    Some(Inline(schema.IntegerSchema(..))) ->
+      "{ let assert Ok([v, ..]) = dict.get(multipart_body, \""
+      <> key
+      <> "\") let assert Ok(n) = int.parse(v) n }"
+    Some(Inline(schema.NumberSchema(..))) ->
+      "{ let assert Ok([v, ..]) = dict.get(multipart_body, \""
+      <> key
+      <> "\") let assert Ok(n) = float.parse(v) n }"
+    Some(Inline(schema.BooleanSchema(..))) ->
+      "{ let assert Ok([v, ..]) = dict.get(multipart_body, \""
+      <> key
+      <> "\") "
+      <> bool_parse_expr
+      <> " }"
+    _ -> base
+  }
+}
+
+fn multipart_body_optional_expr_with_schema(
+  key: String,
+  schema_ref: Option(SchemaRef),
+) -> String {
+  case schema_ref {
+    Some(Inline(schema.IntegerSchema(..))) ->
+      "case dict.get(multipart_body, \""
+      <> key
+      <> "\") { Ok([v, ..]) -> { case int.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }"
+    Some(Inline(schema.NumberSchema(..))) ->
+      "case dict.get(multipart_body, \""
+      <> key
+      <> "\") { Ok([v, ..]) -> { case float.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }"
+    Some(Inline(schema.BooleanSchema(..))) ->
+      "case dict.get(multipart_body, \""
+      <> key
+      <> "\") { Ok([v, ..]) -> Some("
+      <> bool_parse_expr
+      <> ") _ -> None }"
+    _ ->
+      "case dict.get(multipart_body, \""
+      <> key
+      <> "\") { Ok([v, ..]) -> Some(v) _ -> None }"
+  }
+}
+
 /// Generate expression for a required header parameter.
 fn header_required_expr(key: String, param: spec.Parameter) -> String {
   case param.schema {
@@ -1601,6 +1865,13 @@ fn generate_body_decode_expr(
     }
     [#("application/x-www-form-urlencoded", _media_type)] -> {
       let body_expr = form_urlencoded_body_constructor_expr(rb, op_id, ctx)
+      case rb.required {
+        True -> body_expr
+        False -> "case body { \"\" -> None _ -> Some(" <> body_expr <> ") }"
+      }
+    }
+    [#("multipart/form-data", _media_type)] -> {
+      let body_expr = multipart_body_constructor_expr(rb, op_id, ctx)
       case rb.required {
         True -> body_expr
         False -> "case body { \"\" -> None _ -> Some(" <> body_expr <> ") }"
