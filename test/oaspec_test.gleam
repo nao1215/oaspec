@@ -388,7 +388,7 @@ paths:
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "multipart/form-data")
-    && string.contains(s, "request bodies")
+    && string.contains(s, "form-urlencoded")
   })
   |> should.be_true()
 }
@@ -3211,6 +3211,92 @@ pub fn status_code_suffix_range_test() {
 
   http.status_code_suffix("4XX")
   |> should.equal("Status4xx")
+}
+
+// --- validate error message accuracy tests ---
+
+/// Validation error for unsupported request content type must list
+/// all actually supported types, including form-urlencoded.
+pub fn validate_request_content_type_message_includes_form_urlencoded_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    post:
+      operationId: doX
+      requestBody:
+        content:
+          text/csv:
+            schema:
+              type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  let assert [validate.UnsupportedFeature(detail: msg, ..)] = errors
+  // Error message must mention form-urlencoded as a supported type
+  string.contains(msg, "form-urlencoded")
+  |> should.be_true()
+}
+
+/// Validation error for unsupported response content type must list
+/// all actually supported types, including XML.
+pub fn validate_response_content_type_message_includes_xml_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200':
+          description: ok
+          content:
+            text/csv:
+              schema:
+                type: string
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  let assert [validate.UnsupportedFeature(detail: msg, ..)] = errors
+  // Error message must mention XML as a supported type
+  string.contains(msg, "xml")
+  |> should.be_true()
 }
 
 // --- form-urlencoded non-object validation tests ---

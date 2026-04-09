@@ -177,7 +177,7 @@ fn validate_request_body(
             path: op_id <> ".requestBody",
             detail: "Content type '"
               <> media_type
-              <> "' is not supported. Only 'application/json' and 'multipart/form-data' are supported for request bodies.",
+              <> "' is not supported. Supported request content types: application/json, multipart/form-data, application/x-www-form-urlencoded.",
           ),
         ]
       }
@@ -296,7 +296,7 @@ fn validate_responses(
             path: path,
             detail: "Response content type '"
               <> media_type_name
-              <> "' is not supported. Only 'application/json' and 'text/plain' are supported.",
+              <> "' is not supported. Supported response content types: application/json, text/plain, application/octet-stream, application/xml, text/xml.",
           ),
         ]
       }
