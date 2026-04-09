@@ -5,9 +5,7 @@ erl_crash.dump
 CLAUDE.md
 .codex
 .claude
-doc/reference/*
-!doc/reference/FULL_SUPPORT_PLAN.md
-!doc/reference/HANDOFF.md
+doc/reference
 test_output/
 integration_test/src/api/
 integration_test/build/
