@@ -2106,8 +2106,9 @@ fn generate_response_conversion(
                       )
                   }
               }
-            // Multiple content types: variant wraps String
-            [_, _, ..] ->
+            // Multiple content types: variant wraps String.
+            // Use the first content type as default content-type header.
+            [#(first_media_type, _), _, ..] ->
               sb
               |> se.indent(
                 4,
@@ -2115,7 +2116,9 @@ fn generate_response_conversion(
                   <> variant_name
                   <> "(data) -> ServerResponse(status: "
                   <> status_int
-                  <> ", body: data, headers: [])",
+                  <> ", body: data, headers: [#(\"content-type\", \""
+                  <> first_media_type
+                  <> "\")])",
               )
           }
         })

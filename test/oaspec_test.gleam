@@ -6910,6 +6910,53 @@ paths:
   |> should.be_false()
 }
 
+pub fn server_multi_content_response_sets_first_content_type_test() {
+  // When a response has multiple content types, the server router should
+  // set the first content type as a default content-type header rather
+  // than leaving headers empty.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /data:
+    get:
+      operationId: getData
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+            text/plain:
+              schema:
+                type: string
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Server,
+    )
+  let ctx = context.new(spec, cfg)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // Should have a content-type header, not empty headers
+  string.contains(content, "application/json")
+  |> should.be_true()
+}
+
 pub fn response_types_includes_types_import_when_ref_body_test() {
   // When a response has a $ref body, types import is needed.
   let yaml =
