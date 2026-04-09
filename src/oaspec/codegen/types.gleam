@@ -408,14 +408,17 @@ fn generate_anonymous_response_types(
     case content_entries {
       [#(_media_type, media_type), ..] ->
         case media_type.schema {
-          Some(Inline(schema_obj)) ->
+          Some(Inline(schema_obj)) -> {
+            // Filter out writeOnly properties from response types
+            let filtered_schema = filter_write_only_properties(schema_obj, ctx)
             generate_anonymous_type_for_schema(
               sb,
               op_id,
               "Response" <> http.status_code_suffix(status_code),
-              schema_obj,
+              filtered_schema,
               ctx,
             )
+          }
           _ -> sb
         }
       _ -> sb
@@ -436,14 +439,17 @@ fn generate_anonymous_request_body_type(
       case content_entries {
         [#(_media_type, media_type), ..] ->
           case media_type.schema {
-            Some(Inline(schema_obj)) ->
+            Some(Inline(schema_obj)) -> {
+              // Filter out readOnly properties from request body types
+              let filtered_schema = filter_read_only_properties(schema_obj, ctx)
               generate_anonymous_type_for_schema(
                 sb,
                 op_id,
                 "RequestBody",
-                schema_obj,
+                filtered_schema,
                 ctx,
               )
+            }
             _ -> sb
           }
         _ -> sb
@@ -1047,6 +1053,112 @@ fn schema_ref_is_nullable(ref: SchemaRef, ctx: Context) -> Bool {
         Ok(s) -> schema.is_nullable(s)
         Error(_) -> False
       }
+  }
+}
+
+/// Check if a SchemaRef has readOnly metadata, resolving $ref if needed.
+pub fn schema_ref_is_read_only(ref: SchemaRef, ctx: Context) -> Bool {
+  case ref {
+    Inline(s) -> schema.get_metadata(s).read_only
+    Reference(..) ->
+      case resolver.resolve_schema_ref(ref, ctx.spec) {
+        Ok(s) -> schema.get_metadata(s).read_only
+        Error(_) -> False
+      }
+  }
+}
+
+/// Check if a SchemaRef has writeOnly metadata, resolving $ref if needed.
+pub fn schema_ref_is_write_only(ref: SchemaRef, ctx: Context) -> Bool {
+  case ref {
+    Inline(s) -> schema.get_metadata(s).write_only
+    Reference(..) ->
+      case resolver.resolve_schema_ref(ref, ctx.spec) {
+        Ok(s) -> schema.get_metadata(s).write_only
+        Error(_) -> False
+      }
+  }
+}
+
+/// Filter readOnly properties from an ObjectSchema for request body context.
+/// Returns a new schema with readOnly properties removed.
+pub fn filter_read_only_properties(
+  schema_obj: SchemaObject,
+  ctx: Context,
+) -> SchemaObject {
+  case schema_obj {
+    ObjectSchema(
+      metadata:,
+      properties:,
+      required:,
+      additional_properties:,
+      additional_properties_untyped:,
+      min_properties:,
+      max_properties:,
+    ) -> {
+      let filtered_props =
+        dict.filter(properties, fn(_name, prop_ref) {
+          !schema_ref_is_read_only(prop_ref, ctx)
+        })
+      let filtered_required =
+        list.filter(required, fn(name) {
+          case dict.get(filtered_props, name) {
+            Ok(_) -> True
+            Error(_) -> False
+          }
+        })
+      ObjectSchema(
+        metadata:,
+        properties: filtered_props,
+        required: filtered_required,
+        additional_properties:,
+        additional_properties_untyped:,
+        min_properties:,
+        max_properties:,
+      )
+    }
+    _ -> schema_obj
+  }
+}
+
+/// Filter writeOnly properties from an ObjectSchema for response body context.
+/// Returns a new schema with writeOnly properties removed.
+pub fn filter_write_only_properties(
+  schema_obj: SchemaObject,
+  ctx: Context,
+) -> SchemaObject {
+  case schema_obj {
+    ObjectSchema(
+      metadata:,
+      properties:,
+      required:,
+      additional_properties:,
+      additional_properties_untyped:,
+      min_properties:,
+      max_properties:,
+    ) -> {
+      let filtered_props =
+        dict.filter(properties, fn(_name, prop_ref) {
+          !schema_ref_is_write_only(prop_ref, ctx)
+        })
+      let filtered_required =
+        list.filter(required, fn(name) {
+          case dict.get(filtered_props, name) {
+            Ok(_) -> True
+            Error(_) -> False
+          }
+        })
+      ObjectSchema(
+        metadata:,
+        properties: filtered_props,
+        required: filtered_required,
+        additional_properties:,
+        additional_properties_untyped:,
+        min_properties:,
+        max_properties:,
+      )
+    }
+    _ -> schema_obj
   }
 }
 

@@ -4890,3 +4890,350 @@ webhooks:
   { warnings != [] }
   |> should.be_true()
 }
+
+// --- readOnly/writeOnly filtering tests ---
+
+pub fn read_only_filtered_from_request_body_type_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /users:
+    post:
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                id: { type: integer, readOnly: true }
+                password: { type: string, writeOnly: true }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  id: { type: integer, readOnly: true }
+                  password: { type: string, writeOnly: true }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  // NOTE: Do NOT hoist here -- we want inline schemas to remain inline
+  // so that the anonymous type filtering for readOnly/writeOnly is tested.
+  let ctx = make_ctx_from_spec(spec)
+
+  let type_files = types.generate(ctx)
+
+  // Check the types.gleam file for the anonymous request body type
+  let assert Ok(types_file) =
+    list.find(type_files, fn(f) { f.path == "types.gleam" })
+
+  // Request body type should NOT have id field (readOnly)
+  // but SHOULD have password field (writeOnly is fine in requests)
+  let request_body_section =
+    string.contains(types_file.content, "CreateUserRequestBody")
+  request_body_section |> should.be_true()
+
+  // The request body type should contain name and password but NOT id
+  // Split content to find the request body type definition
+  let lines = string.split(types_file.content, "\n")
+  let request_body_lines = extract_type_block(lines, "CreateUserRequestBody")
+  let request_body_text = string.join(request_body_lines, "\n")
+
+  // readOnly field 'id' must NOT be in request body type
+  string.contains(request_body_text, "id:") |> should.be_false()
+  // writeOnly field 'password' MUST be in request body type
+  string.contains(request_body_text, "password:") |> should.be_true()
+  // Normal field 'name' MUST be in request body type
+  string.contains(request_body_text, "name:") |> should.be_true()
+
+  // Response type should NOT have password field (writeOnly)
+  // but SHOULD have id field (readOnly is fine in responses)
+  let response_section =
+    string.contains(types_file.content, "CreateUserResponseOk")
+  response_section |> should.be_true()
+
+  let response_lines = extract_type_block(lines, "CreateUserResponseOk")
+  let response_text = string.join(response_lines, "\n")
+
+  // writeOnly field 'password' must NOT be in response type
+  string.contains(response_text, "password:") |> should.be_false()
+  // readOnly field 'id' MUST be in response type
+  string.contains(response_text, "id:") |> should.be_true()
+  // Normal field 'name' MUST be in response type
+  string.contains(response_text, "name:") |> should.be_true()
+}
+
+/// Helper to extract lines from a type block definition.
+fn extract_type_block(lines: List(String), type_name: String) -> List(String) {
+  extract_type_block_loop(lines, type_name, False, 0, [])
+}
+
+fn extract_type_block_loop(
+  lines: List(String),
+  type_name: String,
+  in_block: Bool,
+  brace_depth: Int,
+  acc: List(String),
+) -> List(String) {
+  case lines {
+    [] -> list.reverse(acc)
+    [line, ..rest] ->
+      case in_block {
+        False ->
+          case string.contains(line, "pub type " <> type_name) {
+            True ->
+              extract_type_block_loop(rest, type_name, True, 1, [line, ..acc])
+            False -> extract_type_block_loop(rest, type_name, False, 0, acc)
+          }
+        True -> {
+          let opens =
+            string.to_graphemes(line)
+            |> list.count(fn(c) { c == "{" })
+          let closes =
+            string.to_graphemes(line)
+            |> list.count(fn(c) { c == "}" })
+          let new_depth = brace_depth + opens - closes
+          case new_depth <= 0 {
+            True -> list.reverse([line, ..acc])
+            False ->
+              extract_type_block_loop(rest, type_name, True, new_depth, [
+                line,
+                ..acc
+              ])
+          }
+        }
+      }
+  }
+}
+
+pub fn read_only_filtered_from_encoder_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /users:
+    post:
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                id: { type: integer, readOnly: true }
+                password: { type: string, writeOnly: true }
+      responses:
+        '200':
+          description: ok
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  // Do NOT hoist -- keep inline schemas to test anonymous encoder filtering
+  let ctx = make_ctx_from_spec(spec)
+
+  let decoder_files = decoders.generate(ctx)
+  let assert Ok(encode_file) =
+    list.find(decoder_files, fn(f) { f.path == "encode.gleam" })
+
+  // The encoder for request body should NOT encode the readOnly 'id' field
+  // Find the encoder function
+  let content = encode_file.content
+  string.contains(content, "encode_create_user_request_body")
+  |> should.be_true()
+
+  // The encoder should not have "id" as a JSON key
+  // but should have "name" and "password"
+  let lines = string.split(content, "\n")
+  let encoder_lines =
+    extract_fn_block(lines, "encode_create_user_request_body_json")
+  let encoder_text = string.join(encoder_lines, "\n")
+
+  string.contains(encoder_text, "\"id\"") |> should.be_false()
+  string.contains(encoder_text, "\"name\"") |> should.be_true()
+  string.contains(encoder_text, "\"password\"") |> should.be_true()
+}
+
+/// Helper to extract lines from a function block definition.
+fn extract_fn_block(lines: List(String), fn_name: String) -> List(String) {
+  extract_fn_block_loop(lines, fn_name, False, 0, [])
+}
+
+fn extract_fn_block_loop(
+  lines: List(String),
+  fn_name: String,
+  in_block: Bool,
+  brace_depth: Int,
+  acc: List(String),
+) -> List(String) {
+  case lines {
+    [] -> list.reverse(acc)
+    [line, ..rest] ->
+      case in_block {
+        False ->
+          case string.contains(line, "pub fn " <> fn_name) {
+            True -> extract_fn_block_loop(rest, fn_name, True, 1, [line, ..acc])
+            False -> extract_fn_block_loop(rest, fn_name, False, 0, acc)
+          }
+        True -> {
+          let opens =
+            string.to_graphemes(line)
+            |> list.count(fn(c) { c == "{" })
+          let closes =
+            string.to_graphemes(line)
+            |> list.count(fn(c) { c == "}" })
+          let new_depth = brace_depth + opens - closes
+          case new_depth <= 0 {
+            True -> list.reverse([line, ..acc])
+            False ->
+              extract_fn_block_loop(rest, fn_name, True, new_depth, [
+                line,
+                ..acc
+              ])
+          }
+        }
+      }
+  }
+}
+
+pub fn write_only_filtered_from_response_decoder_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /users:
+    post:
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  id: { type: integer, readOnly: true }
+                  password: { type: string, writeOnly: true }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  // Do NOT hoist -- keep inline schemas to test anonymous decoder filtering
+  let ctx = make_ctx_from_spec(spec)
+
+  let decoder_files = decoders.generate(ctx)
+  let assert Ok(decode_file) =
+    list.find(decoder_files, fn(f) { f.path == "decode.gleam" })
+
+  let content = decode_file.content
+
+  // The response decoder should NOT decode writeOnly 'password' field
+  let lines = string.split(content, "\n")
+  let decoder_lines = extract_fn_block(lines, "create_user_response_ok_decoder")
+  let decoder_text = string.join(decoder_lines, "\n")
+
+  // writeOnly 'password' must NOT be in response decoder
+  string.contains(decoder_text, "\"password\"") |> should.be_false()
+  // readOnly 'id' MUST be in response decoder
+  string.contains(decoder_text, "\"id\"") |> should.be_true()
+  // Normal 'name' MUST be in response decoder
+  string.contains(decoder_text, "\"name\"") |> should.be_true()
+}
+
+pub fn read_only_filtered_from_component_encoder_with_hoist_test() {
+  // Test that component schema encoders (after hoist) skip readOnly fields
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+components:
+  schemas:
+    User:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        id: { type: integer, readOnly: true }
+        password: { type: string, writeOnly: true }
+paths:
+  /users:
+    post:
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+
+  // Check encoder: readOnly 'id' should NOT be encoded
+  let decoder_files = decoders.generate(ctx)
+  let assert Ok(encode_file) =
+    list.find(decoder_files, fn(f) { f.path == "encode.gleam" })
+  let lines = string.split(encode_file.content, "\n")
+  let encoder_lines = extract_fn_block(lines, "encode_user_json")
+  let encoder_text = string.join(encoder_lines, "\n")
+
+  // readOnly 'id' must NOT be in encoder
+  string.contains(encoder_text, "\"id\"") |> should.be_false()
+  // writeOnly 'password' MUST be in encoder (it's sent by client)
+  string.contains(encoder_text, "\"password\"") |> should.be_true()
+  // Normal 'name' MUST be in encoder
+  string.contains(encoder_text, "\"name\"") |> should.be_true()
+
+  // Check decoder: writeOnly 'password' should be treated as optional
+  let assert Ok(decode_file) =
+    list.find(decoder_files, fn(f) { f.path == "decode.gleam" })
+  let dlines = string.split(decode_file.content, "\n")
+  let decoder_lines = extract_fn_block(dlines, "user_decoder")
+  let decoder_text = string.join(decoder_lines, "\n")
+
+  // writeOnly 'password' should use optional_field (not required field)
+  string.contains(decoder_text, "optional_field(\"password\"")
+  |> should.be_true()
+  // readOnly 'id' and normal 'name' should be present
+  string.contains(decoder_text, "\"id\"") |> should.be_true()
+  string.contains(decoder_text, "\"name\"") |> should.be_true()
+
+  // Check that the component type still has ALL fields (shared type)
+  let type_files = types.generate(ctx)
+  let assert Ok(types_file) =
+    list.find(type_files, fn(f) { f.path == "types.gleam" })
+  let tlines = string.split(types_file.content, "\n")
+  let user_type_lines = extract_type_block(tlines, "User")
+  let user_type_text = string.join(user_type_lines, "\n")
+  // All fields must be present in the shared type
+  string.contains(user_type_text, "name:") |> should.be_true()
+  string.contains(user_type_text, "id:") |> should.be_true()
+  string.contains(user_type_text, "password:") |> should.be_true()
+}

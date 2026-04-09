@@ -167,12 +167,15 @@ fn generate_anonymous_response_decoders(
       [#(_, media_type), ..] ->
         case media_type.schema {
           Some(Inline(schema_obj)) -> {
+            // Filter out writeOnly properties from response decoders
+            let filtered_schema =
+              type_gen.filter_write_only_properties(schema_obj, ctx)
             let suffix = "Response" <> http.status_code_suffix(status_code)
             generate_anonymous_schema_decoder(
               sb,
               op_id,
               suffix,
-              schema_obj,
+              filtered_schema,
               ctx,
             )
           }
@@ -196,14 +199,18 @@ fn generate_anonymous_request_body_decoder(
       case content_entries {
         [#(_, media_type), ..] ->
           case media_type.schema {
-            Some(Inline(schema_obj)) ->
+            Some(Inline(schema_obj)) -> {
+              // Filter out readOnly properties from request body decoders
+              let filtered_schema =
+                type_gen.filter_read_only_properties(schema_obj, ctx)
               generate_anonymous_schema_decoder(
                 sb,
                 op_id,
                 "RequestBody",
-                schema_obj,
+                filtered_schema,
                 ctx,
               )
+            }
             _ -> sb
           }
         _ -> sb
@@ -305,7 +312,10 @@ fn generate_decoder(
           let #(prop_name, prop_ref) = entry
           let field_name =
             list_at_or(deduped_names, idx, naming.to_snake_case(prop_name))
-          let is_required = list.contains(required, prop_name)
+          // writeOnly fields may not appear in responses, so treat them
+          // as optional even if listed in required
+          let is_write_only = type_gen.schema_ref_is_write_only(prop_ref, ctx)
+          let is_required = list.contains(required, prop_name) && !is_write_only
           let field_decoder =
             schema_ref_to_decoder(prop_ref, name, prop_name, ctx)
           let is_nullable_schema = schema_ref_is_nullable(prop_ref, ctx)
@@ -1317,8 +1327,11 @@ fn generate_anonymous_request_body_encoder(
         [#(_, media_type), ..] ->
           case media_type.schema {
             Some(Inline(schema_obj)) -> {
+              // Filter out readOnly properties from request body encoders
+              let filtered_schema =
+                type_gen.filter_read_only_properties(schema_obj, ctx)
               let name = naming.to_snake_case(op_id) <> "_request_body"
-              generate_encoder(sb, name, Inline(schema_obj), ctx)
+              generate_encoder(sb, name, Inline(filtered_schema), ctx)
             }
             _ -> sb
           }
@@ -1374,20 +1387,27 @@ fn generate_encoder(
           |> se.indent(1, "json.object([")
       }
 
-      let props = dict.to_list(properties)
-      let encoder_deduped_names =
-        dedup.dedup_property_names(list.map(props, fn(e) { e.0 }))
-      let sb =
-        list.index_fold(props, sb, fn(sb, entry, idx) {
+      // Filter out readOnly properties -- they should not be sent to the server
+      let all_props = dict.to_list(properties)
+      let all_deduped_names =
+        dedup.dedup_property_names(list.map(all_props, fn(e) { e.0 }))
+      // Build list of (prop_name, prop_ref, field_name) with readOnly filtered out
+      let props_with_names =
+        list.index_map(all_props, fn(entry, idx) {
           let #(prop_name, prop_ref) = entry
           let field_name =
-            list_at_or(
-              encoder_deduped_names,
-              idx,
-              naming.to_snake_case(prop_name),
-            )
+            list_at_or(all_deduped_names, idx, naming.to_snake_case(prop_name))
+          #(prop_name, prop_ref, field_name)
+        })
+        |> list.filter(fn(entry) {
+          let #(_, prop_ref, _) = entry
+          !type_gen.schema_ref_is_read_only(prop_ref, ctx)
+        })
+      let sb =
+        list.index_fold(props_with_names, sb, fn(sb, entry, idx) {
+          let #(prop_name, prop_ref, field_name) = entry
           let is_required = list.contains(required, prop_name)
-          let trailing = case idx == list.length(props) - 1 {
+          let trailing = case idx == list.length(props_with_names) - 1 {
             True -> ""
             False -> ","
           }
