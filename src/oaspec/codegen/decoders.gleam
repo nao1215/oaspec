@@ -830,7 +830,78 @@ fn generate_oneof_decoder(
         }
 
         None -> {
-          // No discriminator: try each variant decoder in order
+          // No discriminator: generate a decode.Decoder that tries each variant
+          let ref_variants =
+            list.filter_map(schemas, fn(s_ref) {
+              case s_ref {
+                Reference(ref:) -> {
+                  let ref_name = resolver.ref_to_name(ref)
+                  Ok(ref_name)
+                }
+                _ -> Error(Nil)
+              }
+            })
+
+          let sb =
+            sb
+            |> se.line(
+              "pub fn "
+              <> decoder_fn_name
+              <> "() -> decode.Decoder(types."
+              <> type_name
+              <> ") {",
+            )
+
+          // Build a chain of decode.one_of attempts
+          let sb = case ref_variants {
+            [] ->
+              sb
+              |> se.indent(
+                1,
+                "decode.failure(types."
+                <> type_name
+                <> ", \""
+                <> type_name
+                <> "\")",
+              )
+            [first, ..rest] -> {
+              let first_variant_type = naming.schema_to_type_name(first)
+              let first_decoder = naming.to_snake_case(first) <> "_decoder()"
+              let sb =
+                sb
+                |> se.indent(
+                  1,
+                  "decode.one_of("
+                  <> first_decoder
+                  <> " |> decode.map(types."
+                  <> type_name
+                  <> first_variant_type
+                  <> "), [",
+                )
+              let sb =
+                list.fold(rest, sb, fn(sb, ref_name) {
+                  let variant_type = naming.schema_to_type_name(ref_name)
+                  let decoder = naming.to_snake_case(ref_name) <> "_decoder()"
+                  sb
+                  |> se.indent(
+                    2,
+                    decoder
+                    <> " |> decode.map(types."
+                    <> type_name
+                    <> variant_type
+                    <> "),",
+                  )
+                })
+              sb |> se.indent(1, "])")
+            }
+          }
+
+          let sb =
+            sb
+            |> se.line("}")
+            |> se.blank_line()
+
+          // json.parse wrapper
           let sb =
             sb
             |> se.line(
@@ -840,40 +911,10 @@ fn generate_oneof_decoder(
               <> type_name
               <> ", json.DecodeError) {",
             )
-
-          let sb =
-            list.fold(schemas, sb, fn(sb, s_ref) {
-              case s_ref {
-                Reference(ref:) -> {
-                  let ref_name = resolver.ref_to_name(ref)
-                  let variant_type = naming.schema_to_type_name(ref_name)
-                  let variant_name = type_name <> variant_type
-                  let decode_fn = "decode_" <> naming.to_snake_case(ref_name)
-                  sb
-                  |> se.indent(1, "case " <> decode_fn <> "(json_string) {")
-                  |> se.indent(
-                    2,
-                    "Ok(v) -> Ok(types." <> variant_name <> "(v))",
-                  )
-                  |> se.indent(2, "Error(_) ->")
-                }
-                _ -> sb
-              }
-            })
-
-          // Final error case
-          let sb =
-            sb
-            |> se.indent(1, "Error(json.UnexpectedEndOfInput)")
-
-          // Close all the nested case blocks
-          let sb =
-            list.fold(list.repeat(Nil, list.length(schemas)), sb, fn(sb, _) {
-              sb |> se.indent(1, "}")
-            })
-
-          let sb =
-            sb
+            |> se.indent(
+              1,
+              "json.parse(json_string, " <> decoder_fn_name <> "())",
+            )
             |> se.line("}")
             |> se.blank_line()
 
