@@ -42,19 +42,18 @@ fn resolve_schema_ref_with_seen(
 ) -> Result(SchemaObject, ResolveError) {
   case schema_ref {
     Inline(schema) -> Ok(schema)
-    Reference(ref:) -> {
+    Reference(ref:, name:) -> {
       case set.contains(seen, ref) {
         True -> Error(CircularRef(ref:))
         False -> {
           let new_seen = set.insert(seen, ref)
           case spec.components {
             Some(components) -> {
-              let name = ref_to_name(ref)
               case dict.get(components.schemas, name) {
                 Ok(Inline(schema)) -> Ok(schema)
-                Ok(Reference(inner_ref)) ->
+                Ok(Reference(ref: inner_ref, name: inner_name)) ->
                   resolve_schema_ref_with_seen(
-                    Reference(ref: inner_ref),
+                    Reference(ref: inner_ref, name: inner_name),
                     spec,
                     new_seen,
                   )
@@ -75,14 +74,7 @@ pub fn resolve_schema_refs_in_schema(
   spec: OpenApiSpec,
 ) -> SchemaObject {
   case schema {
-    ObjectSchema(
-      description:,
-      properties:,
-      required:,
-      additional_properties:,
-      additional_properties_untyped:,
-      nullable:,
-    ) -> {
+    ObjectSchema(properties:, additional_properties:, ..) as obj -> {
       let resolved_props =
         dict.map_values(properties, fn(_k, v) { resolve_one_ref(v, spec) })
       let resolved_ap = case additional_properties {
@@ -90,33 +82,24 @@ pub fn resolve_schema_refs_in_schema(
         None -> None
       }
       ObjectSchema(
-        description:,
+        ..obj,
         properties: resolved_props,
-        required:,
         additional_properties: resolved_ap,
-        additional_properties_untyped:,
-        nullable:,
       )
     }
-    ArraySchema(description:, items:, min_items:, max_items:, nullable:) ->
-      ArraySchema(
-        description:,
-        items: resolve_one_ref(items, spec),
-        min_items:,
-        max_items:,
-        nullable:,
-      )
-    AllOfSchema(description:, schemas:) -> {
+    ArraySchema(items:, ..) as arr ->
+      ArraySchema(..arr, items: resolve_one_ref(items, spec))
+    AllOfSchema(metadata:, schemas:) -> {
       let resolved = list_map_ref(schemas, spec)
-      AllOfSchema(description:, schemas: resolved)
+      AllOfSchema(metadata:, schemas: resolved)
     }
-    OneOfSchema(description:, schemas:, discriminator:) -> {
+    OneOfSchema(metadata:, schemas:, discriminator:) -> {
       let resolved = list_map_ref(schemas, spec)
-      OneOfSchema(description:, schemas: resolved, discriminator:)
+      OneOfSchema(metadata:, schemas: resolved, discriminator:)
     }
-    AnyOfSchema(description:, schemas:) -> {
+    AnyOfSchema(metadata:, schemas:, discriminator:) -> {
       let resolved = list_map_ref(schemas, spec)
-      AnyOfSchema(description:, schemas: resolved)
+      AnyOfSchema(metadata:, schemas: resolved, discriminator:)
     }
     other -> other
   }
@@ -125,10 +108,10 @@ pub fn resolve_schema_refs_in_schema(
 /// Try to resolve a single ref, keeping it as-is if resolution fails.
 fn resolve_one_ref(schema_ref: SchemaRef, spec: OpenApiSpec) -> SchemaRef {
   case schema_ref {
-    Reference(ref:) ->
+    Reference(..) ->
       case resolve_schema_ref(schema_ref, spec) {
         Ok(schema) -> Inline(schema)
-        Error(_) -> Reference(ref:)
+        Error(_) -> schema_ref
       }
     inline -> inline
   }

@@ -1,7 +1,8 @@
 import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/set
+import gleam/regexp
+import gleam/string
 import oaspec/codegen/context.{type Context}
 import oaspec/codegen/types as type_gen
 import oaspec/openapi/resolver
@@ -12,99 +13,229 @@ import oaspec/openapi/schema.{
 }
 import oaspec/openapi/spec
 import oaspec/util/content_type
-import oaspec/util/naming
 
-/// A validation error representing an unsupported OpenAPI feature.
+/// Severity level for validation issues.
+pub type Severity {
+  SeverityError
+  SeverityWarning
+}
+
+/// Target indicating which generation mode the issue applies to.
+pub type Target {
+  TargetBoth
+  TargetClient
+  TargetServer
+}
+
+/// A validation issue representing an unsupported or noteworthy OpenAPI feature.
 pub type ValidationError {
-  UnsupportedFeature(path: String, detail: String)
+  ValidationError(
+    path: String,
+    detail: String,
+    severity: Severity,
+    target: Target,
+  )
 }
 
 /// Validate the parsed spec for unsupported patterns.
 /// Returns a list of errors; empty list means validation passed.
+/// Name collisions and duplicate operationIds are handled by the dedup pass
+/// before validation, so they are no longer checked here.
 pub fn validate(ctx: Context) -> List(ValidationError) {
   let op_errors = validate_operations(ctx)
   let schema_errors = validate_component_schemas(ctx)
-  let collision_errors = validate_name_collisions(ctx)
   let security_errors = validate_security_schemes(ctx)
-  list.flatten([op_errors, schema_errors, collision_errors, security_errors])
+  let preserved_warnings = validate_preserved_but_unused(ctx)
+  list.flatten([op_errors, schema_errors, security_errors, preserved_warnings])
+}
+
+/// Filter to only errors (not warnings).
+pub fn errors_only(issues: List(ValidationError)) -> List(ValidationError) {
+  list.filter(issues, fn(e) { e.severity == SeverityError })
+}
+
+/// Filter to only warnings (not errors).
+pub fn warnings_only(issues: List(ValidationError)) -> List(ValidationError) {
+  list.filter(issues, fn(e) { e.severity == SeverityWarning })
 }
 
 /// Convert a validation error to a human-readable string.
 pub fn error_to_string(error: ValidationError) -> String {
-  case error {
-    UnsupportedFeature(path:, detail:) ->
-      "Unsupported feature at " <> path <> ": " <> detail
+  let prefix = case error.severity {
+    SeverityError -> "Error"
+    SeverityWarning -> "Warning"
   }
+  prefix <> " at " <> error.path <> ": " <> error.detail
 }
 
 /// Validate all operations for unsupported patterns.
 fn validate_operations(ctx: Context) -> List(ValidationError) {
   let operations = type_gen.collect_operations(ctx)
   list.flat_map(operations, fn(op) {
-    let #(op_id, operation, _path, _method) = op
+    let #(op_id, operation, path, _method) = op
+    let path_errors =
+      validate_path_template_params(op_id, path, operation.parameters)
     let param_errors = validate_parameters(op_id, operation.parameters, ctx)
     let body_errors = validate_request_body(op_id, operation.request_body, ctx)
-    let response_errors = validate_responses(op_id, operation.responses)
-    list.flatten([param_errors, body_errors, response_errors])
+    let response_errors = validate_responses(op_id, operation.responses, ctx)
+    list.flatten([path_errors, param_errors, body_errors, response_errors])
   })
 }
 
-/// Validate parameters for unsupported patterns.
+/// Validate that all {param} templates in the path have a corresponding
+/// path parameter definition. Reports unbound templates that would produce
+/// invalid generated code with literal {param} in URLs.
+fn validate_path_template_params(
+  op_id: String,
+  path: String,
+  params: List(spec.Parameter),
+) -> List(ValidationError) {
+  let template_names = extract_path_template_names(path)
+  let path_param_names =
+    list.filter_map(params, fn(p) {
+      case p.in_ {
+        spec.InPath -> Ok(p.name)
+        _ -> Error(Nil)
+      }
+    })
+  list.filter_map(template_names, fn(name) {
+    case list.contains(path_param_names, name) {
+      True -> Error(Nil)
+      False ->
+        Ok(ValidationError(
+          severity: SeverityError,
+          target: TargetBoth,
+          path: op_id <> ".path",
+          detail: "Path template parameter '{"
+            <> name
+            <> "}' in '"
+            <> path
+            <> "' has no corresponding parameter definition.",
+        ))
+    }
+  })
+}
+
+/// Extract parameter names from path template, e.g. "/items/{id}" -> ["id"].
+fn extract_path_template_names(path: String) -> List(String) {
+  let assert Ok(re) = regexp.from_string("\\{([^}]+)\\}")
+  regexp.scan(re, path)
+  |> list.filter_map(fn(match) {
+    case match.submatches {
+      [Some(name)] -> Ok(name)
+      _ -> Error(Nil)
+    }
+  })
+}
+
+/// Validate parameters for unsupported serialization styles.
+/// Supported: form (default), deepObject (query+object), exploded array.
+/// Unsupported: matrix, label, simple, spaceDelimited, pipeDelimited.
 fn validate_parameters(
   op_id: String,
   params: List(spec.Parameter),
   ctx: Context,
 ) -> List(ValidationError) {
-  list.flat_map(params, fn(param) {
-    let path = op_id <> ".parameters." <> param.name
-    let resolved_schema = resolve_schema_object(param.schema, ctx)
-    let deep_object_errors = case param.style {
-      Some("deepObject") -> [
-        UnsupportedFeature(
+  list.flat_map(params, fn(p) {
+    let path = op_id <> ".parameters." <> p.name
+    let style_errors = case p.style {
+      Some(spec.MatrixStyle)
+      | Some(spec.LabelStyle)
+      | Some(spec.SpaceDelimitedStyle)
+      | Some(spec.PipeDelimitedStyle) -> [
+        ValidationError(
+          severity: SeverityError,
+          target: TargetBoth,
           path: path,
-          detail: "Parameter style 'deepObject' is not supported.",
+          detail: "Parameter style is not supported. Supported styles: form, deepObject, simple.",
         ),
       ]
       _ -> []
     }
-    let complex_schema_errors = case resolved_schema {
-      Some(ObjectSchema(..))
-      | Some(AllOfSchema(..))
-      | Some(OneOfSchema(..))
-      | Some(AnyOfSchema(..)) -> [
-        UnsupportedFeature(
+    // Parameter.schema is None when Parameter.content is used instead.
+    // We don't support the content-based parameter serialization.
+    let content_errors = case p.schema {
+      None -> [
+        ValidationError(
+          severity: SeverityError,
+          target: TargetBoth,
           path: path,
-          detail: "Complex schema parameters (object/allOf/oneOf/anyOf) are not supported.",
+          detail: "Parameters using 'content' instead of 'schema' are not supported.",
         ),
       ]
       _ -> []
     }
-    let array_errors = case param.in_, resolved_schema {
-      spec.InPath, _ -> []
-      _, Some(ArraySchema(..)) -> [
-        UnsupportedFeature(
-          path: path,
-          detail: "Array parameters in query/header/cookie are not supported.",
-        ),
-      ]
-      _, _ -> []
-    }
-    let required_errors = case param.in_, param.required {
-      spec.InPath, False -> [
-        UnsupportedFeature(
-          path: path,
-          detail: "Path parameters with required: false are not supported.",
-        ),
-      ]
-      _, _ -> []
-    }
-    list.flatten([
-      deep_object_errors,
-      complex_schema_errors,
-      array_errors,
-      required_errors,
-    ])
+    // Object/complex schemas in query/header/cookie params require deepObject
+    // style. Without it, codegen cannot stringify the value and falls through
+    // to raw variable name, producing invalid generated code.
+    let complex_schema_errors = validate_complex_param_schema(path, p, ctx)
+    list.flatten([style_errors, content_errors, complex_schema_errors])
   })
+}
+
+/// Check if a parameter has a complex schema (object, oneOf, allOf, anyOf)
+/// that is not handled by deepObject style.
+fn validate_complex_param_schema(
+  path: String,
+  param: spec.Parameter,
+  ctx: Context,
+) -> List(ValidationError) {
+  case param.style {
+    Some(spec.DeepObjectStyle) ->
+      // deepObject supports one level of object nesting only.
+      // Reject nested object properties since codegen produces
+      // invalid code (e.g., uri.percent_encode(filter.meta)).
+      validate_deep_object_no_nested_objects(path, param, ctx)
+    _ ->
+      case param.in_ {
+        spec.InPath -> []
+        _ ->
+          case resolve_schema_object(param.schema, ctx) {
+            Some(ObjectSchema(..))
+            | Some(AllOfSchema(..))
+            | Some(OneOfSchema(..))
+            | Some(AnyOfSchema(..)) -> [
+              ValidationError(
+                severity: SeverityError,
+                target: TargetBoth,
+                path: path,
+                detail: "Complex schema (object/oneOf/allOf/anyOf) parameters require style: deepObject. Without it, the parameter cannot be serialized.",
+              ),
+            ]
+            _ -> []
+          }
+      }
+  }
+}
+
+/// Validate that a deepObject parameter has no nested object properties.
+fn validate_deep_object_no_nested_objects(
+  path: String,
+  param: spec.Parameter,
+  ctx: Context,
+) -> List(ValidationError) {
+  case resolve_schema_object(param.schema, ctx) {
+    Some(ObjectSchema(properties:, ..)) ->
+      dict.to_list(properties)
+      |> list.flat_map(fn(entry) {
+        let #(prop_name, prop_ref) = entry
+        case resolve_schema_object(Some(prop_ref), ctx) {
+          Some(ObjectSchema(..))
+          | Some(AllOfSchema(..))
+          | Some(OneOfSchema(..))
+          | Some(AnyOfSchema(..)) -> [
+            ValidationError(
+              severity: SeverityError,
+              target: TargetBoth,
+              path: path <> "." <> prop_name,
+              detail: "Nested object properties in deepObject parameters are not supported. Only one level of object nesting is supported (e.g., filter[name]=value).",
+            ),
+          ]
+          _ -> []
+        }
+      })
+    _ -> []
+  }
 }
 
 fn resolve_schema_object(
@@ -139,11 +270,13 @@ fn validate_request_body(
       let content_type_errors = case unsupported {
         [] -> []
         [media_type, ..] -> [
-          UnsupportedFeature(
+          ValidationError(
+            severity: SeverityError,
+            target: TargetBoth,
             path: op_id <> ".requestBody",
             detail: "Content type '"
               <> media_type
-              <> "' is not supported. Only 'application/json' and 'multipart/form-data' are supported for request bodies.",
+              <> "' is not supported. Supported request content types: application/json, multipart/form-data, application/x-www-form-urlencoded.",
           ),
         ]
       }
@@ -154,16 +287,23 @@ fn validate_request_body(
           let #(_media_type, media_type) = entry
           case media_type.schema {
             Some(schema_ref) ->
-              validate_schema_ref_recursive(op_id <> ".requestBody", schema_ref)
+              validate_schema_ref_recursive(
+                op_id <> ".requestBody",
+                schema_ref,
+                ctx,
+              )
             None -> []
           }
         })
       let multipart_field_errors =
         validate_multipart_request_body_fields(op_id, rb.content, ctx)
+      let form_urlencoded_errors =
+        validate_form_urlencoded_schema(op_id, rb.content, ctx)
       list.flatten([
         content_type_errors,
         schema_errors,
         multipart_field_errors,
+        form_urlencoded_errors,
       ])
     }
   }
@@ -184,7 +324,9 @@ fn validate_multipart_request_body_fields(
             case multipart_field_is_stringifiable(field_schema, ctx) {
               True -> []
               False -> [
-                UnsupportedFeature(
+                ValidationError(
+                  severity: SeverityError,
+                  target: TargetBoth,
                   path: op_id <> ".requestBody.multipart." <> field_name,
                   detail: "multipart/form-data fields must be string, integer, number, boolean, binary, or string enums.",
                 ),
@@ -192,9 +334,36 @@ fn validate_multipart_request_body_fields(
             }
           })
         Some(_) -> [
-          UnsupportedFeature(
+          ValidationError(
+            severity: SeverityError,
+            target: TargetBoth,
             path: op_id <> ".requestBody",
             detail: "multipart/form-data request bodies must use an object schema.",
+          ),
+        ]
+        None -> []
+      }
+    Error(_) -> []
+  }
+}
+
+/// Validate that application/x-www-form-urlencoded uses an object schema.
+/// Non-object schemas produce empty form bodies in the generated code.
+fn validate_form_urlencoded_schema(
+  op_id: String,
+  content: dict.Dict(String, spec.MediaType),
+  ctx: Context,
+) -> List(ValidationError) {
+  case dict.get(content, "application/x-www-form-urlencoded") {
+    Ok(media_type) ->
+      case resolve_schema_object(media_type.schema, ctx) {
+        Some(ObjectSchema(..)) -> []
+        Some(_) -> [
+          ValidationError(
+            severity: SeverityError,
+            target: TargetBoth,
+            path: op_id <> ".requestBody",
+            detail: "application/x-www-form-urlencoded request bodies must use an object schema.",
           ),
         ]
         None -> []
@@ -217,6 +386,7 @@ fn multipart_field_is_stringifiable(schema_ref: SchemaRef, ctx: Context) -> Bool
 fn validate_responses(
   op_id: String,
   responses: dict.Dict(String, spec.Response),
+  ctx: Context,
 ) -> List(ValidationError) {
   let entries = dict.to_list(responses)
   list.flat_map(entries, fn(entry) {
@@ -232,16 +402,18 @@ fn validate_responses(
       {
         True -> []
         False -> [
-          UnsupportedFeature(
+          ValidationError(
+            severity: SeverityError,
+            target: TargetBoth,
             path: path,
             detail: "Response content type '"
               <> media_type_name
-              <> "' is not supported. Only 'application/json' and 'text/plain' are supported.",
+              <> "' is not supported. Supported response content types: application/json, text/plain, application/octet-stream, application/xml, text/xml.",
           ),
         ]
       }
       let schema_errors = case media_type.schema {
-        Some(schema_ref) -> validate_schema_ref_recursive(path, schema_ref)
+        Some(schema_ref) -> validate_schema_ref_recursive(path, schema_ref, ctx)
         None -> []
       }
       list.append(content_type_errors, schema_errors)
@@ -257,18 +429,51 @@ fn validate_component_schemas(ctx: Context) -> List(ValidationError) {
   }
   list.flat_map(schemas, fn(entry) {
     let #(name, schema_ref) = entry
-    validate_schema_ref_recursive("components.schemas." <> name, schema_ref)
+    validate_schema_ref_recursive(
+      "components.schemas." <> name,
+      schema_ref,
+      ctx,
+    )
   })
 }
 
 /// Recursively validate a SchemaRef at any depth.
+/// References are checked for resolvability against the spec's components.
 fn validate_schema_ref_recursive(
   path: String,
   schema_ref: SchemaRef,
+  ctx: Context,
 ) -> List(ValidationError) {
   case schema_ref {
-    Reference(_) -> []
-    Inline(schema_obj) -> validate_schema_recursive(path, schema_obj)
+    Reference(ref:, ..) ->
+      // Detect external refs (not starting with #/) before resolution
+      case string.starts_with(ref, "#/") {
+        False -> [
+          ValidationError(
+            severity: SeverityError,
+            target: TargetBoth,
+            path: path,
+            detail: "External $ref '"
+              <> ref
+              <> "' is not supported. Only local references (#/components/...) are supported.",
+          ),
+        ]
+        True ->
+          case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
+            Ok(_) -> []
+            Error(_) -> [
+              ValidationError(
+                severity: SeverityError,
+                target: TargetBoth,
+                path: path,
+                detail: "Unresolved schema reference: '"
+                  <> ref
+                  <> "'. The referenced schema does not exist in components.",
+              ),
+            ]
+          }
+      }
+    Inline(schema_obj) -> validate_schema_recursive(path, schema_obj, ctx)
   }
 }
 
@@ -276,6 +481,7 @@ fn validate_schema_ref_recursive(
 fn validate_schema_recursive(
   path: String,
   schema_obj: SchemaObject,
+  ctx: Context,
 ) -> List(ValidationError) {
   case schema_obj {
     ObjectSchema(
@@ -290,230 +496,120 @@ fn validate_schema_recursive(
       // Recurse into typed additionalProperties schema
       let typed_ap_errors = case additional_properties {
         Some(ap_ref) ->
-          validate_schema_ref_recursive(path <> ".additionalProperties", ap_ref)
+          validate_schema_ref_recursive(
+            path <> ".additionalProperties",
+            ap_ref,
+            ctx,
+          )
         None -> []
       }
-      // Recurse into properties, also catching inline objects
+      // Recurse into properties
       let prop_errors =
         dict.to_list(properties)
         |> list.flat_map(fn(entry) {
           let #(prop_name, prop_ref) = entry
           let prop_path = path <> "." <> prop_name
-          let inline_obj_errors = case prop_ref {
-            Inline(ObjectSchema(..)) -> [
-              UnsupportedFeature(
-                path: prop_path,
-                detail: "Nested inline object properties are not supported. Extract to a named schema in components.schemas and use $ref.",
-              ),
-            ]
-            Inline(AllOfSchema(..)) -> [
-              UnsupportedFeature(
-                path: prop_path,
-                detail: "Nested inline allOf properties are not supported. Extract to a named schema in components.schemas and use $ref.",
-              ),
-            ]
-            _ -> []
-          }
-          list.append(
-            inline_obj_errors,
-            validate_schema_ref_recursive(prop_path, prop_ref),
-          )
-        })
-      // Property name collisions after snake_case conversion
-      let prop_names =
-        dict.to_list(properties)
-        |> list.map(fn(entry) {
-          let #(prop_name, _) = entry
-          naming.to_snake_case(prop_name)
-        })
-      let prop_collision_errors =
-        find_name_collisions(prop_names, fn(dup) {
-          UnsupportedFeature(
-            path: path,
-            detail: "Property name collision after snake_case conversion: '"
-              <> dup
-              <> "'",
-          )
+          validate_schema_ref_recursive(prop_path, prop_ref, ctx)
         })
       list.flatten([
         ap_errors,
         typed_ap_errors,
         prop_errors,
-        prop_collision_errors,
       ])
     }
 
     ArraySchema(items:, ..) -> {
-      // Reject inline complex array items
-      let item_errors = case items {
-        Inline(ObjectSchema(..))
-        | Inline(AllOfSchema(..))
-        | Inline(OneOfSchema(..))
-        | Inline(AnyOfSchema(..)) -> [
-          UnsupportedFeature(
-            path: path <> ".items",
-            detail: "Inline complex array items (object/allOf/oneOf/anyOf) are not supported. Extract to components.schemas and use $ref.",
-          ),
-        ]
-        _ -> []
-      }
-      list.append(
-        item_errors,
-        validate_schema_ref_recursive(path <> ".items", items),
-      )
+      validate_schema_ref_recursive(path <> ".items", items, ctx)
     }
 
-    OneOfSchema(schemas:, ..) -> validate_compound_schemas(path, schemas)
-    AnyOfSchema(schemas:, ..) -> validate_compound_schemas(path, schemas)
+    OneOfSchema(schemas:, ..) ->
+      list.flat_map(schemas, fn(s_ref) {
+        validate_schema_ref_recursive(path <> ".oneOf", s_ref, ctx)
+      })
+    AnyOfSchema(schemas:, ..) ->
+      list.flat_map(schemas, fn(s_ref) {
+        validate_schema_ref_recursive(path <> ".anyOf", s_ref, ctx)
+      })
 
     AllOfSchema(schemas:, ..) ->
       list.flat_map(schemas, fn(s_ref) {
-        validate_schema_ref_recursive(path <> ".allOf", s_ref)
+        validate_schema_ref_recursive(path <> ".allOf", s_ref, ctx)
       })
 
     _ -> []
   }
 }
 
-/// Validate oneOf/anyOf schemas: only $ref variants are supported.
-/// Inline schemas (primitives, objects, arrays) cannot be generated as
-/// union variants.
-fn validate_compound_schemas(
-  path: String,
-  schemas: List(SchemaRef),
-) -> List(ValidationError) {
-  let inline_errors = case has_any_inline_schemas(schemas) {
-    True -> [
-      UnsupportedFeature(
-        path: path,
-        detail: "oneOf/anyOf with inline schemas is not supported. All variants must be $ref to named schemas.",
+/// Validate security schemes for unsupported types.
+/// All scheme types are now supported: apiKey, HTTP (any scheme), OAuth2,
+/// and OpenID Connect.
+fn validate_security_schemes(_ctx: Context) -> List(ValidationError) {
+  []
+}
+
+/// Check for AST fields that are parsed but not used by codegen, emitting
+/// warnings so users are aware their spec contains features we preserve but
+/// do not generate code for.
+fn validate_preserved_but_unused(ctx: Context) -> List(ValidationError) {
+  let webhook_warnings = case dict.is_empty(ctx.spec.webhooks) {
+    True -> []
+    False -> [
+      ValidationError(
+        severity: SeverityWarning,
+        target: TargetBoth,
+        path: "webhooks",
+        detail: "Webhooks are parsed but not used by code generation.",
       ),
     ]
-    False -> []
   }
-  // Recurse into each sub-schema
-  let child_errors =
-    list.flat_map(schemas, fn(s_ref) {
-      validate_schema_ref_recursive(path, s_ref)
-    })
-  list.append(inline_errors, child_errors)
-}
-
-/// Check if any schema in a list is inline (not a $ref).
-fn has_any_inline_schemas(schemas: List(SchemaRef)) -> Bool {
-  list.any(schemas, fn(s) {
-    case s {
-      Inline(_) -> True
-      Reference(_) -> False
-    }
-  })
-}
-
-/// Validate for operationId duplicates and naming collisions.
-fn validate_name_collisions(ctx: Context) -> List(ValidationError) {
   let operations = type_gen.collect_operations(ctx)
-
-  // Check duplicate operationId
-  let op_id_errors =
-    find_duplicates(
-      operations,
-      fn(op) {
-        let #(op_id, _, _, _) = op
-        op_id
-      },
-      fn(dup) {
-        UnsupportedFeature(
-          path: "paths",
-          detail: "Duplicate operationId: '" <> dup <> "'",
-        )
-      },
-    )
-
-  // Function name collisions after snake_case conversion
-  let fn_names =
-    list.map(operations, fn(op) {
-      let #(op_id, _, _, _) = op
-      naming.operation_to_function_name(op_id)
+  let response_warnings =
+    list.flat_map(operations, fn(op) {
+      let #(op_id, operation, _path, _method) = op
+      let entries = dict.to_list(operation.responses)
+      list.flat_map(entries, fn(entry) {
+        let #(status_code, response) = entry
+        let base_path = op_id <> ".responses." <> status_code
+        let header_warnings = case dict.is_empty(response.headers) {
+          True -> []
+          False -> [
+            ValidationError(
+              severity: SeverityWarning,
+              target: TargetBoth,
+              path: base_path <> ".headers",
+              detail: "Response headers are parsed but not used by code generation.",
+            ),
+          ]
+        }
+        let link_warnings = case dict.is_empty(response.links) {
+          True -> []
+          False -> [
+            ValidationError(
+              severity: SeverityWarning,
+              target: TargetBoth,
+              path: base_path <> ".links",
+              detail: "Response links are parsed but not used by code generation.",
+            ),
+          ]
+        }
+        let content_entries = dict.to_list(response.content)
+        let encoding_warnings =
+          list.flat_map(content_entries, fn(ce) {
+            let #(media_type_name, media_type) = ce
+            case dict.is_empty(media_type.encoding) {
+              True -> []
+              False -> [
+                ValidationError(
+                  severity: SeverityWarning,
+                  target: TargetBoth,
+                  path: base_path <> "." <> media_type_name <> ".encoding",
+                  detail: "MediaType encoding is parsed but not used by code generation.",
+                ),
+              ]
+            }
+          })
+        list.flatten([header_warnings, link_warnings, encoding_warnings])
+      })
     })
-  let fn_collision_errors =
-    find_name_collisions(fn_names, fn(dup) {
-      UnsupportedFeature(
-        path: "paths",
-        detail: "Function name collision after case conversion: '" <> dup <> "'",
-      )
-    })
-
-  // Type name collisions after PascalCase conversion
-  let type_names =
-    list.map(operations, fn(op) {
-      let #(op_id, _, _, _) = op
-      naming.schema_to_type_name(op_id)
-    })
-  let type_collision_errors =
-    find_name_collisions(type_names, fn(dup) {
-      UnsupportedFeature(
-        path: "paths",
-        detail: "Type name collision after case conversion: '" <> dup <> "'",
-      )
-    })
-
-  list.flatten([op_id_errors, fn_collision_errors, type_collision_errors])
-}
-
-/// Find duplicates in a list using a key function, producing errors via an
-/// error function. Only reports the first occurrence of each duplicate.
-fn find_duplicates(
-  items: List(a),
-  key_fn: fn(a) -> String,
-  error_fn: fn(String) -> ValidationError,
-) -> List(ValidationError) {
-  let #(_, errors) =
-    list.fold(items, #(set.new(), []), fn(acc, item) {
-      let #(seen, errs) = acc
-      let key = key_fn(item)
-      case set.contains(seen, key) {
-        True -> #(seen, [error_fn(key), ..errs])
-        False -> #(set.insert(seen, key), errs)
-      }
-    })
-  list.reverse(errors)
-}
-
-/// Find duplicate names in a simple list of strings.
-fn find_name_collisions(
-  names: List(String),
-  error_fn: fn(String) -> ValidationError,
-) -> List(ValidationError) {
-  find_duplicates(names, fn(name) { name }, error_fn)
-}
-
-/// Validate security schemes for unsupported types.
-fn validate_security_schemes(ctx: Context) -> List(ValidationError) {
-  let schemes = case ctx.spec.components {
-    Some(components) -> dict.to_list(components.security_schemes)
-    None -> []
-  }
-  list.flat_map(schemes, fn(entry) {
-    let #(name, scheme) = entry
-    case scheme {
-      spec.ApiKeyScheme(..) -> []
-      spec.HttpScheme(scheme: "bearer", ..) -> []
-      spec.HttpScheme(scheme: "basic", ..) -> []
-      spec.HttpScheme(scheme: "digest", ..) -> []
-      spec.HttpScheme(scheme: scheme_name, ..) -> [
-        UnsupportedFeature(
-          path: "components.securitySchemes." <> name,
-          detail: "HTTP security scheme '"
-            <> scheme_name
-            <> "' is not supported. Supported schemes: bearer, basic, digest.",
-        ),
-      ]
-      spec.OAuth2Scheme(..) -> [
-        UnsupportedFeature(
-          path: "components.securitySchemes." <> name,
-          detail: "OAuth2 security scheme is not supported.",
-        ),
-      ]
-    }
-  })
+  list.flatten([webhook_warnings, response_warnings])
 }

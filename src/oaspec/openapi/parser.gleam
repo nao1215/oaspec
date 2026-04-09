@@ -6,14 +6,18 @@ import gleam/string
 import oaspec/openapi/schema.{
   type Discriminator, type SchemaObject, type SchemaRef, AllOfSchema,
   AnyOfSchema, ArraySchema, BooleanSchema, Discriminator, Inline, IntegerSchema,
-  NumberSchema, ObjectSchema, OneOfSchema, Reference, StringSchema,
+  NumberSchema, ObjectSchema, OneOfSchema, StringSchema,
 }
 import oaspec/openapi/spec.{
-  type Components, type HttpMethod, type Info, type MediaType, type OpenApiSpec,
-  type Operation, type Parameter, type ParameterIn, type PathItem,
-  type RequestBody, type Response, type SecurityRequirement, type Server,
-  Components, Delete, Get, Info, MediaType, OpenApiSpec, Operation, Parameter,
-  Patch, PathItem, Post, Put, RequestBody, Response, SecurityRequirement, Server,
+  type Callback, type Components, type Contact, type Encoding, type ExternalDoc,
+  type Header, type HttpMethod, type Info, type License, type Link,
+  type MediaType, type OpenApiSpec, type Operation, type Parameter,
+  type ParameterIn, type PathItem, type RequestBody, type Response,
+  type SecurityRequirement, type Server, type ServerVariable, type Tag, Callback,
+  Components, Contact, Delete, Encoding, ExternalDoc, Get, Head, Header, Info,
+  License, Link, MediaType, OpenApiSpec, Operation, Options, Parameter, Patch,
+  PathItem, Post, Put, RequestBody, Response, SecurityRequirement, Server,
+  ServerVariable, Tag, Trace,
 }
 import simplifile
 import yay
@@ -71,8 +75,25 @@ fn parse_root(node: yay.Node) -> Result(OpenApiSpec, ParseError) {
   use paths <- result.try(parse_paths(node, components))
   use servers <- result.try(parse_servers(node))
   use security <- result.try(parse_security_requirements(node, ""))
+  use webhooks <- result.try(parse_webhooks(node, components))
+  let tags = parse_tags(node)
+  let external_docs = parse_optional_external_docs(node)
+  let json_schema_dialect =
+    yay.extract_optional_string(node, "jsonSchemaDialect")
+    |> result.unwrap(None)
 
-  Ok(OpenApiSpec(openapi:, info:, paths:, components:, servers:, security:))
+  Ok(OpenApiSpec(
+    openapi:,
+    info:,
+    paths:,
+    components:,
+    servers:,
+    security:,
+    webhooks:,
+    tags:,
+    external_docs:,
+    json_schema_dialect:,
+  ))
 }
 
 /// Parse optional components section.
@@ -110,7 +131,26 @@ fn parse_info(root: yay.Node) -> Result(Info, ParseError) {
     yay.extract_optional_string(info_node, "description")
     |> result.unwrap(None)
 
-  Ok(Info(title:, description:, version:))
+  let summary =
+    yay.extract_optional_string(info_node, "summary")
+    |> result.unwrap(None)
+
+  let terms_of_service =
+    yay.extract_optional_string(info_node, "termsOfService")
+    |> result.unwrap(None)
+
+  let contact = parse_optional_contact(info_node)
+  let license = parse_optional_license(info_node)
+
+  Ok(Info(
+    title:,
+    description:,
+    version:,
+    summary:,
+    terms_of_service:,
+    contact:,
+    license:,
+  ))
 }
 
 /// Parse servers array.
@@ -132,7 +172,9 @@ fn parse_server(node: yay.Node) -> Result(Server, ParseError) {
     yay.extract_optional_string(node, "description")
     |> result.unwrap(None)
 
-  Ok(Server(url:, description:))
+  let variables = parse_server_variables(node)
+
+  Ok(Server(url:, description:, variables:))
 }
 
 /// Parse the paths object.
@@ -146,11 +188,16 @@ fn parse_paths(
         let #(key_node, value_node) = entry
         case key_node {
           yay.NodeStr(path) -> {
-            use path_item <- result.try(parse_path_item(
-              value_node,
-              path,
-              components,
-            ))
+            // Check for $ref first — resolve from components.pathItems
+            use path_item <- result.try(
+              case
+                yay.extract_optional_string(value_node, "$ref")
+                |> result.unwrap(None)
+              {
+                Some(ref_str) -> resolve_path_item_ref(ref_str, components)
+                None -> parse_path_item(value_node, path, components)
+              },
+            )
             Ok(dict.insert(acc, path, path_item))
           }
           _ -> Ok(acc)
@@ -211,8 +258,30 @@ fn parse_path_item(
     Patch,
     components,
   ))
+  use head <- result.try(parse_optional_operation(
+    node,
+    "head",
+    path,
+    Head,
+    components,
+  ))
+  use options <- result.try(parse_optional_operation(
+    node,
+    "options",
+    path,
+    Options,
+    components,
+  ))
+  use trace <- result.try(parse_optional_operation(
+    node,
+    "trace",
+    path,
+    Trace,
+    components,
+  ))
 
   use parameters <- result.try(parse_parameters_list(node, components))
+  use servers <- result.try(parse_servers(node))
 
   Ok(PathItem(
     summary:,
@@ -222,7 +291,11 @@ fn parse_path_item(
     put:,
     delete:,
     patch:,
+    head:,
+    options:,
+    trace:,
     parameters:,
+    servers:,
   ))
 }
 
@@ -312,6 +385,10 @@ fn parse_operation(
 
   use security <- result.try(parse_optional_security_requirements(node, context))
 
+  use callbacks <- result.try(parse_callbacks(node, context, components))
+  use op_servers <- result.try(parse_servers(node))
+  let external_docs = parse_optional_external_docs(node)
+
   Ok(Operation(
     operation_id:,
     summary:,
@@ -322,6 +399,9 @@ fn parse_operation(
     responses:,
     deprecated:,
     security:,
+    callbacks:,
+    servers: op_servers,
+    external_docs:,
   ))
 }
 
@@ -430,6 +510,19 @@ fn parse_parameter(
       let style =
         yay.extract_optional_string(node, "style")
         |> result.unwrap(None)
+        |> option.map(parse_parameter_style)
+
+      let explode =
+        yay.extract_optional_bool(node, "explode")
+        |> result.unwrap(None)
+
+      let allow_reserved =
+        yay.extract_optional_bool(node, "allowReserved")
+        |> result.unwrap(None)
+        |> option.unwrap(False)
+
+      let content = parse_content_map(node)
+      let examples = parse_string_map(node, "examples")
 
       Ok(Parameter(
         name:,
@@ -438,7 +531,11 @@ fn parse_parameter(
         required:,
         schema: param_schema,
         style:,
+        explode:,
         deprecated:,
+        allow_reserved:,
+        content:,
+        examples:,
       ))
     }
   }
@@ -548,6 +645,39 @@ fn parse_parameter_in(value: String) -> Result(ParameterIn, ParseError) {
   }
 }
 
+/// Map a style string to a ParameterStyle ADT value.
+fn parse_parameter_style(value: String) -> spec.ParameterStyle {
+  case value {
+    "form" -> spec.FormStyle
+    "simple" -> spec.SimpleStyle
+    "deepObject" -> spec.DeepObjectStyle
+    "matrix" -> spec.MatrixStyle
+    "label" -> spec.LabelStyle
+    "spaceDelimited" -> spec.SpaceDelimitedStyle
+    "pipeDelimited" -> spec.PipeDelimitedStyle
+    // Unknown styles default to form (OpenAPI default for query)
+    _ -> spec.FormStyle
+  }
+}
+
+/// Map an apiKey "in" string to a SecuritySchemeIn ADT value.
+fn parse_security_scheme_in(
+  value: String,
+) -> Result(spec.SecuritySchemeIn, ParseError) {
+  case value {
+    "header" -> Ok(spec.SchemeInHeader)
+    "query" -> Ok(spec.SchemeInQuery)
+    "cookie" -> Ok(spec.SchemeInCookie)
+    _ ->
+      Error(InvalidValue(
+        path: "securityScheme.in",
+        detail: "Unknown apiKey location: "
+          <> value
+          <> ". Must be one of: header, query, cookie",
+      ))
+  }
+}
+
 /// Parse requestBody from a node.
 fn parse_request_body_at(
   node: yay.Node,
@@ -582,9 +712,54 @@ fn parse_request_body(
     |> result.unwrap(None)
     |> option.unwrap(False)
 
-  use content <- result.try(parse_content(node, context))
+  // content is REQUIRED per OpenAPI spec
+  use content <- result.try(parse_required_content(node, context))
 
   Ok(RequestBody(description:, content:, required:))
+}
+
+/// Parse content map, requiring at least one entry for request bodies.
+fn parse_required_content(
+  node: yay.Node,
+  context: String,
+) -> Result(Dict(String, MediaType), ParseError) {
+  case yay.select_sugar(from: node, selector: "content") {
+    Ok(yay.NodeMap(entries)) -> {
+      list.try_fold(entries, dict.new(), fn(acc, entry) {
+        let #(key_node, value_node) = entry
+        case key_node {
+          yay.NodeStr(media_type_name) -> {
+            use mt_schema <- result.try(
+              case yay.select_sugar(from: value_node, selector: "schema") {
+                Ok(schema_node) -> {
+                  use sr <- result.try(parse_schema_ref(schema_node))
+                  Ok(Some(sr))
+                }
+                _ -> Ok(None)
+              },
+            )
+            let mt_example =
+              yay.extract_optional_string(value_node, "example")
+              |> result.unwrap(None)
+            let mt_examples = parse_string_map(value_node, "examples")
+            let mt_encoding = parse_encoding_map(value_node)
+            Ok(dict.insert(
+              acc,
+              media_type_name,
+              MediaType(
+                schema: mt_schema,
+                example: mt_example,
+                examples: mt_examples,
+                encoding: mt_encoding,
+              ),
+            ))
+          }
+          _ -> Ok(acc)
+        }
+      })
+    }
+    _ -> Error(MissingField(path: context <> ".requestBody", field: "content"))
+  }
 }
 
 /// Parse content map (media type -> schema).
@@ -607,7 +782,21 @@ fn parse_content(
                 _ -> Ok(None)
               },
             )
-            Ok(dict.insert(acc, media_type_name, MediaType(schema: mt_schema)))
+            let mt_example =
+              yay.extract_optional_string(value_node, "example")
+              |> result.unwrap(None)
+            let mt_examples = parse_string_map(value_node, "examples")
+            let mt_encoding = parse_encoding_map(value_node)
+            Ok(dict.insert(
+              acc,
+              media_type_name,
+              MediaType(
+                schema: mt_schema,
+                example: mt_example,
+                examples: mt_examples,
+                encoding: mt_encoding,
+              ),
+            ))
           }
           _ -> Ok(acc)
         }
@@ -654,13 +843,20 @@ fn parse_response(
   case yay.extract_optional_string(node, "$ref") {
     Ok(Some(ref_str)) -> resolve_response_ref(ref_str, components)
     _ -> {
-      let description =
-        yay.extract_optional_string(node, "description")
-        |> result.unwrap(None)
+      // description is REQUIRED per OpenAPI spec
+      use description <- result.try(
+        yay.extract_string(node, "description")
+        |> result.map(Some)
+        |> result.map_error(fn(_) {
+          MissingField(path: "response", field: "description")
+        }),
+      )
 
       use content <- result.try(parse_content(node, "response"))
+      let headers = parse_headers_map(node)
+      let links = parse_links_map(node)
 
-      Ok(Response(description:, content:))
+      Ok(Response(description:, content:, headers:, links:))
     }
   }
 }
@@ -677,6 +873,10 @@ fn parse_components(root: yay.Node) -> Result(Components, ParseError) {
   use request_bodies <- result.try(parse_request_bodies_map(components_node))
   use responses <- result.try(parse_responses_map(components_node))
   use security_schemes <- result.try(parse_security_schemes_map(components_node))
+  use path_items <- result.try(parse_path_items_map(components_node))
+  let headers = parse_headers_map(components_node)
+  let examples = parse_string_map(components_node, "examples")
+  let links = parse_links_map(components_node)
 
   Ok(Components(
     schemas:,
@@ -684,6 +884,10 @@ fn parse_components(root: yay.Node) -> Result(Components, ParseError) {
     request_bodies:,
     responses:,
     security_schemes:,
+    path_items:,
+    headers:,
+    examples:,
+    links:,
   ))
 }
 
@@ -779,7 +983,7 @@ fn parse_responses_map(
 /// Parse a schema reference (either $ref or inline schema).
 pub fn parse_schema_ref(node: yay.Node) -> Result(SchemaRef, ParseError) {
   case yay.extract_optional_string(node, "$ref") {
-    Ok(Some(ref)) -> Ok(Reference(ref:))
+    Ok(Some(ref)) -> Ok(schema.make_reference(ref))
     _ -> {
       use schema_obj <- result.try(parse_schema_object(node))
       Ok(Inline(schema_obj))
@@ -798,11 +1002,50 @@ pub fn parse_schema_object(node: yay.Node) -> Result(SchemaObject, ParseError) {
     yay.extract_optional_string(node, "description")
     |> result.unwrap(None)
 
+  let deprecated =
+    yay.extract_optional_bool(node, "deprecated")
+    |> result.unwrap(None)
+    |> option.unwrap(False)
+
+  let title =
+    yay.extract_optional_string(node, "title")
+    |> result.unwrap(None)
+
+  let read_only =
+    yay.extract_optional_bool(node, "readOnly")
+    |> result.unwrap(None)
+    |> option.unwrap(False)
+
+  let write_only =
+    yay.extract_optional_bool(node, "writeOnly")
+    |> result.unwrap(None)
+    |> option.unwrap(False)
+
+  let default =
+    yay.extract_optional_string(node, "default")
+    |> result.unwrap(None)
+
+  let example =
+    yay.extract_optional_string(node, "example")
+    |> result.unwrap(None)
+
+  let metadata =
+    schema.SchemaMetadata(
+      description:,
+      nullable:,
+      deprecated:,
+      title:,
+      read_only:,
+      write_only:,
+      default:,
+      example:,
+    )
+
   // Check for composition keywords first
   case yay.select_sugar(from: node, selector: "allOf") {
     Ok(yay.NodeSeq(items)) -> {
       use schemas <- result.try(list.try_map(items, parse_schema_ref))
-      Ok(AllOfSchema(description:, schemas:))
+      Ok(AllOfSchema(metadata:, schemas:))
     }
     _ ->
       case yay.select_sugar(from: node, selector: "oneOf") {
@@ -817,15 +1060,24 @@ pub fn parse_schema_object(node: yay.Node) -> Result(SchemaObject, ParseError) {
               Error(_) -> Ok(None)
             },
           )
-          Ok(OneOfSchema(description:, schemas:, discriminator:))
+          Ok(OneOfSchema(metadata:, schemas:, discriminator:))
         }
         _ ->
           case yay.select_sugar(from: node, selector: "anyOf") {
             Ok(yay.NodeSeq(items)) -> {
               use schemas <- result.try(list.try_map(items, parse_schema_ref))
-              Ok(AnyOfSchema(description:, schemas:))
+              use discriminator <- result.try(
+                case yay.select_sugar(from: node, selector: "discriminator") {
+                  Ok(_) -> {
+                    use d <- result.try(parse_discriminator(node))
+                    Ok(Some(d))
+                  }
+                  Error(_) -> Ok(None)
+                },
+              )
+              Ok(AnyOfSchema(metadata:, schemas:, discriminator:))
             }
-            _ -> parse_typed_schema(node, description, nullable)
+            _ -> parse_typed_schema(node, metadata)
           }
       }
   }
@@ -834,13 +1086,59 @@ pub fn parse_schema_object(node: yay.Node) -> Result(SchemaObject, ParseError) {
 /// Parse a typed schema (string, integer, number, boolean, array, object).
 fn parse_typed_schema(
   node: yay.Node,
-  description: Option(String),
-  nullable: Bool,
+  metadata: schema.SchemaMetadata,
 ) -> Result(SchemaObject, ParseError) {
-  let type_str =
-    yay.extract_optional_string(node, "type")
-    |> result.unwrap(None)
-    |> option.unwrap("object")
+  // OpenAPI 3.1 allows type to be an array, e.g. type: [string, 'null'].
+  // Extract the primary type and detect nullable from the array form.
+  // Multi-type unions (e.g. [string, integer]) are not supported.
+  use #(type_str, metadata) <- result.try(
+    case yay.select_sugar(from: node, selector: "type") {
+      Ok(yay.NodeSeq(type_nodes)) -> {
+        let type_strs =
+          list.filter_map(type_nodes, fn(n) {
+            case n {
+              yay.NodeStr(s) -> Ok(s)
+              _ -> Error(Nil)
+            }
+          })
+        let has_null = list.contains(type_strs, "null")
+        let non_null_types = list.filter(type_strs, fn(s) { s != "null" })
+        case non_null_types {
+          [single] ->
+            Ok(#(
+              single,
+              schema.SchemaMetadata(
+                ..metadata,
+                nullable: metadata.nullable || has_null,
+              ),
+            ))
+          [] ->
+            Ok(#(
+              "object",
+              schema.SchemaMetadata(
+                ..metadata,
+                nullable: metadata.nullable || has_null,
+              ),
+            ))
+          _ ->
+            Error(InvalidValue(
+              path: "schema.type",
+              detail: "Multi-type unions (type: ["
+                <> string.join(non_null_types, ", ")
+                <> "]) are not supported; use oneOf instead",
+            ))
+        }
+      }
+      Ok(yay.NodeStr(s)) -> Ok(#(s, metadata))
+      _ -> {
+        let s =
+          yay.extract_optional_string(node, "type")
+          |> result.unwrap(None)
+          |> option.unwrap("object")
+        Ok(#(s, metadata))
+      }
+    },
+  )
 
   let format =
     yay.extract_optional_string(node, "format")
@@ -859,13 +1157,12 @@ fn parse_typed_schema(
       let pattern =
         yay.extract_optional_string(node, "pattern") |> result.unwrap(None)
       Ok(StringSchema(
-        description:,
+        metadata:,
         format:,
         enum_values:,
         min_length:,
         max_length:,
         pattern:,
-        nullable:,
       ))
     }
 
@@ -874,7 +1171,23 @@ fn parse_typed_schema(
         yay.extract_optional_int(node, "minimum") |> result.unwrap(None)
       let maximum =
         yay.extract_optional_int(node, "maximum") |> result.unwrap(None)
-      Ok(IntegerSchema(description:, format:, minimum:, maximum:, nullable:))
+      let exclusive_minimum =
+        yay.extract_optional_int(node, "exclusiveMinimum")
+        |> result.unwrap(None)
+      let exclusive_maximum =
+        yay.extract_optional_int(node, "exclusiveMaximum")
+        |> result.unwrap(None)
+      let multiple_of =
+        yay.extract_optional_int(node, "multipleOf") |> result.unwrap(None)
+      Ok(IntegerSchema(
+        metadata:,
+        format:,
+        minimum:,
+        maximum:,
+        exclusive_minimum:,
+        exclusive_maximum:,
+        multiple_of:,
+      ))
     }
 
     "number" -> {
@@ -882,10 +1195,27 @@ fn parse_typed_schema(
         yay.extract_optional_float(node, "minimum") |> result.unwrap(None)
       let maximum =
         yay.extract_optional_float(node, "maximum") |> result.unwrap(None)
-      Ok(NumberSchema(description:, format:, minimum:, maximum:, nullable:))
+      let exclusive_minimum =
+        yay.extract_optional_float(node, "exclusiveMinimum")
+        |> result.unwrap(None)
+      let exclusive_maximum =
+        yay.extract_optional_float(node, "exclusiveMaximum")
+        |> result.unwrap(None)
+      let multiple_of =
+        yay.extract_optional_float(node, "multipleOf")
+        |> result.unwrap(None)
+      Ok(NumberSchema(
+        metadata:,
+        format:,
+        minimum:,
+        maximum:,
+        exclusive_minimum:,
+        exclusive_maximum:,
+        multiple_of:,
+      ))
     }
 
-    "boolean" -> Ok(BooleanSchema(description:, nullable:))
+    "boolean" -> Ok(BooleanSchema(metadata:))
 
     "array" -> {
       use items <- result.try(
@@ -898,11 +1228,14 @@ fn parse_typed_schema(
         yay.extract_optional_int(node, "minItems") |> result.unwrap(None)
       let max_items =
         yay.extract_optional_int(node, "maxItems") |> result.unwrap(None)
-      Ok(ArraySchema(description:, items:, min_items:, max_items:, nullable:))
+      let unique_items =
+        yay.extract_optional_bool(node, "uniqueItems")
+        |> result.unwrap(None)
+        |> option.unwrap(False)
+      Ok(ArraySchema(metadata:, items:, min_items:, max_items:, unique_items:))
     }
 
-    // Default: object
-    _ -> {
+    "object" -> {
       use properties <- result.try(parse_properties(node))
       let required = case yay.extract_string_list(node, "required") {
         Ok(r) -> r
@@ -919,15 +1252,30 @@ fn parse_typed_schema(
           _ -> Ok(#(None, False))
         },
       )
+      let min_properties =
+        yay.extract_optional_int(node, "minProperties")
+        |> result.unwrap(None)
+      let max_properties =
+        yay.extract_optional_int(node, "maxProperties")
+        |> result.unwrap(None)
       Ok(ObjectSchema(
-        description:,
+        metadata:,
         properties:,
         required:,
         additional_properties:,
         additional_properties_untyped:,
-        nullable:,
+        min_properties:,
+        max_properties:,
       ))
     }
+
+    unrecognized ->
+      Error(InvalidValue(
+        path: "schema.type",
+        detail: "Unrecognized schema type '"
+          <> unrecognized
+          <> "'. Supported types: string, integer, number, boolean, array, object.",
+      ))
   }
 }
 
@@ -1010,6 +1358,60 @@ fn parse_security_schemes_map(
   }
 }
 
+/// Parse the pathItems map from components.
+fn parse_path_items_map(
+  components_node: yay.Node,
+) -> Result(Dict(String, PathItem), ParseError) {
+  case yay.select_sugar(from: components_node, selector: "pathItems") {
+    Ok(yay.NodeMap(entries)) -> {
+      list.try_fold(entries, dict.new(), fn(acc, entry) {
+        let #(key_node, value_node) = entry
+        case key_node {
+          yay.NodeStr(name) -> {
+            use path_item <- result.try(parse_path_item(
+              value_node,
+              "components.pathItems." <> name,
+              None,
+            ))
+            Ok(dict.insert(acc, name, path_item))
+          }
+          _ -> Ok(acc)
+        }
+      })
+    }
+    _ -> Ok(dict.new())
+  }
+}
+
+/// Resolve a $ref for a path item by looking it up in components.pathItems.
+fn resolve_path_item_ref(
+  ref_str: String,
+  components: Option(Components),
+) -> Result(PathItem, ParseError) {
+  let ref_name =
+    ref_str
+    |> string.split("/")
+    |> list.last
+    |> result.unwrap("unknown")
+
+  case components {
+    Some(comps) ->
+      case dict.get(comps.path_items, ref_name) {
+        Ok(path_item) -> Ok(path_item)
+        Error(_) ->
+          Error(InvalidValue(
+            path: "pathItem.$ref",
+            detail: "Unresolved pathItem reference: " <> ref_str,
+          ))
+      }
+    None ->
+      Error(InvalidValue(
+        path: "pathItem.$ref",
+        detail: "No components to resolve reference: " <> ref_str,
+      ))
+  }
+}
+
 /// Parse a single security scheme.
 fn parse_security_scheme(
   node: yay.Node,
@@ -1035,10 +1437,9 @@ fn parse_security_scheme(
           MissingField(path: "securityScheme.apiKey", field: "in")
         }),
       )
-      case in_str {
-        "header" | "query" | "cookie" ->
-          Ok(spec.ApiKeyScheme(name:, in_: in_str))
-        _ ->
+      case parse_security_scheme_in(in_str) {
+        Ok(in_) -> Ok(spec.ApiKeyScheme(name:, in_:))
+        Error(_) ->
           Error(InvalidValue(
             path: "securityScheme.apiKey.in",
             detail: "Only 'header', 'query' and 'cookie' are supported for apiKey. Got: '"
@@ -1063,13 +1464,78 @@ fn parse_security_scheme(
       let description =
         yay.extract_optional_string(node, "description")
         |> result.unwrap(None)
-      Ok(spec.OAuth2Scheme(description:))
+      let flows = parse_oauth2_flows(node)
+      Ok(spec.OAuth2Scheme(description:, flows:))
+    }
+    "openIdConnect" -> {
+      let description =
+        yay.extract_optional_string(node, "description")
+        |> result.unwrap(None)
+      use open_id_connect_url <- result.try(
+        yay.extract_string(node, "openIdConnectUrl")
+        |> result.map_error(fn(_) {
+          MissingField(
+            path: "securityScheme.openIdConnect",
+            field: "openIdConnectUrl",
+          )
+        }),
+      )
+      Ok(spec.OpenIdConnectScheme(open_id_connect_url:, description:))
     }
     _ ->
       Error(InvalidValue(
         path: "securityScheme.type",
         detail: "Unsupported security scheme type: " <> type_str,
       ))
+  }
+}
+
+/// Parse OAuth2 flows from a security scheme node.
+fn parse_oauth2_flows(node: yay.Node) -> dict.Dict(String, spec.OAuth2Flow) {
+  case yay.select_sugar(from: node, selector: "flows") {
+    Ok(yay.NodeMap(flow_entries)) ->
+      list.fold(flow_entries, dict.new(), fn(acc, entry) {
+        let #(key_node, flow_node) = entry
+        case key_node {
+          yay.NodeStr(flow_name) -> {
+            let authorization_url =
+              yay.extract_optional_string(flow_node, "authorizationUrl")
+              |> result.unwrap(None)
+            let token_url =
+              yay.extract_optional_string(flow_node, "tokenUrl")
+              |> result.unwrap(None)
+            let refresh_url =
+              yay.extract_optional_string(flow_node, "refreshUrl")
+              |> result.unwrap(None)
+            let scopes = case
+              yay.select_sugar(from: flow_node, selector: "scopes")
+            {
+              Ok(yay.NodeMap(scope_entries)) ->
+                list.fold(scope_entries, dict.new(), fn(sacc, sentry) {
+                  let #(sk, sv) = sentry
+                  case sk, sv {
+                    yay.NodeStr(scope_name), yay.NodeStr(scope_desc) ->
+                      dict.insert(sacc, scope_name, scope_desc)
+                    _, _ -> sacc
+                  }
+                })
+              _ -> dict.new()
+            }
+            dict.insert(
+              acc,
+              flow_name,
+              spec.OAuth2Flow(
+                authorization_url:,
+                token_url:,
+                refresh_url:,
+                scopes:,
+              ),
+            )
+          }
+          _ -> acc
+        }
+      })
+    _ -> dict.new()
   }
 }
 
@@ -1158,6 +1624,348 @@ fn parse_security_requirement_object(
         path: context <> ".security",
         detail: "Security requirement must be an object",
       ))
+  }
+}
+
+/// Parse callbacks from an operation node.
+/// Returns an empty dict if no callbacks are present.
+/// Propagates parse errors instead of silently dropping invalid callbacks.
+fn parse_callbacks(
+  node: yay.Node,
+  context: String,
+  components: Option(Components),
+) -> Result(dict.Dict(String, Callback), ParseError) {
+  case yay.select_sugar(from: node, selector: "callbacks") {
+    Ok(yay.NodeMap(entries)) -> {
+      list.try_fold(entries, dict.new(), fn(acc, entry) {
+        let #(key_node, value_node) = entry
+        case key_node {
+          yay.NodeStr(callback_name) -> {
+            use callback <- result.try(parse_callback_object(
+              value_node,
+              context,
+              components,
+            ))
+            Ok(dict.insert(acc, callback_name, callback))
+          }
+          _ -> Ok(acc)
+        }
+      })
+    }
+    _ -> Ok(dict.new())
+  }
+}
+
+/// Parse a single callback object (maps URL expressions -> PathItems).
+/// Propagates parse errors from individual URL expression path items.
+fn parse_callback_object(
+  node: yay.Node,
+  context: String,
+  components: Option(Components),
+) -> Result(Callback, ParseError) {
+  case node {
+    yay.NodeMap(entries) -> {
+      use parsed_entries <- result.try(
+        list.try_fold(entries, [], fn(acc, entry) {
+          let #(key_node, path_item_node) = entry
+          case key_node {
+            yay.NodeStr(url_expression) -> {
+              use path_item <- result.try(parse_path_item(
+                path_item_node,
+                context <> ".callbacks." <> url_expression,
+                components,
+              ))
+              Ok([#(url_expression, path_item), ..acc])
+            }
+            _ -> Ok(acc)
+          }
+        }),
+      )
+      case parsed_entries {
+        [] ->
+          Error(MissingField(
+            path: context <> ".callbacks",
+            field: "url expression",
+          ))
+        _ -> Ok(Callback(entries: dict.from_list(parsed_entries)))
+      }
+    }
+    _ ->
+      Error(MissingField(path: context <> ".callbacks", field: "url expression"))
+  }
+}
+
+/// Parse optional contact from an info node.
+fn parse_optional_contact(info_node: yay.Node) -> Option(Contact) {
+  case yay.select_sugar(from: info_node, selector: "contact") {
+    Ok(contact_node) -> {
+      let name =
+        yay.extract_optional_string(contact_node, "name")
+        |> result.unwrap(None)
+      let url =
+        yay.extract_optional_string(contact_node, "url")
+        |> result.unwrap(None)
+      let email =
+        yay.extract_optional_string(contact_node, "email")
+        |> result.unwrap(None)
+      Some(Contact(name:, url:, email:))
+    }
+    _ -> None
+  }
+}
+
+/// Parse optional license from an info node.
+fn parse_optional_license(info_node: yay.Node) -> Option(License) {
+  case yay.select_sugar(from: info_node, selector: "license") {
+    Ok(license_node) -> {
+      case yay.extract_string(license_node, "name") {
+        Ok(name) -> {
+          let url =
+            yay.extract_optional_string(license_node, "url")
+            |> result.unwrap(None)
+          Some(License(name:, url:))
+        }
+        _ -> None
+      }
+    }
+    _ -> None
+  }
+}
+
+/// Parse server variables from a server node.
+fn parse_server_variables(node: yay.Node) -> Dict(String, ServerVariable) {
+  case yay.select_sugar(from: node, selector: "variables") {
+    Ok(yay.NodeMap(entries)) ->
+      list.fold(entries, dict.new(), fn(acc, entry) {
+        let #(key_node, value_node) = entry
+        case key_node {
+          yay.NodeStr(var_name) -> {
+            let default =
+              yay.extract_optional_string(value_node, "default")
+              |> result.unwrap(None)
+              |> option.unwrap("")
+            let enum_values = case yay.extract_string_list(value_node, "enum") {
+              Ok(values) -> values
+              _ -> []
+            }
+            let description =
+              yay.extract_optional_string(value_node, "description")
+              |> result.unwrap(None)
+            dict.insert(
+              acc,
+              var_name,
+              ServerVariable(default:, enum_values:, description:),
+            )
+          }
+          _ -> acc
+        }
+      })
+    _ -> dict.new()
+  }
+}
+
+/// Parse optional external docs from a node.
+fn parse_optional_external_docs(node: yay.Node) -> Option(ExternalDoc) {
+  case yay.select_sugar(from: node, selector: "externalDocs") {
+    Ok(doc_node) -> {
+      case yay.extract_string(doc_node, "url") {
+        Ok(url) -> {
+          let description =
+            yay.extract_optional_string(doc_node, "description")
+            |> result.unwrap(None)
+          Some(ExternalDoc(url:, description:))
+        }
+        _ -> None
+      }
+    }
+    _ -> None
+  }
+}
+
+/// Parse tags array from root.
+fn parse_tags(node: yay.Node) -> List(Tag) {
+  case yay.select_sugar(from: node, selector: "tags") {
+    Ok(yay.NodeSeq(items)) ->
+      list.filter_map(items, fn(tag_node) {
+        case yay.extract_string(tag_node, "name") {
+          Ok(name) -> {
+            let description =
+              yay.extract_optional_string(tag_node, "description")
+              |> result.unwrap(None)
+            let external_docs = parse_optional_external_docs(tag_node)
+            Ok(Tag(name:, description:, external_docs:))
+          }
+          _ -> Error(Nil)
+        }
+      })
+    _ -> []
+  }
+}
+
+/// Parse webhooks from root.
+fn parse_webhooks(
+  node: yay.Node,
+  components: Option(Components),
+) -> Result(Dict(String, PathItem), ParseError) {
+  case yay.select_sugar(from: node, selector: "webhooks") {
+    Ok(yay.NodeMap(entries)) -> {
+      list.try_fold(entries, dict.new(), fn(acc, entry) {
+        let #(key_node, value_node) = entry
+        case key_node {
+          yay.NodeStr(name) -> {
+            use path_item <- result.try(parse_path_item(
+              value_node,
+              "webhooks." <> name,
+              components,
+            ))
+            Ok(dict.insert(acc, name, path_item))
+          }
+          _ -> Ok(acc)
+        }
+      })
+    }
+    _ -> Ok(dict.new())
+  }
+}
+
+/// Parse a string->string map from a node at a given key.
+fn parse_string_map(node: yay.Node, key: String) -> Dict(String, String) {
+  case yay.extract_string_map(node, key) {
+    Ok(m) -> m
+    _ -> dict.new()
+  }
+}
+
+/// Parse a content map (non-result version for use in Parameter).
+fn parse_content_map(node: yay.Node) -> Dict(String, MediaType) {
+  case yay.select_sugar(from: node, selector: "content") {
+    Ok(yay.NodeMap(entries)) ->
+      list.fold(entries, dict.new(), fn(acc, entry) {
+        let #(key_node, value_node) = entry
+        case key_node {
+          yay.NodeStr(media_type_name) -> {
+            let mt_schema = case
+              yay.select_sugar(from: value_node, selector: "schema")
+            {
+              Ok(schema_node) ->
+                case parse_schema_ref(schema_node) {
+                  Ok(sr) -> Some(sr)
+                  _ -> None
+                }
+              _ -> None
+            }
+            let mt_example =
+              yay.extract_optional_string(value_node, "example")
+              |> result.unwrap(None)
+            let mt_examples = parse_string_map(value_node, "examples")
+            let mt_encoding = parse_encoding_map(value_node)
+            dict.insert(
+              acc,
+              media_type_name,
+              MediaType(
+                schema: mt_schema,
+                example: mt_example,
+                examples: mt_examples,
+                encoding: mt_encoding,
+              ),
+            )
+          }
+          _ -> acc
+        }
+      })
+    _ -> dict.new()
+  }
+}
+
+/// Parse encoding map from a media type node.
+fn parse_encoding_map(node: yay.Node) -> Dict(String, Encoding) {
+  case yay.select_sugar(from: node, selector: "encoding") {
+    Ok(yay.NodeMap(entries)) ->
+      list.fold(entries, dict.new(), fn(acc, entry) {
+        let #(key_node, value_node) = entry
+        case key_node {
+          yay.NodeStr(prop_name) -> {
+            let content_type =
+              yay.extract_optional_string(value_node, "contentType")
+              |> result.unwrap(None)
+            let style =
+              yay.extract_optional_string(value_node, "style")
+              |> result.unwrap(None)
+              |> option.map(parse_parameter_style)
+            let explode =
+              yay.extract_optional_bool(value_node, "explode")
+              |> result.unwrap(None)
+            dict.insert(
+              acc,
+              prop_name,
+              Encoding(content_type:, style:, explode:),
+            )
+          }
+          _ -> acc
+        }
+      })
+    _ -> dict.new()
+  }
+}
+
+/// Parse headers map from a node.
+fn parse_headers_map(node: yay.Node) -> Dict(String, Header) {
+  case yay.select_sugar(from: node, selector: "headers") {
+    Ok(yay.NodeMap(entries)) ->
+      list.fold(entries, dict.new(), fn(acc, entry) {
+        let #(key_node, value_node) = entry
+        case key_node {
+          yay.NodeStr(header_name) -> {
+            let description =
+              yay.extract_optional_string(value_node, "description")
+              |> result.unwrap(None)
+            let required =
+              yay.extract_optional_bool(value_node, "required")
+              |> result.unwrap(None)
+              |> option.unwrap(False)
+            let hdr_schema = case
+              yay.select_sugar(from: value_node, selector: "schema")
+            {
+              Ok(schema_node) ->
+                case parse_schema_ref(schema_node) {
+                  Ok(sr) -> Some(sr)
+                  _ -> None
+                }
+              _ -> None
+            }
+            dict.insert(
+              acc,
+              header_name,
+              Header(description:, required:, schema: hdr_schema),
+            )
+          }
+          _ -> acc
+        }
+      })
+    _ -> dict.new()
+  }
+}
+
+/// Parse links map from a node.
+fn parse_links_map(node: yay.Node) -> Dict(String, Link) {
+  case yay.select_sugar(from: node, selector: "links") {
+    Ok(yay.NodeMap(entries)) ->
+      list.fold(entries, dict.new(), fn(acc, entry) {
+        let #(key_node, value_node) = entry
+        case key_node {
+          yay.NodeStr(link_name) -> {
+            let operation_id =
+              yay.extract_optional_string(value_node, "operationId")
+              |> result.unwrap(None)
+            let description =
+              yay.extract_optional_string(value_node, "description")
+              |> result.unwrap(None)
+            dict.insert(acc, link_name, Link(operation_id:, description:))
+          }
+          _ -> acc
+        }
+      })
+    _ -> dict.new()
   }
 }
 

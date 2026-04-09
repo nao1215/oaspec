@@ -1,19 +1,18 @@
 # oaspec
 
+[![Hex](https://img.shields.io/hexpm/v/oaspec)](https://hex.pm/packages/oaspec)
 [![CI](https://github.com/nao1215/oaspec/actions/workflows/ci.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci.yml)
-[![Integration Tests](https://github.com/nao1215/oaspec/actions/workflows/integration.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/integration.yml)
 
-> [!IMPORTANT]
-> oaspec does not cover the full OpenAPI 3.x specification. Support is expanded incrementally.
-
-Generate Gleam code from OpenAPI 3.x specifications.
+Generate Gleam code from OpenAPI 3.x specifications with strict codegen for a large practical subset.
 
 - Custom types for component schemas
 - JSON decoders and encoders (allOf, oneOf/anyOf with discriminator)
-- Server handler stubs
+- Server handler stubs with typed router (request construction, handler dispatch, response encoding)
 - Client SDK with parameter serialization and response decoding
-- Middleware (logging, retry)
-- Security scheme support (`apiKey` header/query/cookie, HTTP bearer/basic/digest)
+- Middleware (logging, retry, validation)
+- Security scheme support (`apiKey`, HTTP all schemes, OAuth2, OpenID Connect)
+- Parameter support (deepObject, array, complex schema parameters)
+- Content type support (JSON, form-urlencoded, multipart, XML, octet-stream, text/plain)
 - OpenAPI descriptions as doc comments
 
 ## Install
@@ -170,13 +169,18 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 
 ### Supported
 
-- OpenAPI 3.x (YAML and JSON)
-- Paths and operations (GET, POST, PUT, DELETE, PATCH)
+- OpenAPI 3.0.x and 3.1 (YAML and JSON; 3.1 `type` arrays and `null` supported, other 3.1-only features are best-effort)
+- Paths and operations (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, TRACE)
 - Path, query, header, cookie parameters (path-level merged by `(name, in)`)
 - Parameter serialization for Bool, Float, Int, String, `$ref` enum types
+- `style: deepObject` query parameters with `key[prop]=value` serialization
+- Array parameters in query/header/cookie with explode-aware serialization (`explode: true` → repeated `key=a&key=b`; `explode: false` → comma-separated `key=a,b`)
+- Complex schema parameters (object/allOf/oneOf/anyOf) via automatic hoisting
 - Percent-encoding for path/query/cookie parameter values via `uri.percent_encode`
 - Cookie parameters combined into single header
 - `application/json` request bodies with `$ref` resolution (typed, auto-encoded)
+- `application/x-www-form-urlencoded` request bodies with recursive bracket encoding for nested objects (`field[sub][key]=value`)
+- `multipart/form-data` request bodies with boundary-based encoding for string/integer/number/boolean/binary/string-enum fields (optional fields handled)
 - allOf in request body (property merging from `$ref` + inline objects)
 - Responses with status codes, `$ref` responses from `components.responses`
 - `$ref` resolution for parameters, requestBodies, responses, schemas
@@ -185,57 +189,74 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 - String enums with unknown-value rejection
 - Inline enums in properties (auto-named)
 - Inline objects in top-level response/requestBody (anonymous types generated)
+- Inline oneOf/anyOf schemas: automatically hoisted to `components.schemas` with generated names
+- Nested inline object/allOf in properties: automatically hoisted
+- Inline complex array items: automatically hoisted
 - oneOf/anyOf with `$ref` variants: sum types, decoders, encoders
 - oneOf discriminator-based decoding
 - anyOf try-each decoding
-- allOf property merging with decoders/encoders
+- allOf property merging with decoders/encoders (non-object sub-schemas included as synthetic fields)
 - Nullable fields, arrays (including `$ref` items)
 - Encode/decode roundtrip: `decode(encode(value)) == Ok(value)`
 - Circular `$ref` detection
 - Fail-fast parser for missing required fields, invalid parameter locations, malformed content
-- Client typed body (auto-encoded) and typed response (auto-decoded)
+- Client typed body (auto-encoded) and typed response (auto-decoded) for single content-type operations; multi-content-type operations use `String` body with explicit `content_type` parameter
 - `default` response handling in client
-- Top-level security inheritance (operation-level overrides, `security: []` opts out)
-- Security schemes: `apiKey` in header/query/cookie, HTTP bearer/basic/digest (first OR alternative applied; AND within one alternative supported)
+- Top-level security inheritance (operation-level overrides, `security: []` opts out, OR alternatives all applied)
+- Security schemes: `apiKey` in header/query/cookie, HTTP all schemes (bearer/basic/digest/hoba/negotiate/mutual/etc.), OAuth2 (flows and scopes preserved in AST), OpenID Connect
 - `text/plain` response content type: body returned as `String` directly
+- `application/xml`, `text/xml` response content types: body returned as `String`
+- `application/octet-stream` response content type: body returned as `String`
 - Typed `additionalProperties`: `Dict(String, T)` with dict decoder/encoder (known keys excluded)
 - Untyped `additionalProperties: true`: `Dict(String, Dynamic)` (decode-only, known keys excluded)
-- `multipart/form-data` request bodies with boundary-based encoding for string/integer/number/boolean/binary/string-enum fields (optional fields handled)
+- `additionalProperties` with inline complex schemas (hoisted automatically)
 - Validation constraint guards (minLength, maxLength, minimum, maximum, minItems, maxItems)
+- Composite `validate_<type>` functions that auto-call all field validators
+- Callbacks: parsed and callback handler stubs generated
 - Duplicate operationId detection
 - Function/type name collision detection after case conversion
 - Property name collision detection after snake_case conversion
 - Enum variant collision detection after PascalCase conversion
+- Auto-deduplication of duplicate operationIds (appends `_2`, `_3`, etc.)
+- Auto-deduplication of property name collisions after snake_case conversion
+- Auto-deduplication of enum variant collisions after PascalCase conversion
+- Auto-deduplication of function/type name collisions after case conversion
 - Config validation: output directory basename must match package name
 - Gleam keyword escaping in generated field names
-
-### Unsupported (exits with error)
-
-These are detected before code generation. The generator prints an error and exits non-zero.
-
-- `style: deepObject` query parameters
-- Inline oneOf/anyOf schemas (variants must be `$ref`)
-- Nested inline object/allOf in properties (use `$ref`)
-- Array parameters (query/header/cookie with `type: array`)
-- Complex schema parameters (object/allOf/oneOf/anyOf in path/query/header/cookie)
-- Inline complex array items (object/allOf/oneOf/anyOf; use `$ref`)
-- Duplicate operationId
-- Function/type name collisions after case conversion
-- Property name collisions after snake_case conversion
-- Enum variant collisions after PascalCase conversion
-- Non-JSON/non-multipart request body content types (only `application/json` and `multipart/form-data`)
-- Non-JSON response content types (only `application/json` and `text/plain`)
-- Path parameters with `required: false`
+- Optional request body (`requestBody.required: false`) generates `Option(T)` body parameter
+- Array alias component schemas (e.g. `type: array, items: ...`) generate decoder/encoder
+- Lossless AST: all OpenAPI 3.x fields preserved through parsing (info, servers, parameters, media types, responses, components, tags, webhooks, external docs)
+- Parameter style and security scheme location expressed as ADTs (not strings)
+- Schema metadata: `title`, `readOnly`, `writeOnly`, `default`, `example`, `deprecated` preserved
+- Numeric constraints: `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf` preserved
+- OAuth2 flows with authorization/token/refresh URLs and scopes preserved
+- `readOnly` properties filtered from request types and encoders; `writeOnly` properties treated as optional in response decoders
+- Structured capability errors with severity (Error/Warning) and target scope (Client/Server/Both)
+- Server router with typed request construction, handler dispatch, and response encoding (not just a scaffold)
+- IR-based type generation (component schemas generated via ir_build → ir_render pipeline)
+- Server variable substitution: `default_base_url()` generated from server URL templates with variable defaults
 
 ### Not yet supported
 
-- Validation constraints enforcement at runtime (guards are generated but not auto-called)
-- Callbacks: ignored by the generator
-- OAuth2: rejected at validation time
-- OpenID Connect: rejected at parse time
-- Unsupported HTTP security schemes (e.g. hoba, negotiate): rejected at validation time
-- `allOf` merge only supports object sub-schemas (non-object entries are ignored)
-- `additionalProperties` with inline complex schemas is not handled explicitly; use primitives or `$ref`
+The AST now parses and preserves all standard OpenAPI 3.x fields (lossless parse). The following features are **parsed and stored** but **not yet used by codegen** (preserved for downstream tools or future codegen use):
+
+- `webhooks`, `externalDocs`, `tags` (top-level)
+- `Info.contact`, `Info.license`, `Info.summary`, `Info.termsOfService`
+- `Parameter.content`, `Parameter.examples`
+- `MediaType.encoding`, `MediaType.examples`
+- `Response.headers`, `Response.links`
+- `PathItem.servers`, `Operation.servers`, `Operation.externalDocs`
+- `components.headers`, `components.examples`, `components.links`
+- Numeric: `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`
+- Array: `uniqueItems`
+- Object: `minProperties`, `maxProperties`
+
+The following features are **not supported** at all:
+
+- `PathItem.$ref` (path-level `$ref`)
+- OpenAPI 3.1 / JSON Schema 2020-12 advanced features (`$defs`, `prefixItems`, `if/then/else`, `dependentSchemas`, `$dynamicRef`, `contentMediaType`)
+- OpenAPI 3.1 multi-type unions (`type: [string, integer]`) — use `oneOf` instead
+- `xml` annotations
 
 ### Schema-to-type mapping
 

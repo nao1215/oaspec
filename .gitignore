@@ -12,3 +12,7 @@ integration_test/build/
 integration_test/manifest.toml
 /oaspec
 test_output_client/
+doc/reference/libopenapi/
+doc/reference/kiota/
+doc/reference/oapi-codegen/
+doc/reference/openapi-generator/

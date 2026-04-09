@@ -303,26 +303,14 @@ Describe 'oaspec generate'
   # Unsupported feature validation
   # -------------------------------------------------------------------
 
-  Describe 'unsupported features'
-    It 'fails with error for specs containing unsupported patterns'
+  # deepObject, multipart/form-data, additionalProperties, and inline
+  # oneOf primitives are now all supported, so the "broken" spec
+  # generates successfully.
+  Describe 'previously unsupported features now succeed'
+    It 'generates successfully for specs with deepObject and inline oneOf'
       When run generate --config=test/fixtures/broken-oaspec.yaml
-      The status should be failure
-      The output should include 'Unsupported feature'
-    End
-
-    It 'reports deepObject style as unsupported'
-      When run generate --config=test/fixtures/broken-oaspec.yaml
-      The status should be failure
-      The output should include 'deepObject'
-    End
-
-    # multipart/form-data and additionalProperties are now supported,
-    # so they are no longer reported as unsupported.
-
-    It 'reports inline oneOf primitives as unsupported'
-      When run generate --config=test/fixtures/broken-oaspec.yaml
-      The status should be failure
-      The output should include 'oneOf/anyOf with inline schemas'
+      The status should be success
+      The output should include 'Successfully generated'
     End
   End
 
@@ -396,8 +384,8 @@ Describe 'oaspec generate'
 
     # Request types reference merged allOf type
 
-    It 'request types reference merged allOf body type'
-      The contents of file "$TEST_OUTPUT_DIR/api/request_types.gleam" should include 'body: types.PostSearchRequest'
+    It 'request types reference merged allOf body type (optional since required defaults to false)'
+      The contents of file "$TEST_OUTPUT_DIR/api/request_types.gleam" should include 'body: Option(types.PostSearchRequest)'
     End
   End
 End

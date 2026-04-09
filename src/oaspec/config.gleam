@@ -50,7 +50,16 @@ pub fn parse_mode(mode: String) -> Result(GenerateMode, ConfigError) {
 pub fn load(path: String) -> Result(Config, ConfigError) {
   use content <- result.try(
     simplifile.read(path)
-    |> result.map_error(fn(_) { FileNotFound(path:) }),
+    |> result.map_error(fn(e) {
+      case e {
+        simplifile.Enoent -> FileNotFound(path:)
+        _ ->
+          FileReadError(
+            path:,
+            detail: "Failed to read file: " <> simplifile.describe_error(e),
+          )
+      }
+    }),
   )
 
   use docs <- result.try(

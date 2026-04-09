@@ -69,6 +69,10 @@ pub fn hoist(spec: OpenApiSpec) -> OpenApiSpec {
             request_bodies: dict.new(),
             responses: dict.new(),
             security_schemes: dict.new(),
+            path_items: dict.new(),
+            headers: dict.new(),
+            examples: dict.new(),
+            links: dict.new(),
           ))
       }
   }
@@ -153,7 +157,7 @@ fn hoist_schema_ref(
   state: HoistState,
 ) -> #(SchemaRef, HoistState) {
   case schema_ref {
-    Reference(_) -> #(schema_ref, state)
+    Reference(..) -> #(schema_ref, state)
     Inline(schema_obj) -> {
       case needs_hoisting(schema_obj) {
         False -> #(schema_ref, state)
@@ -178,9 +182,40 @@ fn hoist_schema_ref(
             )
 
           let ref = "#/components/schemas/" <> unique_name
-          #(Reference(ref: ref), state)
+          #(schema.make_reference(ref), state)
         }
       }
+    }
+  }
+}
+
+/// Hoist a single SchemaRef unconditionally if it is inline.
+/// Used for oneOf/anyOf variants where codegen requires all variants to be $ref.
+fn hoist_schema_ref_always(
+  schema_ref: SchemaRef,
+  name_prefix: String,
+  name_suffix: String,
+  state: HoistState,
+) -> #(SchemaRef, HoistState) {
+  case schema_ref {
+    Reference(..) -> #(schema_ref, state)
+    Inline(schema_obj) -> {
+      let base_name =
+        naming.to_pascal_case(name_prefix) <> naming.to_pascal_case(name_suffix)
+      let #(hoisted_obj, state) =
+        hoist_within_schema(schema_obj, base_name, state)
+      let #(unique_name, state) = make_unique_name(base_name, state)
+      let state =
+        HoistState(
+          ..state,
+          new_schemas: dict.insert(
+            state.new_schemas,
+            unique_name,
+            Inline(hoisted_obj),
+          ),
+        )
+      let ref = "#/components/schemas/" <> unique_name
+      #(schema.make_reference(ref), state)
     }
   }
 }
@@ -192,14 +227,7 @@ fn hoist_within_schema(
   state: HoistState,
 ) -> #(SchemaObject, HoistState) {
   case schema_obj {
-    ObjectSchema(
-      description:,
-      properties:,
-      required:,
-      additional_properties:,
-      additional_properties_untyped:,
-      nullable:,
-    ) -> {
+    ObjectSchema(properties:, additional_properties:, ..) as obj -> {
       // Hoist each property
       let #(new_props, state) =
         dict.to_list(properties)
@@ -223,43 +251,31 @@ fn hoist_within_schema(
 
       let result =
         ObjectSchema(
-          description:,
+          ..obj,
           properties: new_props,
-          required:,
           additional_properties: new_ap,
-          additional_properties_untyped:,
-          nullable:,
         )
       #(result, state)
     }
 
-    ArraySchema(description:, items:, min_items:, max_items:, nullable:) -> {
+    ArraySchema(items:, ..) as arr -> {
       let #(hoisted_items, state) =
         hoist_schema_ref(items, name_prefix, "Item", state)
-      #(
-        ArraySchema(
-          description:,
-          items: hoisted_items,
-          min_items:,
-          max_items:,
-          nullable:,
-        ),
-        state,
-      )
+      #(ArraySchema(..arr, items: hoisted_items), state)
     }
 
-    OneOfSchema(description:, schemas:, discriminator:) -> {
+    OneOfSchema(metadata:, schemas:, discriminator:) -> {
       let #(hoisted_schemas_rev, state) =
         list.index_fold(schemas, #([], state), fn(acc, s_ref, idx) {
           let #(schemas_acc, state) = acc
           let suffix = "Variant" <> int.to_string(idx)
           let #(hoisted, state) =
-            hoist_schema_ref(s_ref, name_prefix, suffix, state)
+            hoist_schema_ref_always(s_ref, name_prefix, suffix, state)
           #([hoisted, ..schemas_acc], state)
         })
       #(
         OneOfSchema(
-          description:,
+          metadata:,
           schemas: list.reverse(hoisted_schemas_rev),
           discriminator:,
         ),
@@ -267,22 +283,26 @@ fn hoist_within_schema(
       )
     }
 
-    AnyOfSchema(description:, schemas:) -> {
+    AnyOfSchema(metadata:, schemas:, discriminator:) -> {
       let #(hoisted_schemas_rev, state) =
         list.index_fold(schemas, #([], state), fn(acc, s_ref, idx) {
           let #(schemas_acc, state) = acc
           let suffix = "Variant" <> int.to_string(idx)
           let #(hoisted, state) =
-            hoist_schema_ref(s_ref, name_prefix, suffix, state)
+            hoist_schema_ref_always(s_ref, name_prefix, suffix, state)
           #([hoisted, ..schemas_acc], state)
         })
       #(
-        AnyOfSchema(description:, schemas: list.reverse(hoisted_schemas_rev)),
+        AnyOfSchema(
+          metadata:,
+          schemas: list.reverse(hoisted_schemas_rev),
+          discriminator:,
+        ),
         state,
       )
     }
 
-    AllOfSchema(description:, schemas:) -> {
+    AllOfSchema(metadata:, schemas:) -> {
       let #(hoisted_schemas_rev, state) =
         list.index_fold(schemas, #([], state), fn(acc, s_ref, idx) {
           let #(schemas_acc, state) = acc
@@ -292,7 +312,7 @@ fn hoist_within_schema(
           #([hoisted, ..schemas_acc], state)
         })
       #(
-        AllOfSchema(description:, schemas: list.reverse(hoisted_schemas_rev)),
+        AllOfSchema(metadata:, schemas: list.reverse(hoisted_schemas_rev)),
         state,
       )
     }
@@ -315,7 +335,7 @@ fn hoist_component_schemas(
         let #(hoisted_obj, state) = hoist_within_schema(schema_obj, name, state)
         #(dict.insert(result, name, Inline(hoisted_obj)), state)
       }
-      Reference(_) -> #(dict.insert(result, name, schema_ref), state)
+      Reference(..) -> #(dict.insert(result, name, schema_ref), state)
     }
   })
 }
@@ -348,8 +368,25 @@ fn hoist_path_item(
     hoist_maybe_operation(path_item.delete, "delete", path, state)
   let #(patch, state) =
     hoist_maybe_operation(path_item.patch, "patch", path, state)
+  let #(head, state) =
+    hoist_maybe_operation(path_item.head, "head", path, state)
+  let #(options, state) =
+    hoist_maybe_operation(path_item.options, "options", path, state)
+  let #(trace, state) =
+    hoist_maybe_operation(path_item.trace, "trace", path, state)
 
-  let result = PathItem(..path_item, get:, post:, put:, delete:, patch:)
+  let result =
+    PathItem(
+      ..path_item,
+      get:,
+      post:,
+      put:,
+      delete:,
+      patch:,
+      head:,
+      options:,
+      trace:,
+    )
   #(result, state)
 }
 
@@ -384,6 +421,10 @@ fn hoist_operation(
   op_id: String,
   state: HoistState,
 ) -> #(spec.Operation, HoistState) {
+  // Hoist parameter schemas (complex object/array params)
+  let #(parameters, state) =
+    hoist_parameters(operation.parameters, op_id, state)
+
   // Hoist request body schemas
   let #(request_body, state) = case operation.request_body {
     None -> #(None, state)
@@ -396,8 +437,30 @@ fn hoist_operation(
   // Hoist response schemas
   let #(responses, state) = hoist_responses(operation.responses, op_id, state)
 
-  let result = spec.Operation(..operation, request_body:, responses:)
+  let result =
+    spec.Operation(..operation, parameters:, request_body:, responses:)
   #(result, state)
+}
+
+/// Hoist complex schemas within operation parameters.
+fn hoist_parameters(
+  params: List(spec.Parameter),
+  op_id: String,
+  state: HoistState,
+) -> #(List(spec.Parameter), HoistState) {
+  list.fold(params, #([], state), fn(acc, param) {
+    let #(params_acc, state) = acc
+    case param.schema {
+      Some(schema_ref) -> {
+        let suffix = "Param" <> naming.to_pascal_case(param.name)
+        let #(hoisted, state) =
+          hoist_schema_ref(schema_ref, op_id, suffix, state)
+        let new_param = spec.Parameter(..param, schema: Some(hoisted))
+        #(list.append(params_acc, [new_param]), state)
+      }
+      None -> #(list.append(params_acc, [param]), state)
+    }
+  })
 }
 
 /// Hoist schemas within a RequestBody.
@@ -415,7 +478,7 @@ fn hoist_request_body(
         Some(schema_ref) -> {
           let #(hoisted, state) =
             hoist_schema_ref(schema_ref, op_id, "Request", state)
-          let mt = spec.MediaType(schema: Some(hoisted))
+          let mt = spec.MediaType(..media_type, schema: Some(hoisted))
           #(dict.insert(result, media_type_name, mt), state)
         }
         None -> #(dict.insert(result, media_type_name, media_type), state)
@@ -444,7 +507,7 @@ fn hoist_responses(
             let suffix = "Response" <> naming.to_pascal_case(status_code)
             let #(hoisted, state) =
               hoist_schema_ref(schema_ref, op_id, suffix, state)
-            let mt = spec.MediaType(schema: Some(hoisted))
+            let mt = spec.MediaType(..media_type, schema: Some(hoisted))
             #(dict.insert(ct_result, media_type_name, mt), state)
           }
           None -> #(dict.insert(ct_result, media_type_name, media_type), state)

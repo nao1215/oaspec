@@ -1,14 +1,14 @@
 import gleam/int
 import gleam/io
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import glint
 import oaspec/codegen/context
 import oaspec/codegen/validate
 import oaspec/codegen/writer
 import oaspec/config
-import oaspec/openapi/hoist
+import oaspec/generate
 import oaspec/openapi/parser
 import simplifile
 
@@ -50,10 +50,16 @@ fn generate_command() -> glint.Command(Nil) {
       fn() {
         glint.command(fn(_named_args, _args, flags) {
           let config_path = config_path(flags) |> result.unwrap("./oaspec.yaml")
-          let mode_str = mode(flags) |> result.unwrap("both")
-          let output_str = output(flags) |> result.unwrap("")
+          let mode_opt = case mode(flags) |> result.unwrap("") {
+            "" -> None
+            s -> Some(s)
+          }
+          let output_opt = case output(flags) |> result.unwrap("") {
+            "" -> None
+            s -> Some(s)
+          }
 
-          run_generate(config_path, mode_str, output_str)
+          run_generate(config_path, mode_opt, output_opt)
         })
       },
     )
@@ -122,111 +128,101 @@ package: api
 }
 
 /// Execute the generation pipeline.
+/// Handles IO (printing, exit codes) while delegating pure logic to
+/// generate.generate and load_config.
 fn run_generate(
   config_path: String,
-  mode_str: String,
-  output_str: String,
+  mode_opt: Option(String),
+  output_opt: Option(String),
 ) -> Nil {
   io.println("oaspec v" <> context.version)
   io.println("Loading config from: " <> config_path)
 
-  // Load config
-  let cfg = case config.load(config_path) {
-    Ok(c) -> c
-    Error(e) -> {
-      io.println("Error: " <> config.error_to_string(e))
+  case load_config(config_path, mode_opt, output_opt) {
+    Error(msg) -> {
+      io.println("Error: " <> msg)
       halt(1)
-      panic as "unreachable"
     }
-  }
-
-  // Apply mode override (only if CLI flag was explicitly set)
-  let cfg = case mode_str {
-    "" -> cfg
-    _ ->
-      case config.parse_mode(mode_str) {
-        Ok(m) -> config.with_mode(cfg, m)
+    Ok(cfg) -> {
+      io.println("Parsing OpenAPI spec: " <> cfg.input)
+      case parser.parse_file(cfg.input) {
         Error(e) -> {
-          io.println("Error: " <> config.error_to_string(e))
+          io.println("Error: " <> parse_error_to_string(e))
           halt(1)
-          panic as "unreachable"
+        }
+        Ok(spec) -> {
+          case generate.generate(spec, cfg) {
+            Error(generate.ValidationErrors(errors:)) -> {
+              io.println("Error: OpenAPI spec contains unsupported features:")
+              list.each(errors, fn(e) {
+                io.println("  - " <> validate.error_to_string(e))
+              })
+              halt(1)
+            }
+            Ok(summary) -> {
+              io.println("Spec loaded: " <> summary.spec_title)
+              io.println("Generating code...")
+              case
+                writer.write_all(summary.files, cfg, fn(path) {
+                  io.println("  Generated: " <> path)
+                })
+              {
+                Ok(written) -> {
+                  io.println("")
+                  io.println(
+                    "Successfully generated "
+                    <> int.to_string(list.length(written))
+                    <> " files",
+                  )
+                }
+                Error(e) -> {
+                  io.println("Error: " <> writer.error_to_string(e))
+                  halt(1)
+                }
+              }
+            }
+          }
         }
       }
-  }
-
-  // Apply output override
-  let cfg = case output_str {
-    "" -> cfg
-    path -> config.with_output(cfg, Some(path))
-  }
-
-  // Validate config after all overrides
-  case config.validate_output_package_match(cfg) {
-    Ok(_) -> Nil
-    Error(e) -> {
-      io.println("Error: " <> config.error_to_string(e))
-      halt(1)
     }
   }
+}
 
-  io.println("Parsing OpenAPI spec: " <> cfg.input)
-
-  // Parse the OpenAPI spec
-  let spec = case parser.parse_file(cfg.input) {
-    Ok(s) -> s
-    Error(e) -> {
-      let detail = case e {
-        parser.FileError(detail:) -> detail
-        parser.YamlError(detail:) -> detail
-        parser.MissingField(path:, field:) ->
-          "Missing field '" <> field <> "' at " <> path
-        parser.InvalidValue(path:, detail:) ->
-          "Invalid value at " <> path <> ": " <> detail
-      }
-      io.println("Error: " <> detail)
-      halt(1)
-      panic as "unreachable"
-    }
+/// Pure config loading and validation pipeline.
+fn load_config(
+  config_path: String,
+  mode_opt: Option(String),
+  output_opt: Option(String),
+) -> Result(config.Config, String) {
+  use cfg <- result.try(
+    config.load(config_path)
+    |> result.map_error(config.error_to_string),
+  )
+  use cfg <- result.try(case mode_opt {
+    None -> Ok(cfg)
+    Some(mode_str) ->
+      config.parse_mode(mode_str)
+      |> result.map(fn(m) { config.with_mode(cfg, m) })
+      |> result.map_error(config.error_to_string)
+  })
+  let cfg = case output_opt {
+    None -> cfg
+    Some(path) -> config.with_output(cfg, Some(path))
   }
+  config.validate_output_package_match(cfg)
+  |> result.map(fn(_) { cfg })
+  |> result.map_error(config.error_to_string)
+}
 
-  io.println("Spec loaded: " <> spec.info.title <> " v" <> spec.info.version)
-
-  // Hoist inline complex schemas into components.schemas
-  let spec = hoist.hoist(spec)
-
-  // Create generation context
-  let ctx = context.new(spec, cfg)
-
-  // Validate spec for unsupported features
-  let validation_errors = validate.validate(ctx)
-  case list.is_empty(validation_errors) {
-    True -> Nil
-    False -> {
-      io.println("Error: OpenAPI spec contains unsupported features:")
-      list.each(validation_errors, fn(e) {
-        io.println("  - " <> validate.error_to_string(e))
-      })
-      halt(1)
-    }
-  }
-
-  // Generate files
-  io.println("Generating code...")
-  case
-    writer.generate_all(ctx, fn(path) { io.println("  Generated: " <> path) })
-  {
-    Ok(files) -> {
-      io.println("")
-      io.println(
-        "Successfully generated "
-        <> int.to_string(list.length(files))
-        <> " files",
-      )
-    }
-    Error(e) -> {
-      io.println("Error: " <> writer.error_to_string(e))
-      halt(1)
-    }
+/// Convert a parse error to a human-readable string.
+fn parse_error_to_string(e: parser.ParseError) -> String {
+  case e {
+    parser.FileError(detail:) -> detail
+    parser.YamlError(detail:) -> detail
+    parser.MissingField(path:, field:) ->
+      "Missing field '" <> field <> "' at " <> path
+    parser.InvalidValue(path:, detail:) ->
+      "Invalid value at " <> path <> ": " <> detail
   }
 }
 

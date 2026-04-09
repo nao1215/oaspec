@@ -4,7 +4,13 @@ import oaspec/util/string_extra as se
 /// Generate middleware module.
 pub fn generate(ctx: Context) -> List(GeneratedFile) {
   let content = generate_middleware(ctx)
-  [GeneratedFile(path: "middleware.gleam", content: content)]
+  [
+    GeneratedFile(
+      path: "middleware.gleam",
+      content: content,
+      target: context.SharedTarget,
+    ),
+  ]
 }
 
 /// Generate the middleware types and utilities.

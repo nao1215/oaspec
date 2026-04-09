@@ -1,61 +1,124 @@
 import gleam/dict.{type Dict}
+import gleam/list
 import gleam/option.{type Option}
+import gleam/string
+
+/// Shared metadata for all schema types.
+/// Extracted from variants to avoid duplication and ensure composition
+/// schemas (allOf/oneOf/anyOf) don't lose these fields.
+pub type SchemaMetadata {
+  SchemaMetadata(
+    description: Option(String),
+    nullable: Bool,
+    deprecated: Bool,
+    title: Option(String),
+    read_only: Bool,
+    write_only: Bool,
+    default: Option(String),
+    example: Option(String),
+  )
+}
+
+/// Create default metadata with no description, not nullable, not deprecated.
+pub fn default_metadata() -> SchemaMetadata {
+  SchemaMetadata(
+    description: option.None,
+    nullable: False,
+    deprecated: False,
+    title: option.None,
+    read_only: False,
+    write_only: False,
+    default: option.None,
+    example: option.None,
+  )
+}
 
 /// Represents a JSON Schema object within OpenAPI 3.x.
 /// This is the core building block for all type generation.
+/// All variants carry shared `metadata` for description, nullable, deprecated.
 pub type SchemaObject {
   StringSchema(
-    description: Option(String),
+    metadata: SchemaMetadata,
     format: Option(String),
     enum_values: List(String),
     min_length: Option(Int),
     max_length: Option(Int),
     pattern: Option(String),
-    nullable: Bool,
   )
   IntegerSchema(
-    description: Option(String),
+    metadata: SchemaMetadata,
     format: Option(String),
     minimum: Option(Int),
     maximum: Option(Int),
-    nullable: Bool,
+    exclusive_minimum: Option(Int),
+    exclusive_maximum: Option(Int),
+    multiple_of: Option(Int),
   )
   NumberSchema(
-    description: Option(String),
+    metadata: SchemaMetadata,
     format: Option(String),
     minimum: Option(Float),
     maximum: Option(Float),
-    nullable: Bool,
+    exclusive_minimum: Option(Float),
+    exclusive_maximum: Option(Float),
+    multiple_of: Option(Float),
   )
-  BooleanSchema(description: Option(String), nullable: Bool)
+  BooleanSchema(metadata: SchemaMetadata)
   ArraySchema(
-    description: Option(String),
+    metadata: SchemaMetadata,
     items: SchemaRef,
     min_items: Option(Int),
     max_items: Option(Int),
-    nullable: Bool,
+    unique_items: Bool,
   )
   ObjectSchema(
-    description: Option(String),
+    metadata: SchemaMetadata,
     properties: Dict(String, SchemaRef),
     required: List(String),
     additional_properties: Option(SchemaRef),
     additional_properties_untyped: Bool,
-    nullable: Bool,
+    min_properties: Option(Int),
+    max_properties: Option(Int),
   )
-  AllOfSchema(description: Option(String), schemas: List(SchemaRef))
+  AllOfSchema(metadata: SchemaMetadata, schemas: List(SchemaRef))
   OneOfSchema(
-    description: Option(String),
+    metadata: SchemaMetadata,
     schemas: List(SchemaRef),
     discriminator: Option(Discriminator),
   )
-  AnyOfSchema(description: Option(String), schemas: List(SchemaRef))
+  AnyOfSchema(
+    metadata: SchemaMetadata,
+    schemas: List(SchemaRef),
+    discriminator: Option(Discriminator),
+  )
 }
 
 /// A reference to a schema, either inline or via $ref.
+/// Reference carries both the full $ref string and the pre-extracted name
+/// (last segment) to eliminate repeated string splitting in codegen.
 pub type SchemaRef {
   Inline(SchemaObject)
-  Reference(ref: String)
+  Reference(ref: String, name: String)
+}
+
+/// Create a Reference from a $ref string, auto-extracting the name.
+pub fn make_reference(ref: String) -> SchemaRef {
+  let name = ref_to_schema_name(ref)
+  Reference(ref:, name:)
+}
+
+/// Extract the schema name from a $ref string (last path segment).
+/// Example: "#/components/schemas/User" -> "User"
+fn ref_to_schema_name(ref: String) -> String {
+  case string.split(ref, "/") {
+    [] -> "Unknown"
+    segments -> {
+      case list.last(segments) {
+        Ok(name) -> name
+        Error(_) -> "Unknown"
+      }
+    }
+  }
 }
 
 /// OpenAPI discriminator for oneOf/anyOf.
@@ -65,30 +128,30 @@ pub type Discriminator {
 
 /// Get the description from any schema object.
 pub fn get_description(schema: SchemaObject) -> Option(String) {
-  case schema {
-    StringSchema(description:, ..) -> description
-    IntegerSchema(description:, ..) -> description
-    NumberSchema(description:, ..) -> description
-    BooleanSchema(description:, ..) -> description
-    ArraySchema(description:, ..) -> description
-    ObjectSchema(description:, ..) -> description
-    AllOfSchema(description:, ..) -> description
-    OneOfSchema(description:, ..) -> description
-    AnyOfSchema(description:, ..) -> description
-  }
+  get_metadata(schema).description
 }
 
 /// Check if a schema is nullable.
 pub fn is_nullable(schema: SchemaObject) -> Bool {
+  get_metadata(schema).nullable
+}
+
+/// Check if a schema is deprecated.
+pub fn is_deprecated(schema: SchemaObject) -> Bool {
+  get_metadata(schema).deprecated
+}
+
+/// Extract the shared metadata from any schema variant.
+pub fn get_metadata(schema: SchemaObject) -> SchemaMetadata {
   case schema {
-    StringSchema(nullable:, ..) -> nullable
-    IntegerSchema(nullable:, ..) -> nullable
-    NumberSchema(nullable:, ..) -> nullable
-    BooleanSchema(nullable:, ..) -> nullable
-    ArraySchema(nullable:, ..) -> nullable
-    ObjectSchema(nullable:, ..) -> nullable
-    AllOfSchema(..) -> False
-    OneOfSchema(..) -> False
-    AnyOfSchema(..) -> False
+    StringSchema(metadata:, ..) -> metadata
+    IntegerSchema(metadata:, ..) -> metadata
+    NumberSchema(metadata:, ..) -> metadata
+    BooleanSchema(metadata:) -> metadata
+    ArraySchema(metadata:, ..) -> metadata
+    ObjectSchema(metadata:, ..) -> metadata
+    AllOfSchema(metadata:, ..) -> metadata
+    OneOfSchema(metadata:, ..) -> metadata
+    AnyOfSchema(metadata:, ..) -> metadata
   }
 }

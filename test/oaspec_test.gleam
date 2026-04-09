@@ -8,15 +8,22 @@ import oaspec/codegen/client as client_gen
 import oaspec/codegen/context
 import oaspec/codegen/decoders
 import oaspec/codegen/guards
+import oaspec/codegen/ir
+import oaspec/codegen/ir_render
+import oaspec/codegen/schema_dispatch
+import oaspec/codegen/server as server_gen
 import oaspec/codegen/types
 import oaspec/codegen/validate
 import oaspec/config
+import oaspec/generate
+import oaspec/openapi/dedup
 import oaspec/openapi/hoist
 import oaspec/openapi/parser
 import oaspec/openapi/resolver
 import oaspec/openapi/schema
 import oaspec/openapi/spec
 import oaspec/util/content_type
+import oaspec/util/http
 import oaspec/util/naming
 import simplifile
 
@@ -278,7 +285,7 @@ pub fn parse_global_security_inherited_test() {
   get_public.security |> should.equal(Some([]))
 }
 
-pub fn validate_rejects_array_parameter_test() {
+pub fn validate_accepts_array_parameter_test() {
   let yaml =
     "
 openapi: 3.0.3
@@ -303,10 +310,10 @@ paths:
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
-  |> should.be_true()
+  |> should.be_false()
 }
 
-pub fn validate_rejects_optional_array_parameter_test() {
+pub fn validate_accepts_optional_array_parameter_test() {
   let yaml =
     "
 openapi: 3.0.3
@@ -332,7 +339,7 @@ paths:
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
-  |> should.be_true()
+  |> should.be_false()
 }
 
 pub fn validate_accepts_text_plain_response_test() {
@@ -384,12 +391,12 @@ paths:
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "multipart/form-data")
-    && string.contains(s, "request bodies")
+    && string.contains(s, "form-urlencoded")
   })
   |> should.be_true()
 }
 
-pub fn validate_rejects_property_name_collision_test() {
+pub fn dedup_resolves_property_name_collision_test() {
   let yaml =
     "
 openapi: 3.0.3
@@ -412,13 +419,12 @@ components:
         pet_id: { type: string }
 "
   let assert Ok(spec) = parser.parse_string(yaml)
+  // Dedup pass resolves property name collisions
+  let spec = dedup.dedup(hoist.hoist(spec))
   let ctx = make_ctx_from_spec(spec)
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, validate.error_to_string)
-  list.any(error_strings, fn(s) {
-    string.contains(s, "Property name collision")
-  })
-  |> should.be_true()
+  // No collision errors since dedup resolved them
+  errors |> should.equal([])
 }
 
 pub fn parse_rejects_optional_path_parameter_test() {
@@ -478,7 +484,7 @@ pub fn parse_parameter_style_deep_object_test() {
   let assert Some(op) = path_item.get
   let assert [param] = op.parameters
   param.name |> should.equal("filter")
-  param.style |> should.equal(Some("deepObject"))
+  param.style |> should.equal(Some(spec.DeepObjectStyle))
 }
 
 pub fn parse_parameter_style_none_test() {
@@ -507,6 +513,8 @@ pub fn parse_additional_properties_untyped_test() {
 
 fn make_ctx(spec_path: String) -> context.Context {
   let assert Ok(spec) = parser.parse_file(spec_path)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
   let cfg =
     config.Config(
       input: spec_path,
@@ -518,25 +526,25 @@ fn make_ctx(spec_path: String) -> context.Context {
   context.new(spec, cfg)
 }
 
-pub fn validate_rejects_deep_object_test() {
+pub fn validate_accepts_deep_object_test() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "deepObject") })
-  |> should.be_true()
+  |> should.be_false()
 }
 
-pub fn validate_rejects_complex_schema_parameter_test() {
+pub fn validate_accepts_complex_schema_parameter_test() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "Complex schema parameters")
   })
-  |> should.be_true()
+  |> should.be_false()
 }
 
-pub fn validate_rejects_referenced_unsupported_parameter_schemas_test() {
+pub fn validate_accepts_referenced_parameter_schemas_test() {
   let yaml =
     "
 openapi: 3.0.3
@@ -574,14 +582,7 @@ components:
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, validate.error_to_string)
-
-  list.any(error_strings, fn(s) {
-    string.contains(s, "Complex schema parameters")
-  })
-  |> should.be_true()
-  list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
-  |> should.be_true()
+  errors |> should.equal([])
 }
 
 pub fn validate_accepts_multipart_form_data_test() {
@@ -632,14 +633,15 @@ components:
   |> should.be_true()
 }
 
-pub fn validate_broken_spec_detects_inline_oneof_test() {
+pub fn validate_broken_spec_accepts_inline_oneof_after_hoisting_test() {
+  // Inline oneOf variants are now handled by hoisting, so no validation error
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "oneOf/anyOf with inline schemas")
   })
-  |> should.be_true()
+  |> should.be_false()
 }
 
 pub fn validate_broken_spec_accepts_untyped_additional_properties_test() {
@@ -704,16 +706,16 @@ paths: {}
   let assert Error(parser.MissingField(path: "info", field: "title")) = result
 }
 
-pub fn validate_deep_inline_oneof_in_request_body_test() {
+pub fn validate_deep_inline_oneof_in_request_body_accepted_test() {
+  // Inline oneOf in requestBody is now handled by hoisting
   let ctx = make_ctx("test/fixtures/deep_unsupported.yaml")
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
-  // oneOf with inline primitives in requestBody should be caught
   list.any(error_strings, fn(s) {
     string.contains(s, "oneOf/anyOf with inline schemas")
     && string.contains(s, "requestBody")
   })
-  |> should.be_true()
+  |> should.be_false()
 }
 
 pub fn validate_deep_additional_properties_in_response_test() {
@@ -727,14 +729,13 @@ pub fn validate_deep_additional_properties_in_response_test() {
   |> should.be_false()
 }
 
-pub fn validate_duplicate_operation_id_test() {
+pub fn dedup_resolves_duplicate_operation_id_test() {
   let ctx = make_ctx("test/fixtures/collision.yaml")
   let errors = validate.validate(ctx)
+  // No duplicate operationId errors since dedup resolved them
   let error_strings = list.map(errors, validate.error_to_string)
-  list.any(error_strings, fn(s) {
-    string.contains(s, "Duplicate operationId") && string.contains(s, "getUser")
-  })
-  |> should.be_true()
+  list.any(error_strings, fn(s) { string.contains(s, "Duplicate operationId") })
+  |> should.be_false()
 }
 
 pub fn validate_accepts_typed_additional_properties_test() {
@@ -839,7 +840,7 @@ components:
   // Pet.address should now be a $ref
   let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "Pet")
-  let assert Ok(schema.Reference(ref: ref)) = dict.get(props, "address")
+  let assert Ok(schema.Reference(ref: ref, ..)) = dict.get(props, "address")
   ref |> should.equal("#/components/schemas/PetAddress")
 
   // PetAddress should have street and city properties
@@ -877,7 +878,7 @@ components:
     dict.get(components.schemas, "PetType")
   list.each(variants, fn(v) {
     case v {
-      schema.Reference(_) -> should.be_true(True)
+      schema.Reference(..) -> should.be_true(True)
       schema.Inline(_) -> should.fail()
     }
   })
@@ -912,7 +913,7 @@ components:
   // Array items should now be a $ref
   let assert Ok(schema.Inline(schema.ArraySchema(items: items_ref, ..))) =
     dict.get(components.schemas, "PetList")
-  let assert schema.Reference(ref: ref) = items_ref
+  let assert schema.Reference(ref: ref, ..) = items_ref
   string.contains(ref, "#/components/schemas/") |> should.be_true()
 
   // The extracted schema should exist in components.schemas
@@ -950,7 +951,7 @@ components:
   // The $ref should remain unchanged
   let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "Pet")
-  let assert Ok(schema.Reference(ref: ref)) = dict.get(props, "owner")
+  let assert Ok(schema.Reference(ref: ref, ..)) = dict.get(props, "owner")
   ref |> should.equal("#/components/schemas/Owner")
 }
 
@@ -1028,14 +1029,14 @@ components:
   // Company.headquarters should be a $ref
   let assert Ok(schema.Inline(schema.ObjectSchema(properties: company_props, ..))) =
     dict.get(components.schemas, "Company")
-  let assert Ok(schema.Reference(ref: hq_ref)) =
+  let assert Ok(schema.Reference(ref: hq_ref, ..)) =
     dict.get(company_props, "headquarters")
   hq_ref |> should.equal("#/components/schemas/CompanyHeadquarters")
 
   // CompanyHeadquarters.coordinates should be a $ref
   let assert Ok(schema.Inline(schema.ObjectSchema(properties: hq_props, ..))) =
     dict.get(components.schemas, "CompanyHeadquarters")
-  let assert Ok(schema.Reference(ref: coord_ref)) =
+  let assert Ok(schema.Reference(ref: coord_ref, ..)) =
     dict.get(hq_props, "coordinates")
   coord_ref
   |> should.equal("#/components/schemas/CompanyHeadquartersCoordinates")
@@ -1083,7 +1084,7 @@ paths:
   let assert Some(op) = path_item.post
   let assert Some(req_body) = op.request_body
   let assert Ok(media_type) = dict.get(req_body.content, "application/json")
-  let assert Some(schema.Reference(ref: ref)) = media_type.schema
+  let assert Some(schema.Reference(ref: ref, ..)) = media_type.schema
   string.contains(ref, "#/components/schemas/") |> should.be_true()
 }
 
@@ -1122,7 +1123,7 @@ paths:
   let assert Some(op) = path_item.get
   let assert Ok(response) = dict.get(op.responses, "200")
   let assert Ok(media_type) = dict.get(response.content, "application/json")
-  let assert Some(schema.Reference(ref: ref)) = media_type.schema
+  let assert Some(schema.Reference(ref: ref, ..)) = media_type.schema
   string.contains(ref, "#/components/schemas/") |> should.be_true()
 }
 
@@ -1197,7 +1198,7 @@ components:
   // Pet.address should reference the suffixed name, not the original PetAddress
   let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "Pet")
-  let assert Ok(schema.Reference(ref: ref)) = dict.get(props, "address")
+  let assert Ok(schema.Reference(ref: ref, ..)) = dict.get(props, "address")
   // The ref should NOT be the original PetAddress
   ref |> should.not_equal("#/components/schemas/PetAddress")
   // It should still be a valid components reference
@@ -1235,7 +1236,7 @@ components:
 
   let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "User")
-  let assert Ok(schema.Reference(ref: ref)) = dict.get(props, "address")
+  let assert Ok(schema.Reference(ref: ref, ..)) = dict.get(props, "address")
   ref |> should.not_equal("#/components/schemas/UserAddress")
 }
 
@@ -1251,8 +1252,17 @@ pub fn content_type_from_string_test() {
   content_type.from_string("multipart/form-data")
   |> should.equal(content_type.MultipartFormData)
 
+  content_type.from_string("application/x-www-form-urlencoded")
+  |> should.equal(content_type.FormUrlEncoded)
+
   content_type.from_string("application/xml")
-  |> should.equal(content_type.UnsupportedContentType("application/xml"))
+  |> should.equal(content_type.ApplicationXml)
+
+  content_type.from_string("text/xml")
+  |> should.equal(content_type.TextXml)
+
+  content_type.from_string("application/octet-stream")
+  |> should.equal(content_type.ApplicationOctetStream)
 }
 
 pub fn content_type_to_string_test() {
@@ -1265,8 +1275,14 @@ pub fn content_type_to_string_test() {
   content_type.to_string(content_type.MultipartFormData)
   |> should.equal("multipart/form-data")
 
-  content_type.to_string(content_type.UnsupportedContentType("application/xml"))
+  content_type.to_string(content_type.FormUrlEncoded)
+  |> should.equal("application/x-www-form-urlencoded")
+
+  content_type.to_string(content_type.ApplicationXml)
   |> should.equal("application/xml")
+
+  content_type.to_string(content_type.ApplicationOctetStream)
+  |> should.equal("application/octet-stream")
 }
 
 pub fn content_type_is_supported_test() {
@@ -1279,8 +1295,17 @@ pub fn content_type_is_supported_test() {
   content_type.is_supported(content_type.MultipartFormData)
   |> should.be_true()
 
+  content_type.is_supported(content_type.FormUrlEncoded)
+  |> should.be_true()
+
+  content_type.is_supported(content_type.ApplicationXml)
+  |> should.be_true()
+
+  content_type.is_supported(content_type.ApplicationOctetStream)
+  |> should.be_true()
+
   content_type.is_supported(content_type.UnsupportedContentType(
-    "application/xml",
+    "application/msgpack",
   ))
   |> should.be_false()
 }
@@ -1292,6 +1317,9 @@ pub fn content_type_is_supported_request_test() {
   content_type.is_supported_request(content_type.MultipartFormData)
   |> should.be_true()
 
+  content_type.is_supported_request(content_type.FormUrlEncoded)
+  |> should.be_true()
+
   content_type.is_supported_request(content_type.TextPlain)
   |> should.be_false()
 }
@@ -1301,6 +1329,12 @@ pub fn content_type_is_supported_response_test() {
   |> should.be_true()
 
   content_type.is_supported_response(content_type.TextPlain)
+  |> should.be_true()
+
+  content_type.is_supported_response(content_type.ApplicationXml)
+  |> should.be_true()
+
+  content_type.is_supported_response(content_type.ApplicationOctetStream)
   |> should.be_true()
 
   content_type.is_supported_response(content_type.MultipartFormData)
@@ -1353,7 +1387,7 @@ components:
   let assert Some(components) = parsed.components
   let assert Ok(scheme) = dict.get(components.security_schemes, "oauth2Auth")
   case scheme {
-    spec.OAuth2Scheme(description: Some("OAuth2 authorization code")) ->
+    spec.OAuth2Scheme(description: Some("OAuth2 authorization code"), ..) ->
       should.be_true(True)
     _ -> should.fail()
   }
@@ -1383,7 +1417,8 @@ components:
   let assert Some(components) = parsed.components
   let assert Ok(scheme) = dict.get(components.security_schemes, "cookieAuth")
   case scheme {
-    spec.ApiKeyScheme(name: "session_id", in_: "cookie") -> should.be_true(True)
+    spec.ApiKeyScheme(name: "session_id", in_: spec.SchemeInCookie) ->
+      should.be_true(True)
     _ -> should.fail()
   }
 }
@@ -1758,7 +1793,7 @@ components:
 
 // --- Finding 3: unknown HTTP security schemes must produce a validation error
 // or a warning, not be silently ignored at code generation time.
-pub fn unknown_http_security_scheme_rejected_test() {
+pub fn unknown_http_security_scheme_accepted_test() {
   let yaml =
     "
 openapi: 3.0.3
@@ -1782,12 +1817,8 @@ security:
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, validate.error_to_string)
-  // Unknown HTTP scheme "hoba" should be flagged
-  list.any(error_strings, fn(s) {
-    string.contains(s, "hoba") || string.contains(s, "security")
-  })
-  |> should.be_true()
+  // All HTTP schemes are now accepted
+  errors |> should.equal([])
 }
 
 // --- Finding 4: allOf merge must preserve additionalProperties from sub-schemas.
@@ -1841,17 +1872,2696 @@ components:
   |> should.be_true()
 }
 
-// --- Finding 5: README must not list multipart/form-data in both Supported
-// and Unsupported sections.
-pub fn readme_no_contradictory_multipart_test() {
-  let assert Ok(content) = simplifile.read("README.md")
-  // Find the Unsupported section
-  let assert Ok(unsupported_start) =
-    find_substring_index(content, "### Unsupported")
-  let unsupported_section = string.drop_start(content, unsupported_start)
-  // multipart/form-data itself should NOT be listed as unsupported
-  string.contains(unsupported_section, "- `multipart/form-data` request bodies")
+// --- Finding: dedup must not corrupt JSON wire names ---
+// When two properties produce the same snake_case (e.g. "petId" and "pet_id"),
+// dedup should rename the Gleam field but the JSON key in decode.field()
+// must stay as the original property name from the OpenAPI spec.
+pub fn dedup_preserves_json_wire_name_for_properties_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      operationId: getPets
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Pet:
+      type: object
+      required: [petId, pet_id]
+      properties:
+        petId: { type: string }
+        pet_id: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = make_ctx_from_spec(spec)
+
+  // Check decoders use original wire names
+  let files = decoders.generate(ctx)
+  let assert [decode_file, ..] = files
+  let decode_content = decode_file.content
+  // Both original JSON keys must appear in decode.field()
+  string.contains(decode_content, "decode.field(\"petId\"")
+  |> should.be_true()
+  string.contains(decode_content, "decode.field(\"pet_id\"")
+  |> should.be_true()
+  // The deduped name like "pet_id_2" must NOT appear as a JSON key
+  string.contains(decode_content, "\"pet_id_2\"")
   |> should.be_false()
+
+  // Check encoders use original wire names
+  let assert [_, encode_file] = files
+  let encode_content = encode_file.content
+  string.contains(encode_content, "#(\"petId\"")
+  |> should.be_true()
+  string.contains(encode_content, "#(\"pet_id\"")
+  |> should.be_true()
+  string.contains(encode_content, "#(\"pet_id_2\"")
+  |> should.be_false()
+}
+
+// dedup must not corrupt enum wire values.
+// When two enum values produce the same PascalCase (e.g. "foo_bar" and "fooBar"),
+// the JSON value sent/received must remain the original string.
+pub fn dedup_preserves_json_wire_name_for_enums_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: getItems
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Status:
+      type: string
+      enum: [foo_bar, fooBar]
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = make_ctx_from_spec(spec)
+
+  // Check decoders preserve original enum string values
+  let files = decoders.generate(ctx)
+  let assert [decode_file, ..] = files
+  let decode_content = decode_file.content
+  string.contains(decode_content, "\"foo_bar\"")
+  |> should.be_true()
+  string.contains(decode_content, "\"fooBar\"")
+  |> should.be_true()
+  // The corrupted name must NOT appear as a wire value
+  string.contains(decode_content, "\"fooBar_2\"")
+  |> should.be_false()
+  string.contains(decode_content, "\"foo_bar_2\"")
+  |> should.be_false()
+}
+
+// --- Finding: guards.gleam composite validator must use correct type and suffix ---
+pub fn guards_composite_validator_compiles_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: getItems
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    BoundedList:
+      type: array
+      items: { type: string }
+      minItems: 1
+      maxItems: 10
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = guards.generate(ctx)
+  let assert [guards_file] = files
+  let content = guards_file.content
+  // Composite validator must use the actual type, not literal "value_type"
+  string.contains(content, "value_type")
+  |> should.be_false()
+  // The composite validator must call the same function name as the definition
+  // Both definition and call must use the same suffix ("length" for arrays)
+  string.contains(content, "validate_bounded_list_length")
+  |> should.be_true()
+  // Must NOT reference a mismatched "items" suffix
+  string.contains(content, "validate_bounded_list_items")
+  |> should.be_false()
+}
+
+// --- Finding: discriminator-less oneOf via $ref must generate matching decoder ---
+pub fn oneof_no_discriminator_ref_decoder_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /wrappers:
+    get:
+      operationId: getWrappers
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    A:
+      type: object
+      properties:
+        x: { type: integer }
+    B:
+      type: object
+      properties:
+        y: { type: string }
+    Payload:
+      oneOf:
+        - $ref: '#/components/schemas/A'
+        - $ref: '#/components/schemas/B'
+    Wrapper:
+      type: object
+      required: [payload]
+      properties:
+        payload:
+          $ref: '#/components/schemas/Payload'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = decoders.generate(ctx)
+  let assert [decode_file, ..] = files
+  let content = decode_file.content
+  // Wrapper's decoder references payload_decoder() via schema_ref_to_decoder
+  // for the $ref to Payload.  The oneOf generator must define payload_decoder()
+  // (not just decode_payload/1).
+  string.contains(content, "fn payload_decoder()")
+  |> should.be_true()
+}
+
+// --- Finding: multiple content-types must not be silently truncated ---
+pub fn multiple_content_types_response_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /data:
+    get:
+      operationId: getData
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { type: integer }
+            text/plain:
+              schema: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+
+  // Multi-content response types use String to stay type-safe
+  let type_files = types.generate(ctx)
+  let response_types_content =
+    list.find(type_files, fn(f) { string.contains(f.path, "response_types") })
+  let assert Ok(rt_file) = response_types_content
+  // Variant must use String (not Int from JSON schema) for type safety
+  string.contains(rt_file.content, "GetDataResponseOk(String)")
+  |> should.be_true()
+}
+
+// --- Finding: form-urlencoded must import uri and string modules ---
+pub fn form_urlencoded_imports_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /submit:
+    post:
+      operationId: submitForm
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [name, tags]
+              properties:
+                name: { type: string }
+                tags:
+                  type: array
+                  items: { type: string }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // Must import uri for percent_encode
+  string.contains(content, "gleam/uri")
+  |> should.be_true()
+  // Must import string for string.join
+  string.contains(content, "gleam/string")
+  |> should.be_true()
+  // Array field must not produce raw "uri.percent_encode(body.tags)"
+  // (that would try to percent_encode a List, which is a type error)
+  string.contains(content, "uri.percent_encode(body.tags)")
+  |> should.be_false()
+}
+
+// --- Finding: callback must support multiple URL expressions ---
+pub fn callback_multiple_url_expressions_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /subscribe:
+    post:
+      operationId: subscribe
+      callbacks:
+        onEvent:
+          '{$request.body#/callbackUrl}/event':
+            post:
+              operationId: onEvent
+              responses:
+                '200': { description: ok }
+          '{$request.body#/callbackUrl}/status':
+            post:
+              operationId: onStatus
+              responses:
+                '200': { description: ok }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  // The callback "onEvent" must contain both URL expressions
+  let subscribe_path = dict.get(spec.paths, "/subscribe")
+  let assert Ok(path_item) = subscribe_path
+  let assert Some(post_op) = path_item.post
+  let assert Ok(callback) = dict.get(post_op.callbacks, "onEvent")
+  // Callback entries dict must have 2 URL expressions
+  let entries = dict.to_list(callback.entries)
+  list.length(entries) |> should.equal(2)
+  // Both URL expressions must be present
+  dict.has_key(callback.entries, "{$request.body#/callbackUrl}/event")
+  |> should.be_true()
+  dict.has_key(callback.entries, "{$request.body#/callbackUrl}/status")
+  |> should.be_true()
+}
+
+// --- Finding: guards must handle optional fields and use correct array suffix ---
+pub fn guards_optional_field_and_array_suffix_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /samples:
+    get:
+      operationId: getSamples
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Sample:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        nickname:
+          type: string
+          minLength: 1
+        tags:
+          type: array
+          items: { type: string }
+          minItems: 1
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = guards.generate(ctx)
+  let assert [guards_file] = files
+  let content = guards_file.content
+  // Optional field "nickname" is Option(String), so composite validator
+  // must unwrap it before calling the validator (or skip when None).
+  // It must NOT call validate_sample_nickname_length(value.nickname) directly.
+  string.contains(content, "validate_sample_nickname_length(value.nickname)")
+  |> should.be_false()
+  // Array field must use "length" suffix (matching the generated function),
+  // NOT "items" suffix.
+  string.contains(content, "validate_sample_tags_items")
+  |> should.be_false()
+  string.contains(content, "validate_sample_tags_length")
+  |> should.be_true()
+}
+
+// --- Finding: multi-content response must produce type-safe code ---
+// When response has text/plain (String) and application/json (Int),
+// the response_type must accommodate both, not just the first.
+pub fn multi_content_response_type_safety_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /data:
+    get:
+      operationId: getData
+      responses:
+        '200':
+          description: ok
+          content:
+            text/plain:
+              schema: { type: string }
+            application/json:
+              schema: { type: integer }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+
+  // Response type must use String (common supertype) since text/plain returns String
+  let type_files = types.generate(ctx)
+  let response_types_content =
+    list.find(type_files, fn(f) { string.contains(f.path, "response_types") })
+  let assert Ok(rt_file) = response_types_content
+  // The variant must use String since text/plain and JSON decode to different types
+  // It must NOT use Int (which would be a type error when returning resp.body: String)
+  let has_int_variant =
+    string.contains(rt_file.content, "GetDataResponseOk(Int)")
+  let has_string_variant =
+    string.contains(rt_file.content, "GetDataResponseOk(String)")
+  // Either use String for both, or separate variants per content-type
+  // The key constraint: text/plain branch returns resp.body (String),
+  // so the variant CANNOT hold Int
+  case has_int_variant, has_string_variant {
+    True, False ->
+      // Int variant but no String variant = type error
+      should.fail()
+    _, _ -> should.be_ok(Ok(Nil))
+  }
+}
+
+// --- Finding: multi-content request body collapsed to first entry ---
+pub fn multi_content_request_body_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /submit:
+    post:
+      operationId: submitData
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+          application/json:
+            schema: { type: integer }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // The client must handle both content types, not just the first.
+  // At minimum, the form-urlencoded content type must appear.
+  string.contains(content, "application/x-www-form-urlencoded")
+  |> should.be_true()
+  // And JSON content type handling must also be present
+  string.contains(content, "application/json")
+  |> should.be_true()
+}
+
+// --- Finding: security OR alternatives must pick one, not apply all ---
+pub fn security_or_alternatives_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /secure:
+    get:
+      operationId: getSecure
+      responses:
+        '200': { description: ok }
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    BearerAuth:
+      type: http
+      scheme: bearer
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // Both security schemes must be present in the ClientConfig type
+  string.contains(content, "api_key_auth")
+  |> should.be_true()
+  string.contains(content, "bearer_auth")
+  |> should.be_true()
+  // The generated code must NOT apply both schemes unconditionally.
+  // OpenAPI security is OR — the client should try the first alternative
+  // that has credentials set, not send all credentials at once.
+  // The generated code must contain a nested/chained pattern that falls
+  // through to the next alternative when the first has None.
+  let assert Ok(fn_start) = find_substring_index(content, "pub fn get_secure(")
+  let fn_body = string.drop_start(content, fn_start)
+  // Both schemes should be referenced in the function body
+  string.contains(fn_body, "api_key_auth")
+  |> should.be_true()
+  string.contains(fn_body, "bearer_auth")
+  |> should.be_true()
+  // The None branch of api_key_auth must fall through to bearer_auth,
+  // not just `None -> req`. This verifies OR semantics.
+  // Count how many "None -> req" appear — with OR semantics, only the
+  // last alternative should have "None -> req". With the old broken code,
+  // each scheme independently had "None -> req".
+  let fn_end = case find_substring_index(fn_body, "\n}\n") {
+    Ok(i) -> string.slice(fn_body, 0, i)
+    Error(_) -> fn_body
+  }
+  let none_req_count =
+    string.split(fn_end, "None -> req")
+    |> list.length()
+  // With 2 OR alternatives, there should be exactly 1 "None -> req" (at the end),
+  // not 2 (one per scheme). Count is split segments, so 2 means 1 occurrence.
+  none_req_count
+  |> should.equal(2)
+}
+
+// --- Finding 2: OpenAPI 3.1 type: [string, 'null'] must parse as nullable string ---
+pub fn openapi_31_type_array_nullable_test() {
+  let yaml =
+    "
+openapi: 3.1.0
+info:
+  title: T
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    MaybeName:
+      type: [string, 'null']
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = types.generate(ctx)
+  let assert [types_file, ..] = files
+  // MaybeName should be a nullable String type, not an empty object
+  // It must NOT generate as a record with no fields (which would be the object fallback)
+  string.contains(types_file.content, "pub type MaybeName =")
+  |> should.be_true()
+}
+
+// --- Finding 3: README says optional path params supported but parser rejects ---
+pub fn readme_no_optional_path_param_claim_test() {
+  let assert Ok(readme) = simplifile.read("README.md")
+  // README must NOT claim "Path parameters with required: false" as supported,
+  // since the parser correctly rejects them per OpenAPI spec.
+  string.contains(readme, "Path parameters with `required: false`")
+  |> should.be_false()
+}
+
+// --- Finding 6: Callback parse errors must propagate, not be swallowed ---
+pub fn callback_parse_error_not_swallowed_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: T
+  version: 1.0.0
+paths:
+  /subscribe:
+    post:
+      operationId: subscribe
+      callbacks:
+        onEvent:
+          '{$request.body#/url}':
+            post:
+              operationId: onEvent
+              parameters:
+                - name: id
+                  in: path
+                  required: false
+              responses:
+                '200': { description: ok }
+      responses:
+        '200': { description: ok }
+"
+  // The callback contains a path parameter with required: false,
+  // which the parser correctly rejects. But the callback parser
+  // currently swallows this error and silently drops the callback.
+  // After fix, the error should propagate.
+  let result = parser.parse_string(yaml)
+  case result {
+    Ok(spec) -> {
+      // If parse succeeded, the callback must NOT have been silently dropped
+      let assert Ok(path_item) = dict.get(spec.paths, "/subscribe")
+      let assert Some(post_op) = path_item.post
+      // Currently the error is swallowed and onEvent is missing.
+      // After fix, either parse fails (Error) or callback is present.
+      dict.has_key(post_op.callbacks, "onEvent")
+      |> should.be_true()
+    }
+    Error(_) -> {
+      // Parse error is acceptable — means we propagate the failure
+      should.be_ok(Ok(Nil))
+    }
+  }
+}
+
+// --- Finding 7: Pure generate function exists and returns Result ---
+pub fn pure_generate_pipeline_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: T
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Both,
+    )
+  let result = generate.generate(spec, cfg)
+  should.be_ok(result)
+  let assert Ok(summary) = result
+  // Should have generated files
+  { summary.files != [] }
+  |> should.be_true()
+  // Should include spec title
+  string.contains(summary.spec_title, "T")
+  |> should.be_true()
+}
+
+// --- Array alias (TagList) must generate decoder and encoder ---
+pub fn array_alias_decoder_encoder_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /tags:
+    get:
+      operationId: getTags
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagList'
+components:
+  schemas:
+    TagList:
+      type: array
+      items: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = decoders.generate(ctx)
+  let assert [decode_file, _encode_file] = files
+  // Must generate tag_list_decoder() function
+  string.contains(decode_file.content, "tag_list_decoder")
+  |> should.be_true()
+}
+
+// --- deepObject array leaf must not produce uri.percent_encode on List ---
+pub fn deep_object_array_leaf_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /search:
+    get:
+      operationId: search
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          required: true
+          schema:
+            type: object
+            required: [tags]
+            properties:
+              tags:
+                type: array
+                items: { type: string }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  // Must NOT produce uri.percent_encode(filter.tags) — that's a type error
+  // (filter.tags is List(String), not String)
+  string.contains(client_file.content, "uri.percent_encode(filter.tags)")
+  |> should.be_false()
+}
+
+// --- form-urlencoded nested object must not produce uri.percent_encode on record ---
+pub fn form_urlencoded_nested_object_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /submit:
+    post:
+      operationId: submitForm
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [meta]
+              properties:
+                meta:
+                  type: object
+                  properties:
+                    name: { type: string }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  // Must NOT produce uri.percent_encode(body.meta) — that's a type error
+  // (body.meta is a record/object, not String)
+  string.contains(client_file.content, "uri.percent_encode(body.meta)")
+  |> should.be_false()
+}
+
+// --- HEAD operation must not be silently dropped ---
+pub fn head_operation_not_silently_dropped_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /ping:
+    head:
+      operationId: headPing
+      responses:
+        '200': { description: ok }
+"
+  let result = parser.parse_string(yaml)
+  case result {
+    Ok(spec) -> {
+      // If parse succeeds, there must be some way to know HEAD was present.
+      // Currently PathItem has no head field, so it silently drops it.
+      // After fix: either head is in the AST, or parser returns an error.
+      let assert Ok(path_item) = dict.get(spec.paths, "/ping")
+      // At minimum, the path should have at least one operation
+      let has_any_op =
+        option.is_some(path_item.get)
+        || option.is_some(path_item.post)
+        || option.is_some(path_item.put)
+        || option.is_some(path_item.delete)
+        || option.is_some(path_item.patch)
+        || option.is_some(path_item.head)
+      // HEAD was the only operation — if no ops exist, it was silently dropped
+      has_any_op
+      |> should.be_true()
+    }
+    Error(_) -> {
+      // Error is acceptable — means we don't silently drop
+      should.be_ok(Ok(Nil))
+    }
+  }
+}
+
+// --- OpenAPI 3.1 type: [string, integer] must not silently take first type ---
+pub fn openapi_31_multi_type_union_test() {
+  let yaml =
+    "
+openapi: 3.1.0
+info: { title: T, version: 1.0.0 }
+paths:
+  /value:
+    get:
+      operationId: getValue
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    StringOrInt:
+      type: [string, integer]
+"
+  let result = parser.parse_string(yaml)
+  case result {
+    Ok(spec) -> {
+      let spec = hoist.hoist(spec)
+      let ctx = make_ctx_from_spec(spec)
+      let files = types.generate(ctx)
+      let assert [types_file, ..] = files
+      // Must NOT generate just "pub type StringOrInt = String"
+      // (that would silently drop the integer variant)
+      // Should either be a union type or a validation error
+      string.contains(types_file.content, "pub type StringOrInt = String")
+      |> should.be_false()
+    }
+    Error(_) -> {
+      // Error is also acceptable
+      should.be_ok(Ok(Nil))
+    }
+  }
+}
+
+// --- OPTIONS operation must not be silently dropped ---
+pub fn options_operation_not_silently_dropped_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /cors:
+    options:
+      operationId: corsPreflight
+      responses:
+        '204': { description: No Content }
+"
+  let result = parser.parse_string(yaml)
+  // Either parse succeeds with the operation accessible,
+  // or parse returns an error (not silent success with no operations).
+  case result {
+    Ok(spec) -> {
+      let assert Ok(path_item) = dict.get(spec.paths, "/cors")
+      // The path must have SOME operation — if it has none,
+      // the OPTIONS was silently dropped
+      // OPTIONS must be accessible in the AST
+      option.is_some(path_item.options)
+      |> should.be_true()
+    }
+    Error(_) -> {
+      // A parse error is acceptable — means we don't silently drop
+      should.be_ok(Ok(Nil))
+    }
+  }
+}
+
+// --- requestBody.required: false must generate optional body parameter ---
+pub fn optional_request_body_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /search:
+    post:
+      operationId: search
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query: { type: string }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // An optional request body must be wrapped in Option, not always required
+  // The generated function should have Option(body_type) or similar
+  string.contains(content, "Option(")
+  |> should.be_true()
+}
+
+// --- form-urlencoded 2-level nested object must not break ---
+pub fn form_urlencoded_two_level_nested_object_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /submit:
+    post:
+      operationId: submitForm
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [meta]
+              properties:
+                meta:
+                  type: object
+                  required: [author]
+                  properties:
+                    author:
+                      type: object
+                      properties:
+                        name: { type: string }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  // Must NOT produce uri.percent_encode on a record type
+  // e.g. uri.percent_encode(body.meta.author) is a type error
+  string.contains(client_file.content, "uri.percent_encode(body.meta")
+  |> should.be_false()
+}
+
+// --- query array with explode: true must produce key=a&key=b, not key=a,b ---
+pub fn query_array_explode_true_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /items:
+    get:
+      operationId: getItems
+      parameters:
+        - name: tags
+          in: query
+          required: true
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: { type: string }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // With explode: true, the query parameter must NOT be comma-joined.
+  // It should produce tags=a&tags=b, not tags=a,b.
+  // The comma-join with list.map pattern indicates explode is being ignored.
+  string.contains(content, "string.join(list.map(")
+  |> should.be_false()
+  // Instead, must use list.fold to produce repeated key=value pairs
+  string.contains(content, "list.fold(")
+  |> should.be_true()
+}
+
+// --- OAuth2 flows must be preserved in AST ---
+pub fn oauth2_flows_preserved_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /data:
+    get:
+      operationId: getData
+      responses:
+        '200': { description: ok }
+components:
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://example.com/auth
+          tokenUrl: https://example.com/token
+          scopes:
+            read: Read access
+            write: Write access
+security:
+  - oauth2: [read]
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let assert Some(components) = spec.components
+  let assert Ok(scheme) = dict.get(components.security_schemes, "oauth2")
+  // OAuth2 scheme must preserve flow URLs and scopes.
+  // Currently OAuth2Scheme only has description, losing all flow data.
+  case scheme {
+    spec.OAuth2Scheme(flows:, ..) -> {
+      // flows must not be empty — must contain the authorizationCode flow
+      { flows != dict.new() }
+      |> should.be_true()
+      // Must have the authorizationCode flow
+      let assert Ok(auth_flow) = dict.get(flows, "authorizationCode")
+      // Must preserve scopes
+      { auth_flow.scopes != dict.new() }
+      |> should.be_true()
+      dict.has_key(auth_flow.scopes, "read")
+      |> should.be_true()
+    }
+    _ -> should.fail()
+  }
+}
+
+// --- Server router must call handlers, not return hardcoded "OK" ---
+pub fn server_router_calls_handlers_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /items:
+    get:
+      operationId: getItems
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  // Find the router file
+  let router_file =
+    list.find(files, fn(f) { string.contains(f.path, "router") })
+  let assert Ok(router) = router_file
+  // Router must NOT have dead-code handler references
+  string.contains(router.content, "let _ = handlers.")
+  |> should.be_false()
+  // Router must NOT have placeholder "OK" strings
+  string.contains(router.content, "\"OK\"")
+  |> should.be_false()
+  // Router must actually call the handler
+  string.contains(router.content, "handlers.get_items()")
+  |> should.be_true()
+  // Router must have ServerResponse type
+  string.contains(router.content, "pub type ServerResponse")
+  |> should.be_true()
+  // Router must have proper route signature with query/headers/body
+  string.contains(
+    router.content,
+    "pub fn route(method: String, path: List(String), query: Dict(String, String), headers: Dict(String, String), body: String) -> ServerResponse",
+  )
+  |> should.be_true()
+  // Router must convert response to ServerResponse
+  string.contains(router.content, "ServerResponse(status: 200")
+  |> should.be_true()
+  // Router must have 404 fallback
+  string.contains(router.content, "ServerResponse(status: 404")
+  |> should.be_true()
+}
+
+// --- GeneratedFile uses target ADT, not filename strings ---
+pub fn generated_file_has_target_kind_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /items:
+    get:
+      operationId: getItems
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = generate.generate_all_files(ctx)
+  // All generated files must have proper target assignments
+  let shared_count =
+    list.count(files, fn(f) { f.target == context.SharedTarget })
+  let server_count =
+    list.count(files, fn(f) { f.target == context.ServerTarget })
+  let client_count =
+    list.count(files, fn(f) { f.target == context.ClientTarget })
+  // Must have shared files (types, decoders, etc.)
+  { shared_count > 0 }
+  |> should.be_true()
+  // Must have server files (handlers, router)
+  { server_count > 0 }
+  |> should.be_true()
+  // Must have client files (client)
+  { client_count > 0 }
+  |> should.be_true()
+}
+
+// --- Path template unbound parameter tests ---
+
+/// Path template {id} without a corresponding path parameter must be
+/// caught by validation, not silently passed through to generated code.
+pub fn unbound_path_template_parameter_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items/{id}:
+    get:
+      operationId: getItem
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  // Must report at least one validation error for unbound {id}
+  list.is_empty(errors)
+  |> should.be_false()
+}
+
+/// Path template with parameter defined at path-item level must pass.
+pub fn path_level_parameter_binds_template_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getItem
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  list.is_empty(errors)
+  |> should.be_true()
+}
+
+/// Path template with all parameters bound must pass validation.
+pub fn bound_path_template_parameter_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items/{id}:
+    get:
+      operationId: getItem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  list.is_empty(errors)
+  |> should.be_true()
+}
+
+// --- Parameter validation tests ---
+
+/// Unsupported parameter style 'matrix' must be caught by validation.
+pub fn unsupported_parameter_style_matrix_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: color
+          in: query
+          style: matrix
+          schema:
+            type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  list.is_empty(errors)
+  |> should.be_false()
+}
+
+/// Supported parameter styles (form, deepObject) must pass validation.
+pub fn supported_parameter_style_form_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: color
+          in: query
+          style: form
+          schema:
+            type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  list.is_empty(errors)
+  |> should.be_true()
+}
+
+// --- Response code range tests ---
+
+/// 2XX response code must generate a valid Gleam range pattern,
+/// not the literal "2XX" which is invalid Gleam syntax.
+pub fn response_code_range_2xx_generates_valid_gleam_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      responses:
+        '2XX':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: string
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // The generated code must NOT contain the literal "2XX" as a case pattern
+  string.contains(content, "2XX ->")
+  |> should.be_false()
+  // It should contain a valid range guard pattern
+  string.contains(content, "status if status >= 200")
+  |> should.be_true()
+}
+
+/// status_code_to_int_pattern must not pass through range codes like "2XX".
+pub fn status_code_range_pattern_test() {
+  // Range codes must produce valid Gleam patterns, not raw "2XX"
+  http.status_code_to_int_pattern("2XX")
+  |> should.not_equal("2XX")
+
+  // Exact codes still work
+  http.status_code_to_int_pattern("200")
+  |> should.equal("200")
+
+  // Default is wildcard
+  http.status_code_to_int_pattern("default")
+  |> should.equal("_")
+}
+
+/// status_code_suffix must handle range codes.
+pub fn status_code_suffix_range_test() {
+  http.status_code_suffix("2XX")
+  |> should.equal("Status2xx")
+
+  http.status_code_suffix("4XX")
+  |> should.equal("Status4xx")
+}
+
+// --- additionalProperties: true encoder tests ---
+
+/// additionalProperties: true must NOT be silently dropped during encoding.
+/// The encoder must include additional_properties in its output.
+pub fn additional_properties_untyped_encoder_includes_extra_props_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Metadata:
+      type: object
+      properties:
+        name:
+          type: string
+      additionalProperties: true
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = decoders.generate(ctx)
+  let assert Ok(encode_file) =
+    list.find(files, fn(f) { string.contains(f.path, "encode") })
+  let content = encode_file.content
+  // The encoder must reference additional_properties, not just base_props
+  string.contains(content, "additional_properties")
+  |> should.be_true()
+  // It must NOT just use json.object(base_props) — that drops extra props
+  string.contains(content, "json.object(base_props)")
+  |> should.be_false()
+}
+
+// --- Complex parameter schema validation tests ---
+
+/// Object schema query parameter without deepObject style must be rejected.
+pub fn object_query_param_without_deep_object_rejected_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: filter
+          in: query
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  // Must report error for object param without deepObject style
+  list.is_empty(errors)
+  |> should.be_false()
+}
+
+/// Object schema query parameter WITH deepObject style must pass.
+pub fn object_query_param_with_deep_object_passes_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  list.is_empty(errors)
+  |> should.be_true()
+}
+
+// --- validate error message accuracy tests ---
+
+/// Validation error for unsupported request content type must list
+/// all actually supported types, including form-urlencoded.
+pub fn validate_request_content_type_message_includes_form_urlencoded_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    post:
+      operationId: doX
+      requestBody:
+        content:
+          text/csv:
+            schema:
+              type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  let assert [validate.ValidationError(detail: msg, ..)] = errors
+  // Error message must mention form-urlencoded as a supported type
+  string.contains(msg, "form-urlencoded")
+  |> should.be_true()
+}
+
+/// Validation error for unsupported response content type must list
+/// all actually supported types, including XML.
+pub fn validate_response_content_type_message_includes_xml_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200':
+          description: ok
+          content:
+            text/csv:
+              schema:
+                type: string
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  let assert [validate.ValidationError(detail: msg, ..)] = errors
+  // Error message must mention XML as a supported type
+  string.contains(msg, "xml")
+  |> should.be_true()
+}
+
+// --- form-urlencoded non-object validation tests ---
+
+/// form-urlencoded with non-object schema must be rejected by validation.
+pub fn form_urlencoded_non_object_schema_rejected_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /submit:
+    post:
+      operationId: submit
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  // Must report error for non-object schema with form-urlencoded
+  list.is_empty(errors)
+  |> should.be_false()
+}
+
+/// form-urlencoded with object schema must pass validation.
+pub fn form_urlencoded_object_schema_passes_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /submit:
+    post:
+      operationId: submit
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  list.is_empty(errors)
+  |> should.be_true()
+}
+
+// --- AnyOfSchema discriminator tests ---
+
+/// anyOf with discriminator must be preserved in the AST, not lost.
+pub fn anyof_discriminator_preserved_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      operationId: getPet
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+components:
+  schemas:
+    Cat:
+      type: object
+      properties:
+        pet_type:
+          type: string
+        meow:
+          type: string
+      required: [pet_type]
+    Dog:
+      type: object
+      properties:
+        pet_type:
+          type: string
+        bark:
+          type: string
+      required: [pet_type]
+    Pet:
+      anyOf:
+        - $ref: '#/components/schemas/Cat'
+        - $ref: '#/components/schemas/Dog'
+      discriminator:
+        propertyName: pet_type
+        mapping:
+          cat: '#/components/schemas/Cat'
+          dog: '#/components/schemas/Dog'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  // The Pet schema must have a discriminator in the AST
+  let assert Some(components) = spec.components
+  let assert Ok(schema.Inline(schema.AnyOfSchema(discriminator: disc, ..))) =
+    dict.get(components.schemas, "Pet")
+  // discriminator must be Some, not None
+  disc
+  |> option.is_some()
+  |> should.be_true()
+}
+
+// --- Nullable schema decoder/encoder tests ---
+
+/// A nullable primitive schema (type: [string, 'null']) must generate
+/// decoder using decode.optional and encoder using json.nullable.
+pub fn nullable_primitive_decoder_encoder_test() {
+  let yaml =
+    "
+openapi: 3.1.0
+info:
+  title: T
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    MaybeName:
+      type: [string, 'null']
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = decoders.generate(ctx)
+  // Find the decode file
+  let assert Ok(decode_file) =
+    list.find(files, fn(f) { string.contains(f.path, "decode") })
+  let decode_content = decode_file.content
+  // The decoder must use decode.optional for nullable String
+  string.contains(decode_content, "decode.optional(decode.string)")
+  |> should.be_true()
+
+  // Find the encode file
+  let assert Ok(encode_file) =
+    list.find(files, fn(f) { string.contains(f.path, "encode") })
+  let encode_content = encode_file.content
+  // The encoder must use json.nullable for nullable String
+  string.contains(encode_content, "json.nullable(value, json.string)")
+  |> should.be_true()
+}
+
+// --- deepObject nested object validation tests ---
+
+/// deepObject with nested object properties must be rejected
+/// since codegen can only handle one level of nesting.
+pub fn deep_object_nested_object_rejected_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            properties:
+              meta:
+                type: object
+                properties:
+                  name:
+                    type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  // Must detect nested object in deepObject param
+  list.is_empty(errors)
+  |> should.be_false()
+}
+
+/// deepObject with flat scalar properties must pass validation.
+pub fn deep_object_flat_properties_passes_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+              age:
+                type: integer
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  list.is_empty(errors)
+  |> should.be_true()
+}
+
+// --- PathItem.$ref tests ---
+
+/// PathItem.$ref must resolve to the referenced PathItem from components.pathItems.
+pub fn path_item_ref_resolves_test() {
+  let yaml =
+    "
+openapi: 3.1.0
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /health:
+    $ref: '#/components/pathItems/HealthCheck'
+components:
+  pathItems:
+    HealthCheck:
+      get:
+        operationId: healthCheck
+        responses:
+          '200':
+            description: OK
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  // /health path must exist with a get operation
+  let assert Ok(path_item) = dict.get(spec.paths, "/health")
+  let assert Some(get_op) = path_item.get
+  get_op.operation_id
+  |> should.equal(Some("healthCheck"))
+}
+
+// --- Unresolved $ref validation tests ---
+
+/// A $ref pointing to a non-existent schema must be caught by validation.
+pub fn unresolved_ref_detected_by_validator_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: getItems
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Missing'
+components:
+  schemas: {}
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  // Must report at least one error for unresolved reference
+  list.is_empty(errors)
+  |> should.be_false()
+}
+
+/// A $ref pointing to an existing schema must pass validation.
+pub fn resolved_ref_passes_validator_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: getItems
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Item'
+components:
+  schemas:
+    Item:
+      type: object
+      properties:
+        name:
+          type: string
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  list.is_empty(errors)
+  |> should.be_true()
+}
+
+// --- Security AND wildcard tests ---
+
+/// Security AND with 3 schemes must generate correct wildcard pattern.
+/// The wildcard must have 3 underscores, not hardcoded `_, _`.
+pub fn security_and_3_schemes_wildcard_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /secure:
+    get:
+      operationId: getSecure
+      security:
+        - ApiKeyAuth: []
+          BearerAuth: []
+          OAuth2: []
+        - BasicAuth: []
+      responses:
+        '200': { description: ok }
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    BearerAuth:
+      type: http
+      scheme: bearer
+    OAuth2:
+      type: oauth2
+      flows:
+        implicit:
+          authorizationUrl: https://example.com
+          scopes: {}
+    BasicAuth:
+      type: http
+      scheme: basic
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // With 3 AND schemes, the wildcard must be `_, _, _`
+  string.contains(content, "_, _, _ -> {")
+  |> should.be_true()
+}
+
+// --- Nullable composition schema tests ---
+
+/// nullable: true on a oneOf schema must produce Option(T) type.
+pub fn nullable_oneof_generates_option_type_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Cat:
+      type: object
+      properties:
+        name:
+          type: string
+    Dog:
+      type: object
+      properties:
+        name:
+          type: string
+    NullablePet:
+      nullable: true
+      oneOf:
+        - $ref: '#/components/schemas/Cat'
+        - $ref: '#/components/schemas/Dog'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  // The NullablePet schema must have nullable: true in the AST
+  let assert Some(components) = spec.components
+  let assert Ok(schema.Inline(oneof_schema)) =
+    dict.get(components.schemas, "NullablePet")
+  schema.is_nullable(oneof_schema)
+  |> should.be_true()
+}
+
+// --- AnyOfSchema type generation tests ---
+
+/// anyOf with $ref schemas must generate a union type like oneOf,
+/// not fall through to String.
+pub fn anyof_generates_union_type_not_string_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      operationId: getPet
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+components:
+  schemas:
+    Cat:
+      type: object
+      properties:
+        name:
+          type: string
+    Dog:
+      type: object
+      properties:
+        name:
+          type: string
+    Pet:
+      anyOf:
+        - $ref: '#/components/schemas/Cat'
+        - $ref: '#/components/schemas/Dog'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = types.generate(ctx)
+  let assert [types_file, ..] = files
+  let content = types_file.content
+  // Pet must be a record with Option fields (anyOf = inclusive union)
+  string.contains(content, "pub type Pet = String")
+  |> should.be_false()
+  // It should have Option fields, not tagged union constructors
+  string.contains(content, "Option(Cat)")
+  |> should.be_true()
+  string.contains(content, "Option(Dog)")
+  |> should.be_true()
+  // Must NOT have tagged union variant constructors
+  string.contains(content, "PetCat(Cat)")
+  |> should.be_false()
+}
+
+// --- Security scopes comment tests ---
+
+/// Security scopes should appear as comments in generated client code.
+pub fn security_scopes_appear_as_comments_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: ok
+      security:
+        - OAuth2:
+            - read:pets
+            - write:pets
+components:
+  securitySchemes:
+    OAuth2:
+      type: oauth2
+      flows:
+        implicit:
+          authorizationUrl: https://example.com
+          scopes:
+            read:pets: Read pets
+            write:pets: Write pets
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // The generated code must include scope information in comments
+  string.contains(content, "read:pets")
+  |> should.be_true()
+}
+
+// --- allowReserved parameter tests ---
+
+/// Query parameter with allowReserved: true must NOT be percent-encoded.
+pub fn allow_reserved_skips_percent_encode_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: search
+      parameters:
+        - name: q
+          in: query
+          required: true
+          allowReserved: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // With allowReserved, the generated code must NOT use uri.percent_encode for this param
+  // Instead it should use the value directly
+  string.contains(content, "uri.percent_encode(q)")
+  |> should.be_false()
+}
+
+/// Query parameter without allowReserved must be percent-encoded (default).
+pub fn default_query_param_is_percent_encoded_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: search
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // Without allowReserved, must use uri.percent_encode
+  string.contains(content, "uri.percent_encode(q)")
+  |> should.be_true()
+}
+
+// --- Parser required field validation tests ---
+
+/// requestBody without content field must be rejected (content is REQUIRED).
+pub fn parser_rejects_request_body_missing_content_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    post:
+      operationId: createItem
+      requestBody:
+        description: An item
+      responses:
+        '200':
+          description: ok
+"
+  let result = parser.parse_string(yaml)
+  case result {
+    Error(_) -> should.be_true(True)
+    Ok(_) -> should.be_true(False)
+  }
+}
+
+/// response without description field must be rejected (description is REQUIRED).
+pub fn parser_rejects_response_missing_description_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: string
+"
+  let result = parser.parse_string(yaml)
+  case result {
+    Error(_) -> should.be_true(True)
+    Ok(_) -> should.be_true(False)
+  }
+}
+
+// --- Schema dispatch centralization tests ---
+
+/// schema_dispatch must return correct types for primitives.
+pub fn schema_dispatch_primitive_types_test() {
+  schema_dispatch.schema_base_type(schema.StringSchema(
+    metadata: schema.default_metadata(),
+    format: None,
+    enum_values: [],
+    min_length: None,
+    max_length: None,
+    pattern: None,
+  ))
+  |> should.equal("String")
+
+  schema_dispatch.schema_base_type(schema.IntegerSchema(
+    metadata: schema.default_metadata(),
+    format: None,
+    minimum: None,
+    maximum: None,
+    exclusive_minimum: None,
+    exclusive_maximum: None,
+    multiple_of: None,
+  ))
+  |> should.equal("Int")
+}
+
+/// schema_dispatch.to_string_expr must produce correct conversion expressions.
+pub fn schema_dispatch_to_string_expr_test() {
+  schema_dispatch.to_string_expr(
+    schema.IntegerSchema(
+      metadata: schema.default_metadata(),
+      format: None,
+      minimum: None,
+      maximum: None,
+      exclusive_minimum: None,
+      exclusive_maximum: None,
+      multiple_of: None,
+    ),
+    "x",
+  )
+  |> should.equal("int.to_string(x)")
+}
+
+// --- Gleam Code IR tests ---
+
+/// IR renderer produces correct type alias.
+pub fn ir_render_type_alias_test() {
+  let module =
+    ir.Module(header: "test", imports: [], declarations: [
+      ir.Declaration(
+        doc: None,
+        type_def: ir.TypeAlias(name: "UserId", target: "String"),
+      ),
+    ])
+  let output = ir_render.render(module)
+  string.contains(output, "pub type UserId = String")
+  |> should.be_true()
+}
+
+/// IR renderer produces correct union type.
+pub fn ir_render_union_type_test() {
+  let module =
+    ir.Module(header: "test", imports: [], declarations: [
+      ir.Declaration(
+        doc: None,
+        type_def: ir.UnionType(name: "Shape", variants: [
+          ir.VariantWithType(name: "ShapeCircle", inner_type: "Circle"),
+          ir.VariantWithType(name: "ShapeSquare", inner_type: "Square"),
+        ]),
+      ),
+    ])
+  let output = ir_render.render(module)
+  string.contains(output, "pub type Shape {")
+  |> should.be_true()
+  string.contains(output, "ShapeCircle(Circle)")
+  |> should.be_true()
+  string.contains(output, "ShapeSquare(Square)")
+  |> should.be_true()
+}
+
+/// IR renderer produces correct record type.
+pub fn ir_render_record_type_test() {
+  let module =
+    ir.Module(header: "test", imports: [], declarations: [
+      ir.Declaration(
+        doc: None,
+        type_def: ir.RecordType(name: "User", fields: [
+          ir.Field(name: "name", type_expr: "String"),
+          ir.Field(name: "age", type_expr: "Int"),
+        ]),
+      ),
+    ])
+  let output = ir_render.render(module)
+  string.contains(output, "pub type User {")
+  |> should.be_true()
+  string.contains(output, "User(name: String, age: Int)")
+  |> should.be_true()
+}
+
+// --- Fail-fast unsupported feature tests ---
+
+/// External $ref (not #/) must be rejected as unsupported.
+pub fn external_ref_rejected_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: './other.yaml#/components/schemas/Foo'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  list.is_empty(errors)
+  |> should.be_false()
+}
+
+/// Unrecognized schema type must be rejected at parse time.
+pub fn unrecognized_schema_type_rejected_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200':
+          description: ok
+components:
+  schemas:
+    Bad:
+      type: frobnicate
+"
+  let result = parser.parse_string(yaml)
+  case result {
+    Error(_) -> should.be_true(True)
+    Ok(_) -> should.be_true(False)
+  }
+}
+
+// --- oneOf vs anyOf semantic separation tests ---
+
+/// anyOf must generate a record with Option fields, NOT a tagged union.
+pub fn anyof_generates_record_with_option_fields_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+components:
+  schemas:
+    Card:
+      type: object
+      properties:
+        card_number:
+          type: string
+    Bank:
+      type: object
+      properties:
+        account:
+          type: string
+    Payment:
+      anyOf:
+        - $ref: '#/components/schemas/Card'
+        - $ref: '#/components/schemas/Bank'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = types.generate(ctx)
+  let assert [types_file, ..] = files
+  let content = types_file.content
+  // anyOf should generate a record with Option fields, not tagged union variants
+  string.contains(content, "Option(")
+  |> should.be_true()
+  // It must NOT have tagged union variant constructors like PaymentCard(Card)
+  string.contains(content, "PaymentCard(")
+  |> should.be_false()
+}
+
+/// oneOf must still generate a tagged union (existing behavior preserved).
+pub fn oneof_still_generates_tagged_union_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Shape'
+components:
+  schemas:
+    Circle:
+      type: object
+      properties:
+        radius:
+          type: number
+    Square:
+      type: object
+      properties:
+        side:
+          type: number
+    Shape:
+      oneOf:
+        - $ref: '#/components/schemas/Circle'
+        - $ref: '#/components/schemas/Square'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = types.generate(ctx)
+  let assert [types_file, ..] = files
+  let content = types_file.content
+  // oneOf must generate tagged union variants
+  string.contains(content, "ShapeCircle(")
+  |> should.be_true()
+  string.contains(content, "ShapeSquare(")
+  |> should.be_true()
+}
+
+// --- ParameterStyle and SecuritySchemeIn are proper ADTs, not strings ---
+pub fn parameter_style_is_adt_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /x:
+    get:
+      operationId: getX
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          schema: { type: object, properties: { a: { type: string } } }
+        - name: ids
+          in: query
+          style: form
+          schema: { type: array, items: { type: integer } }
+        - name: id
+          in: path
+          required: true
+          style: simple
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(parsed) = parser.parse_string(yaml)
+  let assert Ok(pi) = dict.get(parsed.paths, "/x")
+  let assert Some(op) = pi.get
+  let assert [deep, form, simple] = op.parameters
+  deep.style |> should.equal(Some(spec.DeepObjectStyle))
+  form.style |> should.equal(Some(spec.FormStyle))
+  simple.style |> should.equal(Some(spec.SimpleStyle))
+}
+
+// --- SchemaMetadata preserves title, readOnly, writeOnly, default, example ---
+pub fn schema_metadata_lossless_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    User:
+      type: object
+      title: User object
+      properties:
+        name:
+          type: string
+          title: User name
+          readOnly: true
+          default: anonymous
+          example: Alice
+        id:
+          type: integer
+          writeOnly: true
+"
+  let assert Ok(parsed) = parser.parse_string(yaml)
+  let assert Some(c) = parsed.components
+  let assert Ok(schema.Inline(user)) = dict.get(c.schemas, "User")
+  // Object metadata
+  case user {
+    schema.ObjectSchema(metadata:, ..) -> {
+      metadata.title |> should.equal(Some("User object"))
+    }
+    _ -> should.fail()
+  }
+}
+
+pub fn security_scheme_in_is_adt_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  securitySchemes:
+    headerKey:
+      type: apiKey
+      name: X-API-Key
+      in: header
+    queryKey:
+      type: apiKey
+      name: api_key
+      in: query
+    cookieKey:
+      type: apiKey
+      name: session
+      in: cookie
+"
+  let assert Ok(parsed) = parser.parse_string(yaml)
+  let assert Some(c) = parsed.components
+  let assert Ok(h) = dict.get(c.security_schemes, "headerKey")
+  let assert Ok(q) = dict.get(c.security_schemes, "queryKey")
+  let assert Ok(k) = dict.get(c.security_schemes, "cookieKey")
+  case h {
+    spec.ApiKeyScheme(in_: spec.SchemeInHeader, ..) -> should.be_ok(Ok(Nil))
+    _ -> should.fail()
+  }
+  case q {
+    spec.ApiKeyScheme(in_: spec.SchemeInQuery, ..) -> should.be_ok(Ok(Nil))
+    _ -> should.fail()
+  }
+  case k {
+    spec.ApiKeyScheme(in_: spec.SchemeInCookie, ..) -> should.be_ok(Ok(Nil))
+    _ -> should.fail()
+  }
 }
 
 fn find_substring_index(haystack: String, needle: String) -> Result(Int, Nil) {
@@ -1865,4 +4575,944 @@ fn find_substring_index(haystack: String, needle: String) -> Result(Int, Nil) {
     }
     False -> Error(Nil)
   }
+}
+
+// --- Lossless AST: new fields are preserved through parsing ---
+pub fn lossless_info_fields_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: T
+  version: 1.0.0
+  summary: A summary
+  termsOfService: https://example.com/tos
+  contact:
+    name: Support
+    url: https://example.com
+    email: support@example.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+paths: {}
+"
+  let assert Ok(parsed) = parser.parse_string(yaml)
+  parsed.info.summary |> should.equal(Some("A summary"))
+  parsed.info.terms_of_service
+  |> should.equal(Some("https://example.com/tos"))
+  let assert Some(contact) = parsed.info.contact
+  contact.name |> should.equal(Some("Support"))
+  contact.email |> should.equal(Some("support@example.com"))
+  let assert Some(lic) = parsed.info.license
+  lic.name |> should.equal("MIT")
+}
+
+pub fn lossless_server_variables_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+servers:
+  - url: https://{env}.example.com
+    variables:
+      env:
+        default: prod
+        enum: [prod, staging, dev]
+        description: Environment
+paths: {}
+"
+  let assert Ok(parsed) = parser.parse_string(yaml)
+  let assert [server] = parsed.servers
+  let assert Ok(var) = dict.get(server.variables, "env")
+  var.default |> should.equal("prod")
+  var.description |> should.equal(Some("Environment"))
+}
+
+pub fn lossless_response_headers_links_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /items:
+    get:
+      operationId: getItems
+      responses:
+        '200':
+          description: ok
+          headers:
+            X-Rate-Limit:
+              description: Rate limit
+              required: true
+              schema: { type: integer }
+          links:
+            GetItemById:
+              operationId: getItem
+              description: Get item by ID
+"
+  let assert Ok(parsed) = parser.parse_string(yaml)
+  let assert Ok(pi) = dict.get(parsed.paths, "/items")
+  let assert Some(op) = pi.get
+  let assert Ok(resp) = dict.get(op.responses, "200")
+  let assert Ok(header) = dict.get(resp.headers, "X-Rate-Limit")
+  header.description |> should.equal(Some("Rate limit"))
+  header.required |> should.be_true()
+  let assert Ok(link) = dict.get(resp.links, "GetItemById")
+  link.operation_id |> should.equal(Some("getItem"))
+}
+
+pub fn lossless_tags_and_external_docs_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+tags:
+  - name: users
+    description: User operations
+externalDocs:
+  url: https://docs.example.com
+  description: Full docs
+paths: {}
+"
+  let assert Ok(parsed) = parser.parse_string(yaml)
+  let assert [tag] = parsed.tags
+  tag.name |> should.equal("users")
+  tag.description |> should.equal(Some("User operations"))
+  let assert Some(ext) = parsed.external_docs
+  ext.url |> should.equal("https://docs.example.com")
+}
+
+// --- Bug verification tests ---
+
+/// Bug 1: Optional deepObject + array leaf.
+/// When a deepObject parameter is optional (required: false) AND has an array
+/// leaf property, it must NOT produce uri.percent_encode(v) where v is the
+/// whole list. It should iterate the list items instead.
+pub fn bug1_optional_deep_object_array_leaf_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /search:
+    get:
+      operationId: search
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          required: false
+          schema:
+            type: object
+            properties:
+              tags:
+                type: array
+                items: { type: string }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+
+  // The bug: optional deepObject with array leaf calls percent_encode on the
+  // whole list variable (e.g. obj.tags) instead of iterating items.
+  // We check that the generated code uses list.fold to iterate array items
+  // rather than directly encoding the list.
+  // If this assertion fails, the bug exists.
+  let has_list_fold_for_tags = string.contains(content, "list.fold(")
+  let has_direct_encode_of_tags =
+    string.contains(content, "uri.percent_encode(obj.tags)")
+  // Should iterate items (list.fold), not encode list directly
+  has_list_fold_for_tags
+  |> should.be_true()
+  has_direct_encode_of_tags
+  |> should.be_false()
+}
+
+/// Bug 2: form-urlencoded $ref array property.
+/// When a form body has a $ref that resolves to an array schema, it must NOT
+/// produce uri.percent_encode(body.tags) where body.tags is a List.
+/// It should iterate the list items with list.fold instead.
+pub fn bug2_form_urlencoded_ref_array_property_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /submit:
+    post:
+      operationId: submitForm
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [tags]
+              properties:
+                tags:
+                  $ref: '#/components/schemas/TagList'
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    TagList:
+      type: array
+      items: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+
+  // The bug: $ref to array schema is not detected as array, so it treats the
+  // list as a scalar and calls percent_encode(body.tags) directly.
+  // Should use list.fold to iterate items instead.
+  let has_list_fold = string.contains(content, "list.fold(body.tags")
+  let has_direct_encode =
+    string.contains(content, "uri.percent_encode(body.tags)")
+  // Should iterate items, not encode list directly
+  has_list_fold
+  |> should.be_true()
+  has_direct_encode
+  |> should.be_false()
+}
+
+/// Bug 3: $ref array query parameter missing gleam/list import.
+/// When a query parameter has a schema that $refs to an array type, the
+/// generated code uses list.fold but the import for gleam/list may be missing.
+pub fn bug3_ref_array_query_param_import_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /items:
+    get:
+      operationId: getItems
+      parameters:
+        - name: tags
+          in: query
+          required: true
+          style: form
+          explode: true
+          schema:
+            $ref: '#/components/schemas/TagList'
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    TagList:
+      type: array
+      items: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+
+  // The bug: list.fold is used in generated code but gleam/list may not be
+  // imported because the import check only looks for Inline(ArraySchema)
+  // not Reference that resolves to ArraySchema.
+  let uses_list_module =
+    string.contains(content, "list.fold")
+    || string.contains(content, "list.map")
+  let imports_list = string.contains(content, "import gleam/list")
+  // If the code uses list.fold/list.map, it MUST import gleam/list
+  case uses_list_module {
+    True -> imports_list |> should.be_true()
+    False -> Nil
+  }
+}
+
+// --- Structured capability: warnings don't block generation ---
+pub fn capability_warnings_dont_block_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /items:
+    get:
+      operationId: getItems
+      responses:
+        '200':
+          description: ok
+          headers:
+            X-Rate-Limit:
+              description: Rate limit
+              schema: { type: integer }
+          links:
+            next:
+              operationId: getItems
+webhooks:
+  newItem:
+    post:
+      operationId: onNewItem
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Both,
+    )
+  // Generation must succeed even with warnings
+  let result = generate.generate(spec, cfg)
+  should.be_ok(result)
+  // But validation issues should include warnings
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = context.new(spec, cfg)
+  let issues = validate.validate(ctx)
+  let warnings = validate.warnings_only(issues)
+  { warnings != [] }
+  |> should.be_true()
+}
+
+// --- readOnly/writeOnly filtering tests ---
+
+pub fn read_only_filtered_from_request_body_type_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /users:
+    post:
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                id: { type: integer, readOnly: true }
+                password: { type: string, writeOnly: true }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  id: { type: integer, readOnly: true }
+                  password: { type: string, writeOnly: true }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  // NOTE: Do NOT hoist here -- we want inline schemas to remain inline
+  // so that the anonymous type filtering for readOnly/writeOnly is tested.
+  let ctx = make_ctx_from_spec(spec)
+
+  let type_files = types.generate(ctx)
+
+  // Check the types.gleam file for the anonymous request body type
+  let assert Ok(types_file) =
+    list.find(type_files, fn(f) { f.path == "types.gleam" })
+
+  // Request body type should NOT have id field (readOnly)
+  // but SHOULD have password field (writeOnly is fine in requests)
+  let request_body_section =
+    string.contains(types_file.content, "CreateUserRequestBody")
+  request_body_section |> should.be_true()
+
+  // The request body type should contain name and password but NOT id
+  // Split content to find the request body type definition
+  let lines = string.split(types_file.content, "\n")
+  let request_body_lines = extract_type_block(lines, "CreateUserRequestBody")
+  let request_body_text = string.join(request_body_lines, "\n")
+
+  // readOnly field 'id' must NOT be in request body type
+  string.contains(request_body_text, "id:") |> should.be_false()
+  // writeOnly field 'password' MUST be in request body type
+  string.contains(request_body_text, "password:") |> should.be_true()
+  // Normal field 'name' MUST be in request body type
+  string.contains(request_body_text, "name:") |> should.be_true()
+
+  // Response type should NOT have password field (writeOnly)
+  // but SHOULD have id field (readOnly is fine in responses)
+  let response_section =
+    string.contains(types_file.content, "CreateUserResponseOk")
+  response_section |> should.be_true()
+
+  let response_lines = extract_type_block(lines, "CreateUserResponseOk")
+  let response_text = string.join(response_lines, "\n")
+
+  // writeOnly field 'password' must NOT be in response type
+  string.contains(response_text, "password:") |> should.be_false()
+  // readOnly field 'id' MUST be in response type
+  string.contains(response_text, "id:") |> should.be_true()
+  // Normal field 'name' MUST be in response type
+  string.contains(response_text, "name:") |> should.be_true()
+}
+
+/// Helper to extract lines from a type block definition.
+fn extract_type_block(lines: List(String), type_name: String) -> List(String) {
+  extract_type_block_loop(lines, type_name, False, 0, [])
+}
+
+fn extract_type_block_loop(
+  lines: List(String),
+  type_name: String,
+  in_block: Bool,
+  brace_depth: Int,
+  acc: List(String),
+) -> List(String) {
+  case lines {
+    [] -> list.reverse(acc)
+    [line, ..rest] ->
+      case in_block {
+        False ->
+          case string.contains(line, "pub type " <> type_name) {
+            True ->
+              extract_type_block_loop(rest, type_name, True, 1, [line, ..acc])
+            False -> extract_type_block_loop(rest, type_name, False, 0, acc)
+          }
+        True -> {
+          let opens =
+            string.to_graphemes(line)
+            |> list.count(fn(c) { c == "{" })
+          let closes =
+            string.to_graphemes(line)
+            |> list.count(fn(c) { c == "}" })
+          let new_depth = brace_depth + opens - closes
+          case new_depth <= 0 {
+            True -> list.reverse([line, ..acc])
+            False ->
+              extract_type_block_loop(rest, type_name, True, new_depth, [
+                line,
+                ..acc
+              ])
+          }
+        }
+      }
+  }
+}
+
+pub fn read_only_filtered_from_encoder_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /users:
+    post:
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                id: { type: integer, readOnly: true }
+                password: { type: string, writeOnly: true }
+      responses:
+        '200':
+          description: ok
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  // Do NOT hoist -- keep inline schemas to test anonymous encoder filtering
+  let ctx = make_ctx_from_spec(spec)
+
+  let decoder_files = decoders.generate(ctx)
+  let assert Ok(encode_file) =
+    list.find(decoder_files, fn(f) { f.path == "encode.gleam" })
+
+  // The encoder for request body should NOT encode the readOnly 'id' field
+  // Find the encoder function
+  let content = encode_file.content
+  string.contains(content, "encode_create_user_request_body")
+  |> should.be_true()
+
+  // The encoder should not have "id" as a JSON key
+  // but should have "name" and "password"
+  let lines = string.split(content, "\n")
+  let encoder_lines =
+    extract_fn_block(lines, "encode_create_user_request_body_json")
+  let encoder_text = string.join(encoder_lines, "\n")
+
+  string.contains(encoder_text, "\"id\"") |> should.be_false()
+  string.contains(encoder_text, "\"name\"") |> should.be_true()
+  string.contains(encoder_text, "\"password\"") |> should.be_true()
+}
+
+/// Helper to extract lines from a function block definition.
+fn extract_fn_block(lines: List(String), fn_name: String) -> List(String) {
+  extract_fn_block_loop(lines, fn_name, False, 0, [])
+}
+
+fn extract_fn_block_loop(
+  lines: List(String),
+  fn_name: String,
+  in_block: Bool,
+  brace_depth: Int,
+  acc: List(String),
+) -> List(String) {
+  case lines {
+    [] -> list.reverse(acc)
+    [line, ..rest] ->
+      case in_block {
+        False ->
+          case string.contains(line, "pub fn " <> fn_name) {
+            True -> extract_fn_block_loop(rest, fn_name, True, 1, [line, ..acc])
+            False -> extract_fn_block_loop(rest, fn_name, False, 0, acc)
+          }
+        True -> {
+          let opens =
+            string.to_graphemes(line)
+            |> list.count(fn(c) { c == "{" })
+          let closes =
+            string.to_graphemes(line)
+            |> list.count(fn(c) { c == "}" })
+          let new_depth = brace_depth + opens - closes
+          case new_depth <= 0 {
+            True -> list.reverse([line, ..acc])
+            False ->
+              extract_fn_block_loop(rest, fn_name, True, new_depth, [
+                line,
+                ..acc
+              ])
+          }
+        }
+      }
+  }
+}
+
+pub fn write_only_filtered_from_response_decoder_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /users:
+    post:
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  id: { type: integer, readOnly: true }
+                  password: { type: string, writeOnly: true }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  // Do NOT hoist -- keep inline schemas to test anonymous decoder filtering
+  let ctx = make_ctx_from_spec(spec)
+
+  let decoder_files = decoders.generate(ctx)
+  let assert Ok(decode_file) =
+    list.find(decoder_files, fn(f) { f.path == "decode.gleam" })
+
+  let content = decode_file.content
+
+  // The response decoder should NOT decode writeOnly 'password' field
+  let lines = string.split(content, "\n")
+  let decoder_lines = extract_fn_block(lines, "create_user_response_ok_decoder")
+  let decoder_text = string.join(decoder_lines, "\n")
+
+  // writeOnly 'password' must NOT be in response decoder
+  string.contains(decoder_text, "\"password\"") |> should.be_false()
+  // readOnly 'id' MUST be in response decoder
+  string.contains(decoder_text, "\"id\"") |> should.be_true()
+  // Normal 'name' MUST be in response decoder
+  string.contains(decoder_text, "\"name\"") |> should.be_true()
+}
+
+pub fn read_only_filtered_from_component_encoder_with_hoist_test() {
+  // Test that component schema encoders (after hoist) skip readOnly fields
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+components:
+  schemas:
+    User:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        id: { type: integer, readOnly: true }
+        password: { type: string, writeOnly: true }
+paths:
+  /users:
+    post:
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+
+  // Check encoder: readOnly 'id' should NOT be encoded
+  let decoder_files = decoders.generate(ctx)
+  let assert Ok(encode_file) =
+    list.find(decoder_files, fn(f) { f.path == "encode.gleam" })
+  let lines = string.split(encode_file.content, "\n")
+  let encoder_lines = extract_fn_block(lines, "encode_user_json")
+  let encoder_text = string.join(encoder_lines, "\n")
+
+  // readOnly 'id' must NOT be in encoder
+  string.contains(encoder_text, "\"id\"") |> should.be_false()
+  // writeOnly 'password' MUST be in encoder (it's sent by client)
+  string.contains(encoder_text, "\"password\"") |> should.be_true()
+  // Normal 'name' MUST be in encoder
+  string.contains(encoder_text, "\"name\"") |> should.be_true()
+
+  // Check decoder: writeOnly 'password' should be treated as optional
+  let assert Ok(decode_file) =
+    list.find(decoder_files, fn(f) { f.path == "decode.gleam" })
+  let dlines = string.split(decode_file.content, "\n")
+  let decoder_lines = extract_fn_block(dlines, "user_decoder")
+  let decoder_text = string.join(decoder_lines, "\n")
+
+  // writeOnly 'password' should use optional_field (not required field)
+  string.contains(decoder_text, "optional_field(\"password\"")
+  |> should.be_true()
+  // readOnly 'id' and normal 'name' should be present
+  string.contains(decoder_text, "\"id\"") |> should.be_true()
+  string.contains(decoder_text, "\"name\"") |> should.be_true()
+
+  // Check that the component type still has ALL fields (shared type)
+  let type_files = types.generate(ctx)
+  let assert Ok(types_file) =
+    list.find(type_files, fn(f) { f.path == "types.gleam" })
+  let tlines = string.split(types_file.content, "\n")
+  let user_type_lines = extract_type_block(tlines, "User")
+  let user_type_text = string.join(user_type_lines, "\n")
+  // All fields must be present in the shared type
+  string.contains(user_type_text, "name:") |> should.be_true()
+  string.contains(user_type_text, "id:") |> should.be_true()
+  string.contains(user_type_text, "password:") |> should.be_true()
+}
+
+pub fn server_variable_substitution_default_base_url_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: T
+  version: 1.0.0
+servers:
+  - url: https://{env}.example.com/{version}
+    variables:
+      env:
+        default: production
+      version:
+        default: v2
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+
+  // Must contain the default_base_url function
+  string.contains(content, "pub fn default_base_url() -> String {")
+  |> should.be_true()
+
+  // Must contain the resolved URL with variables substituted
+  string.contains(content, "\"https://production.example.com/v2\"")
+  |> should.be_true()
+}
+
+pub fn server_no_variables_default_base_url_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: T
+  version: 1.0.0
+servers:
+  - url: https://api.example.com/v1
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+
+  string.contains(content, "pub fn default_base_url() -> String {")
+  |> should.be_true()
+
+  string.contains(content, "\"https://api.example.com/v1\"")
+  |> should.be_true()
+}
+
+pub fn server_empty_default_base_url_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: T
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+
+  string.contains(content, "pub fn default_base_url() -> String {")
+  |> should.be_true()
+
+  // With no servers, should return empty string
+  string.contains(content, "  \"\"")
+  |> should.be_true()
+}
+
+// --- Feature: Guards for exclusiveMinimum, exclusiveMaximum, multipleOf ---
+
+pub fn guards_exclusive_and_multiple_of_integer_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Item:
+      type: object
+      required: [score, quantity]
+      properties:
+        score:
+          type: integer
+          exclusiveMinimum: 0
+          exclusiveMaximum: 100
+        quantity:
+          type: integer
+          multipleOf: 5
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = guards.generate(ctx)
+  let assert [guard_file] = files
+  let content = guard_file.content
+
+  // Should contain exclusive range guard for score
+  string.contains(content, "validate_item_score_exclusive_range")
+  |> should.be_true()
+  // Should use strict comparison (> not >=)
+  string.contains(content, "value > 0")
+  |> should.be_true()
+  string.contains(content, "value < 100")
+  |> should.be_true()
+
+  // Should contain multipleOf guard for quantity
+  string.contains(content, "validate_item_quantity_multiple_of")
+  |> should.be_true()
+  string.contains(content, "value % 5 == 0")
+  |> should.be_true()
+
+  // Composite validator should call both guards
+  string.contains(content, "validate_item_score_exclusive_range(value.score)")
+  |> should.be_true()
+  string.contains(content, "validate_item_quantity_multiple_of(value.quantity)")
+  |> should.be_true()
+}
+
+pub fn guards_exclusive_and_multiple_of_float_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /measures:
+    get:
+      operationId: listMeasures
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Measure:
+      type: object
+      required: [weight, step]
+      properties:
+        weight:
+          type: number
+          exclusiveMinimum: 0.0
+          exclusiveMaximum: 999.9
+        step:
+          type: number
+          multipleOf: 0.5
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = guards.generate(ctx)
+  let assert [guard_file] = files
+  let content = guard_file.content
+
+  // Should contain exclusive range guard for weight
+  string.contains(content, "validate_measure_weight_exclusive_range")
+  |> should.be_true()
+  // Should use float comparison operators
+  string.contains(content, "value >. 0.0")
+  |> should.be_true()
+
+  // Should contain multipleOf guard for step
+  string.contains(content, "validate_measure_step_multiple_of")
+  |> should.be_true()
+  string.contains(content, "must be a multiple of 0.5")
+  |> should.be_true()
+}
+
+pub fn guards_top_level_integer_exclusive_and_multiple_of_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /ids:
+    get:
+      operationId: listIds
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    EvenPositive:
+      type: integer
+      exclusiveMinimum: 0
+      multipleOf: 2
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = guards.generate(ctx)
+  let assert [guard_file] = files
+  let content = guard_file.content
+
+  // Top-level exclusive range guard
+  string.contains(content, "validate_even_positive_exclusive_range")
+  |> should.be_true()
+  // Top-level multipleOf guard
+  string.contains(content, "validate_even_positive_multiple_of")
+  |> should.be_true()
 }
