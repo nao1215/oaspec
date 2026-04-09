@@ -561,8 +561,21 @@ fn generate_client_function(
   // Only set content-type for requests with body
   let sb = case operation.request_body {
     Some(rb) -> {
+      // For optional request bodies, unwrap the Option first
+      let sb = case rb.required {
+        True -> sb
+        False ->
+          sb
+          |> se.indent(1, "let req = case body {")
+          |> se.indent(2, "Some(body) -> {")
+      }
+      let indent_offset = case rb.required {
+        True -> 0
+        False -> 2
+      }
+      let _ = indent_offset
       let content_entries = dict.to_list(rb.content)
-      case content_entries {
+      let sb = case content_entries {
         // Multiple content types: accept pre-serialized String body
         // with a content_type parameter
         [_, _, ..] ->
@@ -594,6 +607,16 @@ fn generate_client_function(
             }
           }
         [] -> sb
+      }
+      // Close optional body case
+      case rb.required {
+        True -> sb
+        False ->
+          sb
+          |> se.indent(2, "req")
+          |> se.indent(1, "}")
+          |> se.indent(2, "None -> req")
+          |> se.indent(1, "}")
       }
     }
     _ -> sb
@@ -998,11 +1021,15 @@ fn build_param_list(
   let body_param = case operation.request_body {
     Some(rb) -> {
       let body_type = get_body_type(rb, op_id)
+      let wrapped_type = case rb.required {
+        True -> body_type
+        False -> "Option(" <> body_type <> ")"
+      }
       let content_entries = dict.to_list(rb.content)
       case content_entries {
         // Multi-content: add content_type param before body
-        [_, _, ..] -> [", content_type: String", ", body: " <> body_type]
-        _ -> [", body: " <> body_type]
+        [_, _, ..] -> [", content_type: String", ", body: " <> wrapped_type]
+        _ -> [", body: " <> wrapped_type]
       }
     }
     _ -> []

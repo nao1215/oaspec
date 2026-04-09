@@ -742,7 +742,11 @@ fn generate_request_type(
       let sb = case operation.request_body {
         Some(rb) -> {
           let body_type = extract_request_body_type(rb, op_id, ctx)
-          sb |> se.indent(2, "body: " <> body_type)
+          let wrapped = case rb.required {
+            True -> body_type
+            False -> "Option(" <> body_type <> ")"
+          }
+          sb |> se.indent(2, "body: " <> wrapped)
         }
         None -> sb
       }
