@@ -3959,6 +3959,59 @@ components:
   |> should.be_true()
 }
 
+// --- Parser required field validation tests ---
+
+/// requestBody without content field must be rejected (content is REQUIRED).
+pub fn parser_rejects_request_body_missing_content_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    post:
+      operationId: createItem
+      requestBody:
+        description: An item
+      responses:
+        '200':
+          description: ok
+"
+  let result = parser.parse_string(yaml)
+  case result {
+    Error(_) -> should.be_true(True)
+    Ok(_) -> should.be_true(False)
+  }
+}
+
+/// response without description field must be rejected (description is REQUIRED).
+pub fn parser_rejects_response_missing_description_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: string
+"
+  let result = parser.parse_string(yaml)
+  case result {
+    Error(_) -> should.be_true(True)
+    Ok(_) -> should.be_true(False)
+  }
+}
+
 fn find_substring_index(haystack: String, needle: String) -> Result(Int, Nil) {
   case string.contains(haystack, needle) {
     True -> {

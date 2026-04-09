@@ -153,8 +153,7 @@ fn parse_paths(
                 yay.extract_optional_string(value_node, "$ref")
                 |> result.unwrap(None)
               {
-                Some(ref_str) ->
-                  resolve_path_item_ref(ref_str, components)
+                Some(ref_str) -> resolve_path_item_ref(ref_str, components)
                 None -> parse_path_item(value_node, path, components)
               },
             )
@@ -621,9 +620,41 @@ fn parse_request_body(
     |> result.unwrap(None)
     |> option.unwrap(False)
 
-  use content <- result.try(parse_content(node, context))
+  // content is REQUIRED per OpenAPI spec
+  use content <- result.try(parse_required_content(node, context))
 
   Ok(RequestBody(description:, content:, required:))
+}
+
+/// Parse content map, requiring at least one entry for request bodies.
+fn parse_required_content(
+  node: yay.Node,
+  context: String,
+) -> Result(Dict(String, MediaType), ParseError) {
+  case yay.select_sugar(from: node, selector: "content") {
+    Ok(yay.NodeMap(entries)) -> {
+      list.try_fold(entries, dict.new(), fn(acc, entry) {
+        let #(key_node, value_node) = entry
+        case key_node {
+          yay.NodeStr(media_type_name) -> {
+            use mt_schema <- result.try(
+              case yay.select_sugar(from: value_node, selector: "schema") {
+                Ok(schema_node) -> {
+                  use sr <- result.try(parse_schema_ref(schema_node))
+                  Ok(Some(sr))
+                }
+                _ -> Ok(None)
+              },
+            )
+            Ok(dict.insert(acc, media_type_name, MediaType(schema: mt_schema)))
+          }
+          _ -> Ok(acc)
+        }
+      })
+    }
+    _ ->
+      Error(MissingField(path: context <> ".requestBody", field: "content"))
+  }
 }
 
 /// Parse content map (media type -> schema).
@@ -693,9 +724,14 @@ fn parse_response(
   case yay.extract_optional_string(node, "$ref") {
     Ok(Some(ref_str)) -> resolve_response_ref(ref_str, components)
     _ -> {
-      let description =
-        yay.extract_optional_string(node, "description")
-        |> result.unwrap(None)
+      // description is REQUIRED per OpenAPI spec
+      use description <- result.try(
+        yay.extract_string(node, "description")
+        |> result.map(Some)
+        |> result.map_error(fn(_) {
+          MissingField(path: "response", field: "description")
+        }),
+      )
 
       use content <- result.try(parse_content(node, "response"))
 
