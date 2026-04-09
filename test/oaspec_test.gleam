@@ -6997,6 +6997,115 @@ components:
 
 // --- deepObject referenced enum/alias leaf tests ---
 
+// --- Multipart primitive array field tests ---
+
+pub fn validate_multipart_primitive_array_field_accepted_test() {
+  // Multipart body with primitive array fields should be accepted
+  // for server codegen.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /upload:
+    post:
+      operationId: uploadMultipart
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - tags
+              properties:
+                tags:
+                  type: array
+                  items:
+                    type: string
+                scores:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Server,
+    )
+  let ctx = context.new(spec, cfg)
+  let errors = validate.validate(ctx)
+  let multipart_errors =
+    list.filter(errors, fn(e) {
+      string.contains(e.detail, "multipart")
+      && e.target == validate.TargetServer
+    })
+  list.length(multipart_errors)
+  |> should.equal(0)
+}
+
+pub fn server_multipart_array_field_codegen_test() {
+  // Multipart array fields should generate list.map parsing code.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /upload:
+    post:
+      operationId: uploadMultipart
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - tags
+              properties:
+                tags:
+                  type: array
+                  items:
+                    type: string
+                scores:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Server,
+    )
+  let ctx = context.new(spec, cfg)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // tags (string array) should get all values from the multipart dict
+  string.contains(content, "dict.get(multipart_body, \"tags\")")
+  |> should.be_true()
+  // scores (int array) should parse each value
+  string.contains(content, "int.parse")
+  |> should.be_true()
+}
+
 pub fn validate_deep_object_referenced_enum_leaf_accepted_test() {
   // deepObject properties that reference a string enum should be accepted
   // since enums are effectively strings at the wire level.

@@ -1778,6 +1778,22 @@ fn multipart_body_required_expr_with_schema(
       <> "\") "
       <> bool_parse_expr
       <> " }"
+    BodyFieldStringArray ->
+      "{ let assert Ok(vs) = dict.get(multipart_body, \"" <> key <> "\") vs }"
+    BodyFieldIntArray ->
+      "{ let assert Ok(vs) = dict.get(multipart_body, \""
+      <> key
+      <> "\") list.map(vs, fn(item) { let assert Ok(n) = int.parse(item) n }) }"
+    BodyFieldFloatArray ->
+      "{ let assert Ok(vs) = dict.get(multipart_body, \""
+      <> key
+      <> "\") list.map(vs, fn(item) { let assert Ok(n) = float.parse(item) n }) }"
+    BodyFieldBoolArray ->
+      "{ let assert Ok(vs) = dict.get(multipart_body, \""
+      <> key
+      <> "\") list.map(vs, fn(item) { let v = item "
+      <> bool_parse_expr
+      <> " }) }"
     _ -> base
   }
 }
@@ -1802,6 +1818,24 @@ fn multipart_body_optional_expr_with_schema(
       <> "\") { Ok([v, ..]) -> Some("
       <> bool_parse_expr
       <> ") _ -> None }"
+    BodyFieldStringArray ->
+      "case dict.get(multipart_body, \""
+      <> key
+      <> "\") { Ok(vs) -> Some(vs) _ -> None }"
+    BodyFieldIntArray ->
+      "case dict.get(multipart_body, \""
+      <> key
+      <> "\") { Ok(vs) -> Some(list.map(vs, fn(item) { let assert Ok(n) = int.parse(item) n })) _ -> None }"
+    BodyFieldFloatArray ->
+      "case dict.get(multipart_body, \""
+      <> key
+      <> "\") { Ok(vs) -> Some(list.map(vs, fn(item) { let assert Ok(n) = float.parse(item) n })) _ -> None }"
+    BodyFieldBoolArray ->
+      "case dict.get(multipart_body, \""
+      <> key
+      <> "\") { Ok(vs) -> Some(list.map(vs, fn(item) { let v = item "
+      <> bool_parse_expr
+      <> " })) _ -> None }"
     _ ->
       "case dict.get(multipart_body, \""
       <> key

@@ -719,6 +719,21 @@ fn multipart_server_field_supported(schema_ref: SchemaRef, ctx: Context) -> Bool
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
     | Some(BooleanSchema(..)) -> True
+    Some(ArraySchema(items:, ..)) ->
+      multipart_server_array_item_supported(items, ctx)
+    _ -> False
+  }
+}
+
+fn multipart_server_array_item_supported(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Bool {
+  case resolve_schema_object(Some(schema_ref), ctx) {
+    Some(StringSchema(..))
+    | Some(IntegerSchema(..))
+    | Some(NumberSchema(..))
+    | Some(BooleanSchema(..)) -> True
     _ -> False
   }
 }
