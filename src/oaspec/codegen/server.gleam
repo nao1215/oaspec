@@ -189,6 +189,17 @@ fn generate_router(ctx: Context) -> String {
       })
     })
 
+  let needs_float =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(operation.parameters, fn(p) {
+        case p.schema {
+          Some(Inline(schema.NumberSchema(..))) -> True
+          _ -> False
+        }
+      })
+    })
+
   let needs_string =
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
@@ -255,6 +266,10 @@ fn generate_router(ctx: Context) -> String {
   let std_imports = ["gleam/dict.{type Dict}"]
   let std_imports = case needs_int {
     True -> list.append(std_imports, ["gleam/int"])
+    False -> std_imports
+  }
+  let std_imports = case needs_float {
+    True -> list.append(std_imports, ["gleam/float"])
     False -> std_imports
   }
   let std_imports = case needs_option {
@@ -485,7 +500,7 @@ fn param_parse_expr(var_name: String, param: spec.Parameter) -> String {
       "{ let assert Ok(v) = int.parse(" <> var_name <> ") v }"
     }
     Some(Inline(schema.NumberSchema(..))) -> {
-      var_name <> "  // TODO: Parse as Float"
+      "{ let assert Ok(v) = float.parse(" <> var_name <> ") v }"
     }
     Some(Inline(schema.BooleanSchema(..))) -> {
       "{ let v = " <> var_name <> " " <> bool_parse_expr <> " }"

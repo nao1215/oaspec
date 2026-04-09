@@ -5797,3 +5797,69 @@ paths:
   string.contains(content, "string.lowercase")
   |> should.be_true()
 }
+
+pub fn server_float_path_param_parsed_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /locations/{lat}:
+    get:
+      operationId: getLocation
+      parameters:
+        - name: lat
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  string.contains(content, "import gleam/float")
+  |> should.be_true()
+  string.contains(content, "float.parse(")
+  |> should.be_true()
+  string.contains(content, "TODO: Parse as Float")
+  |> should.be_false()
+}
+
+pub fn validate_rejects_cookie_params_for_server_codegen_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: session
+          in: cookie
+          required: true
+          schema:
+            type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "Cookie parameters are not supported")
+    })
+  list.length(server_errors)
+  |> should.equal(1)
+}

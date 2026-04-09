@@ -170,8 +170,33 @@ fn validate_parameters(
     // style. Without it, codegen cannot stringify the value and falls through
     // to raw variable name, producing invalid generated code.
     let complex_schema_errors = validate_complex_param_schema(path, p, ctx)
-    list.flatten([style_errors, content_errors, complex_schema_errors])
+    let cookie_errors = validate_server_cookie_param(path, p, ctx)
+    list.flatten([
+      style_errors,
+      content_errors,
+      complex_schema_errors,
+      cookie_errors,
+    ])
   })
+}
+
+fn validate_server_cookie_param(
+  path: String,
+  param: spec.Parameter,
+  ctx: Context,
+) -> List(ValidationError) {
+  case ctx.config.mode, param.in_ {
+    config.Client, _ -> []
+    _, spec.InCookie -> [
+      ValidationError(
+        severity: SeverityError,
+        target: TargetServer,
+        path: path,
+        detail: "Cookie parameters are not supported for server code generation.",
+      ),
+    ]
+    _, _ -> []
+  }
 }
 
 /// Check if a parameter has a complex schema (object, oneOf, allOf, anyOf)
