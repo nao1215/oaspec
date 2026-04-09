@@ -247,7 +247,6 @@ The AST now parses and preserves all standard OpenAPI 3.x fields (lossless parse
 - `Response.headers`, `Response.links`
 - `PathItem.servers`, `Operation.servers`, `Operation.externalDocs`
 - `components.headers`, `components.examples`, `components.links`
-- Numeric: `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`
 - Array: `uniqueItems`
 - Object: `minProperties`, `maxProperties`
 
