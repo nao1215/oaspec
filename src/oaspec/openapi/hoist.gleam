@@ -381,8 +381,23 @@ fn hoist_path_item(
     hoist_maybe_operation(path_item.patch, "patch", path, state)
   let #(head, state) =
     hoist_maybe_operation(path_item.head, "head", path, state)
+  let #(options, state) =
+    hoist_maybe_operation(path_item.options, "options", path, state)
+  let #(trace, state) =
+    hoist_maybe_operation(path_item.trace, "trace", path, state)
 
-  let result = PathItem(..path_item, get:, post:, put:, delete:, patch:, head:)
+  let result =
+    PathItem(
+      ..path_item,
+      get:,
+      post:,
+      put:,
+      delete:,
+      patch:,
+      head:,
+      options:,
+      trace:,
+    )
   #(result, state)
 }
 

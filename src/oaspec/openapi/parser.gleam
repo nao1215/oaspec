@@ -13,8 +13,8 @@ import oaspec/openapi/spec.{
   type OpenApiSpec, type Operation, type Parameter, type ParameterIn,
   type PathItem, type RequestBody, type Response, type SecurityRequirement,
   type Server, Callback, Components, Delete, Get, Head, Info, MediaType,
-  OpenApiSpec, Operation, Parameter, Patch, PathItem, Post, Put, RequestBody,
-  Response, SecurityRequirement, Server,
+  OpenApiSpec, Operation, Options, Parameter, Patch, PathItem, Post, Put,
+  RequestBody, Response, SecurityRequirement, Server, Trace,
 }
 import simplifile
 import yay
@@ -219,6 +219,20 @@ fn parse_path_item(
     Head,
     components,
   ))
+  use options <- result.try(parse_optional_operation(
+    node,
+    "options",
+    path,
+    Options,
+    components,
+  ))
+  use trace <- result.try(parse_optional_operation(
+    node,
+    "trace",
+    path,
+    Trace,
+    components,
+  ))
 
   use parameters <- result.try(parse_parameters_list(node, components))
 
@@ -231,6 +245,8 @@ fn parse_path_item(
     delete:,
     patch:,
     head:,
+    options:,
+    trace:,
     parameters:,
   ))
 }

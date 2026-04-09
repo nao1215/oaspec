@@ -2685,15 +2685,8 @@ paths:
       let assert Ok(path_item) = dict.get(spec.paths, "/cors")
       // The path must have SOME operation — if it has none,
       // the OPTIONS was silently dropped
-      let has_any =
-        option.is_some(path_item.get)
-        || option.is_some(path_item.post)
-        || option.is_some(path_item.put)
-        || option.is_some(path_item.delete)
-        || option.is_some(path_item.patch)
-        || option.is_some(path_item.head)
-      // If no operations exist, OPTIONS was silently lost
-      has_any
+      // OPTIONS must be accessible in the AST
+      option.is_some(path_item.options)
       |> should.be_true()
     }
     Error(_) -> {

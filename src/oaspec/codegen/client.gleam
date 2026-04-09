@@ -549,6 +549,8 @@ fn generate_client_function(
     spec.Delete -> "http.Delete"
     spec.Patch -> "http.Patch"
     spec.Head -> "http.Head"
+    spec.Options -> "http.Options"
+    spec.Trace -> "http.Trace"
   }
 
   let sb =

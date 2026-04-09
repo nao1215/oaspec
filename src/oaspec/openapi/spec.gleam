@@ -66,6 +66,8 @@ pub type PathItem {
     delete: Option(Operation),
     patch: Option(Operation),
     head: Option(Operation),
+    options: Option(Operation),
+    trace: Option(Operation),
     parameters: List(Parameter),
   )
 }
@@ -140,6 +142,8 @@ pub type HttpMethod {
   Delete
   Patch
   Head
+  Options
+  Trace
 }
 
 /// Convert HTTP method to string.
@@ -151,6 +155,8 @@ pub fn method_to_string(method: HttpMethod) -> String {
     Delete -> "DELETE"
     Patch -> "PATCH"
     Head -> "HEAD"
+    Options -> "OPTIONS"
+    Trace -> "TRACE"
   }
 }
 
@@ -163,5 +169,7 @@ pub fn method_to_lower(method: HttpMethod) -> String {
     Delete -> "delete"
     Patch -> "patch"
     Head -> "head"
+    Options -> "options"
+    Trace -> "trace"
   }
 }

@@ -98,6 +98,8 @@ fn dedup_path_item_ops(
     delete: apply_deduped_id(item.delete, path, "delete", id_map),
     patch: apply_deduped_id(item.patch, path, "patch", id_map),
     head: apply_deduped_id(item.head, path, "head", id_map),
+    options: apply_deduped_id(item.options, path, "options", id_map),
+    trace: apply_deduped_id(item.trace, path, "trace", id_map),
   )
 }
 
@@ -133,6 +135,8 @@ fn collect_all_operations(
       #("delete", item.delete),
       #("patch", item.patch),
       #("head", item.head),
+      #("options", item.options),
+      #("trace", item.trace),
     ]
     list.filter_map(ops, fn(op) {
       case op {
