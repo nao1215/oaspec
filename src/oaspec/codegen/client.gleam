@@ -78,6 +78,11 @@ fn generate_client(ctx: Context) -> String {
     || list.any(all_params, fn(p) {
       case p.schema {
         Some(Inline(schema.ArraySchema(..))) -> True
+        Some(Reference(..) as sr) ->
+          case resolver.resolve_schema_ref(sr, ctx.spec) {
+            Ok(schema.ArraySchema(..)) -> True
+            _ -> False
+          }
         _ -> False
       }
     })
