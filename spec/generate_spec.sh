@@ -303,14 +303,16 @@ Describe 'oaspec generate'
   # Unsupported feature validation
   # -------------------------------------------------------------------
 
-  # deepObject, multipart/form-data, additionalProperties, and inline
-  # oneOf primitives are now all supported, so the "broken" spec
-  # generates successfully.
-  Describe 'previously unsupported features now succeed'
+  # deepObject and multipart/form-data remain unsupported for server
+  # generation, but client-only generation should still succeed.
+  Describe 'client mode filters server-only validation errors'
     It 'generates successfully for specs with deepObject and inline oneOf'
-      When run generate --config=test/fixtures/broken-oaspec.yaml
+      clean_test_output
+      When run generate --config=test/fixtures/broken-oaspec.yaml --mode=client
       The status should be success
       The output should include 'Successfully generated'
+      The path "$TEST_OUTPUT_DIR_CLIENT/api/client.gleam" should be file
+      The path "$TEST_OUTPUT_DIR/api" should not be exist
     End
   End
 

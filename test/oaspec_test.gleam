@@ -307,7 +307,9 @@ paths:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
-  let errors = validate.validate(ctx)
+  let errors =
+    validate.validate(ctx)
+    |> list.filter(fn(e) { e.target != validate.TargetServer })
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
   |> should.be_false()
@@ -336,7 +338,9 @@ paths:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
-  let errors = validate.validate(ctx)
+  let errors =
+    validate.validate(ctx)
+    |> list.filter(fn(e) { e.target != validate.TargetServer })
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
   |> should.be_false()
@@ -528,7 +532,9 @@ fn make_ctx(spec_path: String) -> context.Context {
 
 pub fn validate_accepts_deep_object_test() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
-  let errors = validate.validate(ctx)
+  let errors =
+    validate.validate(ctx)
+    |> list.filter(fn(e) { e.target != validate.TargetServer })
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "deepObject") })
   |> should.be_false()
@@ -536,7 +542,9 @@ pub fn validate_accepts_deep_object_test() {
 
 pub fn validate_accepts_complex_schema_parameter_test() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
-  let errors = validate.validate(ctx)
+  let errors =
+    validate.validate(ctx)
+    |> list.filter(fn(e) { e.target != validate.TargetServer })
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "Complex schema parameters")
@@ -581,14 +589,19 @@ components:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
-  let errors = validate.validate(ctx)
+  let errors =
+    validate.validate(ctx)
+    |> list.filter(fn(e) { e.target != validate.TargetServer })
   errors |> should.equal([])
 }
 
 pub fn validate_accepts_multipart_form_data_test() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, validate.error_to_string)
+  // Filter out server-targeted errors; multipart is valid for client codegen
+  let client_errors =
+    list.filter(errors, fn(e) { e.target != validate.TargetServer })
+  let error_strings = list.map(client_errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "multipart/form-data") })
   |> should.be_false()
 }
@@ -2917,7 +2930,7 @@ paths:
   // Router must have proper route signature with query/headers/body
   string.contains(
     router.content,
-    "pub fn route(method: String, path: List(String), query: Dict(String, String), headers: Dict(String, String), body: String) -> ServerResponse",
+    "pub fn route(method: String, path: List(String), _query: Dict(String, List(String)), _headers: Dict(String, String), _body: String) -> ServerResponse",
   )
   |> should.be_true()
   // Router must convert response to ServerResponse
@@ -5514,5 +5527,1878 @@ components:
   |> should.be_true()
   // Top-level multipleOf guard
   string.contains(content, "validate_even_positive_multiple_of")
+  |> should.be_true()
+}
+
+// --- Bool parameter case-insensitive parsing tests ---
+
+pub fn server_bool_path_param_case_insensitive_test() {
+  // Server codegen should parse both "true"/"True" and "false"/"False" for bool params.
+  // Gleam's bool.to_string produces "True"/"False" (capitalized), so server must
+  // accept both cases to be compatible with the client.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items/{active}:
+    get:
+      operationId: getItems
+      parameters:
+        - name: active
+          in: path
+          required: true
+          schema:
+            type: boolean
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // Must accept "true" and "True" as True (case-insensitive)
+  string.contains(content, "string.lowercase")
+  |> should.be_true()
+}
+
+pub fn server_bool_query_param_case_insensitive_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: verbose
+          in: query
+          required: true
+          schema:
+            type: boolean
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // Must accept "true"/"True" as True via case-insensitive comparison
+  string.contains(content, "string.lowercase")
+  |> should.be_true()
+}
+
+pub fn validate_non_json_request_body_unsupported_for_server_test() {
+  // Server multipart support is intentionally narrow. Nested/object-like fields
+  // should still produce server-targeted validation errors.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /upload:
+    post:
+      operationId: uploadFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                meta:
+                  type: object
+                  properties:
+                    file:
+                      type: string
+                      format: binary
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(
+        e.detail,
+        "multipart/form-data server request bodies only support",
+      )
+    })
+  // Should have at least one server-targeted error for unsupported multipart shape
+  list.length(server_errors)
+  |> should.not_equal(0)
+}
+
+pub fn validate_form_urlencoded_body_multi_level_nesting_accepted_test() {
+  // Multi-level nested form-urlencoded objects are now supported
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /login:
+    post:
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                profile:
+                  type: object
+                  properties:
+                    meta:
+                      type: object
+                      properties:
+                        username:
+                          type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(
+        e.detail,
+        "application/x-www-form-urlencoded server request bodies only support",
+      )
+    })
+  list.length(server_errors)
+  |> should.equal(0)
+}
+
+pub fn validate_json_request_body_ok_for_server_test() {
+  // application/json body should NOT produce a server-targeted error
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    post:
+      operationId: createItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        '201': { description: created }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "not supported for server")
+    })
+  list.length(server_errors)
+  |> should.equal(0)
+}
+
+pub fn server_header_param_name_lowercased_test() {
+  // Server codegen must lowercase header parameter names in dict.get calls
+  // to match client behavior (which lowercases header names).
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: X-Request-ID
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // Must use lowercased header name "x-request-id" not "X-Request-ID"
+  string.contains(content, "\"x-request-id\"")
+  |> should.be_true()
+  // Must NOT contain the original casing in dict.get
+  string.contains(content, "\"X-Request-ID\"")
+  |> should.be_false()
+}
+
+pub fn server_optional_header_param_name_lowercased_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: X-Trace-Id
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // Must use lowercased header name
+  string.contains(content, "\"x-trace-id\"")
+  |> should.be_true()
+}
+
+pub fn server_bool_optional_query_param_case_insensitive_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: verbose
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // Must accept "true"/"True" as True via case-insensitive comparison
+  string.contains(content, "string.lowercase")
+  |> should.be_true()
+}
+
+pub fn server_float_path_param_parsed_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /locations/{lat}:
+    get:
+      operationId: getLocation
+      parameters:
+        - name: lat
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  string.contains(content, "import gleam/float")
+  |> should.be_true()
+  string.contains(content, "float.parse(")
+  |> should.be_true()
+  string.contains(content, "TODO: Parse as Float")
+  |> should.be_false()
+}
+
+pub fn validate_rejects_array_params_for_server_codegen_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: tags
+          in: query
+          required: true
+          schema:
+            type: array
+            items:
+              type: object
+              properties:
+                label:
+                  type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "Query array parameters are only supported")
+    })
+  list.length(server_errors)
+  |> should.equal(1)
+}
+
+pub fn validate_accepts_deep_object_params_for_server_codegen_test() {
+  let ctx = make_ctx("test/fixtures/server_deep_object_params.yaml")
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "deepObject")
+    })
+  list.length(server_errors)
+  |> should.equal(0)
+}
+
+pub fn validate_rejects_path_complex_params_for_server_codegen_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items/{filter}:
+    get:
+      operationId: getItems
+      parameters:
+        - name: filter
+          in: path
+          required: true
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "Complex path parameters are not supported")
+    })
+  list.length(server_errors)
+  |> should.equal(1)
+}
+
+pub fn client_mode_ignores_server_target_validation_errors_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: session
+          in: cookie
+          required: true
+          schema:
+            type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+    )
+  generate.generate(spec, cfg)
+  |> should.be_ok()
+}
+
+pub fn filter_by_mode_drops_server_errors_for_client_test() {
+  let issues = [
+    validate.ValidationError(
+      path: "x",
+      detail: "server-only",
+      severity: validate.SeverityError,
+      target: validate.TargetServer,
+    ),
+    validate.ValidationError(
+      path: "y",
+      detail: "shared",
+      severity: validate.SeverityError,
+      target: validate.TargetBoth,
+    ),
+  ]
+  let filtered = validate.filter_by_mode(issues, config.Client)
+  list.length(filtered)
+  |> should.equal(1)
+}
+
+pub fn filter_by_mode_drops_client_errors_for_server_test() {
+  let issues = [
+    validate.ValidationError(
+      path: "x",
+      detail: "client-only",
+      severity: validate.SeverityError,
+      target: validate.TargetClient,
+    ),
+    validate.ValidationError(
+      path: "y",
+      detail: "shared",
+      severity: validate.SeverityError,
+      target: validate.TargetBoth,
+    ),
+  ]
+  let filtered = validate.filter_by_mode(issues, config.Server)
+  list.length(filtered)
+  |> should.equal(1)
+}
+
+pub fn filter_by_mode_keeps_all_errors_for_both_test() {
+  let issues = [
+    validate.ValidationError(
+      path: "x",
+      detail: "client-only",
+      severity: validate.SeverityError,
+      target: validate.TargetClient,
+    ),
+    validate.ValidationError(
+      path: "y",
+      detail: "server-only",
+      severity: validate.SeverityError,
+      target: validate.TargetServer,
+    ),
+    validate.ValidationError(
+      path: "z",
+      detail: "shared",
+      severity: validate.SeverityError,
+      target: validate.TargetBoth,
+    ),
+  ]
+  let filtered = validate.filter_by_mode(issues, config.Both)
+  list.length(filtered)
+  |> should.equal(3)
+}
+
+pub fn generation_summary_includes_warnings_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /items:
+    get:
+      operationId: getItems
+      responses:
+        '200':
+          description: ok
+          headers:
+            X-Rate-Limit:
+              description: Rate limit
+              schema: { type: integer }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Both,
+    )
+  let assert Ok(summary) = generate.generate(spec, cfg)
+  { summary.warnings != [] }
+  |> should.be_true()
+}
+
+pub fn validate_warns_multi_content_responses_for_server_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /items:
+    get:
+      operationId: getItems
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { type: string }
+            text/plain:
+              schema: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let issues = validate.validate(ctx)
+  let warnings =
+    list.filter(issues, fn(issue) {
+      issue.severity == validate.SeverityWarning
+      && issue.target == validate.TargetServer
+      && string.contains(issue.detail, "Multiple response content types")
+    })
+  list.length(warnings)
+  |> should.equal(1)
+}
+
+pub fn integration_script_uses_warnings_as_errors_for_server_builds_test() {
+  let assert Ok(content) = simplifile.read("integration_test/run.sh")
+  string.contains(content, "if gleam build 2>&1; then")
+  |> should.be_false()
+}
+
+pub fn server_router_uses_underscored_unused_route_args_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /items:
+    get:
+      operationId: getItems
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let router_file = list.find(files, fn(f) { f.path == "router.gleam" })
+  let assert Ok(router) = router_file
+  string.contains(
+    router.content,
+    "pub fn route(method: String, path: List(String), _query: Dict(String, List(String)), _headers: Dict(String, String), _body: String) -> ServerResponse",
+  )
+  |> should.be_true()
+}
+
+pub fn validate_accepts_cookie_params_for_server_codegen_test() {
+  let ctx = make_ctx("test/fixtures/server_cookie_params.yaml")
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "Cookie parameters")
+    })
+  list.length(server_errors)
+  |> should.equal(0)
+}
+
+pub fn server_cookie_params_are_generated_without_todo_placeholders_test() {
+  let ctx = make_ctx("test/fixtures/server_cookie_params.yaml")
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(content, "TODO: Extract cookie param")
+  |> should.be_false()
+  string.contains(content, "cookie_lookup(headers, \"session\")")
+  |> should.be_true()
+  string.contains(content, "cookie_lookup(headers, \"debug\")")
+  |> should.be_true()
+}
+
+pub fn server_cookie_router_imports_list_for_cookie_lookup_test() {
+  let ctx = make_ctx("test/fixtures/server_cookie_params.yaml")
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  string.contains(router_file.content, "import gleam/list")
+  |> should.be_true()
+}
+
+pub fn server_cookie_router_percent_decodes_cookie_values_test() {
+  let ctx = make_ctx("test/fixtures/server_cookie_params.yaml")
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  string.contains(router_file.content, "import gleam/uri")
+  |> should.be_true()
+  string.contains(router_file.content, "uri.percent_decode")
+  |> should.be_true()
+}
+
+pub fn server_query_and_header_scalars_are_parsed_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /metrics:
+    get:
+      operationId: getMetrics
+      parameters:
+        - name: ratio
+          in: query
+          required: true
+          schema:
+            type: number
+        - name: x-enabled
+          in: header
+          required: false
+          schema:
+            type: boolean
+        - name: x-threshold
+          in: header
+          required: true
+          schema:
+            type: number
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(
+    content,
+    "ratio: { let assert Ok([v, ..]) = dict.get(query, \"ratio\") let assert Ok(n) = float.parse(v) n },",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "x_enabled: case dict.get(headers, \"x-enabled\") { Ok(v) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None },",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "x_threshold: { let assert Ok(v) = dict.get(headers, \"x-threshold\") let assert Ok(n) = float.parse(v) n },",
+  )
+  |> should.be_true()
+}
+
+pub fn validate_accepts_header_array_params_for_server_codegen_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: x-tags
+          in: header
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "Array parameters")
+    })
+  list.length(server_errors)
+  |> should.equal(0)
+}
+
+pub fn server_header_array_params_are_parsed_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /headers:
+    get:
+      operationId: getHeaders
+      parameters:
+        - name: x-tags
+          in: header
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+        - name: x-scores
+          in: header
+          required: false
+          schema:
+            type: array
+            items:
+              type: integer
+        - name: x-flags
+          in: header
+          required: true
+          schema:
+            type: array
+            items:
+              type: boolean
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(content, "import gleam/list")
+  |> should.be_true()
+  string.contains(
+    content,
+    "x_tags: { let assert Ok(v) = dict.get(headers, \"x-tags\") list.map(string.split(v, \",\"), fn(item) { string.trim(item) }) },",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "x_scores: case dict.get(headers, \"x-scores\") { Ok(v) -> Some(list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n })) _ -> None },",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "x_flags: { let assert Ok(v) = dict.get(headers, \"x-flags\") list.map(string.split(v, \",\"), fn(item) { let v = string.trim(item) case string.lowercase(v) { \"true\" -> True _ -> False } }) },",
+  )
+  |> should.be_true()
+}
+
+pub fn validate_accepts_query_array_params_for_server_codegen_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: tags
+          in: query
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "Array parameters")
+    })
+  list.length(server_errors)
+  |> should.equal(0)
+}
+
+pub fn server_query_array_params_use_query_multimap_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: search
+      parameters:
+        - name: tags
+          in: query
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+        - name: scores
+          in: query
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: integer
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(
+    content,
+    "pub fn route(method: String, path: List(String), query: Dict(String, List(String)), _headers: Dict(String, String), _body: String) -> ServerResponse",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "tags: { let assert Ok(vs) = dict.get(query, \"tags\") list.map(vs, fn(item) { string.trim(item) }) },",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "scores: case dict.get(query, \"scores\") { Ok([v, ..]) -> Some(list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n })) _ -> None },",
+  )
+  |> should.be_true()
+}
+
+pub fn server_deep_object_params_are_parsed_test() {
+  let ctx = make_ctx("test/fixtures/server_deep_object_params.yaml")
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(content, "import api/types")
+  |> should.be_true()
+  string.contains(
+    content,
+    "fn deep_object_present(query: Dict(String, List(String)), prefix: String, props: List(String)) -> Bool {",
+  )
+  |> should.be_true()
+  string.contains(content, "filter: types.SearchItemsParamFilter(")
+  |> should.be_true()
+  string.contains(
+    content,
+    "name: { let assert Ok([v, ..]) = dict.get(query, \"filter[name]\") v }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "active: case dict.get(query, \"filter[active]\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "ratio: case dict.get(query, \"filter[ratio]\") { Ok([v, ..]) -> { case float.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "scores: { let assert Ok(vs) = dict.get(query, \"filter[scores]\") list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n }) }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "options: case deep_object_present(query, \"options\", [",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "tags: case dict.get(query, \"options[tags]\") { Ok(vs) -> Some(list.map(vs, fn(item) { string.trim(item) })) _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "enabled: case dict.get(query, \"options[enabled]\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
+  )
+  |> should.be_true()
+}
+
+pub fn validate_accepts_form_urlencoded_body_for_server_codegen_test() {
+  let ctx = make_ctx("test/fixtures/server_form_urlencoded_body.yaml")
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "application/x-www-form-urlencoded")
+    })
+  list.length(server_errors)
+  |> should.equal(0)
+}
+
+pub fn server_form_urlencoded_body_is_parsed_test() {
+  let ctx = make_ctx("test/fixtures/server_form_urlencoded_body.yaml")
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(content, "import api/types")
+  |> should.be_true()
+  string.contains(content, "fn form_url_decode(value: String) -> String {")
+  |> should.be_true()
+  string.contains(
+    content,
+    "fn parse_form_body(body: String) -> Dict(String, List(String)) {",
+  )
+  |> should.be_true()
+  string.contains(content, "let form_body = parse_form_body(body)")
+  |> should.be_true()
+  string.contains(content, "body: types.SubmitFormRequest(")
+  |> should.be_true()
+  string.contains(
+    content,
+    "name: { let assert Ok([v, ..]) = dict.get(form_body, \"name\") v }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "active: case dict.get(form_body, \"active\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "ratio: case dict.get(form_body, \"ratio\") { Ok([v, ..]) -> { case float.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "scores: { let assert Ok(vs) = dict.get(form_body, \"scores\") list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n }) }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "tags: case dict.get(form_body, \"tags\") { Ok(vs) -> Some(list.map(vs, fn(item) { string.trim(item) })) _ -> None }",
+  )
+  |> should.be_true()
+}
+
+pub fn validate_accepts_nested_form_urlencoded_body_for_server_codegen_test() {
+  let ctx = make_ctx("test/fixtures/server_form_urlencoded_nested_body.yaml")
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "application/x-www-form-urlencoded")
+    })
+  list.length(server_errors)
+  |> should.equal(0)
+}
+
+pub fn server_nested_form_urlencoded_body_is_parsed_test() {
+  let ctx = make_ctx("test/fixtures/server_form_urlencoded_nested_body.yaml")
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(content, "profile: types.SubmitNestedFormRequestProfile(")
+  |> should.be_true()
+  string.contains(
+    content,
+    "username: { let assert Ok([v, ..]) = dict.get(form_body, \"profile[username]\") v }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "aliases: case dict.get(form_body, \"profile[aliases]\") { Ok(vs) -> Some(list.map(vs, fn(item) { string.trim(item) })) _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "age: case dict.get(form_body, \"profile[age]\") { Ok([v, ..]) -> { case int.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }",
+  )
+  |> should.be_true()
+}
+
+pub fn validate_accepts_multipart_body_for_server_codegen_test() {
+  let ctx = make_ctx("test/fixtures/server_multipart_body.yaml")
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "multipart/form-data")
+    })
+  list.length(server_errors)
+  |> should.equal(0)
+}
+
+pub fn server_multipart_body_is_parsed_test() {
+  let ctx = make_ctx("test/fixtures/server_multipart_body.yaml")
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(
+    content,
+    "fn parse_multipart_body(body: String, headers: Dict(String, String)) -> Dict(String, List(String)) {",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "let multipart_body = parse_multipart_body(body, headers)",
+  )
+  |> should.be_true()
+  string.contains(content, "body: types.UploadMultipartRequest(")
+  |> should.be_true()
+  string.contains(
+    content,
+    "name: { let assert Ok([v, ..]) = dict.get(multipart_body, \"name\") v }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "active: case dict.get(multipart_body, \"active\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "ratio: case dict.get(multipart_body, \"ratio\") { Ok([v, ..]) -> { case float.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "file: case dict.get(multipart_body, \"file\") { Ok([v, ..]) -> Some(v) _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "let normalized_part = part |> string.remove_prefix(\"\\r\\n\") |> string.remove_suffix(\"\\r\\n\")",
+  )
+  |> should.be_true()
+  string.contains(content, "let value = string.trim(raw_value)")
+  |> should.be_false()
+}
+
+pub fn validate_accepts_form_urlencoded_ref_fields_for_server_codegen_test() {
+  let ctx = make_ctx("test/fixtures/server_form_urlencoded_ref_fields.yaml")
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "application/x-www-form-urlencoded")
+    })
+  list.length(server_errors)
+  |> should.equal(0)
+}
+
+pub fn server_form_urlencoded_ref_fields_are_parsed_test() {
+  let ctx = make_ctx("test/fixtures/server_form_urlencoded_ref_fields.yaml")
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(
+    content,
+    "active: case dict.get(form_body, \"active\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "ratio: case dict.get(form_body, \"ratio\") { Ok([v, ..]) -> { case float.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "scores: { let assert Ok(vs) = dict.get(form_body, \"scores\") list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n }) }",
+  )
+  |> should.be_true()
+  string.contains(content, "profile: types.Profile(")
+  |> should.be_true()
+  string.contains(
+    content,
+    "username: { let assert Ok([v, ..]) = dict.get(form_body, \"profile[username]\") v }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "enabled: case dict.get(form_body, \"profile[enabled]\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
+  )
+  |> should.be_true()
+}
+
+pub fn validate_accepts_multipart_ref_fields_for_server_codegen_test() {
+  let ctx = make_ctx("test/fixtures/server_multipart_ref_fields.yaml")
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "multipart/form-data")
+    })
+  list.length(server_errors)
+  |> should.equal(0)
+}
+
+pub fn server_multipart_ref_fields_are_parsed_test() {
+  let ctx = make_ctx("test/fixtures/server_multipart_ref_fields.yaml")
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(
+    content,
+    "active: case dict.get(multipart_body, \"active\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "ratio: case dict.get(multipart_body, \"ratio\") { Ok([v, ..]) -> { case float.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "file: case dict.get(multipart_body, \"file\") { Ok([v, ..]) -> Some(v) _ -> None }",
+  )
+  |> should.be_true()
+}
+
+// --- Server cookie parameter end-to-end tests ---
+
+pub fn server_cookie_param_generates_cookie_lookup_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /dashboard:
+    get:
+      operationId: getDashboard
+      parameters:
+        - name: session_id
+          in: cookie
+          required: true
+          schema:
+            type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // Router must contain the cookie_lookup helper function
+  string.contains(content, "fn cookie_lookup(")
+  |> should.be_true()
+  // Must use cookie_lookup for the session_id parameter
+  string.contains(content, "cookie_lookup(headers, \"session_id\")")
+  |> should.be_true()
+  // Must import gleam/uri for percent-decoding
+  string.contains(content, "gleam/uri")
+  |> should.be_true()
+}
+
+pub fn server_cookie_param_optional_string_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /prefs:
+    get:
+      operationId: getPrefs
+      parameters:
+        - name: theme
+          in: cookie
+          required: false
+          schema:
+            type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // Optional cookie should use Some/None pattern
+  string.contains(content, "cookie_lookup(headers, \"theme\")")
+  |> should.be_true()
+  string.contains(content, "Some(v)")
+  |> should.be_true()
+}
+
+pub fn server_cookie_param_integer_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /dashboard:
+    get:
+      operationId: getDashboard
+      parameters:
+        - name: page_size
+          in: cookie
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // Integer cookie should use int.parse
+  string.contains(content, "cookie_lookup(headers, \"page_size\")")
+  |> should.be_true()
+  string.contains(content, "int.parse")
+  |> should.be_true()
+}
+
+pub fn server_cookie_param_boolean_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /dashboard:
+    get:
+      operationId: getDashboard
+      parameters:
+        - name: dark_mode
+          in: cookie
+          required: true
+          schema:
+            type: boolean
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // Boolean cookie should use case-insensitive bool parsing
+  string.contains(content, "cookie_lookup(headers, \"dark_mode\")")
+  |> should.be_true()
+  string.contains(content, "string.lowercase")
+  |> should.be_true()
+}
+
+pub fn server_cookie_param_float_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /dashboard:
+    get:
+      operationId: getDashboard
+      parameters:
+        - name: zoom_level
+          in: cookie
+          required: true
+          schema:
+            type: number
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // Float cookie should use float.parse
+  string.contains(content, "cookie_lookup(headers, \"zoom_level\")")
+  |> should.be_true()
+  string.contains(content, "float.parse")
+  |> should.be_true()
+}
+
+// --- Response types import conditional test ---
+
+pub fn response_types_omits_types_import_when_no_body_test() {
+  // When all responses have no body, response_types.gleam should not
+  // import the types module (avoids unused import warning).
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      responses:
+        '200': { description: ok }
+        '500': { description: error }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = types.generate(ctx)
+  let assert Ok(resp_file) =
+    list.find(files, fn(f) { f.path == "response_types.gleam" })
+  let content = resp_file.content
+  // Should NOT import types module when no response body references it
+  string.contains(content, "import api/types")
+  |> should.be_false()
+}
+
+pub fn server_multi_content_response_sets_first_content_type_test() {
+  // When a response has multiple content types, the server router should
+  // set the first content type as a default content-type header rather
+  // than leaving headers empty.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /data:
+    get:
+      operationId: getData
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+            text/plain:
+              schema:
+                type: string
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Server,
+    )
+  let ctx = context.new(spec, cfg)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // Should have a content-type header, not empty headers
+  string.contains(content, "application/json")
+  |> should.be_true()
+}
+
+pub fn response_types_includes_types_import_when_ref_body_test() {
+  // When a response has a $ref body, types import is needed.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        name:
+          type: string
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = types.generate(ctx)
+  let assert Ok(resp_file) =
+    list.find(files, fn(f) { f.path == "response_types.gleam" })
+  let content = resp_file.content
+  // Should import types module for $ref response bodies
+  string.contains(content, "import api/types")
+  |> should.be_true()
+}
+
+// --- deepObject referenced enum/alias leaf tests ---
+
+// --- Multipart primitive array field tests ---
+
+pub fn validate_multipart_primitive_array_field_accepted_test() {
+  // Multipart body with primitive array fields should be accepted
+  // for server codegen.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /upload:
+    post:
+      operationId: uploadMultipart
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - tags
+              properties:
+                tags:
+                  type: array
+                  items:
+                    type: string
+                scores:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Server,
+    )
+  let ctx = context.new(spec, cfg)
+  let errors = validate.validate(ctx)
+  let multipart_errors =
+    list.filter(errors, fn(e) {
+      string.contains(e.detail, "multipart")
+      && e.target == validate.TargetServer
+    })
+  list.length(multipart_errors)
+  |> should.equal(0)
+}
+
+pub fn server_multipart_array_field_codegen_test() {
+  // Multipart array fields should generate list.map parsing code.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /upload:
+    post:
+      operationId: uploadMultipart
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - tags
+              properties:
+                tags:
+                  type: array
+                  items:
+                    type: string
+                scores:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Server,
+    )
+  let ctx = context.new(spec, cfg)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // tags (string array) should get all values from the multipart dict
+  string.contains(content, "dict.get(multipart_body, \"tags\")")
+  |> should.be_true()
+  // scores (int array) should parse each value
+  string.contains(content, "int.parse")
+  |> should.be_true()
+}
+
+// --- Form-urlencoded multi-level nesting tests ---
+
+pub fn validate_form_urlencoded_two_level_nesting_accepted_test() {
+  // form-urlencoded bodies with two levels of object nesting should be
+  // accepted: field[sub][key]=value
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /submit:
+    post:
+      operationId: submit
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                profile:
+                  type: object
+                  properties:
+                    settings:
+                      type: object
+                      properties:
+                        theme:
+                          type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Server,
+    )
+  let ctx = context.new(spec, cfg)
+  let errors = validate.validate(ctx)
+  let form_errors =
+    list.filter(errors, fn(e) {
+      string.contains(e.detail, "form-urlencoded")
+      && e.target == validate.TargetServer
+    })
+  list.length(form_errors)
+  |> should.equal(0)
+}
+
+pub fn server_form_urlencoded_two_level_nesting_codegen_test() {
+  // Two-level nested form-urlencoded should generate bracket keys
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /submit:
+    post:
+      operationId: submit
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                profile:
+                  type: object
+                  properties:
+                    settings:
+                      type: object
+                      properties:
+                        theme:
+                          type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Server,
+    )
+  let ctx = context.new(spec, cfg)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // Should have two-level bracket key
+  string.contains(content, "profile[settings][theme]")
+  |> should.be_true()
+}
+
+pub fn validate_deep_object_referenced_enum_leaf_accepted_test() {
+  // deepObject properties that reference a string enum should be accepted
+  // since enums are effectively strings at the wire level.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: search
+      parameters:
+        - name: filter
+          in: query
+          required: true
+          style: deepObject
+          schema:
+            type: object
+            properties:
+              status:
+                $ref: '#/components/schemas/Status'
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Status:
+      type: string
+      enum: [active, inactive]
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Server,
+    )
+  let ctx = context.new(spec, cfg)
+  let errors = validate.validate(ctx)
+  let deep_object_errors =
+    list.filter(errors, fn(e) { string.contains(e.detail, "deepObject") })
+  // Should have NO deepObject errors for referenced enum leaf
+  list.length(deep_object_errors)
+  |> should.equal(0)
+}
+
+pub fn validate_deep_object_referenced_primitive_alias_accepted_test() {
+  // deepObject properties that reference a primitive alias (e.g., string)
+  // should be accepted since they resolve to simple scalar types.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: search
+      parameters:
+        - name: filter
+          in: query
+          required: true
+          style: deepObject
+          schema:
+            type: object
+            properties:
+              id:
+                $ref: '#/components/schemas/UUID'
+              count:
+                $ref: '#/components/schemas/PositiveInt'
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    UUID:
+      type: string
+      format: uuid
+    PositiveInt:
+      type: integer
+      minimum: 1
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Server,
+    )
+  let ctx = context.new(spec, cfg)
+  let errors = validate.validate(ctx)
+  let deep_object_errors =
+    list.filter(errors, fn(e) { string.contains(e.detail, "deepObject") })
+  list.length(deep_object_errors)
+  |> should.equal(0)
+}
+
+// --- uniqueItems guard tests ---
+
+pub fn guards_unique_items_generates_guard_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    TagList:
+      type: array
+      items:
+        type: string
+      uniqueItems: true
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = guards.generate(ctx)
+  list.length(files) |> should.not_equal(0)
+  let assert [guard_file] = files
+  let content = guard_file.content
+  // Should generate a uniqueItems guard
+  string.contains(content, "validate_tag_list_unique")
+  |> should.be_true()
+  // Should use list.unique for deduplication
+  string.contains(content, "list.unique")
+  |> should.be_true()
+}
+
+pub fn guards_unique_items_field_generates_guard_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    SearchRequest:
+      type: object
+      properties:
+        tags:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = guards.generate(ctx)
+  list.length(files) |> should.not_equal(0)
+  let assert [guard_file] = files
+  let content = guard_file.content
+  string.contains(content, "validate_search_request_tags_unique")
+  |> should.be_true()
+}
+
+// --- minProperties/maxProperties guard tests ---
+
+pub fn guards_min_properties_generates_guard_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    FilterMap:
+      type: object
+      additionalProperties:
+        type: string
+      minProperties: 1
+      maxProperties: 10
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = guards.generate(ctx)
+  list.length(files) |> should.not_equal(0)
+  let assert [guard_file] = files
+  let content = guard_file.content
+  string.contains(content, "validate_filter_map_properties")
+  |> should.be_true()
+  string.contains(content, "dict.size")
   |> should.be_true()
 }

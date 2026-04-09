@@ -173,17 +173,17 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 - Paths and operations (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, TRACE)
 - Path, query, header, cookie parameters (path-level merged by `(name, in)`)
 - Parameter serialization for Bool, Float, Int, String, `$ref` enum types
-- `style: deepObject` query parameters with `key[prop]=value` serialization
+- `style: deepObject` query parameters with `key[prop]=value` serialization (including `$ref` enum and primitive alias leaves)
 - Array parameters in query/header/cookie with explode-aware serialization (`explode: true` → repeated `key=a&key=b`; `explode: false` → comma-separated `key=a,b`)
 - Complex schema parameters (object/allOf/oneOf/anyOf) via automatic hoisting
 - Percent-encoding for path/query/cookie parameter values via `uri.percent_encode`
 - Cookie parameters combined into single header
 - `application/json` request bodies with `$ref` resolution (typed, auto-encoded)
 - `application/x-www-form-urlencoded` request bodies with recursive bracket encoding for nested objects (`field[sub][key]=value`)
-- `multipart/form-data` request bodies with boundary-based encoding for string/integer/number/boolean/binary/string-enum fields (optional fields handled)
+- `multipart/form-data` request bodies with boundary-based encoding for string/integer/number/boolean/binary/string-enum fields and primitive arrays (optional fields handled)
 - allOf in request body (property merging from `$ref` + inline objects)
 - Responses with status codes, `$ref` responses from `components.responses`
-- `$ref` resolution for parameters, requestBodies, responses, schemas
+- `$ref` resolution for pathItems, parameters, requestBodies, responses, schemas
 - Component schemas: types, decoders, encoders
 - Primitive component schemas (string, integer, number, boolean): type alias, decoder, encoder
 - String enums with unknown-value rejection
@@ -210,7 +210,7 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 - Typed `additionalProperties`: `Dict(String, T)` with dict decoder/encoder (known keys excluded)
 - Untyped `additionalProperties: true`: `Dict(String, Dynamic)` (decode-only, known keys excluded)
 - `additionalProperties` with inline complex schemas (hoisted automatically)
-- Validation constraint guards (minLength, maxLength, minimum, maximum, minItems, maxItems)
+- Validation constraint guards (minLength, maxLength, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, minItems, maxItems, uniqueItems, minProperties, maxProperties)
 - Composite `validate_<type>` functions that auto-call all field validators
 - Callbacks: parsed and callback handler stubs generated
 - Duplicate operationId detection
@@ -228,7 +228,7 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 - Lossless AST: all OpenAPI 3.x fields preserved through parsing (info, servers, parameters, media types, responses, components, tags, webhooks, external docs)
 - Parameter style and security scheme location expressed as ADTs (not strings)
 - Schema metadata: `title`, `readOnly`, `writeOnly`, `default`, `example`, `deprecated` preserved
-- Numeric constraints: `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf` preserved
+- Numeric constraints: `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf` preserved and used for guard generation
 - OAuth2 flows with authorization/token/refresh URLs and scopes preserved
 - `readOnly` properties filtered from request types and encoders; `writeOnly` properties treated as optional in response decoders
 - Structured capability errors with severity (Error/Warning) and target scope (Client/Server/Both)
@@ -247,13 +247,9 @@ The AST now parses and preserves all standard OpenAPI 3.x fields (lossless parse
 - `Response.headers`, `Response.links`
 - `PathItem.servers`, `Operation.servers`, `Operation.externalDocs`
 - `components.headers`, `components.examples`, `components.links`
-- Numeric: `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`
-- Array: `uniqueItems`
-- Object: `minProperties`, `maxProperties`
 
 The following features are **not supported** at all:
 
-- `PathItem.$ref` (path-level `$ref`)
 - OpenAPI 3.1 / JSON Schema 2020-12 advanced features (`$defs`, `prefixItems`, `if/then/else`, `dependentSchemas`, `$dynamicRef`, `contentMediaType`)
 - OpenAPI 3.1 multi-type unions (`type: [string, integer]`) — use `oneOf` instead
 - `xml` annotations

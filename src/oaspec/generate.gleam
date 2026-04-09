@@ -14,7 +14,11 @@ import oaspec/openapi/spec.{type OpenApiSpec}
 
 /// Result of a successful code generation run.
 pub type GenerationSummary {
-  GenerationSummary(files: List(GeneratedFile), spec_title: String)
+  GenerationSummary(
+    files: List(GeneratedFile),
+    spec_title: String,
+    warnings: List(validate.ValidationError),
+  )
 }
 
 /// Errors from the pure generation pipeline.
@@ -41,13 +45,16 @@ pub fn generate(
   let ctx = context.new(spec, cfg)
 
   // Validate spec for unsupported features
-  let validation_issues = validate.validate(ctx)
+  let validation_issues =
+    validate.validate(ctx)
+    |> validate.filter_by_mode(cfg.mode)
   let blocking_errors = validate.errors_only(validation_issues)
+  let warnings = validate.warnings_only(validation_issues)
   case list.is_empty(blocking_errors) {
     False -> Error(ValidationErrors(errors: blocking_errors))
     True -> {
       let files = generate_all_files(ctx)
-      Ok(GenerationSummary(files:, spec_title:))
+      Ok(GenerationSummary(files:, spec_title:, warnings:))
     }
   }
 }

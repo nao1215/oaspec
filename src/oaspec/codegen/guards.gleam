@@ -53,6 +53,10 @@ fn generate_guards(ctx: Context) -> String {
     True -> ["gleam/list", ..imports]
     False -> imports
   }
+  let imports = case constraint_types.has_dict {
+    True -> ["gleam/dict.{type Dict}", ..imports]
+    False -> imports
+  }
   let imports = case constraint_types.has_float_multiple_of {
     True -> ["gleam/int", "gleam/float", ..imports]
     False -> imports
@@ -123,6 +127,7 @@ type ConstraintTypes {
     has_float: Bool,
     has_list: Bool,
     has_float_multiple_of: Bool,
+    has_dict: Bool,
   )
 }
 
@@ -133,7 +138,7 @@ fn collect_constraint_types(
 ) -> ConstraintTypes {
   list.fold(
     schemas,
-    ConstraintTypes(False, False, False, False, False),
+    ConstraintTypes(False, False, False, False, False, False),
     fn(acc, entry) {
       let #(_name, schema_ref) = entry
       collect_schema_constraint_types(acc, schema_ref, ctx)
@@ -169,8 +174,12 @@ fn collect_schema_constraint_types(
     Ok(NumberSchema(multiple_of: Some(_), ..)) ->
       ConstraintTypes(..acc, has_float: True, has_float_multiple_of: True)
     Ok(ArraySchema(min_items: Some(_), ..))
-    | Ok(ArraySchema(max_items: Some(_), ..)) ->
+    | Ok(ArraySchema(max_items: Some(_), ..))
+    | Ok(ArraySchema(unique_items: True, ..)) ->
       ConstraintTypes(..acc, has_list: True)
+    Ok(ObjectSchema(min_properties: Some(_), ..))
+    | Ok(ObjectSchema(max_properties: Some(_), ..)) ->
+      ConstraintTypes(..acc, has_dict: True)
     Ok(ObjectSchema(properties:, ..)) ->
       dict.to_list(properties)
       |> list.fold(acc, fn(a, prop) {
@@ -213,7 +222,15 @@ fn generate_guards_for_schema_object(
   ctx: Context,
 ) -> se.StringBuilder {
   case schema {
-    ObjectSchema(properties:, ..) -> {
+    ObjectSchema(properties:, min_properties:, max_properties:, ..) -> {
+      let sb =
+        generate_properties_count_guard(
+          sb,
+          name,
+          "",
+          min_properties,
+          max_properties,
+        )
       let props = dict.to_list(properties)
       list.fold(props, sb, fn(sb, entry) {
         let #(prop_name, prop_ref) = entry
@@ -280,8 +297,10 @@ fn generate_guards_for_schema_object(
         )
       generate_float_multiple_of_guard(sb, name, "", multiple_of)
     }
-    ArraySchema(min_items:, max_items:, ..) ->
-      generate_list_guard(sb, name, "", min_items, max_items)
+    ArraySchema(min_items:, max_items:, unique_items:, ..) -> {
+      let sb = generate_list_guard(sb, name, "", min_items, max_items)
+      generate_unique_items_guard(sb, name, "", unique_items)
+    }
     _ -> sb
   }
 }
@@ -346,8 +365,11 @@ fn generate_field_guard(
         )
       generate_float_multiple_of_guard(sb, schema_name, prop_name, multiple_of)
     }
-    Ok(ArraySchema(min_items:, max_items:, ..)) ->
-      generate_list_guard(sb, schema_name, prop_name, min_items, max_items)
+    Ok(ArraySchema(min_items:, max_items:, unique_items:, ..)) -> {
+      let sb =
+        generate_list_guard(sb, schema_name, prop_name, min_items, max_items)
+      generate_unique_items_guard(sb, schema_name, prop_name, unique_items)
+    }
     _ -> sb
   }
 }
@@ -877,6 +899,118 @@ fn generate_list_guard(
   }
 }
 
+/// Generate a uniqueItems validation guard.
+fn generate_unique_items_guard(
+  sb: se.StringBuilder,
+  schema_name: String,
+  prop_name: String,
+  unique_items: Bool,
+) -> se.StringBuilder {
+  case unique_items {
+    False -> sb
+    True -> {
+      let fn_name = guard_function_name(schema_name, prop_name, "unique")
+      sb
+      |> se.line(
+        "/// Validate unique items for "
+        <> schema_name
+        <> field_label(prop_name)
+        <> ".",
+      )
+      |> se.line(
+        "pub fn " <> fn_name <> "(value: List(a)) -> Result(List(a), String) {",
+      )
+      |> se.indent(
+        1,
+        "case list.length(value) == list.length(list.unique(value)) {",
+      )
+      |> se.indent(2, "True -> Ok(value)")
+      |> se.indent(2, "False -> Error(\"items must be unique\")")
+      |> se.indent(1, "}")
+      |> se.line("}")
+      |> se.blank_line()
+    }
+  }
+}
+
+/// Generate a minProperties/maxProperties validation guard for objects.
+fn generate_properties_count_guard(
+  sb: se.StringBuilder,
+  schema_name: String,
+  prop_name: String,
+  min_properties: Option(Int),
+  max_properties: Option(Int),
+) -> se.StringBuilder {
+  case min_properties, max_properties {
+    None, None -> sb
+    _, _ -> {
+      let fn_name = guard_function_name(schema_name, prop_name, "properties")
+      let sb =
+        sb
+        |> se.line(
+          "/// Validate property count for "
+          <> schema_name
+          <> field_label(prop_name)
+          <> ".",
+        )
+        |> se.line(
+          "pub fn "
+          <> fn_name
+          <> "(value: Dict(k, v)) -> Result(Dict(k, v), String) {",
+        )
+        |> se.indent(1, "let count = dict.size(value)")
+      let sb = case min_properties, max_properties {
+        Some(min), Some(max) ->
+          sb
+          |> se.indent(1, "case count < " <> int.to_string(min) <> " {")
+          |> se.indent(
+            2,
+            "True -> Error(\"must have at least "
+              <> int.to_string(min)
+              <> " properties\")",
+          )
+          |> se.indent(2, "False ->")
+          |> se.indent(3, "case count > " <> int.to_string(max) <> " {")
+          |> se.indent(
+            4,
+            "True -> Error(\"must have at most "
+              <> int.to_string(max)
+              <> " properties\")",
+          )
+          |> se.indent(4, "False -> Ok(value)")
+          |> se.indent(3, "}")
+          |> se.indent(1, "}")
+        Some(min), None ->
+          sb
+          |> se.indent(1, "case count < " <> int.to_string(min) <> " {")
+          |> se.indent(
+            2,
+            "True -> Error(\"must have at least "
+              <> int.to_string(min)
+              <> " properties\")",
+          )
+          |> se.indent(2, "False -> Ok(value)")
+          |> se.indent(1, "}")
+        None, Some(max) ->
+          sb
+          |> se.indent(1, "case count > " <> int.to_string(max) <> " {")
+          |> se.indent(
+            2,
+            "True -> Error(\"must have at most "
+              <> int.to_string(max)
+              <> " properties\")",
+          )
+          |> se.indent(2, "False -> Ok(value)")
+          |> se.indent(1, "}")
+        None, None -> sb
+      }
+      sb
+      |> se.line("}")
+      |> se.blank_line()
+    }
+  }
+}
+
 /// Build the guard function name from schema name, property name, and constraint type.
 fn guard_function_name(
   schema_name: String,
@@ -1007,13 +1141,28 @@ fn collect_guard_calls(
     Reference(..) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
   }
   case schema {
-    Ok(ObjectSchema(properties:, required:, ..)) ->
-      dict.to_list(properties)
-      |> list.flat_map(fn(entry) {
-        let #(prop_name, prop_ref) = entry
-        let is_required = list.contains(required, prop_name)
-        collect_field_guard_calls(name, prop_name, prop_ref, is_required, ctx)
-      })
+    Ok(ObjectSchema(
+      properties:,
+      required:,
+      min_properties:,
+      max_properties:,
+      ..,
+    )) -> {
+      let prop_calls =
+        dict.to_list(properties)
+        |> list.flat_map(fn(entry) {
+          let #(prop_name, prop_ref) = entry
+          let is_required = list.contains(required, prop_name)
+          collect_field_guard_calls(name, prop_name, prop_ref, is_required, ctx)
+        })
+      let size_calls = case min_properties, max_properties {
+        None, None -> []
+        _, _ -> [
+          #(guard_function_name(name, "", "properties"), "value", True),
+        ]
+      }
+      list.append(prop_calls, size_calls)
+    }
     Ok(AllOfSchema(schemas:, ..)) -> {
       let merged = merge_allof_props_and_required(schemas, ctx)
       dict.to_list(merged.properties)
@@ -1088,13 +1237,21 @@ fn collect_guard_calls(
           ])
       }
     }
-    Ok(ArraySchema(min_items:, max_items:, ..)) ->
-      case min_items, max_items {
+    Ok(ArraySchema(min_items:, max_items:, unique_items:, ..)) -> {
+      let length_calls = case min_items, max_items {
         None, None -> []
         _, _ -> [
           #(guard_function_name(name, "", "length"), "value", True),
         ]
       }
+      let unique_calls = case unique_items {
+        True -> [
+          #(guard_function_name(name, "", "unique"), "value", True),
+        ]
+        False -> []
+      }
+      list.append(length_calls, unique_calls)
+    }
     _ -> []
   }
 }
@@ -1206,8 +1363,8 @@ fn collect_field_guard_calls(
           ])
       }
     }
-    Ok(ArraySchema(min_items:, max_items:, ..)) ->
-      case min_items, max_items {
+    Ok(ArraySchema(min_items:, max_items:, unique_items:, ..)) -> {
+      let length_calls = case min_items, max_items {
         None, None -> []
         _, _ -> [
           #(
@@ -1217,6 +1374,18 @@ fn collect_field_guard_calls(
           ),
         ]
       }
+      let unique_calls = case unique_items {
+        True -> [
+          #(
+            guard_function_name(schema_name, prop_name, "unique"),
+            accessor,
+            is_required,
+          ),
+        ]
+        False -> []
+      }
+      list.append(length_calls, unique_calls)
+    }
     _ -> []
   }
 }

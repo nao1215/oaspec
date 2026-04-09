@@ -5,6 +5,7 @@ import gleam/regexp
 import gleam/string
 import oaspec/codegen/context.{type Context}
 import oaspec/codegen/types as type_gen
+import oaspec/config
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
@@ -57,6 +58,18 @@ pub fn errors_only(issues: List(ValidationError)) -> List(ValidationError) {
 /// Filter to only warnings (not errors).
 pub fn warnings_only(issues: List(ValidationError)) -> List(ValidationError) {
   list.filter(issues, fn(e) { e.severity == SeverityWarning })
+}
+
+/// Filter validation issues to those relevant for the selected generation mode.
+pub fn filter_by_mode(
+  issues: List(ValidationError),
+  mode: config.GenerateMode,
+) -> List(ValidationError) {
+  case mode {
+    config.Client -> list.filter(issues, fn(e) { e.target != TargetServer })
+    config.Server -> list.filter(issues, fn(e) { e.target != TargetClient })
+    config.Both -> issues
+  }
 }
 
 /// Convert a validation error to a human-readable string.
@@ -169,8 +182,131 @@ fn validate_parameters(
     // style. Without it, codegen cannot stringify the value and falls through
     // to raw variable name, producing invalid generated code.
     let complex_schema_errors = validate_complex_param_schema(path, p, ctx)
-    list.flatten([style_errors, content_errors, complex_schema_errors])
+    let server_structured_param_errors =
+      validate_server_structured_param(path, p, ctx)
+    let cookie_errors = validate_server_cookie_param(path, p, ctx)
+    list.flatten([
+      style_errors,
+      content_errors,
+      complex_schema_errors,
+      server_structured_param_errors,
+      cookie_errors,
+    ])
   })
+}
+
+fn validate_server_structured_param(
+  path: String,
+  param: spec.Parameter,
+  ctx: Context,
+) -> List(ValidationError) {
+  case ctx.config.mode {
+    config.Client -> []
+    _ -> {
+      let schema_obj = resolve_schema_object(param.schema, ctx)
+      let array_errors = case param.in_, schema_obj {
+        spec.InQuery, Some(ArraySchema(items: Inline(StringSchema(..)), ..))
+        | spec.InQuery, Some(ArraySchema(items: Inline(IntegerSchema(..)), ..))
+        | spec.InQuery, Some(ArraySchema(items: Inline(NumberSchema(..)), ..))
+        | spec.InQuery, Some(ArraySchema(items: Inline(BooleanSchema(..)), ..))
+        -> []
+        spec.InQuery, Some(ArraySchema(..)) -> [
+          ValidationError(
+            severity: SeverityError,
+            target: TargetServer,
+            path: path,
+            detail: "Query array parameters are only supported for inline primitive items in server code generation.",
+          ),
+        ]
+        spec.InHeader, Some(ArraySchema(items: Inline(StringSchema(..)), ..))
+        | spec.InHeader, Some(ArraySchema(items: Inline(IntegerSchema(..)), ..))
+        | spec.InHeader, Some(ArraySchema(items: Inline(NumberSchema(..)), ..))
+        | spec.InHeader, Some(ArraySchema(items: Inline(BooleanSchema(..)), ..))
+        -> []
+        spec.InHeader, Some(ArraySchema(..)) -> [
+          ValidationError(
+            severity: SeverityError,
+            target: TargetServer,
+            path: path,
+            detail: "Header array parameters are only supported for inline primitive items in server code generation.",
+          ),
+        ]
+        _, _ -> []
+      }
+      let deep_object_errors =
+        validate_server_deep_object_param(path, param, ctx)
+      list.flatten([array_errors, deep_object_errors])
+    }
+  }
+}
+
+fn validate_server_deep_object_param(
+  path: String,
+  param: spec.Parameter,
+  ctx: Context,
+) -> List(ValidationError) {
+  case param.in_, param.style, resolve_schema_object(param.schema, ctx) {
+    spec.InQuery,
+      Some(spec.DeepObjectStyle),
+      Some(ObjectSchema(properties:, ..))
+    ->
+      dict.to_list(properties)
+      |> list.flat_map(fn(entry) {
+        let #(prop_name, prop_ref) = entry
+        case deep_object_server_leaf_supported(prop_ref, ctx) {
+          True -> []
+          False -> [
+            ValidationError(
+              severity: SeverityError,
+              target: TargetServer,
+              path: path <> "." <> prop_name,
+              detail: "deepObject properties are only supported for inline primitive scalars and inline primitive array leaves in server code generation.",
+            ),
+          ]
+        }
+      })
+    _, _, _ -> []
+  }
+}
+
+fn deep_object_server_leaf_supported(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Bool {
+  case schema_ref {
+    Inline(StringSchema(..))
+    | Inline(IntegerSchema(..))
+    | Inline(NumberSchema(..))
+    | Inline(BooleanSchema(..))
+    | Inline(ArraySchema(items: Inline(StringSchema(..)), ..))
+    | Inline(ArraySchema(items: Inline(IntegerSchema(..)), ..))
+    | Inline(ArraySchema(items: Inline(NumberSchema(..)), ..))
+    | Inline(ArraySchema(items: Inline(BooleanSchema(..)), ..)) -> True
+    Reference(..) ->
+      case resolve_schema_object(Some(schema_ref), ctx) {
+        Some(StringSchema(..))
+        | Some(IntegerSchema(..))
+        | Some(NumberSchema(..))
+        | Some(BooleanSchema(..))
+        | Some(ArraySchema(items: Inline(StringSchema(..)), ..))
+        | Some(ArraySchema(items: Inline(IntegerSchema(..)), ..))
+        | Some(ArraySchema(items: Inline(NumberSchema(..)), ..))
+        | Some(ArraySchema(items: Inline(BooleanSchema(..)), ..)) -> True
+        _ -> False
+      }
+    _ -> False
+  }
+}
+
+fn validate_server_cookie_param(
+  path: String,
+  param: spec.Parameter,
+  ctx: Context,
+) -> List(ValidationError) {
+  let _ = path
+  let _ = param
+  let _ = ctx
+  []
 }
 
 /// Check if a parameter has a complex schema (object, oneOf, allOf, anyOf)
@@ -187,14 +323,25 @@ fn validate_complex_param_schema(
       // invalid code (e.g., uri.percent_encode(filter.meta)).
       validate_deep_object_no_nested_objects(path, param, ctx)
     _ ->
-      case param.in_ {
-        spec.InPath -> []
-        _ ->
-          case resolve_schema_object(param.schema, ctx) {
-            Some(ObjectSchema(..))
-            | Some(AllOfSchema(..))
-            | Some(OneOfSchema(..))
-            | Some(AnyOfSchema(..)) -> [
+      case resolve_schema_object(param.schema, ctx) {
+        Some(ObjectSchema(..))
+        | Some(AllOfSchema(..))
+        | Some(OneOfSchema(..))
+        | Some(AnyOfSchema(..)) ->
+          case param.in_ {
+            spec.InPath ->
+              case ctx.config.mode {
+                config.Client -> []
+                _ -> [
+                  ValidationError(
+                    severity: SeverityError,
+                    target: TargetServer,
+                    path: path,
+                    detail: "Complex path parameters are not supported for server code generation.",
+                  ),
+                ]
+              }
+            _ -> [
               ValidationError(
                 severity: SeverityError,
                 target: TargetBoth,
@@ -202,8 +349,8 @@ fn validate_complex_param_schema(
                 detail: "Complex schema (object/oneOf/allOf/anyOf) parameters require style: deepObject. Without it, the parameter cannot be serialized.",
               ),
             ]
-            _ -> []
           }
+        _ -> []
       }
   }
 }
@@ -299,11 +446,34 @@ fn validate_request_body(
         validate_multipart_request_body_fields(op_id, rb.content, ctx)
       let form_urlencoded_errors =
         validate_form_urlencoded_schema(op_id, rb.content, ctx)
+      let server_form_urlencoded_errors =
+        validate_server_form_urlencoded_request_body(
+          op_id,
+          rb.content,
+          content_keys,
+          ctx,
+        )
+      let server_multipart_errors =
+        validate_server_multipart_request_body(
+          op_id,
+          rb.content,
+          content_keys,
+          ctx,
+        )
+      // Server router has explicit typed support for application/json,
+      // application/x-www-form-urlencoded, and multipart/form-data. Other
+      // supported content types still fall back to raw String and must be
+      // rejected here.
+      let server_body_errors =
+        validate_server_request_body_content_types(op_id, content_keys, ctx)
       list.flatten([
         content_type_errors,
         schema_errors,
         multipart_field_errors,
         form_urlencoded_errors,
+        server_form_urlencoded_errors,
+        server_multipart_errors,
+        server_body_errors,
       ])
     }
   }
@@ -369,6 +539,202 @@ fn validate_form_urlencoded_schema(
         None -> []
       }
     Error(_) -> []
+  }
+}
+
+/// Validate that request body content types are supported for server codegen.
+/// Server router only handles application/json with typed decode; other types
+/// that pass the general is_supported_request check (multipart/form-data,
+/// application/x-www-form-urlencoded) are passed as raw String which breaks
+/// the typed body contract.
+fn validate_server_form_urlencoded_request_body(
+  op_id: String,
+  content: dict.Dict(String, spec.MediaType),
+  content_keys: List(String),
+  ctx: Context,
+) -> List(ValidationError) {
+  case ctx.config.mode {
+    config.Client -> []
+    _ ->
+      case dict.get(content, "application/x-www-form-urlencoded") {
+        Ok(media_type) -> {
+          let content_type_errors = case list.length(content_keys) > 1 {
+            True -> [
+              ValidationError(
+                severity: SeverityError,
+                target: TargetServer,
+                path: op_id <> ".requestBody",
+                detail: "application/x-www-form-urlencoded request bodies are only supported as the sole request content type for server code generation.",
+              ),
+            ]
+            False -> []
+          }
+          let field_errors = case
+            resolve_schema_object(media_type.schema, ctx)
+          {
+            Some(ObjectSchema(properties:, ..)) ->
+              dict.to_list(properties)
+              |> list.flat_map(fn(entry) {
+                let #(field_name, field_schema) = entry
+                case
+                  form_urlencoded_server_field_supported(field_schema, ctx, 0)
+                {
+                  True -> []
+                  False -> [
+                    ValidationError(
+                      severity: SeverityError,
+                      target: TargetServer,
+                      path: op_id <> ".requestBody.form." <> field_name,
+                      detail: "application/x-www-form-urlencoded server request bodies only support primitive scalars, primitive arrays, and nested objects with primitive leaves (max 5 levels).",
+                    ),
+                  ]
+                }
+              })
+            _ -> []
+          }
+          list.append(content_type_errors, field_errors)
+        }
+        Error(_) -> []
+      }
+  }
+}
+
+fn validate_server_request_body_content_types(
+  op_id: String,
+  content_keys: List(String),
+  ctx: Context,
+) -> List(ValidationError) {
+  case ctx.config.mode {
+    config.Client -> []
+    _ -> {
+      let non_json_but_supported =
+        list.filter(content_keys, fn(key) {
+          key != "application/json"
+          && key != "application/x-www-form-urlencoded"
+          && key != "multipart/form-data"
+          && content_type.is_supported_request(content_type.from_string(key))
+        })
+      list.map(non_json_but_supported, fn(media_type) {
+        ValidationError(
+          severity: SeverityError,
+          target: TargetServer,
+          path: op_id <> ".requestBody",
+          detail: "Content type '"
+            <> media_type
+            <> "' is not supported for server code generation. Server router only supports application/json request bodies with typed decoding.",
+        )
+      })
+    }
+  }
+}
+
+fn validate_server_multipart_request_body(
+  op_id: String,
+  content: dict.Dict(String, spec.MediaType),
+  content_keys: List(String),
+  ctx: Context,
+) -> List(ValidationError) {
+  case ctx.config.mode {
+    config.Client -> []
+    _ ->
+      case dict.get(content, "multipart/form-data") {
+        Ok(media_type) -> {
+          let content_type_errors = case list.length(content_keys) > 1 {
+            True -> [
+              ValidationError(
+                severity: SeverityError,
+                target: TargetServer,
+                path: op_id <> ".requestBody",
+                detail: "multipart/form-data request bodies are only supported as the sole request content type for server code generation.",
+              ),
+            ]
+            False -> []
+          }
+          let field_errors = case
+            resolve_schema_object(media_type.schema, ctx)
+          {
+            Some(ObjectSchema(properties:, ..)) ->
+              dict.to_list(properties)
+              |> list.flat_map(fn(entry) {
+                let #(field_name, field_schema) = entry
+                case multipart_server_field_supported(field_schema, ctx) {
+                  True -> []
+                  False -> [
+                    ValidationError(
+                      severity: SeverityError,
+                      target: TargetServer,
+                      path: op_id <> ".requestBody.multipart." <> field_name,
+                      detail: "multipart/form-data server request bodies only support primitive scalar fields.",
+                    ),
+                  ]
+                }
+              })
+            _ -> []
+          }
+          list.append(content_type_errors, field_errors)
+        }
+        Error(_) -> []
+      }
+  }
+}
+
+fn form_urlencoded_server_field_supported(
+  schema_ref: SchemaRef,
+  ctx: Context,
+  depth: Int,
+) -> Bool {
+  case resolve_schema_object(Some(schema_ref), ctx) {
+    Some(StringSchema(..))
+    | Some(IntegerSchema(..))
+    | Some(NumberSchema(..))
+    | Some(BooleanSchema(..)) -> True
+    Some(ArraySchema(items:, ..)) ->
+      form_urlencoded_server_array_item_supported(items, ctx)
+    Some(ObjectSchema(properties:, ..)) if depth < 5 ->
+      dict.to_list(properties)
+      |> list.all(fn(entry) {
+        let #(_, child_schema) = entry
+        form_urlencoded_server_field_supported(child_schema, ctx, depth + 1)
+      })
+    _ -> False
+  }
+}
+
+fn form_urlencoded_server_array_item_supported(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Bool {
+  case resolve_schema_object(Some(schema_ref), ctx) {
+    Some(StringSchema(..))
+    | Some(IntegerSchema(..))
+    | Some(NumberSchema(..))
+    | Some(BooleanSchema(..)) -> True
+    _ -> False
+  }
+}
+
+fn multipart_server_field_supported(schema_ref: SchemaRef, ctx: Context) -> Bool {
+  case resolve_schema_object(Some(schema_ref), ctx) {
+    Some(StringSchema(..))
+    | Some(IntegerSchema(..))
+    | Some(NumberSchema(..))
+    | Some(BooleanSchema(..)) -> True
+    Some(ArraySchema(items:, ..)) ->
+      multipart_server_array_item_supported(items, ctx)
+    _ -> False
+  }
+}
+
+fn multipart_server_array_item_supported(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Bool {
+  case resolve_schema_object(Some(schema_ref), ctx) {
+    Some(StringSchema(..))
+    | Some(IntegerSchema(..))
+    | Some(NumberSchema(..))
+    | Some(BooleanSchema(..)) -> True
+    _ -> False
   }
 }
 
@@ -570,6 +936,21 @@ fn validate_preserved_but_unused(ctx: Context) -> List(ValidationError) {
       list.flat_map(entries, fn(entry) {
         let #(status_code, response) = entry
         let base_path = op_id <> ".responses." <> status_code
+        let multi_content_warnings = case
+          ctx.config.mode,
+          list.length(dict.to_list(response.content))
+        {
+          config.Client, _ -> []
+          _, n if n > 1 -> [
+            ValidationError(
+              severity: SeverityWarning,
+              target: TargetServer,
+              path: base_path <> ".content",
+              detail: "Multiple response content types are not fully supported for server code generation. Generated server responses lose the content-type header.",
+            ),
+          ]
+          _, _ -> []
+        }
         let header_warnings = case dict.is_empty(response.headers) {
           True -> []
           False -> [
@@ -608,7 +989,12 @@ fn validate_preserved_but_unused(ctx: Context) -> List(ValidationError) {
               ]
             }
           })
-        list.flatten([header_warnings, link_warnings, encoding_warnings])
+        list.flatten([
+          multi_content_warnings,
+          header_warnings,
+          link_warnings,
+          encoding_warnings,
+        ])
       })
     })
   list.flatten([webhook_warnings, response_warnings])

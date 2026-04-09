@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-09
+
+### Added
+
+#### Server Codegen Improvements
+- Bool parameter parsing is now case-insensitive (`"True"`, `"true"`, `"TRUE"` all accepted), matching `bool.to_string` output from client
+- Header parameter names lowercased in server router to match client behavior (HTTP headers are case-insensitive per RFC 7230)
+- Non-JSON request body content types (`multipart/form-data`, `application/x-www-form-urlencoded`) rejected for server mode with targeted validation error
+- Float path parameter parsing via `float.parse` (previously TODO placeholder)
+- Cookie parameter support with `cookie_lookup` helper, percent-decoding, and all scalar types (string, integer, float, boolean)
+- Server query parameters use `Dict(String, List(String))` multimap for repeated keys
+- Primitive array parameters in query and header positions
+- `style: deepObject` query parameters with inline primitive and inline primitive-array leaves
+- deepObject now supports `$ref` enum and primitive alias leaves by resolving references
+- `application/x-www-form-urlencoded` server request bodies with bracket encoding
+- Form-urlencoded multi-level object nesting up to 5 levels deep (`field[sub][key]=value`)
+- Form-urlencoded support for referenced primitive field schemas
+- `multipart/form-data` server request bodies with primitive scalar and primitive array fields
+- Multipart support for referenced primitive scalar fields
+- Multi-content-type server responses set first content type as default `content-type` header
+- Validation targets respected during generation: client-only errors skip server mode and vice versa
+- CLI displays validation warnings alongside blocking errors
+- `--warnings-as-errors` enforced in server integration builds
+
+#### Guard Generation
+- `uniqueItems` validation guard using `list.unique` length comparison
+- `minProperties` / `maxProperties` validation guards using `dict.size`
+- Guards work at both top-level schema and field-level within object properties
+
+### Fixed
+
+- `response_types.gleam` conditionally imports `types` module only when response variants reference component schemas (avoids unused import warning)
+- Complex path parameters rejected for server generation (previously silently accepted)
+- Structured parameters (array, deepObject, referenced object/array) rejected for server when unsupported
+- Unreachable `ObjectSchema` pattern matches removed from guards codegen
+
+### Changed
+
+- README support table updated to reflect all new capabilities
+- `uniqueItems`, `minProperties`, `maxProperties` moved from "Not yet supported" to "Supported"
+- `doc/reference/` tracking files removed from version control
+
 ## [0.5.0] - 2026-04-09
 
 ### Added

@@ -1,0 +1,52 @@
+openapi: 3.0.3
+info:
+  title: Server Form Urlencoded Ref Fields Test API
+  version: 1.0.0
+paths:
+  /submit:
+    post:
+      operationId: submitFormRefFields
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - scores
+                - profile
+              properties:
+                active:
+                  $ref: "#/components/schemas/ActiveFlag"
+                ratio:
+                  $ref: "#/components/schemas/RatioValue"
+                scores:
+                  $ref: "#/components/schemas/ScoreList"
+                profile:
+                  $ref: "#/components/schemas/Profile"
+      responses:
+        "200":
+          description: ok
+components:
+  schemas:
+    ActiveFlag:
+      type: boolean
+    RatioValue:
+      type: number
+    ScoreList:
+      type: array
+      items:
+        $ref: "#/components/schemas/Score"
+    Score:
+      type: integer
+    Profile:
+      type: object
+      required:
+        - username
+      properties:
+        username:
+          $ref: "#/components/schemas/UserName"
+        enabled:
+          $ref: "#/components/schemas/ActiveFlag"
+    UserName:
+      type: string

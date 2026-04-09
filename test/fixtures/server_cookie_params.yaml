@@ -1,0 +1,22 @@
+openapi: 3.0.3
+info:
+  title: Server Cookie Params
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: session
+          in: cookie
+          required: true
+          schema:
+            type: string
+        - name: debug
+          in: cookie
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: ok

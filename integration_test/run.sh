@@ -97,7 +97,7 @@ info "Compiling generated code (type-safety check)..."
 cd "$SCRIPT_DIR"
 gleam deps download
 
-if gleam build 2>&1; then
+if gleam build --warnings-as-errors 2>&1; then
   info "PASS: Generated code compiles successfully."
 else
   fail "Generated code failed to compile."
@@ -239,7 +239,7 @@ GLEAM_EOF
 cd "$COMPLEX_DIR"
 gleam deps download
 
-if gleam build 2>&1; then
+if gleam build --warnings-as-errors 2>&1; then
   info "PASS: Generated complex spec code compiles successfully."
 else
   fail "Generated complex spec code failed to compile."
@@ -359,5 +359,133 @@ fi
 
 # Clean up
 rm -rf "$PRIM_DIR"
+
+# -------------------------------------------------------
+# Step 9: Generate form-urlencoded server and verify it compiles
+# -------------------------------------------------------
+info "Testing form-urlencoded server code generation..."
+
+FORM_DIR="$SCRIPT_DIR/form_test"
+rm -rf "$FORM_DIR"
+mkdir -p "$FORM_DIR/src"
+
+cat > "$FORM_DIR/oaspec-form.yaml" << 'YAML_EOF'
+input: test/fixtures/server_form_urlencoded_body.yaml
+output:
+  server: ./integration_test/form_test/src/api
+package: api
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$FORM_DIR/oaspec-form.yaml" \
+  --mode=server
+
+cat > "$FORM_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
+import api/request_types
+import api/response_types
+
+pub fn submit_form(req: request_types.SubmitFormRequest) -> response_types.SubmitFormResponse {
+  let _ = req
+  response_types.SubmitFormResponseOk
+}
+GLEAM_EOF
+
+cat > "$FORM_DIR/gleam.toml" << 'TOML_EOF'
+name = "form_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$FORM_DIR/src/form_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$FORM_DIR"
+gleam deps download
+
+if gleam build --warnings-as-errors 2>&1; then
+  info "PASS: Generated form-urlencoded server code compiles (warnings-as-errors)."
+else
+  fail "Generated form-urlencoded server code failed to compile."
+fi
+
+rm -rf "$FORM_DIR"
+
+info "Form-urlencoded server integration tests passed."
+
+# -------------------------------------------------------
+# Step 10: Generate multipart server and verify it compiles
+# -------------------------------------------------------
+info "Testing multipart server code generation..."
+
+MULTI_DIR="$SCRIPT_DIR/multipart_test"
+rm -rf "$MULTI_DIR"
+mkdir -p "$MULTI_DIR/src"
+
+cat > "$MULTI_DIR/oaspec-multi.yaml" << 'YAML_EOF'
+input: test/fixtures/server_multipart_body.yaml
+output:
+  server: ./integration_test/multipart_test/src/api
+package: api
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$MULTI_DIR/oaspec-multi.yaml" \
+  --mode=server
+
+cat > "$MULTI_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
+import api/request_types
+import api/response_types
+
+pub fn upload_multipart(req: request_types.UploadMultipartRequest) -> response_types.UploadMultipartResponse {
+  let _ = req
+  response_types.UploadMultipartResponseOk
+}
+GLEAM_EOF
+
+cat > "$MULTI_DIR/gleam.toml" << 'TOML_EOF'
+name = "multipart_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$MULTI_DIR/src/multipart_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$MULTI_DIR"
+gleam deps download
+
+if gleam build --warnings-as-errors 2>&1; then
+  info "PASS: Generated multipart server code compiles (warnings-as-errors)."
+else
+  fail "Generated multipart server code failed to compile."
+fi
+
+rm -rf "$MULTI_DIR"
+
+info "Multipart server integration tests passed."
 
 info "All integration tests passed!"

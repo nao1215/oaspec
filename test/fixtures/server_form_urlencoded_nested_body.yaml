@@ -1,0 +1,35 @@
+openapi: 3.0.3
+info:
+  title: Server Nested Form Urlencoded Body Test API
+  version: 1.0.0
+paths:
+  /submit:
+    post:
+      operationId: submitNestedForm
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - profile
+              properties:
+                profile:
+                  type: object
+                  required:
+                    - username
+                  properties:
+                    username:
+                      type: string
+                    aliases:
+                      type: array
+                      items:
+                        type: string
+                    age:
+                      type: integer
+                enabled:
+                  type: boolean
+      responses:
+        "200":
+          description: ok

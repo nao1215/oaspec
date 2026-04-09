@@ -283,13 +283,53 @@ fn generate_request_type(
   }
 }
 
+/// Check if any response variant references the types module.
+fn responses_need_types_import(
+  operations: List(#(String, spec.Operation, String, spec.HttpMethod)),
+  _ctx: Context,
+) -> Bool {
+  list.any(operations, fn(op) {
+    let #(_op_id, operation, _path, _method) = op
+    let responses = dict.to_list(operation.responses)
+    list.any(responses, fn(entry) {
+      let #(_status_code, response) = entry
+      let content_entries = dict.to_list(response.content)
+      case content_entries {
+        [] -> False
+        [_, _, ..] -> False
+        [#(media_type_name, media_type)] ->
+          case media_type_name {
+            "text/plain"
+            | "application/xml"
+            | "text/xml"
+            | "application/octet-stream" -> False
+            _ ->
+              case media_type.schema {
+                Some(Reference(..)) -> True
+                Some(Inline(ArraySchema(items: Reference(..), ..))) -> True
+                Some(Inline(ObjectSchema(..))) -> True
+                Some(Inline(OneOfSchema(..))) -> True
+                Some(Inline(AnyOfSchema(..))) -> True
+                Some(Inline(AllOfSchema(..))) -> True
+                _ -> False
+              }
+          }
+      }
+    })
+  })
+}
+
 /// Generate response types for all operations.
 fn generate_response_types(ctx: Context) -> String {
+  let operations = collect_operations(ctx)
+  let needs_types = responses_need_types_import(operations, ctx)
+  let imports = case needs_types {
+    True -> [ctx.config.package <> "/types"]
+    False -> []
+  }
   let sb =
     se.file_header(context.version)
-    |> se.imports([ctx.config.package <> "/types"])
-
-  let operations = collect_operations(ctx)
+    |> se.imports(imports)
 
   let sb =
     list.fold(operations, sb, fn(sb, op) {

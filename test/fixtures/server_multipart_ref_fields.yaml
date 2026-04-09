@@ -1,0 +1,39 @@
+openapi: 3.0.3
+info:
+  title: Server Multipart Ref Fields Test API
+  version: 1.0.0
+paths:
+  /upload:
+    post:
+      operationId: uploadMultipartRefFields
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  $ref: "#/components/schemas/UploadName"
+                active:
+                  $ref: "#/components/schemas/UploadActive"
+                ratio:
+                  $ref: "#/components/schemas/UploadRatio"
+                file:
+                  $ref: "#/components/schemas/UploadFile"
+      responses:
+        "200":
+          description: ok
+components:
+  schemas:
+    UploadName:
+      type: string
+    UploadActive:
+      type: boolean
+    UploadRatio:
+      type: number
+    UploadFile:
+      type: string
+      format: binary

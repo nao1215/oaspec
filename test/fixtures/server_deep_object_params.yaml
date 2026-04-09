@@ -1,0 +1,47 @@
+openapi: 3.0.3
+info:
+  title: Server Deep Object Params Test API
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: searchItems
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          required: true
+          schema:
+            type: object
+            required:
+              - name
+              - scores
+            properties:
+              name:
+                type: string
+              active:
+                type: boolean
+              ratio:
+                type: number
+              scores:
+                type: array
+                items:
+                  type: integer
+        - name: options
+          in: query
+          style: deepObject
+          explode: true
+          required: false
+          schema:
+            type: object
+            properties:
+              tags:
+                type: array
+                items:
+                  type: string
+              enabled:
+                type: boolean
+      responses:
+        "200":
+          description: ok

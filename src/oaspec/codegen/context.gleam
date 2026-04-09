@@ -2,7 +2,7 @@ import oaspec/config.{type Config}
 import oaspec/openapi/spec.{type OpenApiSpec}
 
 /// The version of oaspec used for generated code headers.
-pub const version = "0.5.0"
+pub const version = "0.6.0"
 
 /// Context for code generation, carrying all needed state.
 pub type Context {
