@@ -6141,3 +6141,9 @@ paths:
   list.length(warnings)
   |> should.equal(1)
 }
+
+pub fn integration_script_uses_warnings_as_errors_for_server_builds_test() {
+  let assert Ok(content) = simplifile.read("integration_test/run.sh")
+  string.contains(content, "if gleam build 2>&1; then")
+  |> should.be_false()
+}

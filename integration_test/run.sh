@@ -97,7 +97,7 @@ info "Compiling generated code (type-safety check)..."
 cd "$SCRIPT_DIR"
 gleam deps download
 
-if gleam build 2>&1; then
+if gleam build --warnings-as-errors 2>&1; then
   info "PASS: Generated code compiles successfully."
 else
   fail "Generated code failed to compile."
@@ -239,7 +239,7 @@ GLEAM_EOF
 cd "$COMPLEX_DIR"
 gleam deps download
 
-if gleam build 2>&1; then
+if gleam build --warnings-as-errors 2>&1; then
   info "PASS: Generated complex spec code compiles successfully."
 else
   fail "Generated complex spec code failed to compile."
