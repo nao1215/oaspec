@@ -669,10 +669,13 @@ pub fn validate_broken_spec_accepts_untyped_additional_properties_test() {
 
 // --- Parser: fail-fast tests ---
 
-pub fn parse_missing_responses_fails_test() {
-  let result = parser.parse_file("test/fixtures/missing_responses.yaml")
-  should.be_error(result)
-  let assert Error(parser.MissingField(path: _, field: "responses")) = result
+pub fn parse_missing_responses_succeeds_with_empty_dict_test() {
+  // Missing responses field is now parsed as empty dict (not a parse error).
+  // Validation catches missing responses separately.
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/missing_responses.yaml")
+  let paths = dict.to_list(spec.paths)
+  list.length(paths) |> should.not_equal(0)
 }
 
 pub fn parse_invalid_param_location_fails_test() {
@@ -7401,4 +7404,108 @@ components:
   |> should.be_true()
   string.contains(content, "dict.size")
   |> should.be_true()
+}
+
+// --- OSS fixture tests ---
+// Test fixtures ported from open source projects under MIT / Apache 2.0 licenses.
+// libopenapi: MIT License, Copyright (c) 2022-2025 Princess Beef Heavy Industries
+// oapi-codegen: Apache License 2.0, Copyright deepmap/oapi-codegen contributors
+
+pub fn oss_libopenapi_all_components_parses_test() {
+  // all-the-components.yaml has webhooks without responses field.
+  // OpenAPI spec requires responses on operations, but webhooks in the wild
+  // often omit them. Parser should handle this gracefully.
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_libopenapi_all_components.yaml")
+  spec.info.title |> should.equal("Burger Shop")
+  let ops = dict.to_list(spec.paths)
+  list.length(ops) |> should.not_equal(0)
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+pub fn oss_libopenapi_all_components_validates_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_libopenapi_all_components.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let blocking = validate.errors_only(errors)
+  list.length(blocking) |> should.equal(0)
+}
+
+pub fn oss_libopenapi_all_components_generates_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_libopenapi_all_components.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let result = generate.generate(spec, ctx.config)
+  case result {
+    Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
+    Error(generate.ValidationErrors(errors:)) -> {
+      let blocking = validate.errors_only(errors)
+      list.length(blocking) |> should.equal(0)
+    }
+  }
+}
+
+pub fn oss_libopenapi_burgershop_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_libopenapi_burgershop.yaml")
+  spec.info.title |> should.equal("Burger Shop")
+  spec.info.version |> should.equal("1.2")
+  // Has webhooks
+  dict.size(spec.webhooks) |> should.not_equal(0)
+  // Has security
+  list.length(spec.security) |> should.not_equal(0)
+}
+
+pub fn oss_libopenapi_burgershop_schemas_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_libopenapi_burgershop.yaml")
+  let assert Some(components) = spec.components
+  // Has expected schemas
+  let schema_names = dict.keys(components.schemas)
+  list.contains(schema_names, "Burger") |> should.be_true()
+  list.contains(schema_names, "Error") |> should.be_true()
+  list.contains(schema_names, "Fries") |> should.be_true()
+  list.contains(schema_names, "Dressing") |> should.be_true()
+  list.contains(schema_names, "Drink") |> should.be_true()
+}
+
+pub fn oss_libopenapi_petstorev3_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_libopenapi_petstorev3.json")
+  spec.info.title |> should.equal("Swagger Petstore - OpenAPI 3.0")
+  let paths = dict.to_list(spec.paths)
+  list.length(paths) |> should.not_equal(0)
+}
+
+pub fn oss_libopenapi_circular_rejects_missing_info_test() {
+  // circular-tests.yaml has no info field, which is required by OpenAPI 3.x.
+  // Parser should reject this with a clear error.
+  let result = parser.parse_file("test/fixtures/oss_libopenapi_circular.yaml")
+  case result {
+    Error(_) -> Nil
+    Ok(_) -> should.fail()
+  }
+}
+
+pub fn oss_oapi_codegen_cookies_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_cookies.yaml")
+  spec.info.title |> should.not_equal("")
+}
+
+pub fn oss_oapi_codegen_name_conflicts_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_name_conflicts.yaml")
+  let assert Some(components) = spec.components
+  // Should have many schemas (name conflict resolution tests many similar names)
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+pub fn oss_oapi_codegen_illegal_enums_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_illegal_enums.yaml")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
 }
