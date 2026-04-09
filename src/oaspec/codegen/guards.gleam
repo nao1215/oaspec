@@ -301,14 +301,6 @@ fn generate_guards_for_schema_object(
       let sb = generate_list_guard(sb, name, "", min_items, max_items)
       generate_unique_items_guard(sb, name, "", unique_items)
     }
-    ObjectSchema(min_properties:, max_properties:, ..) ->
-      generate_properties_count_guard(
-        sb,
-        name,
-        "",
-        min_properties,
-        max_properties,
-      )
     _ -> sb
   }
 }
@@ -1149,13 +1141,28 @@ fn collect_guard_calls(
     Reference(..) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
   }
   case schema {
-    Ok(ObjectSchema(properties:, required:, ..)) ->
-      dict.to_list(properties)
-      |> list.flat_map(fn(entry) {
-        let #(prop_name, prop_ref) = entry
-        let is_required = list.contains(required, prop_name)
-        collect_field_guard_calls(name, prop_name, prop_ref, is_required, ctx)
-      })
+    Ok(ObjectSchema(
+      properties:,
+      required:,
+      min_properties:,
+      max_properties:,
+      ..,
+    )) -> {
+      let prop_calls =
+        dict.to_list(properties)
+        |> list.flat_map(fn(entry) {
+          let #(prop_name, prop_ref) = entry
+          let is_required = list.contains(required, prop_name)
+          collect_field_guard_calls(name, prop_name, prop_ref, is_required, ctx)
+        })
+      let size_calls = case min_properties, max_properties {
+        None, None -> []
+        _, _ -> [
+          #(guard_function_name(name, "", "properties"), "value", True),
+        ]
+      }
+      list.append(prop_calls, size_calls)
+    }
     Ok(AllOfSchema(schemas:, ..)) -> {
       let merged = merge_allof_props_and_required(schemas, ctx)
       dict.to_list(merged.properties)
@@ -1245,13 +1252,6 @@ fn collect_guard_calls(
       }
       list.append(length_calls, unique_calls)
     }
-    Ok(ObjectSchema(min_properties:, max_properties:, ..)) ->
-      case min_properties, max_properties {
-        None, None -> []
-        _, _ -> [
-          #(guard_function_name(name, "", "properties"), "value", True),
-        ]
-      }
     _ -> []
   }
 }
