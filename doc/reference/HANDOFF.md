@@ -9,6 +9,7 @@ meaningful slice of work lands.
 
 ## Recent Commits
 
+- `91bd911` `Support primitive query arrays in server codegen`
 - `e8ae2fa` `Percent-decode generated server cookie values`
 - `3b685aa` `Import list for generated cookie router helpers`
 - `c5635a0` `Support cookie parameters in server codegen`
@@ -30,15 +31,22 @@ meaningful slice of work lands.
 - Server cookie parameters are now generated via Cookie-header lookup in
   `src/oaspec/codegen/server.gleam`, including percent-decoding of cookie
   values and required imports for the generated helper.
-- Structured server parameters and non-JSON server request bodies still need a
-  larger request parsing refactor.
+- Server query parameters now flow through a multimap route API
+  (`Dict(String, List(String))`), and primitive query arrays are supported in
+  generated server request construction.
+- Server deepObject query params are supported for flat object shapes whose
+  leaves are inline primitive scalars or inline primitive arrays.
+- Non-JSON server request bodies remain the largest missing request-parsing
+  gap.
 
 ## Next Concrete Tasks
 
-1. Add failing tests for server cookie parameter support.
-2. Build repeated-query support for server array parameters.
-3. Build server deepObject parsing on top of the same request parsing layer.
-4. Rework server non-JSON request-body parsing.
+1. Add fixtures and failing tests for server
+   `application/x-www-form-urlencoded` request bodies.
+2. Implement typed form-urlencoded request parsing in
+   `src/oaspec/codegen/server.gleam`.
+3. Rework multipart validation and generation once form-urlencoded is stable.
+4. Revisit multi-content server responses and response-header emission.
 
 ## Verification Commands
 
@@ -56,8 +64,9 @@ env PATH="$HOME/.local/share/mise/shims:/home/nao/.local/share/mise/installs/gle
 
 Latest known good local checks from this branch:
 
-- `gleam test` -> `197 passed, no failures`
+- `gleam test` -> `203 passed, no failures`
 - `gleam build --warnings-as-errors` -> pass
+- `just all` -> pass
 
 ## Constraints
 

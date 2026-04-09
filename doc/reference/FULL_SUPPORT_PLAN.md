@@ -146,10 +146,13 @@ Definition of done:
 
 ### Phase B: server structured parameters
 
-- [ ] repeated query key representation added to server route API
-- [ ] query array parsing implemented
-- [ ] deepObject parsing implemented
-- [ ] server validation updated to allow these features
+- [x] repeated query key representation added to server route API
+- [x] query array parsing implemented
+- [x] deepObject parsing implemented for flat object params with inline primitive
+  and inline primitive-array leaves
+- [x] server validation updated to allow implemented structured query features
+- [ ] deepObject leaf support expanded beyond inline primitives when request type
+  generation can safely represent referenced enums / aliases
 
 ### Phase C: server non-JSON request bodies
 
@@ -178,3 +181,6 @@ Definition of done:
   code with `--warnings-as-errors`.
 - When a feature is implemented for only one target, keep capability filtering
   target-aware instead of widening `Both` support prematurely.
+- The generated server route signature is now
+  `Dict(String, List(String))` for query values; new parsing features should
+  build on that multimap rather than collapsing back to a single string.
