@@ -210,7 +210,7 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 - Typed `additionalProperties`: `Dict(String, T)` with dict decoder/encoder (known keys excluded)
 - Untyped `additionalProperties: true`: `Dict(String, Dynamic)` (decode-only, known keys excluded)
 - `additionalProperties` with inline complex schemas (hoisted automatically)
-- Validation constraint guards (minLength, maxLength, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, minItems, maxItems)
+- Validation constraint guards (minLength, maxLength, minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, minItems, maxItems, uniqueItems, minProperties, maxProperties)
 - Composite `validate_<type>` functions that auto-call all field validators
 - Callbacks: parsed and callback handler stubs generated
 - Duplicate operationId detection
@@ -247,8 +247,6 @@ The AST now parses and preserves all standard OpenAPI 3.x fields (lossless parse
 - `Response.headers`, `Response.links`
 - `PathItem.servers`, `Operation.servers`, `Operation.externalDocs`
 - `components.headers`, `components.examples`, `components.links`
-- Array: `uniqueItems`
-- Object: `minProperties`, `maxProperties`
 
 The following features are **not supported** at all:
 
