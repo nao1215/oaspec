@@ -2171,6 +2171,193 @@ paths:
   |> should.be_true()
 }
 
+// --- Finding: guards must handle optional fields and use correct array suffix ---
+pub fn guards_optional_field_and_array_suffix_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /samples:
+    get:
+      operationId: getSamples
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Sample:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        nickname:
+          type: string
+          minLength: 1
+        tags:
+          type: array
+          items: { type: string }
+          minItems: 1
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = guards.generate(ctx)
+  let assert [guards_file] = files
+  let content = guards_file.content
+  // Optional field "nickname" is Option(String), so composite validator
+  // must unwrap it before calling the validator (or skip when None).
+  // It must NOT call validate_sample_nickname_length(value.nickname) directly.
+  string.contains(content, "validate_sample_nickname_length(value.nickname)")
+  |> should.be_false()
+  // Array field must use "length" suffix (matching the generated function),
+  // NOT "items" suffix.
+  string.contains(content, "validate_sample_tags_items")
+  |> should.be_false()
+  string.contains(content, "validate_sample_tags_length")
+  |> should.be_true()
+}
+
+// --- Finding: multi-content response must produce type-safe code ---
+// When response has text/plain (String) and application/json (Int),
+// the response_type must accommodate both, not just the first.
+pub fn multi_content_response_type_safety_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /data:
+    get:
+      operationId: getData
+      responses:
+        '200':
+          description: ok
+          content:
+            text/plain:
+              schema: { type: string }
+            application/json:
+              schema: { type: integer }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+
+  // Response type must use String (common supertype) since text/plain returns String
+  let type_files = types.generate(ctx)
+  let response_types_content =
+    list.find(type_files, fn(f) { string.contains(f.path, "response_types") })
+  let assert Ok(rt_file) = response_types_content
+  // The variant must use String since text/plain and JSON decode to different types
+  // It must NOT use Int (which would be a type error when returning resp.body: String)
+  let has_int_variant = string.contains(rt_file.content, "GetDataResponseOk(Int)")
+  let has_string_variant =
+    string.contains(rt_file.content, "GetDataResponseOk(String)")
+  // Either use String for both, or separate variants per content-type
+  // The key constraint: text/plain branch returns resp.body (String),
+  // so the variant CANNOT hold Int
+  case has_int_variant, has_string_variant {
+    True, False ->
+      // Int variant but no String variant = type error
+      should.fail()
+    _, _ -> should.be_ok(Ok(Nil))
+  }
+}
+
+// --- Finding: multi-content request body collapsed to first entry ---
+pub fn multi_content_request_body_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /submit:
+    post:
+      operationId: submitData
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+          application/json:
+            schema: { type: integer }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // The client must handle both content types, not just the first.
+  // At minimum, the form-urlencoded content type must appear.
+  string.contains(content, "application/x-www-form-urlencoded")
+  |> should.be_true()
+  // And JSON content type handling must also be present
+  string.contains(content, "application/json")
+  |> should.be_true()
+}
+
+// --- Finding: security OR alternatives must all be applied ---
+pub fn security_or_alternatives_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /secure:
+    get:
+      operationId: getSecure
+      responses:
+        '200': { description: ok }
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    BearerAuth:
+      type: http
+      scheme: bearer
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // Both security schemes must be applied in generated code,
+  // not just the first alternative.
+  string.contains(content, "api_key_auth")
+  |> should.be_true()
+  string.contains(content, "bearer_auth")
+  |> should.be_true()
+  // bearer_auth must actually be used in the request function body
+  // (not just in the ClientConfig type definition).
+  // Find the get_secure function and check bearer_auth appears inside it.
+  let assert Ok(fn_start) =
+    find_substring_index(content, "pub fn get_secure(")
+  let fn_body = string.drop_start(content, fn_start)
+  string.contains(fn_body, "bearer_auth")
+  |> should.be_true()
+}
+
 fn find_substring_index(haystack: String, needle: String) -> Result(Int, Nil) {
   case string.contains(haystack, needle) {
     True -> {
