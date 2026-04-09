@@ -169,7 +169,7 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 
 ### Supported
 
-- OpenAPI 3.x (YAML and JSON)
+- OpenAPI 3.0.x and 3.1 (YAML and JSON; 3.1 `type` arrays and `null` supported, other 3.1-only features are best-effort)
 - Paths and operations (GET, POST, PUT, DELETE, PATCH)
 - Path, query, header, cookie parameters (path-level merged by `(name, in)`)
 - Parameter serialization for Bool, Float, Int, String, `$ref` enum types
@@ -200,9 +200,9 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 - Encode/decode roundtrip: `decode(encode(value)) == Ok(value)`
 - Circular `$ref` detection
 - Fail-fast parser for missing required fields, invalid parameter locations, malformed content
-- Client typed body (auto-encoded) and typed response (auto-decoded)
+- Client typed body (auto-encoded) and typed response (auto-decoded) for single content-type operations; multi-content-type operations use `String` body with explicit `content_type` parameter
 - `default` response handling in client
-- Top-level security inheritance (operation-level overrides, `security: []` opts out)
+- Top-level security inheritance (operation-level overrides, `security: []` opts out, OR alternatives all applied)
 - Security schemes: `apiKey` in header/query/cookie, HTTP all schemes (bearer/basic/digest/hoba/negotiate/mutual/etc.), OAuth2, OpenID Connect
 - `text/plain` response content type: body returned as `String` directly
 - `application/xml`, `text/xml` response content types: body returned as `String`
