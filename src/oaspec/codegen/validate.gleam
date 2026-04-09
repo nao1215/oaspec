@@ -253,14 +253,25 @@ fn validate_complex_param_schema(
       // invalid code (e.g., uri.percent_encode(filter.meta)).
       validate_deep_object_no_nested_objects(path, param, ctx)
     _ ->
-      case param.in_ {
-        spec.InPath -> []
-        _ ->
-          case resolve_schema_object(param.schema, ctx) {
-            Some(ObjectSchema(..))
-            | Some(AllOfSchema(..))
-            | Some(OneOfSchema(..))
-            | Some(AnyOfSchema(..)) -> [
+      case resolve_schema_object(param.schema, ctx) {
+        Some(ObjectSchema(..))
+        | Some(AllOfSchema(..))
+        | Some(OneOfSchema(..))
+        | Some(AnyOfSchema(..)) ->
+          case param.in_ {
+            spec.InPath ->
+              case ctx.config.mode {
+                config.Client -> []
+                _ -> [
+                  ValidationError(
+                    severity: SeverityError,
+                    target: TargetServer,
+                    path: path,
+                    detail: "Complex path parameters are not supported for server code generation.",
+                  ),
+                ]
+              }
+            _ -> [
               ValidationError(
                 severity: SeverityError,
                 target: TargetBoth,
@@ -268,8 +279,8 @@ fn validate_complex_param_schema(
                 detail: "Complex schema (object/oneOf/allOf/anyOf) parameters require style: deepObject. Without it, the parameter cannot be serialized.",
               ),
             ]
-            _ -> []
           }
+        _ -> []
       }
   }
 }

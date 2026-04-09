@@ -5945,3 +5945,38 @@ paths:
   list.length(server_errors)
   |> should.equal(1)
 }
+
+pub fn validate_rejects_path_complex_params_for_server_codegen_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items/{filter}:
+    get:
+      operationId: getItems
+      parameters:
+        - name: filter
+          in: path
+          required: true
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "Complex path parameters are not supported")
+    })
+  list.length(server_errors)
+  |> should.equal(1)
+}
