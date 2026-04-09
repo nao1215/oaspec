@@ -3,7 +3,7 @@
 [![CI](https://github.com/nao1215/oaspec/actions/workflows/ci.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci.yml)
 [![Integration Tests](https://github.com/nao1215/oaspec/actions/workflows/integration.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/integration.yml)
 
-Generate Gleam code from OpenAPI 3.x specifications with full spec coverage.
+Generate Gleam code from OpenAPI 3.x specifications with strict codegen for a large practical subset.
 
 - Custom types for component schemas
 - JSON decoders and encoders (allOf, oneOf/anyOf with discriminator)
@@ -170,16 +170,16 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 ### Supported
 
 - OpenAPI 3.0.x and 3.1 (YAML and JSON; 3.1 `type` arrays and `null` supported, other 3.1-only features are best-effort)
-- Paths and operations (GET, POST, PUT, DELETE, PATCH)
+- Paths and operations (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, TRACE)
 - Path, query, header, cookie parameters (path-level merged by `(name, in)`)
 - Parameter serialization for Bool, Float, Int, String, `$ref` enum types
 - `style: deepObject` query parameters with `key[prop]=value` serialization
-- Array parameters in query/header/cookie with comma-separated serialization
+- Array parameters in query/header/cookie with explode-aware serialization (`explode: true` → repeated `key=a&key=b`; `explode: false` → comma-separated `key=a,b`)
 - Complex schema parameters (object/allOf/oneOf/anyOf) via automatic hoisting
 - Percent-encoding for path/query/cookie parameter values via `uri.percent_encode`
 - Cookie parameters combined into single header
 - `application/json` request bodies with `$ref` resolution (typed, auto-encoded)
-- `application/x-www-form-urlencoded` request bodies with `key=value&...` encoding
+- `application/x-www-form-urlencoded` request bodies with recursive bracket encoding for nested objects (`field[sub][key]=value`)
 - `multipart/form-data` request bodies with boundary-based encoding for string/integer/number/boolean/binary/string-enum fields (optional fields handled)
 - allOf in request body (property merging from `$ref` + inline objects)
 - Responses with status codes, `$ref` responses from `components.responses`
@@ -223,6 +223,26 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 - Auto-deduplication of function/type name collisions after case conversion
 - Config validation: output directory basename must match package name
 - Gleam keyword escaping in generated field names
+- Optional request body (`requestBody.required: false`) generates `Option(T)` body parameter
+- Array alias component schemas (e.g. `type: array, items: ...`) generate decoder/encoder
+
+### Not yet supported
+
+The following OpenAPI 3.x features are not yet implemented. Specs using these features will either produce a parse error or have the feature silently ignored:
+
+- `PathItem.$ref` (path-level `$ref`)
+- `Parameter.content` (media-type-based parameter encoding)
+- `Parameter.allowReserved`
+- `MediaType.encoding` (per-property encoding for multipart/form-data)
+- `Response.headers` and `Response.links`
+- OAuth2 `flows` / `scopes` detail (schemes are recognized but flow details are not preserved)
+- Webhooks (`webhooks` top-level field)
+- `components.pathItems`
+- OpenAPI 3.1 / JSON Schema 2020-12 advanced features (`$defs`, `prefixItems`, `if/then/else`, `dependentSchemas`, `$dynamicRef`, `contentMediaType`)
+- OpenAPI 3.1 multi-type unions (`type: [string, integer]`) — use `oneOf` instead
+- Server variable generation (server stubs are scaffolds only)
+- `xml` annotations
+- `externalDocs`
 
 ### Schema-to-type mapping
 
