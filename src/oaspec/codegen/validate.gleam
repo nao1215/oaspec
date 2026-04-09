@@ -238,18 +238,10 @@ fn validate_server_cookie_param(
   param: spec.Parameter,
   ctx: Context,
 ) -> List(ValidationError) {
-  case ctx.config.mode, param.in_ {
-    config.Client, _ -> []
-    _, spec.InCookie -> [
-      ValidationError(
-        severity: SeverityError,
-        target: TargetServer,
-        path: path,
-        detail: "Cookie parameters are not supported for server code generation.",
-      ),
-    ]
-    _, _ -> []
-  }
+  let _ = path
+  let _ = param
+  let _ = ctx
+  []
 }
 
 /// Check if a parameter has a complex schema (object, oneOf, allOf, anyOf)

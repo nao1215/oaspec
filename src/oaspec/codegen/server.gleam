@@ -204,11 +204,18 @@ fn generate_router(ctx: Context) -> String {
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       list.any(operation.parameters, fn(p) {
-        case p.schema {
-          Some(Inline(schema.BooleanSchema(..))) -> True
-          _ -> False
+        case p.in_, p.schema {
+          spec.InCookie, _ -> True
+          _, Some(Inline(schema.BooleanSchema(..))) -> True
+          _, _ -> False
         }
       })
+    })
+
+  let needs_cookie_lookup =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(operation.parameters, fn(p) { p.in_ == spec.InCookie })
     })
 
   let needs_option =
@@ -383,6 +390,11 @@ fn generate_router(ctx: Context) -> String {
     |> se.line("}")
     |> se.blank_line()
 
+  let sb = case needs_cookie_lookup {
+    True -> generate_cookie_lookup(sb)
+    False -> sb
+  }
+
   se.to_string(sb)
 }
 
@@ -391,6 +403,29 @@ fn route_arg_name(name: String, used: Bool) -> String {
     True -> name
     False -> "_" <> name
   }
+}
+
+fn generate_cookie_lookup(sb: se.StringBuilder) -> se.StringBuilder {
+  sb
+  |> se.doc_comment("Extract a cookie value from the Cookie header.")
+  |> se.line("fn cookie_lookup(headers: Dict(String, String), key: String) -> Result(String, Nil) {")
+  |> se.indent(1, "case dict.get(headers, \"cookie\") {")
+  |> se.indent(2, "Ok(raw) ->")
+  |> se.indent(3, "list.find_map(string.split(raw, \";\"), fn(part) {")
+  |> se.indent(4, "let trimmed = string.trim(part)")
+  |> se.indent(4, "case string.split_once(trimmed, on: \"=\") {")
+  |> se.indent(5, "Ok(#(cookie_key, cookie_value)) ->")
+  |> se.indent(6, "case string.trim(cookie_key) == key {")
+  |> se.indent(7, "True -> Ok(string.trim(cookie_value))")
+  |> se.indent(7, "False -> Error(Nil)")
+  |> se.indent(6, "}")
+  |> se.indent(5, "Error(_) -> Error(Nil)")
+  |> se.indent(4, "}")
+  |> se.indent(3, "})")
+  |> se.indent(2, "Error(_) -> Error(Nil)")
+  |> se.indent(1, "}")
+  |> se.line("}")
+  |> se.blank_line()
 }
 
 /// Generate the body of a single route case branch.
@@ -503,10 +538,10 @@ fn generate_request_construction(
           }
         }
         spec.InCookie -> {
-          // Cookie params: extract from headers, simplified
+          let key = param.name
           case param.required {
-            True -> "\"\"  // TODO: Extract cookie param " <> param.name
-            False -> "None  // TODO: Extract cookie param " <> param.name
+            True -> cookie_required_expr(key, param)
+            False -> cookie_optional_expr(key, param)
           }
         }
       }
@@ -598,6 +633,51 @@ fn header_optional_expr(key: String, param: spec.Parameter) -> String {
       <> "\") { Ok(v) -> { case int.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }"
     _ ->
       "case dict.get(headers, \"" <> key <> "\") { Ok(v) -> Some(v) _ -> None }"
+  }
+}
+
+/// Generate expression for a required cookie parameter.
+fn cookie_required_expr(key: String, param: spec.Parameter) -> String {
+  case param.schema {
+    Some(Inline(schema.IntegerSchema(..))) ->
+      "{ let assert Ok(v) = cookie_lookup(headers, \""
+      <> key
+      <> "\") let assert Ok(n) = int.parse(v) n }"
+    Some(Inline(schema.NumberSchema(..))) ->
+      "{ let assert Ok(v) = cookie_lookup(headers, \""
+      <> key
+      <> "\") let assert Ok(n) = float.parse(v) n }"
+    Some(Inline(schema.BooleanSchema(..))) ->
+      "{ let assert Ok(v) = cookie_lookup(headers, \""
+      <> key
+      <> "\") "
+      <> bool_parse_expr
+      <> " }"
+    _ -> "{ let assert Ok(v) = cookie_lookup(headers, \"" <> key <> "\") v }"
+  }
+}
+
+/// Generate expression for an optional cookie parameter.
+fn cookie_optional_expr(key: String, param: spec.Parameter) -> String {
+  case param.schema {
+    Some(Inline(schema.IntegerSchema(..))) ->
+      "case cookie_lookup(headers, \""
+      <> key
+      <> "\") { Ok(v) -> { case int.parse(v) { Ok(n) -> Some(n) _ -> None } } Error(_) -> None }"
+    Some(Inline(schema.NumberSchema(..))) ->
+      "case cookie_lookup(headers, \""
+      <> key
+      <> "\") { Ok(v) -> { case float.parse(v) { Ok(n) -> Some(n) _ -> None } } Error(_) -> None }"
+    Some(Inline(schema.BooleanSchema(..))) ->
+      "case cookie_lookup(headers, \""
+      <> key
+      <> "\") { Ok(v) -> Some("
+      <> bool_parse_expr
+      <> ") Error(_) -> None }"
+    _ ->
+      "case cookie_lookup(headers, \""
+      <> key
+      <> "\") { Ok(v) -> Some(v) Error(_) -> None }"
   }
 }
 

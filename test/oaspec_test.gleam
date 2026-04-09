@@ -5844,38 +5844,6 @@ paths:
   |> should.be_false()
 }
 
-pub fn validate_rejects_cookie_params_for_server_codegen_test() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /items:
-    get:
-      operationId: listItems
-      parameters:
-        - name: session
-          in: cookie
-          required: true
-          schema:
-            type: string
-      responses:
-        '200': { description: ok }
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let ctx = make_ctx_from_spec(spec)
-  let errors = validate.validate(ctx)
-  let server_errors =
-    list.filter(errors, fn(e) {
-      e.target == validate.TargetServer
-      && string.contains(e.detail, "Cookie parameters are not supported")
-    })
-  list.length(server_errors)
-  |> should.equal(1)
-}
-
 pub fn validate_rejects_array_params_for_server_codegen_test() {
   let yaml =
     "
@@ -6170,5 +6138,32 @@ paths:
     router.content,
     "pub fn route(method: String, path: List(String), _query: Dict(String, String), _headers: Dict(String, String), _body: String) -> ServerResponse",
   )
+  |> should.be_true()
+}
+
+pub fn validate_accepts_cookie_params_for_server_codegen_test() {
+  let ctx = make_ctx("test/fixtures/server_cookie_params.yaml")
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "Cookie parameters")
+    })
+  list.length(server_errors)
+  |> should.equal(0)
+}
+
+pub fn server_cookie_params_are_generated_without_todo_placeholders_test() {
+  let ctx = make_ctx("test/fixtures/server_cookie_params.yaml")
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(content, "TODO: Extract cookie param")
+  |> should.be_false()
+  string.contains(content, "cookie_lookup(headers, \"session\")")
+  |> should.be_true()
+  string.contains(content, "cookie_lookup(headers, \"debug\")")
   |> should.be_true()
 }
