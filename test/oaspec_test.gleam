@@ -3620,6 +3620,62 @@ components:
   |> should.be_true()
 }
 
+// --- AnyOfSchema type generation tests ---
+
+/// anyOf with $ref schemas must generate a union type like oneOf,
+/// not fall through to String.
+pub fn anyof_generates_union_type_not_string_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      operationId: getPet
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+components:
+  schemas:
+    Cat:
+      type: object
+      properties:
+        name:
+          type: string
+    Dog:
+      type: object
+      properties:
+        name:
+          type: string
+    Pet:
+      anyOf:
+        - $ref: '#/components/schemas/Cat'
+        - $ref: '#/components/schemas/Dog'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = types.generate(ctx)
+  let assert [types_file, ..] = files
+  let content = types_file.content
+  // Pet must be a union type with Cat and Dog variants, NOT `pub type Pet = String`
+  string.contains(content, "pub type Pet = String")
+  |> should.be_false()
+  // It should have variant constructors
+  string.contains(content, "PetCat(")
+  |> should.be_true()
+  string.contains(content, "PetDog(")
+  |> should.be_true()
+}
+
 fn find_substring_index(haystack: String, needle: String) -> Result(Int, Nil) {
   case string.contains(haystack, needle) {
     True -> {

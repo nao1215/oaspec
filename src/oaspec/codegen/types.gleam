@@ -298,7 +298,8 @@ fn generate_schema_type(
       |> se.blank_line()
     }
 
-    OneOfSchema(description:, schemas:, ..) -> {
+    OneOfSchema(description:, schemas:, ..)
+    | AnyOfSchema(description:, schemas:, ..) -> {
       let sb = maybe_doc_comment(sb, description)
       let sb = sb |> se.line("pub type " <> type_name <> " {")
       let sb =
@@ -442,32 +443,8 @@ fn generate_anonymous_type_for_schema(
   case schema_obj {
     ObjectSchema(..) ->
       generate_schema_type(sb, type_name, raw_name, schema_obj, ctx)
-    OneOfSchema(schemas:, ..) -> {
+    OneOfSchema(schemas:, ..) | AnyOfSchema(schemas:, ..) -> {
       // Only generate if all schemas are $ref (inline primitives are caught by validation)
-      let all_refs =
-        list.all(schemas, fn(s) {
-          case s {
-            Reference(_) -> True
-            _ -> False
-          }
-        })
-      case all_refs {
-        True -> {
-          let sb = sb |> se.line("pub type " <> type_name <> " {")
-          let sb =
-            list.fold(schemas, sb, fn(sb, s_ref) {
-              let variant_type = schema_ref_to_type(s_ref, ctx)
-              let variant_name = type_name <> variant_type
-              sb |> se.indent(1, variant_name <> "(" <> variant_type <> ")")
-            })
-          sb
-          |> se.line("}")
-          |> se.blank_line()
-        }
-        False -> sb
-      }
-    }
-    AnyOfSchema(schemas:, ..) -> {
       let all_refs =
         list.all(schemas, fn(s) {
           case s {
