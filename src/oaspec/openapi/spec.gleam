@@ -36,9 +36,27 @@ pub type Components {
   )
 }
 
+/// Location for apiKey security scheme.
+pub type SecuritySchemeIn {
+  SchemeInHeader
+  SchemeInQuery
+  SchemeInCookie
+}
+
+/// Parameter serialization style (OpenAPI 3.x).
+pub type ParameterStyle {
+  FormStyle
+  SimpleStyle
+  DeepObjectStyle
+  MatrixStyle
+  LabelStyle
+  SpaceDelimitedStyle
+  PipeDelimitedStyle
+}
+
 /// Security scheme definition.
 pub type SecurityScheme {
-  ApiKeyScheme(name: String, in_: String)
+  ApiKeyScheme(name: String, in_: SecuritySchemeIn)
   HttpScheme(scheme: String, bearer_format: Option(String))
   OAuth2Scheme(description: Option(String), flows: Dict(String, OAuth2Flow))
   OpenIdConnectScheme(open_id_connect_url: String, description: Option(String))
@@ -121,7 +139,7 @@ pub type Parameter {
     description: Option(String),
     required: Bool,
     schema: Option(SchemaRef),
-    style: Option(String),
+    style: Option(ParameterStyle),
     explode: Option(Bool),
     deprecated: Bool,
     allow_reserved: Bool,

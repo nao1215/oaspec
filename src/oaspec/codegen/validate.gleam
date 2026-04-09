@@ -107,15 +107,13 @@ fn validate_parameters(
   list.flat_map(params, fn(p) {
     let path = op_id <> ".parameters." <> p.name
     let style_errors = case p.style {
-      Some("matrix")
-      | Some("label")
-      | Some("spaceDelimited")
-      | Some("pipeDelimited") -> [
+      Some(spec.MatrixStyle)
+      | Some(spec.LabelStyle)
+      | Some(spec.SpaceDelimitedStyle)
+      | Some(spec.PipeDelimitedStyle) -> [
         UnsupportedFeature(
           path: path,
-          detail: "Parameter style '"
-            <> option_to_string(p.style)
-            <> "' is not supported. Supported styles: form, deepObject, simple.",
+          detail: "Parameter style is not supported. Supported styles: form, deepObject, simple.",
         ),
       ]
       _ -> []
@@ -147,7 +145,7 @@ fn validate_complex_param_schema(
   ctx: Context,
 ) -> List(ValidationError) {
   case param.style {
-    Some("deepObject") ->
+    Some(spec.DeepObjectStyle) ->
       // deepObject supports one level of object nesting only.
       // Reject nested object properties since codegen produces
       // invalid code (e.g., uri.percent_encode(filter.meta)).
@@ -197,13 +195,6 @@ fn validate_deep_object_no_nested_objects(
         }
       })
     _ -> []
-  }
-}
-
-fn option_to_string(opt: Option(String)) -> String {
-  case opt {
-    Some(s) -> s
-    None -> ""
   }
 }
 

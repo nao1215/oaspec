@@ -484,7 +484,7 @@ pub fn parse_parameter_style_deep_object_test() {
   let assert Some(op) = path_item.get
   let assert [param] = op.parameters
   param.name |> should.equal("filter")
-  param.style |> should.equal(Some("deepObject"))
+  param.style |> should.equal(Some(spec.DeepObjectStyle))
 }
 
 pub fn parse_parameter_style_none_test() {
@@ -1417,7 +1417,8 @@ components:
   let assert Some(components) = parsed.components
   let assert Ok(scheme) = dict.get(components.security_schemes, "cookieAuth")
   case scheme {
-    spec.ApiKeyScheme(name: "session_id", in_: "cookie") -> should.be_true(True)
+    spec.ApiKeyScheme(name: "session_id", in_: spec.SchemeInCookie) ->
+      should.be_true(True)
     _ -> should.fail()
   }
 }
@@ -4416,6 +4417,87 @@ components:
   |> should.be_true()
   string.contains(content, "ShapeSquare(")
   |> should.be_true()
+}
+
+// --- ParameterStyle and SecuritySchemeIn are proper ADTs, not strings ---
+pub fn parameter_style_is_adt_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /x:
+    get:
+      operationId: getX
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          schema: { type: object, properties: { a: { type: string } } }
+        - name: ids
+          in: query
+          style: form
+          schema: { type: array, items: { type: integer } }
+        - name: id
+          in: path
+          required: true
+          style: simple
+          schema: { type: string }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(parsed) = parser.parse_string(yaml)
+  let assert Ok(pi) = dict.get(parsed.paths, "/x")
+  let assert Some(op) = pi.get
+  let assert [deep, form, simple] = op.parameters
+  deep.style |> should.equal(Some(spec.DeepObjectStyle))
+  form.style |> should.equal(Some(spec.FormStyle))
+  simple.style |> should.equal(Some(spec.SimpleStyle))
+}
+
+pub fn security_scheme_in_is_adt_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  securitySchemes:
+    headerKey:
+      type: apiKey
+      name: X-API-Key
+      in: header
+    queryKey:
+      type: apiKey
+      name: api_key
+      in: query
+    cookieKey:
+      type: apiKey
+      name: session
+      in: cookie
+"
+  let assert Ok(parsed) = parser.parse_string(yaml)
+  let assert Some(c) = parsed.components
+  let assert Ok(h) = dict.get(c.security_schemes, "headerKey")
+  let assert Ok(q) = dict.get(c.security_schemes, "queryKey")
+  let assert Ok(k) = dict.get(c.security_schemes, "cookieKey")
+  case h {
+    spec.ApiKeyScheme(in_: spec.SchemeInHeader, ..) -> should.be_ok(Ok(Nil))
+    _ -> should.fail()
+  }
+  case q {
+    spec.ApiKeyScheme(in_: spec.SchemeInQuery, ..) -> should.be_ok(Ok(Nil))
+    _ -> should.fail()
+  }
+  case k {
+    spec.ApiKeyScheme(in_: spec.SchemeInCookie, ..) -> should.be_ok(Ok(Nil))
+    _ -> should.fail()
+  }
 }
 
 fn find_substring_index(haystack: String, needle: String) -> Result(Int, Nil) {

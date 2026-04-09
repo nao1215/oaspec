@@ -463,6 +463,7 @@ fn parse_parameter(
       let style =
         yay.extract_optional_string(node, "style")
         |> result.unwrap(None)
+        |> option.map(parse_parameter_style)
 
       let explode =
         yay.extract_optional_bool(node, "explode")
@@ -588,6 +589,39 @@ fn parse_parameter_in(value: String) -> Result(ParameterIn, ParseError) {
         detail: "Unknown parameter location: "
           <> value
           <> ". Must be one of: path, query, header, cookie",
+      ))
+  }
+}
+
+/// Map a style string to a ParameterStyle ADT value.
+fn parse_parameter_style(value: String) -> spec.ParameterStyle {
+  case value {
+    "form" -> spec.FormStyle
+    "simple" -> spec.SimpleStyle
+    "deepObject" -> spec.DeepObjectStyle
+    "matrix" -> spec.MatrixStyle
+    "label" -> spec.LabelStyle
+    "spaceDelimited" -> spec.SpaceDelimitedStyle
+    "pipeDelimited" -> spec.PipeDelimitedStyle
+    // Unknown styles default to form (OpenAPI default for query)
+    _ -> spec.FormStyle
+  }
+}
+
+/// Map an apiKey "in" string to a SecuritySchemeIn ADT value.
+fn parse_security_scheme_in(
+  value: String,
+) -> Result(spec.SecuritySchemeIn, ParseError) {
+  case value {
+    "header" -> Ok(spec.SchemeInHeader)
+    "query" -> Ok(spec.SchemeInQuery)
+    "cookie" -> Ok(spec.SchemeInCookie)
+    _ ->
+      Error(InvalidValue(
+        path: "securityScheme.in",
+        detail: "Unknown apiKey location: "
+          <> value
+          <> ". Must be one of: header, query, cookie",
       ))
   }
 }
@@ -1238,10 +1272,9 @@ fn parse_security_scheme(
           MissingField(path: "securityScheme.apiKey", field: "in")
         }),
       )
-      case in_str {
-        "header" | "query" | "cookie" ->
-          Ok(spec.ApiKeyScheme(name:, in_: in_str))
-        _ ->
+      case parse_security_scheme_in(in_str) {
+        Ok(in_) -> Ok(spec.ApiKeyScheme(name:, in_:))
+        Error(_) ->
           Error(InvalidValue(
             path: "securityScheme.apiKey.in",
             detail: "Only 'header', 'query' and 'cookie' are supported for apiKey. Got: '"

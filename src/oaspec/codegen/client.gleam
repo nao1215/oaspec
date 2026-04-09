@@ -156,7 +156,7 @@ fn generate_client(ctx: Context) -> String {
       }
       list.any(security_schemes, fn(entry) {
         case entry {
-          #(_, spec.ApiKeyScheme(in_: "query", ..)) -> True
+          #(_, spec.ApiKeyScheme(in_: spec.SchemeInQuery, ..)) -> True
           _ -> False
         }
       })
@@ -264,7 +264,7 @@ fn generate_client(ctx: Context) -> String {
     Some(c) ->
       list.any(dict.to_list(c.security_schemes), fn(entry) {
         case entry {
-          #(_, spec.ApiKeyScheme(in_: "cookie", ..)) -> True
+          #(_, spec.ApiKeyScheme(in_: spec.SchemeInCookie, ..)) -> True
           _ -> False
         }
       })
@@ -498,7 +498,7 @@ fn generate_client_function(
           let param_name = naming.to_snake_case(p.name)
           // Check for deepObject style with object schema
           case p.style, is_deep_object_param(p, ctx) {
-            Some("deepObject"), True ->
+            Some(spec.DeepObjectStyle), True ->
               generate_deep_object_query_param(sb, p, param_name, ctx)
             _, _ ->
               case is_exploded_array_param(p, ctx) {
@@ -1719,7 +1719,7 @@ fn is_exploded_array_param(param: spec.Parameter, ctx: Context) -> Bool {
         option.Some(v) -> v
         option.None ->
           case param.style {
-            option.Some("form") | option.None -> True
+            option.Some(spec.FormStyle) | option.None -> True
             _ -> False
           }
       }
@@ -2147,7 +2147,7 @@ fn generate_scheme_some_branch(
   case ctx.spec.components {
     Some(components) ->
       case dict.get(components.security_schemes, scheme_ref.scheme_name) {
-        Ok(spec.ApiKeyScheme(name: header_name, in_: "header")) ->
+        Ok(spec.ApiKeyScheme(name: header_name, in_: spec.SchemeInHeader)) ->
           sb
           |> se.indent(
             indent,
@@ -2155,7 +2155,7 @@ fn generate_scheme_some_branch(
               <> string.lowercase(header_name)
               <> "\", key)",
           )
-        Ok(spec.ApiKeyScheme(name: query_name, in_: "query")) ->
+        Ok(spec.ApiKeyScheme(name: query_name, in_: spec.SchemeInQuery)) ->
           sb
           |> se.indent(indent, "Some(key) -> {")
           |> se.indent(
@@ -2172,7 +2172,7 @@ fn generate_scheme_some_branch(
               <> "=\" <> key)",
           )
           |> se.indent(indent, "}")
-        Ok(spec.ApiKeyScheme(name: cookie_name, in_: "cookie")) ->
+        Ok(spec.ApiKeyScheme(name: cookie_name, in_: spec.SchemeInCookie)) ->
           sb
           |> se.indent(indent, "Some(value) -> {")
           |> se.indent(
@@ -2237,7 +2237,7 @@ fn generate_scheme_apply(
   case ctx.spec.components {
     Some(components) ->
       case dict.get(components.security_schemes, scheme_ref.scheme_name) {
-        Ok(spec.ApiKeyScheme(name: header_name, in_: "header")) ->
+        Ok(spec.ApiKeyScheme(name: header_name, in_: spec.SchemeInHeader)) ->
           sb
           |> se.indent(
             indent,
@@ -2247,7 +2247,7 @@ fn generate_scheme_apply(
               <> val_var
               <> ")",
           )
-        Ok(spec.ApiKeyScheme(name: query_name, in_: "query")) ->
+        Ok(spec.ApiKeyScheme(name: query_name, in_: spec.SchemeInQuery)) ->
           sb
           |> se.indent(
             indent,
@@ -2264,7 +2264,7 @@ fn generate_scheme_apply(
               <> val_var
               <> ")",
           )
-        Ok(spec.ApiKeyScheme(name: cookie_name, in_: "cookie")) ->
+        Ok(spec.ApiKeyScheme(name: cookie_name, in_: spec.SchemeInCookie)) ->
           sb
           |> se.indent(
             indent,
