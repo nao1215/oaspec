@@ -254,6 +254,26 @@ fn generate_router(ctx: Context) -> String {
 
   let needs_encode = needs_json
 
+  let uses_query =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(operation.parameters, fn(p) { p.in_ == spec.InQuery })
+    })
+
+  let uses_headers =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(operation.parameters, fn(p) {
+        p.in_ == spec.InHeader || p.in_ == spec.InCookie
+      })
+    })
+
+  let uses_body =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      option.is_some(operation.request_body)
+    })
+
   let has_params_ops =
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
@@ -326,7 +346,13 @@ fn generate_router(ctx: Context) -> String {
     sb
     |> se.doc_comment("Route an incoming request to the appropriate handler.")
     |> se.line(
-      "pub fn route(method: String, path: List(String), query: Dict(String, String), headers: Dict(String, String), body: String) -> ServerResponse {",
+      "pub fn route(method: String, path: List(String), "
+      <> route_arg_name("query", uses_query)
+      <> ": Dict(String, String), "
+      <> route_arg_name("headers", uses_headers)
+      <> ": Dict(String, String), "
+      <> route_arg_name("body", uses_body)
+      <> ": String) -> ServerResponse {",
     )
     |> se.indent(1, "case method, path {")
 
@@ -358,6 +384,13 @@ fn generate_router(ctx: Context) -> String {
     |> se.blank_line()
 
   se.to_string(sb)
+}
+
+fn route_arg_name(name: String, used: Bool) -> String {
+  case used {
+    True -> name
+    False -> "_" <> name
+  }
 }
 
 /// Generate the body of a single route case branch.

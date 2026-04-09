@@ -2930,7 +2930,7 @@ paths:
   // Router must have proper route signature with query/headers/body
   string.contains(
     router.content,
-    "pub fn route(method: String, path: List(String), query: Dict(String, String), headers: Dict(String, String), body: String) -> ServerResponse",
+    "pub fn route(method: String, path: List(String), _query: Dict(String, String), _headers: Dict(String, String), _body: String) -> ServerResponse",
   )
   |> should.be_true()
   // Router must convert response to ServerResponse
@@ -6146,4 +6146,29 @@ pub fn integration_script_uses_warnings_as_errors_for_server_builds_test() {
   let assert Ok(content) = simplifile.read("integration_test/run.sh")
   string.contains(content, "if gleam build 2>&1; then")
   |> should.be_false()
+}
+
+pub fn server_router_uses_underscored_unused_route_args_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /items:
+    get:
+      operationId: getItems
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let router_file = list.find(files, fn(f) { f.path == "router.gleam" })
+  let assert Ok(router) = router_file
+  string.contains(
+    router.content,
+    "pub fn route(method: String, path: List(String), _query: Dict(String, String), _headers: Dict(String, String), _body: String) -> ServerResponse",
+  )
+  |> should.be_true()
 }
