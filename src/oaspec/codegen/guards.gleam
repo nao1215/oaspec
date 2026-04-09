@@ -53,6 +53,10 @@ fn generate_guards(ctx: Context) -> String {
     True -> ["gleam/list", ..imports]
     False -> imports
   }
+  let imports = case constraint_types.has_float_multiple_of {
+    True -> ["gleam/int", "gleam/float", ..imports]
+    False -> imports
+  }
   // Import types module when composite validators reference named types
   let needs_types =
     list.any(schemas, fn(entry) {
@@ -118,6 +122,7 @@ type ConstraintTypes {
     has_integer: Bool,
     has_float: Bool,
     has_list: Bool,
+    has_float_multiple_of: Bool,
   )
 }
 
@@ -128,7 +133,7 @@ fn collect_constraint_types(
 ) -> ConstraintTypes {
   list.fold(
     schemas,
-    ConstraintTypes(False, False, False, False),
+    ConstraintTypes(False, False, False, False, False),
     fn(acc, entry) {
       let #(_name, schema_ref) = entry
       collect_schema_constraint_types(acc, schema_ref, ctx)
@@ -151,11 +156,18 @@ fn collect_schema_constraint_types(
     | Ok(StringSchema(max_length: Some(_), ..)) ->
       ConstraintTypes(..acc, has_string: True)
     Ok(IntegerSchema(minimum: Some(_), ..))
-    | Ok(IntegerSchema(maximum: Some(_), ..)) ->
+    | Ok(IntegerSchema(maximum: Some(_), ..))
+    | Ok(IntegerSchema(exclusive_minimum: Some(_), ..))
+    | Ok(IntegerSchema(exclusive_maximum: Some(_), ..))
+    | Ok(IntegerSchema(multiple_of: Some(_), ..)) ->
       ConstraintTypes(..acc, has_integer: True)
     Ok(NumberSchema(minimum: Some(_), ..))
-    | Ok(NumberSchema(maximum: Some(_), ..)) ->
+    | Ok(NumberSchema(maximum: Some(_), ..))
+    | Ok(NumberSchema(exclusive_minimum: Some(_), ..))
+    | Ok(NumberSchema(exclusive_maximum: Some(_), ..)) ->
       ConstraintTypes(..acc, has_float: True)
+    Ok(NumberSchema(multiple_of: Some(_), ..)) ->
+      ConstraintTypes(..acc, has_float: True, has_float_multiple_of: True)
     Ok(ArraySchema(min_items: Some(_), ..))
     | Ok(ArraySchema(max_items: Some(_), ..)) ->
       ConstraintTypes(..acc, has_list: True)
@@ -230,10 +242,44 @@ fn generate_guards_for_schema_object(
     // Top-level string/integer constraints (type aliases with constraints)
     StringSchema(min_length:, max_length:, ..) ->
       generate_string_guard(sb, name, "", min_length, max_length)
-    IntegerSchema(minimum:, maximum:, ..) ->
-      generate_integer_guard(sb, name, "", minimum, maximum)
-    NumberSchema(minimum:, maximum:, ..) ->
-      generate_float_guard(sb, name, "", minimum, maximum)
+    IntegerSchema(
+      minimum:,
+      maximum:,
+      exclusive_minimum:,
+      exclusive_maximum:,
+      multiple_of:,
+      ..,
+    ) -> {
+      let sb = generate_integer_guard(sb, name, "", minimum, maximum)
+      let sb =
+        generate_integer_exclusive_guard(
+          sb,
+          name,
+          "",
+          exclusive_minimum,
+          exclusive_maximum,
+        )
+      generate_integer_multiple_of_guard(sb, name, "", multiple_of)
+    }
+    NumberSchema(
+      minimum:,
+      maximum:,
+      exclusive_minimum:,
+      exclusive_maximum:,
+      multiple_of:,
+      ..,
+    ) -> {
+      let sb = generate_float_guard(sb, name, "", minimum, maximum)
+      let sb =
+        generate_float_exclusive_guard(
+          sb,
+          name,
+          "",
+          exclusive_minimum,
+          exclusive_maximum,
+        )
+      generate_float_multiple_of_guard(sb, name, "", multiple_of)
+    }
     ArraySchema(min_items:, max_items:, ..) ->
       generate_list_guard(sb, name, "", min_items, max_items)
     _ -> sb
@@ -255,10 +301,51 @@ fn generate_field_guard(
   case resolved {
     Ok(StringSchema(min_length:, max_length:, ..)) ->
       generate_string_guard(sb, schema_name, prop_name, min_length, max_length)
-    Ok(IntegerSchema(minimum:, maximum:, ..)) ->
-      generate_integer_guard(sb, schema_name, prop_name, minimum, maximum)
-    Ok(NumberSchema(minimum:, maximum:, ..)) ->
-      generate_float_guard(sb, schema_name, prop_name, minimum, maximum)
+    Ok(IntegerSchema(
+      minimum:,
+      maximum:,
+      exclusive_minimum:,
+      exclusive_maximum:,
+      multiple_of:,
+      ..,
+    )) -> {
+      let sb =
+        generate_integer_guard(sb, schema_name, prop_name, minimum, maximum)
+      let sb =
+        generate_integer_exclusive_guard(
+          sb,
+          schema_name,
+          prop_name,
+          exclusive_minimum,
+          exclusive_maximum,
+        )
+      generate_integer_multiple_of_guard(
+        sb,
+        schema_name,
+        prop_name,
+        multiple_of,
+      )
+    }
+    Ok(NumberSchema(
+      minimum:,
+      maximum:,
+      exclusive_minimum:,
+      exclusive_maximum:,
+      multiple_of:,
+      ..,
+    )) -> {
+      let sb =
+        generate_float_guard(sb, schema_name, prop_name, minimum, maximum)
+      let sb =
+        generate_float_exclusive_guard(
+          sb,
+          schema_name,
+          prop_name,
+          exclusive_minimum,
+          exclusive_maximum,
+        )
+      generate_float_multiple_of_guard(sb, schema_name, prop_name, multiple_of)
+    }
     Ok(ArraySchema(min_items:, max_items:, ..)) ->
       generate_list_guard(sb, schema_name, prop_name, min_items, max_items)
     _ -> sb
@@ -475,6 +562,233 @@ fn generate_float_guard(
         None, None -> sb
       }
       sb
+      |> se.line("}")
+      |> se.blank_line()
+    }
+  }
+}
+
+/// Generate an integer exclusive range validation guard.
+fn generate_integer_exclusive_guard(
+  sb: se.StringBuilder,
+  schema_name: String,
+  prop_name: String,
+  exclusive_minimum: Option(Int),
+  exclusive_maximum: Option(Int),
+) -> se.StringBuilder {
+  case exclusive_minimum, exclusive_maximum {
+    None, None -> sb
+    _, _ -> {
+      let fn_name =
+        guard_function_name(schema_name, prop_name, "exclusive_range")
+      let sb =
+        sb
+        |> se.line(
+          "/// Validate integer exclusive range for "
+          <> schema_name
+          <> field_label(prop_name)
+          <> ".",
+        )
+      let sb =
+        sb
+        |> se.line(
+          "pub fn " <> fn_name <> "(value: Int) -> Result(Int, String) {",
+        )
+      let sb = case exclusive_minimum, exclusive_maximum {
+        Some(min), Some(max) ->
+          sb
+          |> se.indent(1, "case value > " <> int.to_string(min) <> " {")
+          |> se.indent(
+            2,
+            "False -> Error(\"must be greater than "
+              <> int.to_string(min)
+              <> "\")",
+          )
+          |> se.indent(2, "True ->")
+          |> se.indent(3, "case value < " <> int.to_string(max) <> " {")
+          |> se.indent(
+            4,
+            "False -> Error(\"must be less than " <> int.to_string(max) <> "\")",
+          )
+          |> se.indent(4, "True -> Ok(value)")
+          |> se.indent(3, "}")
+          |> se.indent(1, "}")
+        Some(min), None ->
+          sb
+          |> se.indent(1, "case value > " <> int.to_string(min) <> " {")
+          |> se.indent(
+            2,
+            "False -> Error(\"must be greater than "
+              <> int.to_string(min)
+              <> "\")",
+          )
+          |> se.indent(2, "True -> Ok(value)")
+          |> se.indent(1, "}")
+        None, Some(max) ->
+          sb
+          |> se.indent(1, "case value < " <> int.to_string(max) <> " {")
+          |> se.indent(
+            2,
+            "False -> Error(\"must be less than " <> int.to_string(max) <> "\")",
+          )
+          |> se.indent(2, "True -> Ok(value)")
+          |> se.indent(1, "}")
+        None, None -> sb
+      }
+      sb
+      |> se.line("}")
+      |> se.blank_line()
+    }
+  }
+}
+
+/// Generate an integer multipleOf validation guard.
+fn generate_integer_multiple_of_guard(
+  sb: se.StringBuilder,
+  schema_name: String,
+  prop_name: String,
+  multiple_of: Option(Int),
+) -> se.StringBuilder {
+  case multiple_of {
+    None -> sb
+    Some(m) -> {
+      let fn_name = guard_function_name(schema_name, prop_name, "multiple_of")
+      sb
+      |> se.line(
+        "/// Validate integer multipleOf for "
+        <> schema_name
+        <> field_label(prop_name)
+        <> ".",
+      )
+      |> se.line(
+        "pub fn " <> fn_name <> "(value: Int) -> Result(Int, String) {",
+      )
+      |> se.indent(1, "case value % " <> int.to_string(m) <> " == 0 {")
+      |> se.indent(
+        2,
+        "False -> Error(\"must be a multiple of " <> int.to_string(m) <> "\")",
+      )
+      |> se.indent(2, "True -> Ok(value)")
+      |> se.indent(1, "}")
+      |> se.line("}")
+      |> se.blank_line()
+    }
+  }
+}
+
+/// Generate a float exclusive range validation guard.
+fn generate_float_exclusive_guard(
+  sb: se.StringBuilder,
+  schema_name: String,
+  prop_name: String,
+  exclusive_minimum: Option(Float),
+  exclusive_maximum: Option(Float),
+) -> se.StringBuilder {
+  case exclusive_minimum, exclusive_maximum {
+    None, None -> sb
+    _, _ -> {
+      let fn_name =
+        guard_function_name(schema_name, prop_name, "exclusive_range")
+      let sb =
+        sb
+        |> se.line(
+          "/// Validate float exclusive range for "
+          <> schema_name
+          <> field_label(prop_name)
+          <> ".",
+        )
+      let sb =
+        sb
+        |> se.line(
+          "pub fn " <> fn_name <> "(value: Float) -> Result(Float, String) {",
+        )
+      let sb = case exclusive_minimum, exclusive_maximum {
+        Some(min), Some(max) ->
+          sb
+          |> se.indent(1, "case value >. " <> float.to_string(min) <> " {")
+          |> se.indent(
+            2,
+            "False -> Error(\"must be greater than "
+              <> float.to_string(min)
+              <> "\")",
+          )
+          |> se.indent(2, "True ->")
+          |> se.indent(3, "case value <. " <> float.to_string(max) <> " {")
+          |> se.indent(
+            4,
+            "False -> Error(\"must be less than "
+              <> float.to_string(max)
+              <> "\")",
+          )
+          |> se.indent(4, "True -> Ok(value)")
+          |> se.indent(3, "}")
+          |> se.indent(1, "}")
+        Some(min), None ->
+          sb
+          |> se.indent(1, "case value >. " <> float.to_string(min) <> " {")
+          |> se.indent(
+            2,
+            "False -> Error(\"must be greater than "
+              <> float.to_string(min)
+              <> "\")",
+          )
+          |> se.indent(2, "True -> Ok(value)")
+          |> se.indent(1, "}")
+        None, Some(max) ->
+          sb
+          |> se.indent(1, "case value <. " <> float.to_string(max) <> " {")
+          |> se.indent(
+            2,
+            "False -> Error(\"must be less than "
+              <> float.to_string(max)
+              <> "\")",
+          )
+          |> se.indent(2, "True -> Ok(value)")
+          |> se.indent(1, "}")
+        None, None -> sb
+      }
+      sb
+      |> se.line("}")
+      |> se.blank_line()
+    }
+  }
+}
+
+/// Generate a float multipleOf validation guard.
+fn generate_float_multiple_of_guard(
+  sb: se.StringBuilder,
+  schema_name: String,
+  prop_name: String,
+  multiple_of: Option(Float),
+) -> se.StringBuilder {
+  case multiple_of {
+    None -> sb
+    Some(m) -> {
+      let fn_name = guard_function_name(schema_name, prop_name, "multiple_of")
+      sb
+      |> se.line(
+        "/// Validate float multipleOf for "
+        <> schema_name
+        <> field_label(prop_name)
+        <> ".",
+      )
+      |> se.line(
+        "pub fn " <> fn_name <> "(value: Float) -> Result(Float, String) {",
+      )
+      |> se.indent(
+        1,
+        "let remainder = value -. float.truncate(value /. "
+          <> float.to_string(m)
+          <> " |> int.to_float) *. "
+          <> float.to_string(m),
+      )
+      |> se.indent(1, "case remainder == 0.0 || remainder == -0.0 {")
+      |> se.indent(
+        2,
+        "False -> Error(\"must be a multiple of " <> float.to_string(m) <> "\")",
+      )
+      |> se.indent(2, "True -> Ok(value)")
+      |> se.indent(1, "}")
       |> se.line("}")
       |> se.blank_line()
     }
@@ -716,20 +1030,64 @@ fn collect_guard_calls(
           #(guard_function_name(name, "", "length"), "value", True),
         ]
       }
-    Ok(IntegerSchema(minimum:, maximum:, ..)) ->
-      case minimum, maximum {
+    Ok(IntegerSchema(
+      minimum:,
+      maximum:,
+      exclusive_minimum:,
+      exclusive_maximum:,
+      multiple_of:,
+      ..,
+    )) -> {
+      let calls = case minimum, maximum {
         None, None -> []
         _, _ -> [
           #(guard_function_name(name, "", "range"), "value", True),
         ]
       }
-    Ok(NumberSchema(minimum:, maximum:, ..)) ->
-      case minimum, maximum {
+      let calls = case exclusive_minimum, exclusive_maximum {
+        None, None -> calls
+        _, _ ->
+          list.append(calls, [
+            #(guard_function_name(name, "", "exclusive_range"), "value", True),
+          ])
+      }
+      case multiple_of {
+        None -> calls
+        Some(_) ->
+          list.append(calls, [
+            #(guard_function_name(name, "", "multiple_of"), "value", True),
+          ])
+      }
+    }
+    Ok(NumberSchema(
+      minimum:,
+      maximum:,
+      exclusive_minimum:,
+      exclusive_maximum:,
+      multiple_of:,
+      ..,
+    )) -> {
+      let calls = case minimum, maximum {
         None, None -> []
         _, _ -> [
           #(guard_function_name(name, "", "range"), "value", True),
         ]
       }
+      let calls = case exclusive_minimum, exclusive_maximum {
+        None, None -> calls
+        _, _ ->
+          list.append(calls, [
+            #(guard_function_name(name, "", "exclusive_range"), "value", True),
+          ])
+      }
+      case multiple_of {
+        None -> calls
+        Some(_) ->
+          list.append(calls, [
+            #(guard_function_name(name, "", "multiple_of"), "value", True),
+          ])
+      }
+    }
     Ok(ArraySchema(min_items:, max_items:, ..)) ->
       case min_items, max_items {
         None, None -> []
@@ -766,8 +1124,15 @@ fn collect_field_guard_calls(
           ),
         ]
       }
-    Ok(IntegerSchema(minimum:, maximum:, ..)) ->
-      case minimum, maximum {
+    Ok(IntegerSchema(
+      minimum:,
+      maximum:,
+      exclusive_minimum:,
+      exclusive_maximum:,
+      multiple_of:,
+      ..,
+    )) -> {
+      let calls = case minimum, maximum {
         None, None -> []
         _, _ -> [
           #(
@@ -777,8 +1142,38 @@ fn collect_field_guard_calls(
           ),
         ]
       }
-    Ok(NumberSchema(minimum:, maximum:, ..)) ->
-      case minimum, maximum {
+      let calls = case exclusive_minimum, exclusive_maximum {
+        None, None -> calls
+        _, _ ->
+          list.append(calls, [
+            #(
+              guard_function_name(schema_name, prop_name, "exclusive_range"),
+              accessor,
+              is_required,
+            ),
+          ])
+      }
+      case multiple_of {
+        None -> calls
+        Some(_) ->
+          list.append(calls, [
+            #(
+              guard_function_name(schema_name, prop_name, "multiple_of"),
+              accessor,
+              is_required,
+            ),
+          ])
+      }
+    }
+    Ok(NumberSchema(
+      minimum:,
+      maximum:,
+      exclusive_minimum:,
+      exclusive_maximum:,
+      multiple_of:,
+      ..,
+    )) -> {
+      let calls = case minimum, maximum {
         None, None -> []
         _, _ -> [
           #(
@@ -788,6 +1183,29 @@ fn collect_field_guard_calls(
           ),
         ]
       }
+      let calls = case exclusive_minimum, exclusive_maximum {
+        None, None -> calls
+        _, _ ->
+          list.append(calls, [
+            #(
+              guard_function_name(schema_name, prop_name, "exclusive_range"),
+              accessor,
+              is_required,
+            ),
+          ])
+      }
+      case multiple_of {
+        None -> calls
+        Some(_) ->
+          list.append(calls, [
+            #(
+              guard_function_name(schema_name, prop_name, "multiple_of"),
+              accessor,
+              is_required,
+            ),
+          ])
+      }
+    }
     Ok(ArraySchema(min_items:, max_items:, ..)) ->
       case min_items, max_items {
         None, None -> []

@@ -5378,3 +5378,141 @@ paths:
   string.contains(content, "  \"\"")
   |> should.be_true()
 }
+
+// --- Feature: Guards for exclusiveMinimum, exclusiveMaximum, multipleOf ---
+
+pub fn guards_exclusive_and_multiple_of_integer_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Item:
+      type: object
+      required: [score, quantity]
+      properties:
+        score:
+          type: integer
+          exclusiveMinimum: 0
+          exclusiveMaximum: 100
+        quantity:
+          type: integer
+          multipleOf: 5
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = guards.generate(ctx)
+  let assert [guard_file] = files
+  let content = guard_file.content
+
+  // Should contain exclusive range guard for score
+  string.contains(content, "validate_item_score_exclusive_range")
+  |> should.be_true()
+  // Should use strict comparison (> not >=)
+  string.contains(content, "value > 0")
+  |> should.be_true()
+  string.contains(content, "value < 100")
+  |> should.be_true()
+
+  // Should contain multipleOf guard for quantity
+  string.contains(content, "validate_item_quantity_multiple_of")
+  |> should.be_true()
+  string.contains(content, "value % 5 == 0")
+  |> should.be_true()
+
+  // Composite validator should call both guards
+  string.contains(content, "validate_item_score_exclusive_range(value.score)")
+  |> should.be_true()
+  string.contains(content, "validate_item_quantity_multiple_of(value.quantity)")
+  |> should.be_true()
+}
+
+pub fn guards_exclusive_and_multiple_of_float_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /measures:
+    get:
+      operationId: listMeasures
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Measure:
+      type: object
+      required: [weight, step]
+      properties:
+        weight:
+          type: number
+          exclusiveMinimum: 0.0
+          exclusiveMaximum: 999.9
+        step:
+          type: number
+          multipleOf: 0.5
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = guards.generate(ctx)
+  let assert [guard_file] = files
+  let content = guard_file.content
+
+  // Should contain exclusive range guard for weight
+  string.contains(content, "validate_measure_weight_exclusive_range")
+  |> should.be_true()
+  // Should use float comparison operators
+  string.contains(content, "value >. 0.0")
+  |> should.be_true()
+
+  // Should contain multipleOf guard for step
+  string.contains(content, "validate_measure_step_multiple_of")
+  |> should.be_true()
+  string.contains(content, "must be a multiple of 0.5")
+  |> should.be_true()
+}
+
+pub fn guards_top_level_integer_exclusive_and_multiple_of_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /ids:
+    get:
+      operationId: listIds
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    EvenPositive:
+      type: integer
+      exclusiveMinimum: 0
+      multipleOf: 2
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = guards.generate(ctx)
+  let assert [guard_file] = files
+  let content = guard_file.content
+
+  // Top-level exclusive range guard
+  string.contains(content, "validate_even_positive_exclusive_range")
+  |> should.be_true()
+  // Top-level multipleOf guard
+  string.contains(content, "validate_even_positive_multiple_of")
+  |> should.be_true()
+}
