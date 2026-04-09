@@ -1916,10 +1916,51 @@ fn generate_deep_object_query_param(
           let #(prop_name, prop_ref) = entry
           let field_name = naming.to_snake_case(prop_name)
           let accessor = "obj." <> field_name
-          let to_str = schema_ref_to_string_expr(prop_ref, accessor, ctx)
           let is_required = list.contains(required_fields, prop_name)
-          case is_required {
-            True ->
+          let is_array = case prop_ref {
+            Inline(schema.ArraySchema(..)) -> True
+            _ -> False
+          }
+          case is_array, is_required {
+            True, True ->
+              sb
+              |> se.indent(
+                3,
+                "let qp = list.fold(" <> accessor <> ", qp, fn(acc, item) {",
+              )
+              |> se.indent(
+                4,
+                "[\""
+                  <> param.name
+                  <> "["
+                  <> prop_name
+                  <> "]=\" <> uri.percent_encode("
+                  <> deep_object_array_item_to_string(prop_ref, ctx)
+                  <> "), ..acc]",
+              )
+              |> se.indent(3, "})")
+            True, False ->
+              sb
+              |> se.indent(3, "let qp = case " <> accessor <> " {")
+              |> se.indent(
+                4,
+                "Some(items) -> list.fold(items, qp, fn(acc, item) {",
+              )
+              |> se.indent(
+                5,
+                "[\""
+                  <> param.name
+                  <> "["
+                  <> prop_name
+                  <> "]=\" <> uri.percent_encode("
+                  <> deep_object_array_item_to_string(prop_ref, ctx)
+                  <> "), ..acc]",
+              )
+              |> se.indent(4, "})")
+              |> se.indent(4, "None -> qp")
+              |> se.indent(3, "}")
+            False, True -> {
+              let to_str = schema_ref_to_string_expr(prop_ref, accessor, ctx)
               sb
               |> se.indent(
                 3,
@@ -1931,7 +1972,8 @@ fn generate_deep_object_query_param(
                   <> to_str
                   <> "), ..qp]",
               )
-            False ->
+            }
+            False, False ->
               sb
               |> se.indent(3, "let qp = case " <> accessor <> " {")
               |> se.indent(
