@@ -1371,21 +1371,31 @@ fn form_urlencoded_object_constructor_expr(
   prefix: String,
   properties: List(DeepObjectProperty),
   ctx: Context,
-  allow_nested_objects: Bool,
+  nesting_depth: Int,
 ) -> String {
   let fields =
     properties
     |> list.map(fn(prop) {
       let key = form_urlencoded_key(prefix, prop.name)
       let value_expr = case
-        allow_nested_objects
+        nesting_depth < 5
         && schema_ref_resolves_to_object(prop.schema_ref, ctx),
         prop.required
       {
         True, True ->
-          form_urlencoded_object_required_expr(key, prop.schema_ref, ctx)
+          form_urlencoded_object_required_expr(
+            key,
+            prop.schema_ref,
+            ctx,
+            nesting_depth + 1,
+          )
         True, False ->
-          form_urlencoded_object_optional_expr(key, prop.schema_ref, ctx)
+          form_urlencoded_object_optional_expr(
+            key,
+            prop.schema_ref,
+            ctx,
+            nesting_depth + 1,
+          )
         False, True ->
           form_body_required_expr_with_schema(key, Some(prop.schema_ref), ctx)
         False, False ->
@@ -1401,13 +1411,14 @@ fn form_urlencoded_object_required_expr(
   prefix: String,
   schema_ref: SchemaRef,
   ctx: Context,
+  nesting_depth: Int,
 ) -> String {
   form_urlencoded_object_constructor_expr(
     form_urlencoded_schema_ref_type_name(schema_ref),
     prefix,
     object_properties_from_schema_ref(schema_ref, ctx),
     ctx,
-    False,
+    nesting_depth,
   )
 }
 
@@ -1415,6 +1426,7 @@ fn form_urlencoded_object_optional_expr(
   prefix: String,
   schema_ref: SchemaRef,
   ctx: Context,
+  nesting_depth: Int,
 ) -> String {
   let props = object_properties_from_schema_ref(schema_ref, ctx)
   let prop_names =
@@ -1431,7 +1443,7 @@ fn form_urlencoded_object_optional_expr(
     prefix,
     props,
     ctx,
-    False,
+    nesting_depth,
   )
   <> ") False -> None }"
 }
@@ -1446,7 +1458,7 @@ fn form_urlencoded_body_constructor_expr(
     "",
     form_urlencoded_body_properties(rb, ctx),
     ctx,
-    True,
+    0,
   )
 }
 

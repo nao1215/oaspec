@@ -5642,7 +5642,8 @@ paths:
   |> should.not_equal(0)
 }
 
-pub fn validate_form_urlencoded_body_unsupported_for_server_test() {
+pub fn validate_form_urlencoded_body_multi_level_nesting_accepted_test() {
+  // Multi-level nested form-urlencoded objects are now supported
   let yaml =
     "
 openapi: 3.0.3
@@ -5683,7 +5684,7 @@ paths:
       )
     })
   list.length(server_errors)
-  |> should.not_equal(0)
+  |> should.equal(0)
 }
 
 pub fn validate_json_request_body_ok_for_server_test() {
@@ -7103,6 +7104,108 @@ paths:
   |> should.be_true()
   // scores (int array) should parse each value
   string.contains(content, "int.parse")
+  |> should.be_true()
+}
+
+// --- Form-urlencoded multi-level nesting tests ---
+
+pub fn validate_form_urlencoded_two_level_nesting_accepted_test() {
+  // form-urlencoded bodies with two levels of object nesting should be
+  // accepted: field[sub][key]=value
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /submit:
+    post:
+      operationId: submit
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                profile:
+                  type: object
+                  properties:
+                    settings:
+                      type: object
+                      properties:
+                        theme:
+                          type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Server,
+    )
+  let ctx = context.new(spec, cfg)
+  let errors = validate.validate(ctx)
+  let form_errors =
+    list.filter(errors, fn(e) {
+      string.contains(e.detail, "form-urlencoded")
+      && e.target == validate.TargetServer
+    })
+  list.length(form_errors)
+  |> should.equal(0)
+}
+
+pub fn server_form_urlencoded_two_level_nesting_codegen_test() {
+  // Two-level nested form-urlencoded should generate bracket keys
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /submit:
+    post:
+      operationId: submit
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                profile:
+                  type: object
+                  properties:
+                    settings:
+                      type: object
+                      properties:
+                        theme:
+                          type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Server,
+    )
+  let ctx = context.new(spec, cfg)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // Should have two-level bracket key
+  string.contains(content, "profile[settings][theme]")
   |> should.be_true()
 }
 

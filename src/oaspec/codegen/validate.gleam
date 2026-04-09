@@ -585,7 +585,7 @@ fn validate_server_form_urlencoded_request_body(
                       severity: SeverityError,
                       target: TargetServer,
                       path: op_id <> ".requestBody.form." <> field_name,
-                      detail: "application/x-www-form-urlencoded server request bodies only support primitive scalars/arrays and one level of object nesting with primitive leaves.",
+                      detail: "application/x-www-form-urlencoded server request bodies only support primitive scalars, primitive arrays, and nested objects with primitive leaves (max 5 levels).",
                     ),
                   ]
                 }
@@ -690,11 +690,11 @@ fn form_urlencoded_server_field_supported(
     | Some(BooleanSchema(..)) -> True
     Some(ArraySchema(items:, ..)) ->
       form_urlencoded_server_array_item_supported(items, ctx)
-    Some(ObjectSchema(properties:, ..)) if depth == 0 ->
+    Some(ObjectSchema(properties:, ..)) if depth < 5 ->
       dict.to_list(properties)
       |> list.all(fn(entry) {
         let #(_, child_schema) = entry
-        form_urlencoded_server_field_supported(child_schema, ctx, 1)
+        form_urlencoded_server_field_supported(child_schema, ctx, depth + 1)
       })
     _ -> False
   }
