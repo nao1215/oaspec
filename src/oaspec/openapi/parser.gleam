@@ -919,7 +919,39 @@ pub fn parse_schema_object(node: yay.Node) -> Result(SchemaObject, ParseError) {
     |> result.unwrap(None)
     |> option.unwrap(False)
 
-  let metadata = schema.SchemaMetadata(description:, nullable:, deprecated:)
+  let title =
+    yay.extract_optional_string(node, "title")
+    |> result.unwrap(None)
+
+  let read_only =
+    yay.extract_optional_bool(node, "readOnly")
+    |> result.unwrap(None)
+    |> option.unwrap(False)
+
+  let write_only =
+    yay.extract_optional_bool(node, "writeOnly")
+    |> result.unwrap(None)
+    |> option.unwrap(False)
+
+  let default =
+    yay.extract_optional_string(node, "default")
+    |> result.unwrap(None)
+
+  let example =
+    yay.extract_optional_string(node, "example")
+    |> result.unwrap(None)
+
+  let metadata =
+    schema.SchemaMetadata(
+      description:,
+      nullable:,
+      deprecated:,
+      title:,
+      read_only:,
+      write_only:,
+      default:,
+      example:,
+    )
 
   // Check for composition keywords first
   case yay.select_sugar(from: node, selector: "allOf") {

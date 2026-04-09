@@ -7,12 +7,30 @@ import gleam/string
 /// Extracted from variants to avoid duplication and ensure composition
 /// schemas (allOf/oneOf/anyOf) don't lose these fields.
 pub type SchemaMetadata {
-  SchemaMetadata(description: Option(String), nullable: Bool, deprecated: Bool)
+  SchemaMetadata(
+    description: Option(String),
+    nullable: Bool,
+    deprecated: Bool,
+    title: Option(String),
+    read_only: Bool,
+    write_only: Bool,
+    default: Option(String),
+    example: Option(String),
+  )
 }
 
 /// Create default metadata with no description, not nullable, not deprecated.
 pub fn default_metadata() -> SchemaMetadata {
-  SchemaMetadata(description: option.None, nullable: False, deprecated: False)
+  SchemaMetadata(
+    description: option.None,
+    nullable: False,
+    deprecated: False,
+    title: option.None,
+    read_only: False,
+    write_only: False,
+    default: option.None,
+    example: option.None,
+  )
 }
 
 /// Represents a JSON Schema object within OpenAPI 3.x.

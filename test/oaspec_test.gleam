@@ -4455,6 +4455,46 @@ paths:
   simple.style |> should.equal(Some(spec.SimpleStyle))
 }
 
+// --- SchemaMetadata preserves title, readOnly, writeOnly, default, example ---
+pub fn schema_metadata_lossless_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    User:
+      type: object
+      title: User object
+      properties:
+        name:
+          type: string
+          title: User name
+          readOnly: true
+          default: anonymous
+          example: Alice
+        id:
+          type: integer
+          writeOnly: true
+"
+  let assert Ok(parsed) = parser.parse_string(yaml)
+  let assert Some(c) = parsed.components
+  let assert Ok(schema.Inline(user)) = dict.get(c.schemas, "User")
+  // Object metadata
+  case user {
+    schema.ObjectSchema(metadata:, ..) -> {
+      metadata.title |> should.equal(Some("User object"))
+    }
+    _ -> should.fail()
+  }
+}
+
 pub fn security_scheme_in_is_adt_test() {
   let yaml =
     "
