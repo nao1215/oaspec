@@ -124,6 +124,7 @@ pub type Parameter {
     style: Option(String),
     explode: Option(Bool),
     deprecated: Bool,
+    allow_reserved: Bool,
   )
 }
 

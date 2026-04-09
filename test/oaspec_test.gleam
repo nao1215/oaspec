@@ -3959,6 +3959,98 @@ components:
   |> should.be_true()
 }
 
+// --- allowReserved parameter tests ---
+
+/// Query parameter with allowReserved: true must NOT be percent-encoded.
+pub fn allow_reserved_skips_percent_encode_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: search
+      parameters:
+        - name: q
+          in: query
+          required: true
+          allowReserved: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // With allowReserved, the generated code must NOT use uri.percent_encode for this param
+  // Instead it should use the value directly
+  string.contains(content, "uri.percent_encode(q)")
+  |> should.be_false()
+}
+
+/// Query parameter without allowReserved must be percent-encoded (default).
+pub fn default_query_param_is_percent_encoded_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: search
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // Without allowReserved, must use uri.percent_encode
+  string.contains(content, "uri.percent_encode(q)")
+  |> should.be_true()
+}
+
 // --- Parser required field validation tests ---
 
 /// requestBody without content field must be rejected (content is REQUIRED).

@@ -468,6 +468,11 @@ fn parse_parameter(
         yay.extract_optional_bool(node, "explode")
         |> result.unwrap(None)
 
+      let allow_reserved =
+        yay.extract_optional_bool(node, "allowReserved")
+        |> result.unwrap(None)
+        |> option.unwrap(False)
+
       Ok(Parameter(
         name:,
         in_:,
@@ -477,6 +482,7 @@ fn parse_parameter(
         style:,
         explode:,
         deprecated:,
+        allow_reserved:,
       ))
     }
   }

@@ -509,18 +509,20 @@ fn generate_client_function(
                   case p.required {
                     True -> {
                       let to_str = to_str_for_required(p, param_name, ctx)
+                      let encoded = maybe_percent_encode(to_str, p)
                       sb
                       |> se.indent(
                         1,
                         "let query_parts = [\""
                           <> p.name
-                          <> "=\" <> uri.percent_encode("
-                          <> to_str
-                          <> "), ..query_parts]",
+                          <> "=\" <> "
+                          <> encoded
+                          <> ", ..query_parts]",
                       )
                     }
                     False -> {
                       let to_str = to_str_for_optional_value(p, ctx)
+                      let encoded = maybe_percent_encode(to_str, p)
                       sb
                       |> se.indent(
                         1,
@@ -530,9 +532,9 @@ fn generate_client_function(
                         2,
                         "Some(v) -> [\""
                           <> p.name
-                          <> "=\" <> uri.percent_encode("
-                          <> to_str
-                          <> "), ..query_parts]",
+                          <> "=\" <> "
+                          <> encoded
+                          <> ", ..query_parts]",
                       )
                       |> se.indent(2, "None -> query_parts")
                       |> se.indent(1, "}")
@@ -2438,5 +2440,14 @@ fn generate_scheme_apply(
         _ -> sb
       }
     _ -> sb
+  }
+}
+
+/// Wrap a value expression with uri.percent_encode or not, based on allowReserved.
+/// When allowReserved is true, reserved characters are sent as-is per OpenAPI spec.
+fn maybe_percent_encode(value_expr: String, param: spec.Parameter) -> String {
+  case param.allow_reserved {
+    True -> value_expr
+    False -> "uri.percent_encode(" <> value_expr <> ")"
   }
 }
