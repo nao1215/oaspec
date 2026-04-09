@@ -219,6 +219,7 @@ fn generate_router(ctx: Context) -> String {
     })
 
   let needs_list_import = needs_cookie_lookup
+  let needs_uri_import = needs_cookie_lookup
 
   let needs_option =
     list.any(operations, fn(op) {
@@ -295,6 +296,10 @@ fn generate_router(ctx: Context) -> String {
   let std_imports = ["gleam/dict.{type Dict}"]
   let std_imports = case needs_list_import {
     True -> list.append(std_imports, ["gleam/list"])
+    False -> std_imports
+  }
+  let std_imports = case needs_uri_import {
+    True -> list.append(std_imports, ["gleam/uri"])
     False -> std_imports
   }
   let std_imports = case needs_int {
@@ -422,7 +427,10 @@ fn generate_cookie_lookup(sb: se.StringBuilder) -> se.StringBuilder {
   |> se.indent(4, "case string.split_once(trimmed, on: \"=\") {")
   |> se.indent(5, "Ok(#(cookie_key, cookie_value)) ->")
   |> se.indent(6, "case string.trim(cookie_key) == key {")
-  |> se.indent(7, "True -> Ok(string.trim(cookie_value))")
+  |> se.indent(
+    7,
+    "True -> uri.percent_decode(string.trim(cookie_value))",
+  )
   |> se.indent(7, "False -> Error(Nil)")
   |> se.indent(6, "}")
   |> se.indent(5, "Error(_) -> Error(Nil)")
