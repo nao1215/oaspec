@@ -177,12 +177,11 @@ fn dedup_schema_ref(schema_ref: SchemaRef) -> SchemaRef {
 fn dedup_schema_object(schema_obj: SchemaObject) -> SchemaObject {
   case schema_obj {
     ObjectSchema(
-      description:,
+      metadata:,
       properties:,
       required:,
       additional_properties:,
       additional_properties_untyped:,
-      nullable:,
     ) -> {
       // Only recurse into child schemas — do NOT rename property keys.
       // Property keys are JSON wire names and must be preserved exactly.
@@ -197,7 +196,7 @@ fn dedup_schema_object(schema_obj: SchemaObject) -> SchemaObject {
         |> dict.from_list()
 
       ObjectSchema(
-        description:,
+        metadata:,
         properties: new_props,
         required:,
         additional_properties: case additional_properties {
@@ -205,27 +204,24 @@ fn dedup_schema_object(schema_obj: SchemaObject) -> SchemaObject {
           None -> None
         },
         additional_properties_untyped:,
-        nullable:,
       )
     }
 
     // Do NOT rename enum values — they are JSON wire values.
     // Gleam variant deduplication is handled at codegen time via
     // dedup_enum_variants/1.
-    OneOfSchema(description:, schemas:, discriminator:, nullable:) ->
+    OneOfSchema(metadata:, schemas:, discriminator:) ->
       OneOfSchema(
-        description:,
+        metadata:,
         schemas: list.map(schemas, dedup_schema_ref),
         discriminator:,
-        nullable:,
       )
 
-    AnyOfSchema(description:, schemas:, discriminator:, nullable:) ->
+    AnyOfSchema(metadata:, schemas:, discriminator:) ->
       AnyOfSchema(
-        description:,
+        metadata:,
         schemas: list.map(schemas, dedup_schema_ref),
         discriminator:,
-        nullable:,
       )
 
     _ -> schema_obj

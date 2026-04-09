@@ -658,8 +658,7 @@ fn parse_required_content(
         }
       })
     }
-    _ ->
-      Error(MissingField(path: context <> ".requestBody", field: "content"))
+    _ -> Error(MissingField(path: context <> ".requestBody", field: "content"))
   }
 }
 
@@ -881,11 +880,18 @@ pub fn parse_schema_object(node: yay.Node) -> Result(SchemaObject, ParseError) {
     yay.extract_optional_string(node, "description")
     |> result.unwrap(None)
 
+  let deprecated =
+    yay.extract_optional_bool(node, "deprecated")
+    |> result.unwrap(None)
+    |> option.unwrap(False)
+
+  let metadata = schema.SchemaMetadata(description:, nullable:, deprecated:)
+
   // Check for composition keywords first
   case yay.select_sugar(from: node, selector: "allOf") {
     Ok(yay.NodeSeq(items)) -> {
       use schemas <- result.try(list.try_map(items, parse_schema_ref))
-      Ok(AllOfSchema(description:, schemas:, nullable:))
+      Ok(AllOfSchema(metadata:, schemas:))
     }
     _ ->
       case yay.select_sugar(from: node, selector: "oneOf") {
@@ -900,7 +906,7 @@ pub fn parse_schema_object(node: yay.Node) -> Result(SchemaObject, ParseError) {
               Error(_) -> Ok(None)
             },
           )
-          Ok(OneOfSchema(description:, schemas:, discriminator:, nullable:))
+          Ok(OneOfSchema(metadata:, schemas:, discriminator:))
         }
         _ ->
           case yay.select_sugar(from: node, selector: "anyOf") {
@@ -915,9 +921,9 @@ pub fn parse_schema_object(node: yay.Node) -> Result(SchemaObject, ParseError) {
                   Error(_) -> Ok(None)
                 },
               )
-              Ok(AnyOfSchema(description:, schemas:, discriminator:, nullable:))
+              Ok(AnyOfSchema(metadata:, schemas:, discriminator:))
             }
-            _ -> parse_typed_schema(node, description, nullable)
+            _ -> parse_typed_schema(node, metadata)
           }
       }
   }
@@ -926,13 +932,12 @@ pub fn parse_schema_object(node: yay.Node) -> Result(SchemaObject, ParseError) {
 /// Parse a typed schema (string, integer, number, boolean, array, object).
 fn parse_typed_schema(
   node: yay.Node,
-  description: Option(String),
-  nullable: Bool,
+  metadata: schema.SchemaMetadata,
 ) -> Result(SchemaObject, ParseError) {
   // OpenAPI 3.1 allows type to be an array, e.g. type: [string, 'null'].
   // Extract the primary type and detect nullable from the array form.
   // Multi-type unions (e.g. [string, integer]) are not supported.
-  use #(type_str, nullable) <- result.try(
+  use #(type_str, metadata) <- result.try(
     case yay.select_sugar(from: node, selector: "type") {
       Ok(yay.NodeSeq(type_nodes)) -> {
         let type_strs =
@@ -945,8 +950,22 @@ fn parse_typed_schema(
         let has_null = list.contains(type_strs, "null")
         let non_null_types = list.filter(type_strs, fn(s) { s != "null" })
         case non_null_types {
-          [single] -> Ok(#(single, nullable || has_null))
-          [] -> Ok(#("object", nullable || has_null))
+          [single] ->
+            Ok(#(
+              single,
+              schema.SchemaMetadata(
+                ..metadata,
+                nullable: metadata.nullable || has_null,
+              ),
+            ))
+          [] ->
+            Ok(#(
+              "object",
+              schema.SchemaMetadata(
+                ..metadata,
+                nullable: metadata.nullable || has_null,
+              ),
+            ))
           _ ->
             Error(InvalidValue(
               path: "schema.type",
@@ -956,13 +975,13 @@ fn parse_typed_schema(
             ))
         }
       }
-      Ok(yay.NodeStr(s)) -> Ok(#(s, nullable))
+      Ok(yay.NodeStr(s)) -> Ok(#(s, metadata))
       _ -> {
         let s =
           yay.extract_optional_string(node, "type")
           |> result.unwrap(None)
           |> option.unwrap("object")
-        Ok(#(s, nullable))
+        Ok(#(s, metadata))
       }
     },
   )
@@ -984,13 +1003,12 @@ fn parse_typed_schema(
       let pattern =
         yay.extract_optional_string(node, "pattern") |> result.unwrap(None)
       Ok(StringSchema(
-        description:,
+        metadata:,
         format:,
         enum_values:,
         min_length:,
         max_length:,
         pattern:,
-        nullable:,
       ))
     }
 
@@ -999,7 +1017,7 @@ fn parse_typed_schema(
         yay.extract_optional_int(node, "minimum") |> result.unwrap(None)
       let maximum =
         yay.extract_optional_int(node, "maximum") |> result.unwrap(None)
-      Ok(IntegerSchema(description:, format:, minimum:, maximum:, nullable:))
+      Ok(IntegerSchema(metadata:, format:, minimum:, maximum:))
     }
 
     "number" -> {
@@ -1007,10 +1025,10 @@ fn parse_typed_schema(
         yay.extract_optional_float(node, "minimum") |> result.unwrap(None)
       let maximum =
         yay.extract_optional_float(node, "maximum") |> result.unwrap(None)
-      Ok(NumberSchema(description:, format:, minimum:, maximum:, nullable:))
+      Ok(NumberSchema(metadata:, format:, minimum:, maximum:))
     }
 
-    "boolean" -> Ok(BooleanSchema(description:, nullable:))
+    "boolean" -> Ok(BooleanSchema(metadata:))
 
     "array" -> {
       use items <- result.try(
@@ -1023,7 +1041,7 @@ fn parse_typed_schema(
         yay.extract_optional_int(node, "minItems") |> result.unwrap(None)
       let max_items =
         yay.extract_optional_int(node, "maxItems") |> result.unwrap(None)
-      Ok(ArraySchema(description:, items:, min_items:, max_items:, nullable:))
+      Ok(ArraySchema(metadata:, items:, min_items:, max_items:))
     }
 
     // Default: object
@@ -1045,12 +1063,11 @@ fn parse_typed_schema(
         },
       )
       Ok(ObjectSchema(
-        description:,
+        metadata:,
         properties:,
         required:,
         additional_properties:,
         additional_properties_untyped:,
-        nullable:,
       ))
     }
   }

@@ -158,11 +158,11 @@ fn generate_inline_enums_from_properties(
   list.fold(entries, sb, fn(sb, entry) {
     let #(prop_name, prop_ref) = entry
     case prop_ref {
-      Inline(StringSchema(description:, enum_values:, ..)) if enum_values != [] -> {
+      Inline(StringSchema(metadata:, enum_values:, ..)) if enum_values != [] -> {
         let type_name =
           naming.schema_to_type_name(parent_name)
           <> naming.schema_to_type_name(prop_name)
-        let sb = maybe_doc_comment(sb, description)
+        let sb = maybe_doc_comment(sb, metadata.description)
         let sb = sb |> se.line("pub type " <> type_name <> " {")
         let deduped_variants = dedup.dedup_enum_variants(enum_values)
         let sb =
@@ -213,14 +213,13 @@ fn generate_schema_type(
 ) -> se.StringBuilder {
   case schema {
     ObjectSchema(
-      description:,
+      metadata:,
       properties:,
       required:,
       additional_properties:,
       additional_properties_untyped:,
-      ..,
     ) -> {
-      let sb = maybe_doc_comment(sb, description)
+      let sb = maybe_doc_comment(sb, metadata.description)
       let sb = sb |> se.line("pub type " <> type_name <> " {")
       let sb = sb |> se.indent(1, type_name <> "(")
 
@@ -281,8 +280,8 @@ fn generate_schema_type(
       |> se.blank_line()
     }
 
-    StringSchema(description:, enum_values:, ..) if enum_values != [] -> {
-      let sb = maybe_doc_comment(sb, description)
+    StringSchema(metadata:, enum_values:, ..) if enum_values != [] -> {
+      let sb = maybe_doc_comment(sb, metadata.description)
       let sb = sb |> se.line("pub type " <> type_name <> " {")
       let deduped_variants = dedup.dedup_enum_variants(enum_values)
       let sb =
@@ -298,9 +297,8 @@ fn generate_schema_type(
       |> se.blank_line()
     }
 
-    OneOfSchema(description:, schemas:, ..)
-    | AnyOfSchema(description:, schemas:, ..) -> {
-      let sb = maybe_doc_comment(sb, description)
+    OneOfSchema(metadata:, schemas:, ..) | AnyOfSchema(metadata:, schemas:, ..) -> {
+      let sb = maybe_doc_comment(sb, metadata.description)
       let sb = sb |> se.line("pub type " <> type_name <> " {")
       let sb =
         list.fold(schemas, sb, fn(sb, s_ref) {
@@ -313,19 +311,18 @@ fn generate_schema_type(
       |> se.blank_line()
     }
 
-    AllOfSchema(description:, schemas:, ..) -> {
+    AllOfSchema(metadata:, schemas:) -> {
       // Merge all properties into a single object type
-      let sb = maybe_doc_comment(sb, description)
+      let sb = maybe_doc_comment(sb, metadata.description)
       let merged = merge_allof_schemas(schemas, ctx)
 
       let merged_schema =
         ObjectSchema(
-          description:,
+          metadata:,
           properties: merged.properties,
           required: merged.required,
           additional_properties: merged.additional_properties,
           additional_properties_untyped: merged.additional_properties_untyped,
-          nullable: False,
         )
       generate_schema_type(sb, type_name, raw_name, merged_schema, ctx)
     }
@@ -468,16 +465,15 @@ fn generate_anonymous_type_for_schema(
         False -> sb
       }
     }
-    AllOfSchema(description:, schemas:, ..) -> {
+    AllOfSchema(metadata:, schemas:) -> {
       let merged = merge_allof_schemas(schemas, ctx)
       let merged_schema =
         ObjectSchema(
-          description:,
+          metadata:,
           properties: merged.properties,
           required: merged.required,
           additional_properties: merged.additional_properties,
           additional_properties_untyped: merged.additional_properties_untyped,
-          nullable: False,
         )
       generate_schema_type(sb, type_name, raw_name, merged_schema, ctx)
     }

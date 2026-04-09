@@ -1,64 +1,66 @@
 import gleam/dict.{type Dict}
 import gleam/option.{type Option}
 
+/// Shared metadata for all schema types.
+/// Extracted from variants to avoid duplication and ensure composition
+/// schemas (allOf/oneOf/anyOf) don't lose these fields.
+pub type SchemaMetadata {
+  SchemaMetadata(description: Option(String), nullable: Bool, deprecated: Bool)
+}
+
+/// Create default metadata with no description, not nullable, not deprecated.
+pub fn default_metadata() -> SchemaMetadata {
+  SchemaMetadata(description: option.None, nullable: False, deprecated: False)
+}
+
 /// Represents a JSON Schema object within OpenAPI 3.x.
 /// This is the core building block for all type generation.
+/// All variants carry shared `metadata` for description, nullable, deprecated.
 pub type SchemaObject {
   StringSchema(
-    description: Option(String),
+    metadata: SchemaMetadata,
     format: Option(String),
     enum_values: List(String),
     min_length: Option(Int),
     max_length: Option(Int),
     pattern: Option(String),
-    nullable: Bool,
   )
   IntegerSchema(
-    description: Option(String),
+    metadata: SchemaMetadata,
     format: Option(String),
     minimum: Option(Int),
     maximum: Option(Int),
-    nullable: Bool,
   )
   NumberSchema(
-    description: Option(String),
+    metadata: SchemaMetadata,
     format: Option(String),
     minimum: Option(Float),
     maximum: Option(Float),
-    nullable: Bool,
   )
-  BooleanSchema(description: Option(String), nullable: Bool)
+  BooleanSchema(metadata: SchemaMetadata)
   ArraySchema(
-    description: Option(String),
+    metadata: SchemaMetadata,
     items: SchemaRef,
     min_items: Option(Int),
     max_items: Option(Int),
-    nullable: Bool,
   )
   ObjectSchema(
-    description: Option(String),
+    metadata: SchemaMetadata,
     properties: Dict(String, SchemaRef),
     required: List(String),
     additional_properties: Option(SchemaRef),
     additional_properties_untyped: Bool,
-    nullable: Bool,
   )
-  AllOfSchema(
-    description: Option(String),
-    schemas: List(SchemaRef),
-    nullable: Bool,
-  )
+  AllOfSchema(metadata: SchemaMetadata, schemas: List(SchemaRef))
   OneOfSchema(
-    description: Option(String),
+    metadata: SchemaMetadata,
     schemas: List(SchemaRef),
     discriminator: Option(Discriminator),
-    nullable: Bool,
   )
   AnyOfSchema(
-    description: Option(String),
+    metadata: SchemaMetadata,
     schemas: List(SchemaRef),
     discriminator: Option(Discriminator),
-    nullable: Bool,
   )
 }
 
@@ -75,30 +77,30 @@ pub type Discriminator {
 
 /// Get the description from any schema object.
 pub fn get_description(schema: SchemaObject) -> Option(String) {
-  case schema {
-    StringSchema(description:, ..) -> description
-    IntegerSchema(description:, ..) -> description
-    NumberSchema(description:, ..) -> description
-    BooleanSchema(description:, ..) -> description
-    ArraySchema(description:, ..) -> description
-    ObjectSchema(description:, ..) -> description
-    AllOfSchema(description:, ..) -> description
-    OneOfSchema(description:, ..) -> description
-    AnyOfSchema(description:, ..) -> description
-  }
+  get_metadata(schema).description
 }
 
 /// Check if a schema is nullable.
 pub fn is_nullable(schema: SchemaObject) -> Bool {
+  get_metadata(schema).nullable
+}
+
+/// Check if a schema is deprecated.
+pub fn is_deprecated(schema: SchemaObject) -> Bool {
+  get_metadata(schema).deprecated
+}
+
+/// Extract the shared metadata from any schema variant.
+pub fn get_metadata(schema: SchemaObject) -> SchemaMetadata {
   case schema {
-    StringSchema(nullable:, ..) -> nullable
-    IntegerSchema(nullable:, ..) -> nullable
-    NumberSchema(nullable:, ..) -> nullable
-    BooleanSchema(nullable:, ..) -> nullable
-    ArraySchema(nullable:, ..) -> nullable
-    ObjectSchema(nullable:, ..) -> nullable
-    AllOfSchema(nullable:, ..) -> nullable
-    OneOfSchema(nullable:, ..) -> nullable
-    AnyOfSchema(nullable:, ..) -> nullable
+    StringSchema(metadata:, ..) -> metadata
+    IntegerSchema(metadata:, ..) -> metadata
+    NumberSchema(metadata:, ..) -> metadata
+    BooleanSchema(metadata:) -> metadata
+    ArraySchema(metadata:, ..) -> metadata
+    ObjectSchema(metadata:, ..) -> metadata
+    AllOfSchema(metadata:, ..) -> metadata
+    OneOfSchema(metadata:, ..) -> metadata
+    AnyOfSchema(metadata:, ..) -> metadata
   }
 }

@@ -76,12 +76,11 @@ pub fn resolve_schema_refs_in_schema(
 ) -> SchemaObject {
   case schema {
     ObjectSchema(
-      description:,
+      metadata:,
       properties:,
       required:,
       additional_properties:,
       additional_properties_untyped:,
-      nullable:,
     ) -> {
       let resolved_props =
         dict.map_values(properties, fn(_k, v) { resolve_one_ref(v, spec) })
@@ -90,33 +89,31 @@ pub fn resolve_schema_refs_in_schema(
         None -> None
       }
       ObjectSchema(
-        description:,
+        metadata:,
         properties: resolved_props,
         required:,
         additional_properties: resolved_ap,
         additional_properties_untyped:,
-        nullable:,
       )
     }
-    ArraySchema(description:, items:, min_items:, max_items:, nullable:) ->
+    ArraySchema(metadata:, items:, min_items:, max_items:) ->
       ArraySchema(
-        description:,
+        metadata:,
         items: resolve_one_ref(items, spec),
         min_items:,
         max_items:,
-        nullable:,
       )
-    AllOfSchema(description:, schemas:, nullable:) -> {
+    AllOfSchema(metadata:, schemas:) -> {
       let resolved = list_map_ref(schemas, spec)
-      AllOfSchema(description:, schemas: resolved, nullable:)
+      AllOfSchema(metadata:, schemas: resolved)
     }
-    OneOfSchema(description:, schemas:, discriminator:, nullable:) -> {
+    OneOfSchema(metadata:, schemas:, discriminator:) -> {
       let resolved = list_map_ref(schemas, spec)
-      OneOfSchema(description:, schemas: resolved, discriminator:, nullable:)
+      OneOfSchema(metadata:, schemas: resolved, discriminator:)
     }
-    AnyOfSchema(description:, schemas:, discriminator:, nullable:) -> {
+    AnyOfSchema(metadata:, schemas:, discriminator:) -> {
       let resolved = list_map_ref(schemas, spec)
-      AnyOfSchema(description:, schemas: resolved, discriminator:, nullable:)
+      AnyOfSchema(metadata:, schemas: resolved, discriminator:)
     }
     other -> other
   }

@@ -278,14 +278,13 @@ fn generate_decoder(
 
   case schema_ref {
     Inline(ObjectSchema(
-      description:,
+      metadata:,
       properties:,
       required:,
-      nullable:,
       additional_properties:,
       additional_properties_untyped:,
     )) -> {
-      let sb = maybe_doc_comment(sb, description)
+      let sb = maybe_doc_comment(sb, metadata.description)
       let sb =
         sb
         |> se.line(
@@ -514,12 +513,11 @@ fn generate_decoder(
         |> se.line("}")
         |> se.blank_line()
 
-      let _ = nullable
       sb
     }
 
-    Inline(StringSchema(description:, enum_values:, ..)) if enum_values != [] -> {
-      let sb = maybe_doc_comment(sb, description)
+    Inline(StringSchema(metadata:, enum_values:, ..)) if enum_values != [] -> {
+      let sb = maybe_doc_comment(sb, metadata.description)
       let sb =
         sb
         |> se.line(
@@ -583,35 +581,34 @@ fn generate_decoder(
       sb
     }
 
-    Inline(AllOfSchema(description:, schemas:, ..)) -> {
+    Inline(AllOfSchema(metadata:, schemas:)) -> {
       let merged = type_gen.merge_allof_schemas(schemas, ctx)
       let merged_schema =
         Inline(ObjectSchema(
-          description:,
+          metadata:,
           properties: merged.properties,
           required: merged.required,
           additional_properties: merged.additional_properties,
           additional_properties_untyped: merged.additional_properties_untyped,
-          nullable: False,
         ))
       generate_decoder(sb, name, merged_schema, ctx)
     }
 
-    Inline(OneOfSchema(description:, schemas:, discriminator:, ..)) -> {
+    Inline(OneOfSchema(metadata:, schemas:, discriminator:)) -> {
       generate_oneof_decoder(
         sb,
         name,
         type_name,
         fn_name,
         decoder_fn_name,
-        description,
+        metadata.description,
         schemas,
         discriminator,
         ctx,
       )
     }
 
-    Inline(AnyOfSchema(description:, schemas:, discriminator:, ..)) -> {
+    Inline(AnyOfSchema(metadata:, schemas:, discriminator:)) -> {
       // Treat anyOf the same as oneOf, using discriminator if present
       generate_oneof_decoder(
         sb,
@@ -619,7 +616,7 @@ fn generate_decoder(
         type_name,
         fn_name,
         decoder_fn_name,
-        description,
+        metadata.description,
         schemas,
         discriminator,
         ctx,
@@ -628,8 +625,8 @@ fn generate_decoder(
 
     // Primitive schemas: generate decoder/encoder wrappers
     // Nullable primitives use decode.optional / Option(T) types.
-    Inline(StringSchema(enum_values: [], nullable:, ..)) -> {
-      let #(gleam_type, decoder_expr) = case nullable {
+    Inline(StringSchema(metadata:, enum_values: [], ..)) -> {
+      let #(gleam_type, decoder_expr) = case metadata.nullable {
         True -> #("Option(String)", "decode.optional(decode.string)")
         False -> #("String", "decode.string")
       }
@@ -658,8 +655,8 @@ fn generate_decoder(
       sb
     }
 
-    Inline(IntegerSchema(nullable:, ..)) -> {
-      let #(gleam_type, decoder_expr) = case nullable {
+    Inline(IntegerSchema(metadata:, ..)) -> {
+      let #(gleam_type, decoder_expr) = case metadata.nullable {
         True -> #("Option(Int)", "decode.optional(decode.int)")
         False -> #("Int", "decode.int")
       }
@@ -688,8 +685,8 @@ fn generate_decoder(
       sb
     }
 
-    Inline(NumberSchema(nullable:, ..)) -> {
-      let #(gleam_type, decoder_expr) = case nullable {
+    Inline(NumberSchema(metadata:, ..)) -> {
+      let #(gleam_type, decoder_expr) = case metadata.nullable {
         True -> #("Option(Float)", "decode.optional(decode.float)")
         False -> #("Float", "decode.float")
       }
@@ -718,8 +715,8 @@ fn generate_decoder(
       sb
     }
 
-    Inline(BooleanSchema(nullable:, ..)) -> {
-      let #(gleam_type, decoder_expr) = case nullable {
+    Inline(BooleanSchema(metadata:)) -> {
+      let #(gleam_type, decoder_expr) = case metadata.nullable {
         True -> #("Option(Bool)", "decode.optional(decode.bool)")
         False -> #("Bool", "decode.bool")
       }
@@ -1504,16 +1501,15 @@ fn generate_encoder(
       sb
     }
 
-    Inline(AllOfSchema(description:, schemas:, ..)) -> {
+    Inline(AllOfSchema(metadata:, schemas:)) -> {
       let merged = type_gen.merge_allof_schemas(schemas, ctx)
       let merged_schema =
         Inline(ObjectSchema(
-          description:,
+          metadata:,
           properties: merged.properties,
           required: merged.required,
           additional_properties: merged.additional_properties,
           additional_properties_untyped: merged.additional_properties_untyped,
-          nullable: False,
         ))
       generate_encoder(sb, name, merged_schema, ctx)
     }
@@ -1592,8 +1588,8 @@ fn generate_encoder(
 
     // Primitive schemas: generate encoder wrappers
     // Nullable primitives use json.nullable / Option(T) types.
-    Inline(StringSchema(enum_values: [], nullable:, ..)) -> {
-      let #(gleam_type, json_expr) = case nullable {
+    Inline(StringSchema(metadata:, enum_values: [], ..)) -> {
+      let #(gleam_type, json_expr) = case metadata.nullable {
         True -> #("Option(String)", "json.nullable(value, json.string)")
         False -> #("String", "json.string(value)")
       }
@@ -1616,8 +1612,8 @@ fn generate_encoder(
       |> se.blank_line()
     }
 
-    Inline(IntegerSchema(nullable:, ..)) -> {
-      let #(gleam_type, json_expr) = case nullable {
+    Inline(IntegerSchema(metadata:, ..)) -> {
+      let #(gleam_type, json_expr) = case metadata.nullable {
         True -> #("Option(Int)", "json.nullable(value, json.int)")
         False -> #("Int", "json.int(value)")
       }
@@ -1640,8 +1636,8 @@ fn generate_encoder(
       |> se.blank_line()
     }
 
-    Inline(NumberSchema(nullable:, ..)) -> {
-      let #(gleam_type, json_expr) = case nullable {
+    Inline(NumberSchema(metadata:, ..)) -> {
+      let #(gleam_type, json_expr) = case metadata.nullable {
         True -> #("Option(Float)", "json.nullable(value, json.float)")
         False -> #("Float", "json.float(value)")
       }
@@ -1664,8 +1660,8 @@ fn generate_encoder(
       |> se.blank_line()
     }
 
-    Inline(BooleanSchema(nullable:, ..)) -> {
-      let #(gleam_type, json_expr) = case nullable {
+    Inline(BooleanSchema(metadata:)) -> {
+      let #(gleam_type, json_expr) = case metadata.nullable {
         True -> #("Option(Bool)", "json.nullable(value, json.bool)")
         False -> #("Bool", "json.bool(value)")
       }
