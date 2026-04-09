@@ -286,7 +286,7 @@ fn generate_request_type(
 /// Check if any response variant references the types module.
 fn responses_need_types_import(
   operations: List(#(String, spec.Operation, String, spec.HttpMethod)),
-  ctx: Context,
+  _ctx: Context,
 ) -> Bool {
   list.any(operations, fn(op) {
     let #(_op_id, operation, _path, _method) = op

@@ -7252,9 +7252,7 @@ components:
   let ctx = context.new(spec, cfg)
   let errors = validate.validate(ctx)
   let deep_object_errors =
-    list.filter(errors, fn(e) {
-      string.contains(e.detail, "deepObject")
-    })
+    list.filter(errors, fn(e) { string.contains(e.detail, "deepObject") })
   // Should have NO deepObject errors for referenced enum leaf
   list.length(deep_object_errors)
   |> should.equal(0)
@@ -7308,9 +7306,7 @@ components:
   let ctx = context.new(spec, cfg)
   let errors = validate.validate(ctx)
   let deep_object_errors =
-    list.filter(errors, fn(e) {
-      string.contains(e.detail, "deepObject")
-    })
+    list.filter(errors, fn(e) { string.contains(e.detail, "deepObject") })
   list.length(deep_object_errors)
   |> should.equal(0)
 }

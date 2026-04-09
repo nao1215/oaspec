@@ -1378,8 +1378,7 @@ fn form_urlencoded_object_constructor_expr(
     |> list.map(fn(prop) {
       let key = form_urlencoded_key(prefix, prop.name)
       let value_expr = case
-        nesting_depth < 5
-        && schema_ref_resolves_to_object(prop.schema_ref, ctx),
+        nesting_depth < 5 && schema_ref_resolves_to_object(prop.schema_ref, ctx),
         prop.required
       {
         True, True ->
