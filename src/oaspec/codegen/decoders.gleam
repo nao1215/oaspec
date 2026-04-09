@@ -1130,9 +1130,7 @@ fn generate_encoders(ctx: Context) -> String {
     })
 
   let base_imports = case needs_dict, needs_dynamic {
-    True, True -> [
-      "gleam/dict", "gleam/dynamic", "gleam/json", "gleam/list",
-    ]
+    True, True -> ["gleam/dict", "gleam/dynamic", "gleam/json", "gleam/list"]
     True, False -> ["gleam/dict", "gleam/json", "gleam/list"]
     _, _ -> ["gleam/json"]
   }
@@ -1172,35 +1170,20 @@ fn generate_encoders(ctx: Context) -> String {
       |> se.line("fn encode_dynamic(value: dynamic.Dynamic) -> json.Json {")
       |> se.indent(1, "case dynamic.classify(value) {")
       |> se.indent(2, "\"String\" -> {")
-      |> se.indent(
-        3,
-        "let assert Ok(s) = dynamic.string(value)",
-      )
+      |> se.indent(3, "let assert Ok(s) = dynamic.string(value)")
       |> se.indent(3, "json.string(s)")
       |> se.indent(2, "}")
       |> se.indent(2, "\"Int\" -> {")
-      |> se.indent(
-        3,
-        "let assert Ok(i) = dynamic.int(value)",
-      )
+      |> se.indent(3, "let assert Ok(i) = dynamic.int(value)")
       |> se.indent(3, "json.int(i)")
       |> se.indent(2, "}")
       |> se.indent(2, "\"Float\" -> {")
-      |> se.indent(
-        3,
-        "let assert Ok(f) = dynamic.float(value)",
-      )
+      |> se.indent(3, "let assert Ok(f) = dynamic.float(value)")
       |> se.indent(3, "json.float(f)")
       |> se.indent(2, "}")
-      |> se.indent(
-        2,
-        "\"Bool\" -> json.bool(dynamic.unsafe_coerce(value))",
-      )
+      |> se.indent(2, "\"Bool\" -> json.bool(dynamic.unsafe_coerce(value))")
       |> se.indent(2, "\"Nil\" -> json.null()")
-      |> se.indent(
-        2,
-        "_ -> json.string(dynamic.classify(value))",
-      )
+      |> se.indent(2, "_ -> json.string(dynamic.classify(value))")
       |> se.indent(1, "}")
       |> se.line("}")
       |> se.blank_line()
@@ -1616,7 +1599,11 @@ fn generate_encoder(
       }
       sb
       |> se.line(
-        "pub fn " <> json_fn_name <> "(value: " <> gleam_type <> ") -> json.Json {",
+        "pub fn "
+        <> json_fn_name
+        <> "(value: "
+        <> gleam_type
+        <> ") -> json.Json {",
       )
       |> se.indent(1, json_expr)
       |> se.line("}")
@@ -1636,7 +1623,11 @@ fn generate_encoder(
       }
       sb
       |> se.line(
-        "pub fn " <> json_fn_name <> "(value: " <> gleam_type <> ") -> json.Json {",
+        "pub fn "
+        <> json_fn_name
+        <> "(value: "
+        <> gleam_type
+        <> ") -> json.Json {",
       )
       |> se.indent(1, json_expr)
       |> se.line("}")
@@ -1656,7 +1647,11 @@ fn generate_encoder(
       }
       sb
       |> se.line(
-        "pub fn " <> json_fn_name <> "(value: " <> gleam_type <> ") -> json.Json {",
+        "pub fn "
+        <> json_fn_name
+        <> "(value: "
+        <> gleam_type
+        <> ") -> json.Json {",
       )
       |> se.indent(1, json_expr)
       |> se.line("}")
@@ -1676,7 +1671,11 @@ fn generate_encoder(
       }
       sb
       |> se.line(
-        "pub fn " <> json_fn_name <> "(value: " <> gleam_type <> ") -> json.Json {",
+        "pub fn "
+        <> json_fn_name
+        <> "(value: "
+        <> gleam_type
+        <> ") -> json.Json {",
       )
       |> se.indent(1, json_expr)
       |> se.line("}")

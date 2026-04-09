@@ -133,8 +133,7 @@ fn validate_parameters(
     // Object/complex schemas in query/header/cookie params require deepObject
     // style. Without it, codegen cannot stringify the value and falls through
     // to raw variable name, producing invalid generated code.
-    let complex_schema_errors =
-      validate_complex_param_schema(path, p, ctx)
+    let complex_schema_errors = validate_complex_param_schema(path, p, ctx)
     list.flatten([style_errors, content_errors, complex_schema_errors])
   })
 }
