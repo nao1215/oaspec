@@ -392,6 +392,23 @@ fn generate_client_function(
     Some(desc) -> sb |> se.doc_comment(desc)
     _ -> sb
   }
+  // Add doc comment listing supported content types for multi-content request bodies
+  let sb = case operation.request_body {
+    Some(rb) -> {
+      let content_entries = dict.to_list(rb.content)
+      case content_entries {
+        [_, _, ..] -> {
+          let ct_names =
+            list.map(content_entries, fn(e) { e.0 })
+            |> string.join(", ")
+          sb
+          |> se.doc_comment("Supported content types: " <> ct_names)
+        }
+        _ -> sb
+      }
+    }
+    _ -> sb
+  }
 
   let path_params =
     list.filter(operation.parameters, fn(p) {
@@ -542,26 +559,38 @@ fn generate_client_function(
   let sb = case operation.request_body {
     Some(rb) -> {
       let content_entries = dict.to_list(rb.content)
-      let content_type_key = case content_entries {
-        [#(key, _), ..] -> key
-        _ -> "application/json"
-      }
-      case content_type_key {
-        "multipart/form-data" -> generate_multipart_body(sb, rb, op_id, ctx)
-        "application/x-www-form-urlencoded" ->
-          generate_form_urlencoded_body(sb, rb, op_id, ctx)
-        _ -> {
-          let body_encode_expr = get_body_encode_expr(rb, op_id, ctx)
+      case content_entries {
+        // Multiple content types: accept pre-serialized String body
+        // with a content_type parameter
+        [_, _, ..] ->
           sb
           |> se.indent(
             1,
-            "let req = request.set_header(req, \"content-type\", \"application/json\")",
+            "let req = request.set_header(req, \"content-type\", content_type)",
           )
-          |> se.indent(
-            1,
-            "let req = request.set_body(req, " <> body_encode_expr <> ")",
-          )
-        }
+          |> se.indent(1, "let req = request.set_body(req, body)")
+        // Single content type
+        [#(content_type_key, _)] ->
+          case content_type_key {
+            "multipart/form-data" -> generate_multipart_body(sb, rb, op_id, ctx)
+            "application/x-www-form-urlencoded" ->
+              generate_form_urlencoded_body(sb, rb, op_id, ctx)
+            _ -> {
+              let body_encode_expr = get_body_encode_expr(rb, op_id, ctx)
+              sb
+              |> se.indent(
+                1,
+                "let req = request.set_header(req, \"content-type\", \""
+                  <> content_type_key
+                  <> "\")",
+              )
+              |> se.indent(
+                1,
+                "let req = request.set_body(req, " <> body_encode_expr <> ")",
+              )
+            }
+          }
+        [] -> sb
       }
     }
     _ -> sb
@@ -957,7 +986,12 @@ fn build_param_list(
   let body_param = case operation.request_body {
     Some(rb) -> {
       let body_type = get_body_type(rb, op_id)
-      [", body: " <> body_type]
+      let content_entries = dict.to_list(rb.content)
+      case content_entries {
+        // Multi-content: add content_type param before body
+        [_, _, ..] -> [", content_type: String", ", body: " <> body_type]
+        _ -> [", body: " <> body_type]
+      }
     }
     _ -> []
   }
@@ -1087,7 +1121,9 @@ fn to_str_for_optional_value(param: spec.Parameter, ctx: Context) -> String {
 fn get_body_type(rb: spec.RequestBody, op_id: String) -> String {
   let content_entries = dict.to_list(rb.content)
   case content_entries {
-    [#(_, media_type), ..] ->
+    // Multiple content types: use pre-serialized String
+    [_, _, ..] -> "String"
+    [#(_, media_type)] ->
       case media_type.schema {
         Some(Reference(ref:)) ->
           "types." <> naming.schema_to_type_name(resolver.ref_to_name(ref))

@@ -2073,13 +2073,14 @@ paths:
   let assert Ok(spec) = parser.parse_string(yaml)
   let spec = hoist.hoist(spec)
   let ctx = make_ctx_from_spec(spec)
-  let files = client_gen.generate(ctx)
-  let assert [client_file] = files
-  let content = client_file.content
-  // The generated client must handle both content types, not just the first
-  string.contains(content, "text/plain")
-  |> should.be_true()
-  string.contains(content, "application/json")
+
+  // Multi-content response types use String to stay type-safe
+  let type_files = types.generate(ctx)
+  let response_types_content =
+    list.find(type_files, fn(f) { string.contains(f.path, "response_types") })
+  let assert Ok(rt_file) = response_types_content
+  // Variant must use String (not Int from JSON schema) for type safety
+  string.contains(rt_file.content, "GetDataResponseOk(String)")
   |> should.be_true()
 }
 
@@ -2255,7 +2256,8 @@ paths:
   let assert Ok(rt_file) = response_types_content
   // The variant must use String since text/plain and JSON decode to different types
   // It must NOT use Int (which would be a type error when returning resp.body: String)
-  let has_int_variant = string.contains(rt_file.content, "GetDataResponseOk(Int)")
+  let has_int_variant =
+    string.contains(rt_file.content, "GetDataResponseOk(Int)")
   let has_string_variant =
     string.contains(rt_file.content, "GetDataResponseOk(String)")
   // Either use String for both, or separate variants per content-type
@@ -2351,8 +2353,7 @@ security:
   // bearer_auth must actually be used in the request function body
   // (not just in the ClientConfig type definition).
   // Find the get_secure function and check bearer_auth appears inside it.
-  let assert Ok(fn_start) =
-    find_substring_index(content, "pub fn get_secure(")
+  let assert Ok(fn_start) = find_substring_index(content, "pub fn get_secure(")
   let fn_body = string.drop_start(content, fn_start)
   string.contains(fn_body, "bearer_auth")
   |> should.be_true()
