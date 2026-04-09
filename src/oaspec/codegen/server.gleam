@@ -10,6 +10,11 @@ import oaspec/util/http
 import oaspec/util/naming
 import oaspec/util/string_extra as se
 
+/// Expression that case-insensitively parses a string to Bool.
+/// Accepts "true"/"True"/"TRUE" etc. as True, everything else as False.
+/// This is compatible with Gleam's bool.to_string which produces "True"/"False".
+const bool_parse_expr = "case string.lowercase(v) { \"true\" -> True _ -> False }"
+
 /// Generate server stub files.
 pub fn generate(ctx: Context) -> List(GeneratedFile) {
   let handlers_content = generate_handlers(ctx)
@@ -184,6 +189,17 @@ fn generate_router(ctx: Context) -> String {
       })
     })
 
+  let needs_string =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(operation.parameters, fn(p) {
+        case p.schema {
+          Some(Inline(schema.BooleanSchema(..))) -> True
+          _ -> False
+        }
+      })
+    })
+
   let needs_option =
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
@@ -247,6 +263,10 @@ fn generate_router(ctx: Context) -> String {
   }
   let std_imports = case needs_json {
     True -> list.append(std_imports, ["gleam/json"])
+    False -> std_imports
+  }
+  let std_imports = case needs_string {
+    True -> list.append(std_imports, ["gleam/string"])
     False -> std_imports
   }
 
@@ -467,7 +487,7 @@ fn param_parse_expr(var_name: String, param: spec.Parameter) -> String {
       var_name <> "  // TODO: Parse as Float"
     }
     Some(Inline(schema.BooleanSchema(..))) -> {
-      "case " <> var_name <> " { \"true\" -> True _ -> False }"
+      "{ let v = " <> var_name <> " " <> bool_parse_expr <> " }"
     }
     _ -> var_name
   }
@@ -484,7 +504,9 @@ fn query_required_expr(key: String, param: spec.Parameter) -> String {
     Some(Inline(schema.BooleanSchema(..))) ->
       "{ let assert Ok(v) = dict.get(query, \""
       <> key
-      <> "\") case v { \"true\" -> True _ -> False } }"
+      <> "\") "
+      <> bool_parse_expr
+      <> " }"
     _ -> base
   }
 }
@@ -499,7 +521,9 @@ fn query_optional_expr(key: String, param: spec.Parameter) -> String {
     Some(Inline(schema.BooleanSchema(..))) ->
       "case dict.get(query, \""
       <> key
-      <> "\") { Ok(v) -> Some(case v { \"true\" -> True _ -> False }) _ -> None }"
+      <> "\") { Ok(v) -> Some("
+      <> bool_parse_expr
+      <> ") _ -> None }"
     _ ->
       "case dict.get(query, \"" <> key <> "\") { Ok(v) -> Some(v) _ -> None }"
   }

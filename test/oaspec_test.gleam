@@ -5516,3 +5516,101 @@ components:
   string.contains(content, "validate_even_positive_multiple_of")
   |> should.be_true()
 }
+
+// --- Bool parameter case-insensitive parsing tests ---
+
+pub fn server_bool_path_param_case_insensitive_test() {
+  // Server codegen should parse both "true"/"True" and "false"/"False" for bool params.
+  // Gleam's bool.to_string produces "True"/"False" (capitalized), so server must
+  // accept both cases to be compatible with the client.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items/{active}:
+    get:
+      operationId: getItems
+      parameters:
+        - name: active
+          in: path
+          required: true
+          schema:
+            type: boolean
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // Must accept "true" and "True" as True (case-insensitive)
+  string.contains(content, "string.lowercase")
+  |> should.be_true()
+}
+
+pub fn server_bool_query_param_case_insensitive_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: verbose
+          in: query
+          required: true
+          schema:
+            type: boolean
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // Must accept "true"/"True" as True via case-insensitive comparison
+  string.contains(content, "string.lowercase")
+  |> should.be_true()
+}
+
+pub fn server_bool_optional_query_param_case_insensitive_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: verbose
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // Must accept "true"/"True" as True via case-insensitive comparison
+  string.contains(content, "string.lowercase")
+  |> should.be_true()
+}
