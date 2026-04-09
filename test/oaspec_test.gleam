@@ -8060,3 +8060,188 @@ pub fn oss_openapi_gen_issue_18516_generates_test() {
       list.length(validate.errors_only(errors)) |> should.equal(0)
   }
 }
+
+// ---------------------------------------------------------------------------
+// OSS: kin-openapi (MIT)
+// Test data derived from https://github.com/getkin/kin-openapi
+// ---------------------------------------------------------------------------
+
+/// kin-openapi link-example: complex links between operations.
+pub fn oss_kin_openapi_link_example_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_kin_openapi_link_example.yaml")
+  spec.info.title |> should.equal("Link Example")
+  // Has multiple paths
+  dict.size(spec.paths) |> should.not_equal(0)
+  // Has components with links
+  let assert Some(components) = spec.components
+  dict.size(components.links) |> should.not_equal(0)
+}
+
+/// kin-openapi issue409: string schema with regex pattern.
+pub fn oss_kin_openapi_issue409_pattern_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_kin_openapi_issue409.yaml")
+  spec.info.title |> should.equal("Issue 409")
+  dict.size(spec.paths) |> should.not_equal(0)
+}
+
+/// kin-openapi issue753: callbacks with schema refs.
+pub fn oss_kin_openapi_callbacks_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_kin_openapi_callbacks.yaml")
+  // Has two paths with callbacks
+  dict.size(spec.paths) |> should.equal(2)
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+/// kin-openapi issue794: request body with empty media type content.
+pub fn oss_kin_openapi_empty_media_type_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_kin_openapi_empty_media_type.yaml")
+  spec.info.title |> should.equal("Swagger API")
+  dict.size(spec.paths) |> should.equal(1)
+}
+
+/// kin-openapi issue697: schema with date format and example.
+pub fn oss_kin_openapi_date_example_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_kin_openapi_date_example.yaml")
+  spec.info.title |> should.equal("sample")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+/// kin-openapi: path-level parameters overridden at operation level.
+pub fn oss_kin_openapi_param_override_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_kin_openapi_param_override.yaml")
+  spec.info.title |> should.equal("customer")
+  dict.size(spec.paths) |> should.equal(1)
+  list.length(spec.servers) |> should.equal(1)
+}
+
+/// kin-openapi: additionalProperties with typed schema.
+pub fn oss_kin_openapi_additional_properties_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file(
+      "test/fixtures/oss_kin_openapi_additional_properties.yaml",
+    )
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.equal(2)
+}
+
+/// kin-openapi: example $ref within parameters, headers, and media types.
+pub fn oss_kin_openapi_example_refs_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_kin_openapi_example_refs.yaml")
+  let assert Some(components) = spec.components
+  dict.size(components.parameters) |> should.not_equal(0)
+  dict.size(components.headers) |> should.not_equal(0)
+  dict.size(components.request_bodies) |> should.not_equal(0)
+  dict.size(components.responses) |> should.not_equal(0)
+}
+
+/// kin-openapi: minimal OpenAPI spec in JSON format.
+pub fn oss_kin_openapi_minimal_json_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_kin_openapi_minimal.json")
+  // The original fixture has an empty title
+  spec.info.title |> should.equal("")
+  spec.openapi |> should.equal("3.0.0")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.equal(1)
+}
+
+/// kin-openapi: components with $ref cross-references in JSON.
+/// The fixture contains an invalid security scheme type ("cookie") which is
+/// not part of the OpenAPI 3.x specification. The parser rejects it with a
+/// clear error message guiding the user to fix the security scheme type.
+pub fn oss_kin_openapi_components_json_rejects_invalid_scheme_test() {
+  let result =
+    parser.parse_file("test/fixtures/oss_kin_openapi_components.json")
+  case result {
+    Error(parser.InvalidValue(_, detail)) ->
+      should.be_true(string.contains(detail, "cookie"))
+    _ -> should.fail()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// OSS: openapi-spec-validator (Apache-2.0)
+// Test data derived from https://github.com/python-openapi/openapi-spec-validator
+// ---------------------------------------------------------------------------
+
+/// openapi-spec-validator: standard petstore v3.0.
+pub fn oss_spec_validator_petstore_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_spec_validator_petstore.yaml")
+  spec.info.title |> should.equal("Swagger Petstore")
+  spec.openapi |> should.equal("3.0.0")
+  dict.size(spec.paths) |> should.equal(2)
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.equal(3)
+}
+
+/// openapi-spec-validator: readOnly and writeOnly properties.
+pub fn oss_spec_validator_read_write_only_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_spec_validator_read_write_only.yaml")
+  spec.info.title |> should.equal("Specification Containing readOnly")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+/// openapi-spec-validator: response without description field.
+/// OpenAPI 3.x requires 'description' on every response object.
+/// The parser rejects this with a user-friendly error message.
+pub fn oss_spec_validator_missing_description_rejects_test() {
+  let result =
+    parser.parse_file(
+      "test/fixtures/oss_spec_validator_missing_description.yaml",
+    )
+  case result {
+    Error(parser.MissingField(_, "description")) -> should.be_true(True)
+    Error(e) -> {
+      let msg = parser.parse_error_to_string(e)
+      should.be_true(string.contains(msg, "description"))
+    }
+    Ok(_) -> should.fail()
+  }
+}
+
+/// openapi-spec-validator: self-referencing recursive schema.
+pub fn oss_spec_validator_recursive_property_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file(
+      "test/fixtures/oss_spec_validator_recursive_property.yaml",
+    )
+  spec.info.title |> should.equal("Some Schema")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+/// openapi-spec-validator: petstore v3.1 with pathItems in components.
+pub fn oss_spec_validator_petstore_v31_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_spec_validator_petstore_v31.yaml")
+  spec.info.title |> should.equal("Swagger Petstore")
+  spec.openapi |> should.equal("3.1.0")
+  let assert Some(components) = spec.components
+  dict.size(components.path_items) |> should.not_equal(0)
+}
+
+// ---------------------------------------------------------------------------
+// OSS: swagger-parser-js (MIT)
+// Test data derived from https://github.com/APIDevTools/swagger-parser
+// ---------------------------------------------------------------------------
+
+/// swagger-parser-js: relative server URL in JSON format.
+pub fn oss_swagger_parser_js_relative_server_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_swagger_parser_js_relative_server.json")
+  spec.info.title |> should.equal("Swagger Petstore")
+  list.length(spec.servers) |> should.equal(1)
+  dict.size(spec.paths) |> should.not_equal(0)
+}
