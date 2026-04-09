@@ -1,7 +1,7 @@
 import gleam/int
 import gleam/io
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import glint
 import oaspec/codegen/context
@@ -50,10 +50,16 @@ fn generate_command() -> glint.Command(Nil) {
       fn() {
         glint.command(fn(_named_args, _args, flags) {
           let config_path = config_path(flags) |> result.unwrap("./oaspec.yaml")
-          let mode_str = mode(flags) |> result.unwrap("both")
-          let output_str = output(flags) |> result.unwrap("")
+          let mode_opt = case mode(flags) |> result.unwrap("") {
+            "" -> None
+            s -> Some(s)
+          }
+          let output_opt = case output(flags) |> result.unwrap("") {
+            "" -> None
+            s -> Some(s)
+          }
 
-          run_generate(config_path, mode_str, output_str)
+          run_generate(config_path, mode_opt, output_opt)
         })
       },
     )
@@ -126,13 +132,13 @@ package: api
 /// generate.generate and load_config.
 fn run_generate(
   config_path: String,
-  mode_str: String,
-  output_str: String,
+  mode_opt: Option(String),
+  output_opt: Option(String),
 ) -> Nil {
   io.println("oaspec v" <> context.version)
   io.println("Loading config from: " <> config_path)
 
-  case load_config(config_path, mode_str, output_str) {
+  case load_config(config_path, mode_opt, output_opt) {
     Error(msg) -> {
       io.println("Error: " <> msg)
       halt(1)
@@ -185,23 +191,23 @@ fn run_generate(
 /// Pure config loading and validation pipeline.
 fn load_config(
   config_path: String,
-  mode_str: String,
-  output_str: String,
+  mode_opt: Option(String),
+  output_opt: Option(String),
 ) -> Result(config.Config, String) {
   use cfg <- result.try(
     config.load(config_path)
     |> result.map_error(config.error_to_string),
   )
-  use cfg <- result.try(case mode_str {
-    "" -> Ok(cfg)
-    _ ->
+  use cfg <- result.try(case mode_opt {
+    None -> Ok(cfg)
+    Some(mode_str) ->
       config.parse_mode(mode_str)
       |> result.map(fn(m) { config.with_mode(cfg, m) })
       |> result.map_error(config.error_to_string)
   })
-  let cfg = case output_str {
-    "" -> cfg
-    path -> config.with_output(cfg, Some(path))
+  let cfg = case output_opt {
+    None -> cfg
+    Some(path) -> config.with_output(cfg, Some(path))
   }
   config.validate_output_package_match(cfg)
   |> result.map(fn(_) { cfg })
