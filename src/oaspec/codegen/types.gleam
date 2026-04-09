@@ -795,7 +795,10 @@ fn generate_response_type(
 
           case content_entries {
             [] -> sb |> se.indent(1, variant_name)
-            [#(media_type_name, media_type), ..] ->
+            // Multiple content types: use String to stay type-safe
+            // since different media types may decode to different Gleam types
+            [_, _, ..] -> sb |> se.indent(1, variant_name <> "(String)")
+            [#(media_type_name, media_type)] ->
               case media_type_name {
                 // text/plain, XML, octet-stream: always use String type
                 "text/plain"
