@@ -42,19 +42,18 @@ fn resolve_schema_ref_with_seen(
 ) -> Result(SchemaObject, ResolveError) {
   case schema_ref {
     Inline(schema) -> Ok(schema)
-    Reference(ref:) -> {
+    Reference(ref:, name:) -> {
       case set.contains(seen, ref) {
         True -> Error(CircularRef(ref:))
         False -> {
           let new_seen = set.insert(seen, ref)
           case spec.components {
             Some(components) -> {
-              let name = ref_to_name(ref)
               case dict.get(components.schemas, name) {
                 Ok(Inline(schema)) -> Ok(schema)
-                Ok(Reference(inner_ref)) ->
+                Ok(Reference(ref: inner_ref, name: inner_name)) ->
                   resolve_schema_ref_with_seen(
-                    Reference(ref: inner_ref),
+                    Reference(ref: inner_ref, name: inner_name),
                     spec,
                     new_seen,
                   )
@@ -122,10 +121,10 @@ pub fn resolve_schema_refs_in_schema(
 /// Try to resolve a single ref, keeping it as-is if resolution fails.
 fn resolve_one_ref(schema_ref: SchemaRef, spec: OpenApiSpec) -> SchemaRef {
   case schema_ref {
-    Reference(ref:) ->
+    Reference(..) ->
       case resolve_schema_ref(schema_ref, spec) {
         Ok(schema) -> Inline(schema)
-        Error(_) -> Reference(ref:)
+        Error(_) -> schema_ref
       }
     inline -> inline
   }

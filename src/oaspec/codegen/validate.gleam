@@ -403,7 +403,7 @@ fn validate_schema_ref_recursive(
   ctx: Context,
 ) -> List(ValidationError) {
   case schema_ref {
-    Reference(ref) ->
+    Reference(ref:, ..) ->
       case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
         Ok(_) -> []
         Error(_) -> [

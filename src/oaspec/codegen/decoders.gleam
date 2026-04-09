@@ -239,7 +239,7 @@ fn generate_inline_enum_decoders(
         list.fold(schemas, dict.new(), fn(acc, s_ref) {
           case s_ref {
             Inline(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-            Reference(_) ->
+            Reference(..) ->
               case resolver.resolve_schema_ref(s_ref, ctx.spec) {
                 Ok(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
                 _ -> acc
@@ -796,7 +796,7 @@ fn generate_oneof_decoder(
   let all_refs =
     list.all(schemas, fn(s) {
       case s {
-        Reference(_) -> True
+        Reference(..) -> True
         _ -> False
       }
     })
@@ -829,8 +829,8 @@ fn generate_oneof_decoder(
           let sb =
             list.fold(schemas, sb, fn(sb, s_ref) {
               case s_ref {
-                Reference(ref:) -> {
-                  let ref_name = resolver.ref_to_name(ref)
+                Reference(ref:, name:) -> {
+                  let ref_name = name
                   let variant_type = naming.schema_to_type_name(ref_name)
                   let variant_name = type_name <> variant_type
                   let variant_decoder =
@@ -857,15 +857,15 @@ fn generate_oneof_decoder(
           // then immediately fail. This avoids needing a placeholder value
           // while maintaining the correct return type.
           let first_ref_decoder = case schemas {
-            [Reference(ref:), ..] -> {
-              let ref_name = resolver.ref_to_name(ref)
+            [Reference(name:, ..), ..] -> {
+              let ref_name = name
               naming.to_snake_case(ref_name) <> "_decoder()"
             }
             _ -> "decode.string"
           }
           let first_variant_name = case schemas {
-            [Reference(ref:), ..] -> {
-              let ref_name = resolver.ref_to_name(ref)
+            [Reference(name:, ..), ..] -> {
+              let ref_name = name
               let variant_type = naming.schema_to_type_name(ref_name)
               "types." <> type_name <> variant_type
             }
@@ -914,8 +914,8 @@ fn generate_oneof_decoder(
           let ref_variants =
             list.filter_map(schemas, fn(s_ref) {
               case s_ref {
-                Reference(ref:) -> {
-                  let ref_name = resolver.ref_to_name(ref)
+                Reference(name:, ..) -> {
+                  let ref_name = name
                   Ok(ref_name)
                 }
                 _ -> Error(Nil)
@@ -1057,8 +1057,7 @@ fn schema_ref_to_decoder(
       let inner = schema_ref_to_decoder(items, parent_name, prop_name, ctx)
       "decode.list(" <> inner <> ")"
     }
-    Reference(ref:) -> {
-      let name = resolver.ref_to_name(ref)
+    Reference(name:, ..) -> {
       naming.to_snake_case(name) <> "_decoder()"
     }
     _ -> "decode.string"
@@ -1069,7 +1068,7 @@ fn schema_ref_to_decoder(
 fn schema_ref_is_nullable(ref: SchemaRef, ctx: Context) -> Bool {
   case ref {
     Inline(schema) -> schema.is_nullable(schema)
-    Reference(_) ->
+    Reference(..) ->
       case resolver.resolve_schema_ref(ref, ctx.spec) {
         Ok(s) -> schema.is_nullable(s)
         Error(_) -> False
@@ -1204,7 +1203,7 @@ fn generate_inline_enum_encoders(
         list.fold(schemas, dict.new(), fn(acc, s_ref) {
           case s_ref {
             Inline(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-            Reference(_) ->
+            Reference(..) ->
               case resolver.resolve_schema_ref(s_ref, ctx.spec) {
                 Ok(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
                 _ -> acc
@@ -1519,7 +1518,7 @@ fn generate_encoder(
       let all_refs =
         list.all(schemas, fn(s) {
           case s {
-            Reference(_) -> True
+            Reference(..) -> True
             _ -> False
           }
         })
@@ -1541,8 +1540,8 @@ fn generate_encoder(
           let sb =
             list.fold(schemas, sb, fn(sb, s_ref) {
               case s_ref {
-                Reference(ref:) -> {
-                  let ref_name = resolver.ref_to_name(ref)
+                Reference(name:, ..) -> {
+                  let ref_name = name
                   let variant_type = naming.schema_to_type_name(ref_name)
                   let variant_name = type_name <> variant_type
                   let inner_encoder =
@@ -1740,8 +1739,7 @@ fn schema_ref_to_json_encoder(
         schema_ref_to_json_encoder_fn(items, parent_name, prop_name, ctx)
       "json.array(" <> value_expr <> ", " <> inner_fn <> ")"
     }
-    Reference(ref:) -> {
-      let name = resolver.ref_to_name(ref)
+    Reference(name:, ..) -> {
       "encode_" <> naming.to_snake_case(name) <> "_json(" <> value_expr <> ")"
     }
     _ -> "json.string(" <> value_expr <> ")"
@@ -1775,8 +1773,7 @@ fn schema_ref_to_json_encoder_fn(
         schema_ref_to_json_encoder_fn(items, parent_name, prop_name, ctx)
       "fn(items) { json.array(items, " <> inner <> ") }"
     }
-    Reference(ref:) -> {
-      let name = resolver.ref_to_name(ref)
+    Reference(name:, ..) -> {
       "encode_" <> naming.to_snake_case(name) <> "_json"
     }
     _ -> "json.string"
@@ -1795,8 +1792,7 @@ fn list_at_or(lst: List(String), idx: Int, default: String) -> String {
 /// Convert a SchemaRef to a qualified Gleam type string (with types. prefix for refs).
 fn qualified_schema_ref_type(ref: SchemaRef, ctx: Context) -> String {
   case ref {
-    Reference(ref:) -> {
-      let name = resolver.ref_to_name(ref)
+    Reference(name:, ..) -> {
       "types." <> naming.schema_to_type_name(name)
     }
     Inline(schema) -> type_gen.schema_to_gleam_type(schema, ctx)

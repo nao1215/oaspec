@@ -63,7 +63,7 @@ fn generate_guards(ctx: Context) -> String {
         False -> {
           let resolved = case schema_ref {
             Inline(s) -> Ok(s)
-            Reference(_) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
+            Reference(..) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
           }
           case resolved {
             Ok(ObjectSchema(..)) | Ok(AllOfSchema(..)) -> True
@@ -144,7 +144,7 @@ fn collect_schema_constraint_types(
 ) -> ConstraintTypes {
   let schema = case schema_ref {
     Inline(s) -> Ok(s)
-    Reference(_) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
+    Reference(..) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
   }
   case schema {
     Ok(StringSchema(min_length: Some(_), ..))
@@ -182,8 +182,8 @@ fn generate_guards_for_schema(
 ) -> se.StringBuilder {
   case schema_ref {
     Inline(schema) -> generate_guards_for_schema_object(sb, name, schema, ctx)
-    Reference(ref:) -> {
-      let resolved_name = resolver.ref_to_name(ref)
+    Reference(name:, ..) -> {
+      let resolved_name = name
       case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
         Ok(schema) ->
           generate_guards_for_schema_object(sb, resolved_name, schema, ctx)
@@ -213,7 +213,7 @@ fn generate_guards_for_schema_object(
         list.fold(schemas, dict.new(), fn(acc, s_ref) {
           case s_ref {
             Inline(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-            Reference(_) ->
+            Reference(..) ->
               case resolver.resolve_schema_ref(s_ref, ctx.spec) {
                 Ok(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
                 _ -> acc
@@ -250,7 +250,7 @@ fn generate_field_guard(
 ) -> se.StringBuilder {
   let resolved = case prop_ref {
     Inline(schema) -> Ok(schema)
-    Reference(_) -> resolver.resolve_schema_ref(prop_ref, ctx.spec)
+    Reference(..) -> resolver.resolve_schema_ref(prop_ref, ctx.spec)
   }
   case resolved {
     Ok(StringSchema(min_length:, max_length:, ..)) ->
@@ -665,7 +665,7 @@ fn composite_validator_type(
 ) -> String {
   let schema = case schema_ref {
     Inline(s) -> Ok(s)
-    Reference(_) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
+    Reference(..) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
   }
   case schema {
     Ok(ObjectSchema(..)) | Ok(AllOfSchema(..)) ->
@@ -690,7 +690,7 @@ fn collect_guard_calls(
 ) -> List(GuardCall) {
   let schema = case schema_ref {
     Inline(s) -> Ok(s)
-    Reference(_) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
+    Reference(..) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
   }
   case schema {
     Ok(ObjectSchema(properties:, required:, ..)) ->
@@ -751,7 +751,7 @@ fn collect_field_guard_calls(
 ) -> List(GuardCall) {
   let resolved = case prop_ref {
     Inline(schema) -> Ok(schema)
-    Reference(_) -> resolver.resolve_schema_ref(prop_ref, ctx.spec)
+    Reference(..) -> resolver.resolve_schema_ref(prop_ref, ctx.spec)
   }
   let accessor = "value." <> naming.to_snake_case(prop_name)
   case resolved {
@@ -822,7 +822,7 @@ fn merge_allof_props_and_required(
             properties: dict.merge(acc.properties, properties),
             required: list.append(acc.required, required),
           )
-        Reference(_) ->
+        Reference(..) ->
           case resolver.resolve_schema_ref(s_ref, ctx.spec) {
             Ok(ObjectSchema(properties:, required:, ..)) ->
               MergedProps(

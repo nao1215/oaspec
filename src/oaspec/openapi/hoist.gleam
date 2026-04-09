@@ -154,7 +154,7 @@ fn hoist_schema_ref(
   state: HoistState,
 ) -> #(SchemaRef, HoistState) {
   case schema_ref {
-    Reference(_) -> #(schema_ref, state)
+    Reference(..) -> #(schema_ref, state)
     Inline(schema_obj) -> {
       case needs_hoisting(schema_obj) {
         False -> #(schema_ref, state)
@@ -179,7 +179,7 @@ fn hoist_schema_ref(
             )
 
           let ref = "#/components/schemas/" <> unique_name
-          #(Reference(ref: ref), state)
+          #(schema.make_reference(ref), state)
         }
       }
     }
@@ -195,7 +195,7 @@ fn hoist_schema_ref_always(
   state: HoistState,
 ) -> #(SchemaRef, HoistState) {
   case schema_ref {
-    Reference(_) -> #(schema_ref, state)
+    Reference(..) -> #(schema_ref, state)
     Inline(schema_obj) -> {
       let base_name =
         naming.to_pascal_case(name_prefix) <> naming.to_pascal_case(name_suffix)
@@ -212,7 +212,7 @@ fn hoist_schema_ref_always(
           ),
         )
       let ref = "#/components/schemas/" <> unique_name
-      #(Reference(ref: ref), state)
+      #(schema.make_reference(ref), state)
     }
   }
 }
@@ -343,7 +343,7 @@ fn hoist_component_schemas(
         let #(hoisted_obj, state) = hoist_within_schema(schema_obj, name, state)
         #(dict.insert(result, name, Inline(hoisted_obj)), state)
       }
-      Reference(_) -> #(dict.insert(result, name, schema_ref), state)
+      Reference(..) -> #(dict.insert(result, name, schema_ref), state)
     }
   })
 }

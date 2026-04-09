@@ -1,5 +1,7 @@
 import gleam/dict.{type Dict}
+import gleam/list
 import gleam/option.{type Option}
+import gleam/string
 
 /// Shared metadata for all schema types.
 /// Extracted from variants to avoid duplication and ensure composition
@@ -65,9 +67,31 @@ pub type SchemaObject {
 }
 
 /// A reference to a schema, either inline or via $ref.
+/// Reference carries both the full $ref string and the pre-extracted name
+/// (last segment) to eliminate repeated string splitting in codegen.
 pub type SchemaRef {
   Inline(SchemaObject)
-  Reference(ref: String)
+  Reference(ref: String, name: String)
+}
+
+/// Create a Reference from a $ref string, auto-extracting the name.
+pub fn make_reference(ref: String) -> SchemaRef {
+  let name = ref_to_schema_name(ref)
+  Reference(ref:, name:)
+}
+
+/// Extract the schema name from a $ref string (last path segment).
+/// Example: "#/components/schemas/User" -> "User"
+fn ref_to_schema_name(ref: String) -> String {
+  case string.split(ref, "/") {
+    [] -> "Unknown"
+    segments -> {
+      case list.last(segments) {
+        Ok(name) -> name
+        Error(_) -> "Unknown"
+      }
+    }
+  }
 }
 
 /// OpenAPI discriminator for oneOf/anyOf.

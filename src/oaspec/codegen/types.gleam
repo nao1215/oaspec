@@ -133,7 +133,7 @@ fn generate_inline_enums_for_schema(
         list.fold(schemas, dict.new(), fn(acc, s_ref) {
           case s_ref {
             Inline(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-            Reference(_) ->
+            Reference(..) ->
               case resolver.resolve_schema_ref(s_ref, ctx.spec) {
                 Ok(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
                 _ -> acc
@@ -193,9 +193,8 @@ fn generate_type_def(
 
   case schema_ref {
     Inline(schema) -> generate_schema_type(sb, type_name, name, schema, ctx)
-    Reference(ref:) -> {
-      let resolved_name = resolver.ref_to_name(ref)
-      let resolved_type = naming.schema_to_type_name(resolved_name)
+    Reference(name:, ..) -> {
+      let resolved_type = naming.schema_to_type_name(name)
       sb
       |> se.line("pub type " <> type_name <> " = " <> resolved_type)
       |> se.blank_line()
@@ -445,7 +444,7 @@ fn generate_anonymous_type_for_schema(
       let all_refs =
         list.all(schemas, fn(s) {
           case s {
-            Reference(_) -> True
+            Reference(..) -> True
             _ -> False
           }
         })
@@ -492,8 +491,7 @@ fn schema_ref_to_type_qualified(
   case ref {
     Inline(schema_obj) ->
       schema_to_gleam_type_qualified(schema_obj, op_id, suffix, ctx)
-    Reference(ref:) -> {
-      let name = resolver.ref_to_name(ref)
+    Reference(name:, ..) -> {
       "types." <> naming.schema_to_type_name(name)
     }
   }
@@ -509,8 +507,7 @@ fn schema_to_gleam_type_qualified(
   case schema_obj {
     ArraySchema(items:, ..) ->
       case items {
-        Reference(ref:) -> {
-          let name = resolver.ref_to_name(ref)
+        Reference(name:, ..) -> {
           "List(types." <> naming.schema_to_type_name(name) <> ")"
         }
         _ -> schema_to_gleam_type(schema_obj, ctx)
@@ -524,7 +521,7 @@ fn schema_to_gleam_type_qualified(
       let all_refs =
         list.all(schemas, fn(s) {
           case s {
-            Reference(_) -> True
+            Reference(..) -> True
             _ -> False
           }
         })
@@ -540,7 +537,7 @@ fn schema_to_gleam_type_qualified(
       let all_refs =
         list.all(schemas, fn(s) {
           case s {
-            Reference(_) -> True
+            Reference(..) -> True
             _ -> False
           }
         })
@@ -564,8 +561,7 @@ fn schema_to_gleam_type_qualified(
 pub fn schema_ref_to_type(ref: SchemaRef, ctx: Context) -> String {
   case ref {
     Inline(schema) -> schema_to_gleam_type(schema, ctx)
-    Reference(ref:) -> {
-      let name = resolver.ref_to_name(ref)
+    Reference(name:, ..) -> {
       naming.schema_to_type_name(name)
     }
   }
@@ -580,8 +576,7 @@ pub fn schema_to_gleam_type(schema: SchemaObject, _ctx: Context) -> String {
     BooleanSchema(..) -> "Bool"
     ArraySchema(items:, ..) ->
       case items {
-        Reference(ref:) -> {
-          let name = resolver.ref_to_name(ref)
+        Reference(name:, ..) -> {
           "List(" <> naming.schema_to_type_name(name) <> ")"
         }
         Inline(inner) -> {
@@ -631,7 +626,7 @@ fn generate_request_types(ctx: Context) -> String {
       let has_ref_params =
         list.any(operation.parameters, fn(p) {
           case p.schema {
-            Some(Reference(_)) -> True
+            Some(Reference(..)) -> True
             _ -> False
           }
         })
@@ -640,7 +635,7 @@ fn generate_request_types(ctx: Context) -> String {
           list.any(dict.to_list(rb.content), fn(ce) {
             let #(_, mt) = ce
             case mt.schema {
-              Some(Reference(_)) -> True
+              Some(Reference(..)) -> True
               Some(Inline(schema.ObjectSchema(..))) -> True
               Some(Inline(schema.AllOfSchema(..))) -> True
               _ -> False
@@ -707,14 +702,13 @@ fn generate_request_type(
                 Inline(IntegerSchema(..)) -> "Int"
                 Inline(NumberSchema(..)) -> "Float"
                 Inline(BooleanSchema(..)) -> "Bool"
-                Reference(ref:) ->
-                  naming.schema_to_type_name(resolver.ref_to_name(ref))
+                Reference(name:, ..) -> naming.schema_to_type_name(name)
                 _ -> "String"
               }
               "List(" <> item_type <> ")"
             }
-            Some(Reference(ref:)) ->
-              "types." <> naming.schema_to_type_name(resolver.ref_to_name(ref))
+            Some(Reference(name:, ..)) ->
+              "types." <> naming.schema_to_type_name(name)
             _ -> "String"
           }
           let final_type = case param.required {
@@ -864,7 +858,7 @@ pub fn merge_allof_schemas(
     fn(acc, s_ref, idx) {
       let resolved = case s_ref {
         Inline(obj) -> Ok(obj)
-        Reference(_) -> resolver.resolve_schema_ref(s_ref, ctx.spec)
+        Reference(..) -> resolver.resolve_schema_ref(s_ref, ctx.spec)
       }
       case resolved {
         Ok(ObjectSchema(
@@ -987,7 +981,7 @@ pub fn schema_has_additional_properties(
     Inline(ObjectSchema(additional_properties_untyped: True, ..)) -> True
     Inline(AllOfSchema(schemas:, ..)) ->
       list.any(schemas, fn(s) { schema_has_additional_properties(s, ctx) })
-    Reference(_) ->
+    Reference(..) ->
       case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
         Ok(schema_obj) ->
           schema_has_additional_properties(Inline(schema_obj), ctx)
@@ -1008,7 +1002,7 @@ pub fn schema_has_untyped_additional_properties(
       list.any(schemas, fn(s) {
         schema_has_untyped_additional_properties(s, ctx)
       })
-    Reference(_) ->
+    Reference(..) ->
       case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
         Ok(schema_obj) ->
           schema_has_untyped_additional_properties(Inline(schema_obj), ctx)
@@ -1033,7 +1027,7 @@ pub fn schema_has_optional_fields(schema_ref: SchemaRef, ctx: Context) -> Bool {
     }
     Inline(AllOfSchema(schemas:, ..)) ->
       list.any(schemas, fn(s) { schema_has_optional_fields(s, ctx) })
-    Reference(_) ->
+    Reference(..) ->
       case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
         Ok(schema_obj) -> schema_has_optional_fields(Inline(schema_obj), ctx)
         Error(_) -> False
@@ -1046,7 +1040,7 @@ pub fn schema_has_optional_fields(schema_ref: SchemaRef, ctx: Context) -> Bool {
 fn schema_ref_is_nullable(ref: SchemaRef, ctx: Context) -> Bool {
   case ref {
     Inline(s) -> schema.is_nullable(s)
-    Reference(_) ->
+    Reference(..) ->
       case resolver.resolve_schema_ref(ref, ctx.spec) {
         Ok(s) -> schema.is_nullable(s)
         Error(_) -> False
@@ -1065,8 +1059,8 @@ fn extract_request_body_type(
   case content_entries {
     [#(_media_type, media_type), ..] ->
       case media_type.schema {
-        Some(Reference(ref:)) ->
-          "types." <> naming.schema_to_type_name(resolver.ref_to_name(ref))
+        Some(Reference(name:, ..)) ->
+          "types." <> naming.schema_to_type_name(name)
         Some(Inline(schema_obj)) ->
           extract_inline_request_body_type(schema_obj, op_id, ctx)
         _ -> "String"

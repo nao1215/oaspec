@@ -173,7 +173,7 @@ fn generate_client(ctx: Context) -> String {
           list.any(dict.to_list(rb.content), fn(ce) {
             let #(_, mt) = ce
             case mt.schema {
-              Some(Reference(_)) -> True
+              Some(Reference(..)) -> True
               Some(Inline(schema.ObjectSchema(..))) -> True
               Some(Inline(schema.AllOfSchema(..))) -> True
               _ -> False
@@ -184,7 +184,7 @@ fn generate_client(ctx: Context) -> String {
       let has_ref_params =
         list.any(operation.parameters, fn(p) {
           case p.schema {
-            Some(Reference(_)) -> True
+            Some(Reference(..)) -> True
             _ -> False
           }
         })
@@ -970,14 +970,12 @@ fn param_to_type(param: spec.Parameter, _ctx: Context) -> String {
         Inline(IntegerSchema(..)) -> "Int"
         Inline(schema.NumberSchema(..)) -> "Float"
         Inline(schema.BooleanSchema(..)) -> "Bool"
-        Reference(ref:) ->
-          "types." <> naming.schema_to_type_name(resolver.ref_to_name(ref))
+        Reference(name:, ..) -> "types." <> naming.schema_to_type_name(name)
         _ -> "String"
       }
       "List(" <> item_type <> ")"
     }
-    Some(Reference(ref:)) ->
-      "types." <> naming.schema_to_type_name(resolver.ref_to_name(ref))
+    Some(Reference(name:, ..)) -> "types." <> naming.schema_to_type_name(name)
     _ -> "String"
   }
   case param.required {
@@ -1005,11 +1003,10 @@ fn param_to_string_expr(
       <> item_to_str
       <> "), \",\")"
     }
-    Some(Reference(ref:) as schema_ref) -> {
+    Some(Reference(name:, ..) as schema_ref) -> {
       // Resolve the $ref to determine the actual schema type
       case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
         Ok(StringSchema(enum_values:, ..)) if enum_values != [] -> {
-          let name = resolver.ref_to_name(ref)
           "encode.encode_"
           <> naming.to_snake_case(name)
           <> "_to_string("
@@ -1054,10 +1051,9 @@ fn to_str_for_optional_value(param: spec.Parameter, ctx: Context) -> String {
       let item_to_str = array_item_to_string_fn(items, ctx)
       "string.join(list.map(v, " <> item_to_str <> "), \",\")"
     }
-    Some(Reference(ref:) as schema_ref) -> {
+    Some(Reference(name:, ..) as schema_ref) -> {
       case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
         Ok(StringSchema(enum_values:, ..)) if enum_values != [] -> {
-          let name = resolver.ref_to_name(ref)
           "encode.encode_" <> naming.to_snake_case(name) <> "_to_string(v)"
         }
         Ok(schema.ArraySchema(items:, ..)) -> {
@@ -1083,8 +1079,8 @@ fn get_body_type(rb: spec.RequestBody, op_id: String) -> String {
     [_, _, ..] -> "String"
     [#(_, media_type)] ->
       case media_type.schema {
-        Some(Reference(ref:)) ->
-          "types." <> naming.schema_to_type_name(resolver.ref_to_name(ref))
+        Some(Reference(name:, ..)) ->
+          "types." <> naming.schema_to_type_name(name)
         Some(Inline(schema.StringSchema(..))) -> "String"
         Some(Inline(schema.IntegerSchema(..))) -> "Int"
         Some(Inline(schema.NumberSchema(..))) -> "Float"
@@ -1107,8 +1103,7 @@ fn get_body_encode_expr(
   case content_entries {
     [#(_, media_type), ..] ->
       case media_type.schema {
-        Some(Reference(ref:)) -> {
-          let name = resolver.ref_to_name(ref)
+        Some(Reference(name:, ..)) -> {
           "encode.encode_" <> naming.to_snake_case(name) <> "(body)"
         }
         Some(Inline(schema.StringSchema(..))) ->
@@ -1146,10 +1141,9 @@ fn generate_multipart_body(
           dict.to_list(properties),
           required,
         )
-        Some(Reference(ref:) as schema_ref) ->
+        Some(Reference(..) as schema_ref) ->
           case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
             Ok(schema.ObjectSchema(properties:, required:, ..)) -> {
-              let _ = ref
               #(dict.to_list(properties), required)
             }
             _ -> #([], [])
@@ -1245,7 +1239,7 @@ fn multipart_field_is_binary(
 ) -> Bool {
   case field_schema {
     Inline(schema.StringSchema(format: Some("binary"), ..)) -> True
-    Reference(_) as schema_ref ->
+    Reference(..) as schema_ref ->
       case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
         Ok(schema.StringSchema(format: Some("binary"), ..)) -> True
         _ -> False
@@ -1262,10 +1256,9 @@ fn multipart_field_to_string_fn(
     Inline(schema.IntegerSchema(..)) -> "int.to_string"
     Inline(schema.NumberSchema(..)) -> "float.to_string"
     Inline(schema.BooleanSchema(..)) -> "bool.to_string"
-    Reference(ref:) as schema_ref ->
+    Reference(name:, ..) as schema_ref ->
       case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
         Ok(schema.StringSchema(enum_values:, ..)) if enum_values != [] -> {
-          let name = resolver.ref_to_name(ref)
           "encode.encode_" <> naming.to_snake_case(name) <> "_to_string"
         }
         Ok(schema.IntegerSchema(..)) -> "int.to_string"
@@ -1290,10 +1283,9 @@ fn form_array_item_to_string(
         Inline(schema.NumberSchema(..)) -> "float.to_string(item)"
         Inline(schema.BooleanSchema(..)) -> "bool.to_string(item)"
         Inline(schema.StringSchema(..)) -> "item"
-        Reference(ref:) as sr ->
+        Reference(name:, ..) as sr ->
           case resolver.resolve_schema_ref(sr, ctx.spec) {
             Ok(schema.StringSchema(enum_values:, ..)) if enum_values != [] -> {
-              let name = resolver.ref_to_name(ref)
               "encode.encode_"
               <> naming.to_snake_case(name)
               <> "_to_string(item)"
@@ -1320,7 +1312,7 @@ fn generate_form_nested_object(
 ) -> se.StringBuilder {
   let resolved = case field_schema {
     Inline(s) -> Ok(s)
-    Reference(_) -> resolver.resolve_schema_ref(field_schema, ctx.spec)
+    Reference(..) -> resolver.resolve_schema_ref(field_schema, ctx.spec)
   }
   let sub_props = case resolved {
     Ok(schema.ObjectSchema(properties:, required:, ..)) -> #(
@@ -1359,7 +1351,7 @@ fn generate_form_nested_object(
       // Check if sub-property is an object — need recursive bracket encoding
       let is_sub_object = case sub_ref {
         Inline(schema.ObjectSchema(..)) -> True
-        Reference(_) as sr ->
+        Reference(..) as sr ->
           case resolver.resolve_schema_ref(sr, ctx.spec) {
             Ok(schema.ObjectSchema(..)) -> True
             _ -> False
@@ -1458,7 +1450,7 @@ fn generate_form_bracket_fields(
 ) -> se.StringBuilder {
   let resolved = case field_schema {
     Inline(s) -> Ok(s)
-    Reference(_) -> resolver.resolve_schema_ref(field_schema, ctx.spec)
+    Reference(..) -> resolver.resolve_schema_ref(field_schema, ctx.spec)
   }
   case resolved {
     Ok(schema.ObjectSchema(properties:, required:, ..)) -> {
@@ -1470,7 +1462,7 @@ fn generate_form_bracket_fields(
         let prop_required = list.contains(required, prop_name)
         let is_obj = case prop_ref {
           Inline(schema.ObjectSchema(..)) -> True
-          Reference(_) as sr ->
+          Reference(..) as sr ->
             case resolver.resolve_schema_ref(sr, ctx.spec) {
               Ok(schema.ObjectSchema(..)) -> True
               _ -> False
@@ -1562,10 +1554,9 @@ fn generate_form_urlencoded_body(
           dict.to_list(properties),
           required,
         )
-        Some(Reference(ref:) as schema_ref) ->
+        Some(Reference(..) as schema_ref) ->
           case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
             Ok(schema.ObjectSchema(properties:, required:, ..)) -> {
-              let _ = ref
               #(dict.to_list(properties), required)
             }
             _ -> #([], [])
@@ -1587,7 +1578,7 @@ fn generate_form_urlencoded_body(
       }
       let is_object = case field_schema {
         Inline(schema.ObjectSchema(..)) -> True
-        Reference(_) as sr ->
+        Reference(..) as sr ->
           case resolver.resolve_schema_ref(sr, ctx.spec) {
             Ok(schema.ObjectSchema(..)) -> True
             _ -> False
@@ -1711,14 +1702,12 @@ fn get_response_decode_expr(
   _ctx: Context,
 ) -> String {
   case schema_ref {
-    Reference(ref:) -> {
-      let name = resolver.ref_to_name(ref)
+    Reference(name:, ..) -> {
       "decode.decode_" <> naming.to_snake_case(name) <> "(resp.body)"
     }
     Inline(schema.ArraySchema(items:, ..)) ->
       case items {
-        Reference(ref:) -> {
-          let name = resolver.ref_to_name(ref)
+        Reference(name:, ..) -> {
           "decode.decode_" <> naming.to_snake_case(name) <> "_list(resp.body)"
         }
         Inline(inner) -> {
@@ -1763,10 +1752,9 @@ fn array_item_to_string_fn(items: schema.SchemaRef, ctx: Context) -> String {
     Inline(NumberSchema(..)) -> "float.to_string"
     Inline(schema.BooleanSchema(..)) -> "bool.to_string"
     Inline(StringSchema(..)) -> "fn(x) { x }"
-    Reference(ref:) -> {
+    Reference(name:, ..) -> {
       case resolver.resolve_schema_ref(items, ctx.spec) {
         Ok(StringSchema(enum_values:, ..)) if enum_values != [] -> {
-          let name = resolver.ref_to_name(ref)
           "encode.encode_" <> naming.to_snake_case(name) <> "_to_string"
         }
         Ok(IntegerSchema(..)) -> "int.to_string"
@@ -1792,10 +1780,9 @@ fn deep_object_array_item_to_string(
         Inline(NumberSchema(..)) -> "float.to_string(item)"
         Inline(schema.BooleanSchema(..)) -> "bool.to_string(item)"
         Inline(StringSchema(..)) -> "item"
-        Reference(ref:) as sr ->
+        Reference(name:, ..) as sr ->
           case resolver.resolve_schema_ref(sr, ctx.spec) {
             Ok(StringSchema(enum_values:, ..)) if enum_values != [] -> {
-              let name = resolver.ref_to_name(ref)
               "encode.encode_"
               <> naming.to_snake_case(name)
               <> "_to_string(item)"
@@ -1815,7 +1802,7 @@ fn deep_object_array_item_to_string(
 fn is_exploded_array_param(param: spec.Parameter, ctx: Context) -> Bool {
   let is_array = case param.schema {
     Some(Inline(schema.ArraySchema(..))) -> True
-    Some(Reference(_) as sr) ->
+    Some(Reference(..) as sr) ->
       case resolver.resolve_schema_ref(sr, ctx.spec) {
         Ok(schema.ArraySchema(..)) -> True
         _ -> False
@@ -1849,7 +1836,7 @@ fn generate_exploded_array_query_param(
   let item_to_str = case param.schema {
     Some(Inline(schema.ArraySchema(items:, ..))) ->
       array_item_to_string_fn(items, ctx)
-    Some(Reference(_) as sr) ->
+    Some(Reference(..) as sr) ->
       case resolver.resolve_schema_ref(sr, ctx.spec) {
         Ok(schema.ArraySchema(items:, ..)) ->
           array_item_to_string_fn(items, ctx)
@@ -1899,13 +1886,10 @@ fn generate_exploded_array_query_param(
 /// Check if a parameter uses deepObject style with an object schema.
 fn is_deep_object_param(param: spec.Parameter, ctx: Context) -> Bool {
   case param.schema {
-    Some(Reference(ref:) as schema_ref) ->
+    Some(Reference(..) as schema_ref) ->
       case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
         Ok(schema.ObjectSchema(..)) -> True
-        _ -> {
-          let _ = ref
-          False
-        }
+        _ -> False
       }
     Some(Inline(schema.ObjectSchema(..))) -> True
     _ -> False
@@ -1920,7 +1904,7 @@ fn generate_deep_object_query_param(
   ctx: Context,
 ) -> se.StringBuilder {
   let properties = case param.schema {
-    Some(Reference(_ref) as schema_ref) ->
+    Some(Reference(..) as schema_ref) ->
       case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
         Ok(schema.ObjectSchema(properties:, required:, ..)) -> #(
           dict.to_list(properties),
@@ -2081,10 +2065,9 @@ fn schema_ref_to_string_expr(
     Inline(NumberSchema(..)) -> "float.to_string(" <> accessor <> ")"
     Inline(schema.BooleanSchema(..)) -> "bool.to_string(" <> accessor <> ")"
     Inline(StringSchema(..)) -> accessor
-    Reference(ref:) as sr ->
+    Reference(name:, ..) as sr ->
       case resolver.resolve_schema_ref(sr, ctx.spec) {
         Ok(StringSchema(enum_values:, ..)) if enum_values != [] -> {
-          let name = resolver.ref_to_name(ref)
           "encode.encode_"
           <> naming.to_snake_case(name)
           <> "_to_string("

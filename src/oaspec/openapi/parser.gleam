@@ -6,7 +6,7 @@ import gleam/string
 import oaspec/openapi/schema.{
   type Discriminator, type SchemaObject, type SchemaRef, AllOfSchema,
   AnyOfSchema, ArraySchema, BooleanSchema, Discriminator, Inline, IntegerSchema,
-  NumberSchema, ObjectSchema, OneOfSchema, Reference, StringSchema,
+  NumberSchema, ObjectSchema, OneOfSchema, StringSchema,
 }
 import oaspec/openapi/spec.{
   type Callback, type Components, type HttpMethod, type Info, type MediaType,
@@ -861,7 +861,7 @@ fn parse_responses_map(
 /// Parse a schema reference (either $ref or inline schema).
 pub fn parse_schema_ref(node: yay.Node) -> Result(SchemaRef, ParseError) {
   case yay.extract_optional_string(node, "$ref") {
-    Ok(Some(ref)) -> Ok(Reference(ref:))
+    Ok(Some(ref)) -> Ok(schema.make_reference(ref))
     _ -> {
       use schema_obj <- result.try(parse_schema_object(node))
       Ok(Inline(schema_obj))

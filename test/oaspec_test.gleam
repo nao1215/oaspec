@@ -837,7 +837,7 @@ components:
   // Pet.address should now be a $ref
   let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "Pet")
-  let assert Ok(schema.Reference(ref: ref)) = dict.get(props, "address")
+  let assert Ok(schema.Reference(ref: ref, ..)) = dict.get(props, "address")
   ref |> should.equal("#/components/schemas/PetAddress")
 
   // PetAddress should have street and city properties
@@ -875,7 +875,7 @@ components:
     dict.get(components.schemas, "PetType")
   list.each(variants, fn(v) {
     case v {
-      schema.Reference(_) -> should.be_true(True)
+      schema.Reference(..) -> should.be_true(True)
       schema.Inline(_) -> should.fail()
     }
   })
@@ -910,7 +910,7 @@ components:
   // Array items should now be a $ref
   let assert Ok(schema.Inline(schema.ArraySchema(items: items_ref, ..))) =
     dict.get(components.schemas, "PetList")
-  let assert schema.Reference(ref: ref) = items_ref
+  let assert schema.Reference(ref: ref, ..) = items_ref
   string.contains(ref, "#/components/schemas/") |> should.be_true()
 
   // The extracted schema should exist in components.schemas
@@ -948,7 +948,7 @@ components:
   // The $ref should remain unchanged
   let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "Pet")
-  let assert Ok(schema.Reference(ref: ref)) = dict.get(props, "owner")
+  let assert Ok(schema.Reference(ref: ref, ..)) = dict.get(props, "owner")
   ref |> should.equal("#/components/schemas/Owner")
 }
 
@@ -1026,14 +1026,14 @@ components:
   // Company.headquarters should be a $ref
   let assert Ok(schema.Inline(schema.ObjectSchema(properties: company_props, ..))) =
     dict.get(components.schemas, "Company")
-  let assert Ok(schema.Reference(ref: hq_ref)) =
+  let assert Ok(schema.Reference(ref: hq_ref, ..)) =
     dict.get(company_props, "headquarters")
   hq_ref |> should.equal("#/components/schemas/CompanyHeadquarters")
 
   // CompanyHeadquarters.coordinates should be a $ref
   let assert Ok(schema.Inline(schema.ObjectSchema(properties: hq_props, ..))) =
     dict.get(components.schemas, "CompanyHeadquarters")
-  let assert Ok(schema.Reference(ref: coord_ref)) =
+  let assert Ok(schema.Reference(ref: coord_ref, ..)) =
     dict.get(hq_props, "coordinates")
   coord_ref
   |> should.equal("#/components/schemas/CompanyHeadquartersCoordinates")
@@ -1081,7 +1081,7 @@ paths:
   let assert Some(op) = path_item.post
   let assert Some(req_body) = op.request_body
   let assert Ok(media_type) = dict.get(req_body.content, "application/json")
-  let assert Some(schema.Reference(ref: ref)) = media_type.schema
+  let assert Some(schema.Reference(ref: ref, ..)) = media_type.schema
   string.contains(ref, "#/components/schemas/") |> should.be_true()
 }
 
@@ -1120,7 +1120,7 @@ paths:
   let assert Some(op) = path_item.get
   let assert Ok(response) = dict.get(op.responses, "200")
   let assert Ok(media_type) = dict.get(response.content, "application/json")
-  let assert Some(schema.Reference(ref: ref)) = media_type.schema
+  let assert Some(schema.Reference(ref: ref, ..)) = media_type.schema
   string.contains(ref, "#/components/schemas/") |> should.be_true()
 }
 
@@ -1195,7 +1195,7 @@ components:
   // Pet.address should reference the suffixed name, not the original PetAddress
   let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "Pet")
-  let assert Ok(schema.Reference(ref: ref)) = dict.get(props, "address")
+  let assert Ok(schema.Reference(ref: ref, ..)) = dict.get(props, "address")
   // The ref should NOT be the original PetAddress
   ref |> should.not_equal("#/components/schemas/PetAddress")
   // It should still be a valid components reference
@@ -1233,7 +1233,7 @@ components:
 
   let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "User")
-  let assert Ok(schema.Reference(ref: ref)) = dict.get(props, "address")
+  let assert Ok(schema.Reference(ref: ref, ..)) = dict.get(props, "address")
   ref |> should.not_equal("#/components/schemas/UserAddress")
 }
 

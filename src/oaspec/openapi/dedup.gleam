@@ -169,7 +169,7 @@ fn dedup_schemas(spec: OpenApiSpec) -> OpenApiSpec {
 
 fn dedup_schema_ref(schema_ref: SchemaRef) -> SchemaRef {
   case schema_ref {
-    Reference(_) -> schema_ref
+    Reference(..) -> schema_ref
     Inline(schema_obj) -> Inline(dedup_schema_object(schema_obj))
   }
 }
