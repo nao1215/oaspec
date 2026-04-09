@@ -2664,6 +2664,153 @@ components:
   }
 }
 
+// --- OPTIONS operation must not be silently dropped ---
+pub fn options_operation_not_silently_dropped_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /cors:
+    options:
+      operationId: corsPreflight
+      responses:
+        '204': { description: No Content }
+"
+  let result = parser.parse_string(yaml)
+  // Either parse succeeds with the operation accessible,
+  // or parse returns an error (not silent success with no operations).
+  case result {
+    Ok(spec) -> {
+      let assert Ok(path_item) = dict.get(spec.paths, "/cors")
+      // The path must have SOME operation — if it has none,
+      // the OPTIONS was silently dropped
+      let has_any =
+        option.is_some(path_item.get)
+        || option.is_some(path_item.post)
+        || option.is_some(path_item.put)
+        || option.is_some(path_item.delete)
+        || option.is_some(path_item.patch)
+        || option.is_some(path_item.head)
+      // If no operations exist, OPTIONS was silently lost
+      has_any
+      |> should.be_true()
+    }
+    Error(_) -> {
+      // A parse error is acceptable — means we don't silently drop
+      should.be_ok(Ok(Nil))
+    }
+  }
+}
+
+// --- requestBody.required: false must generate optional body parameter ---
+pub fn optional_request_body_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /search:
+    post:
+      operationId: search
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query: { type: string }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // An optional request body must be wrapped in Option, not always required
+  // The generated function should have Option(body_type) or similar
+  string.contains(content, "Option(")
+  |> should.be_true()
+}
+
+// --- form-urlencoded 2-level nested object must not break ---
+pub fn form_urlencoded_two_level_nested_object_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /submit:
+    post:
+      operationId: submitForm
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [meta]
+              properties:
+                meta:
+                  type: object
+                  required: [author]
+                  properties:
+                    author:
+                      type: object
+                      properties:
+                        name: { type: string }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  // Must NOT produce uri.percent_encode on a record type
+  // e.g. uri.percent_encode(body.meta.author) is a type error
+  string.contains(client_file.content, "uri.percent_encode(body.meta")
+  |> should.be_false()
+}
+
+// --- query array with explode: true must produce key=a&key=b, not key=a,b ---
+pub fn query_array_explode_true_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /items:
+    get:
+      operationId: getItems
+      parameters:
+        - name: tags
+          in: query
+          required: true
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: { type: string }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // With explode: true, the query parameter must NOT be comma-joined.
+  // It should produce tags=a&tags=b, not tags=a,b.
+  // The comma-join pattern indicates explode is being ignored.
+  string.contains(content, "string.join(")
+  |> should.be_false()
+}
+
 fn find_substring_index(haystack: String, needle: String) -> Result(Int, Nil) {
   case string.contains(haystack, needle) {
     True -> {
