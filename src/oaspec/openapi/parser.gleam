@@ -851,32 +851,41 @@ fn parse_typed_schema(
 ) -> Result(SchemaObject, ParseError) {
   // OpenAPI 3.1 allows type to be an array, e.g. type: [string, 'null'].
   // Extract the primary type and detect nullable from the array form.
-  let #(type_str, nullable) = case
-    yay.select_sugar(from: node, selector: "type")
-  {
-    Ok(yay.NodeSeq(type_nodes)) -> {
-      let type_strs =
-        list.filter_map(type_nodes, fn(n) {
-          case n {
-            yay.NodeStr(s) -> Ok(s)
-            _ -> Error(Nil)
-          }
-        })
-      let has_null = list.contains(type_strs, "null")
-      let primary =
-        list.find(type_strs, fn(s) { s != "null" })
-        |> result.unwrap("object")
-      #(primary, nullable || has_null)
-    }
-    Ok(yay.NodeStr(s)) -> #(s, nullable)
-    _ -> {
-      let s =
-        yay.extract_optional_string(node, "type")
-        |> result.unwrap(None)
-        |> option.unwrap("object")
-      #(s, nullable)
-    }
-  }
+  // Multi-type unions (e.g. [string, integer]) are not supported.
+  use #(type_str, nullable) <- result.try(
+    case yay.select_sugar(from: node, selector: "type") {
+      Ok(yay.NodeSeq(type_nodes)) -> {
+        let type_strs =
+          list.filter_map(type_nodes, fn(n) {
+            case n {
+              yay.NodeStr(s) -> Ok(s)
+              _ -> Error(Nil)
+            }
+          })
+        let has_null = list.contains(type_strs, "null")
+        let non_null_types = list.filter(type_strs, fn(s) { s != "null" })
+        case non_null_types {
+          [single] -> Ok(#(single, nullable || has_null))
+          [] -> Ok(#("object", nullable || has_null))
+          _ ->
+            Error(InvalidValue(
+              path: "schema.type",
+              detail: "Multi-type unions (type: ["
+                <> string.join(non_null_types, ", ")
+                <> "]) are not supported; use oneOf instead",
+            ))
+        }
+      }
+      Ok(yay.NodeStr(s)) -> Ok(#(s, nullable))
+      _ -> {
+        let s =
+          yay.extract_optional_string(node, "type")
+          |> result.unwrap(None)
+          |> option.unwrap("object")
+        Ok(#(s, nullable))
+      }
+    },
+  )
 
   let format =
     yay.extract_optional_string(node, "format")
