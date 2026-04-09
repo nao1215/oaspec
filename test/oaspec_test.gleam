@@ -7588,3 +7588,268 @@ pub fn oss_oapi_codegen_multi_content_rejects_unsupported_types_test() {
   // Should have blocking errors for unsupported content types
   list.length(blocking) |> should.not_equal(0)
 }
+
+// --- OSS fixture batch 3: regression specs ---
+
+pub fn oss_oapi_codegen_issue_312_colon_path_parses_test() {
+  // Path with colon: /pets:validate
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_312.yaml")
+  let paths = dict.keys(spec.paths)
+  list.contains(paths, "/pets:validate") |> should.be_true()
+}
+
+pub fn oss_oapi_codegen_issue_312_generates_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_312.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let result = generate.generate(spec, ctx.config)
+  case result {
+    Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
+    Error(generate.ValidationErrors(errors:)) -> {
+      list.length(validate.errors_only(errors)) |> should.equal(0)
+    }
+  }
+}
+
+pub fn oss_oapi_codegen_issue_936_recursive_oneof_parses_test() {
+  // Recursive cyclic refs with oneOf (FilterPredicate)
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_936.yaml")
+  let assert Some(components) = spec.components
+  list.contains(dict.keys(components.schemas), "FilterPredicate")
+  |> should.be_true()
+}
+
+pub fn oss_oapi_codegen_issue_52_recursive_additional_props_parses_test() {
+  // Recursive types through additionalProperties
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_52.yaml")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+pub fn oss_oapi_codegen_issue_52_generates_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_52.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let result = generate.generate(spec, ctx.config)
+  case result {
+    Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
+    Error(generate.ValidationErrors(errors:)) -> {
+      list.length(validate.errors_only(errors)) |> should.equal(0)
+    }
+  }
+}
+
+pub fn oss_oapi_codegen_issue_1168_allof_discriminator_parses_test() {
+  // allOf with discriminator
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_1168.yaml")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+pub fn oss_oapi_codegen_issue_1168_rejects_problem_json_test() {
+  // application/problem+json is not a supported response content type
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_1168.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let blocking = validate.errors_only(errors)
+  list.length(blocking) |> should.not_equal(0)
+}
+
+pub fn oss_oapi_codegen_issue_832_recursive_oneof_parses_test() {
+  // Recursive oneOf types
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_832.yaml")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+pub fn oss_oapi_codegen_issue_579_enum_special_chars_parses_test() {
+  // Enum values with special characters
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_579.yaml")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+pub fn oss_oapi_codegen_issue_579_generates_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_579.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let result = generate.generate(spec, ctx.config)
+  case result {
+    Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
+    Error(generate.ValidationErrors(errors:)) -> {
+      list.length(validate.errors_only(errors)) |> should.equal(0)
+    }
+  }
+}
+
+pub fn oss_oapi_codegen_issue_2185_nullable_array_items_parses_test() {
+  // Nullable array items
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_2185.yaml")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+pub fn oss_oapi_codegen_issue_2185_generates_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_2185.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let result = generate.generate(spec, ctx.config)
+  case result {
+    Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
+    Error(generate.ValidationErrors(errors:)) -> {
+      list.length(validate.errors_only(errors)) |> should.equal(0)
+    }
+  }
+}
+
+// --- OSS fixture batch 4: openapi-generator specs (Apache 2.0) ---
+
+pub fn oss_openapi_gen_issue_4947_wildcard_content_parses_test() {
+  // Spec with */* content type and pattern-constrained strings
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_gen_issue_4947.yaml")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+pub fn oss_openapi_gen_issue_9719_dot_operationid_parses_test() {
+  // Dot-delimited operationId: petstore.api.users.get_all
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_gen_issue_9719.yaml")
+  let paths = dict.to_list(spec.paths)
+  list.length(paths) |> should.not_equal(0)
+}
+
+pub fn oss_openapi_gen_issue_9719_generates_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_gen_issue_9719.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let result = generate.generate(spec, ctx.config)
+  case result {
+    Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
+    Error(generate.ValidationErrors(errors:)) -> {
+      list.length(validate.errors_only(errors)) |> should.equal(0)
+    }
+  }
+}
+
+pub fn oss_openapi_gen_issue_13917_patch_allof_parses_test() {
+  // PATCH operation with allOf request body
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_gen_issue_13917.yaml")
+  let paths = dict.to_list(spec.paths)
+  list.length(paths) |> should.not_equal(0)
+}
+
+pub fn oss_openapi_gen_issue_13917_rejects_json_patch_content_test() {
+  // application/json-patch+json is not a supported content type
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_gen_issue_13917.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let blocking = validate.errors_only(errors)
+  list.length(blocking) |> should.not_equal(0)
+}
+
+pub fn oss_openapi_gen_petstore_server_parses_test() {
+  // Full petstore server spec from openapi-generator samples
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_gen_petstore_server.yaml")
+  spec.info.title |> should.not_equal("")
+  let paths = dict.to_list(spec.paths)
+  list.length(paths) |> should.not_equal(0)
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+pub fn oss_openapi_gen_petstore_server_generates_client_test() {
+  // Client-only mode avoids server-specific validation errors.
+  // multipart field type errors still apply to both targets.
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_gen_petstore_server.yaml")
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+    )
+  let ctx = context.new(spec, cfg)
+  let errors = validate.validate(ctx)
+  let blocking = validate.errors_only(errors)
+  // This spec has multipart fields that are unstringifiable objects,
+  // which is correctly rejected.
+  list.length(blocking) |> should.not_equal(0)
+}
+
+// --- OSS fixture batch 5: kiota specs (MIT License, Copyright Microsoft) ---
+
+pub fn oss_kiota_discriminator_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_kiota_discriminator.yaml")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+pub fn oss_kiota_discriminator_generates_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_kiota_discriminator.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let result = generate.generate(spec, ctx.config)
+  case result {
+    Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
+    Error(generate.ValidationErrors(errors:)) -> {
+      list.length(validate.errors_only(errors)) |> should.equal(0)
+    }
+  }
+}
+
+pub fn oss_kiota_derived_types_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_kiota_derived_types.yaml")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
+
+pub fn oss_kiota_derived_types_generates_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_kiota_derived_types.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let result = generate.generate(spec, ctx.config)
+  case result {
+    Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
+    Error(generate.ValidationErrors(errors:)) -> {
+      list.length(validate.errors_only(errors)) |> should.equal(0)
+    }
+  }
+}
+
+pub fn oss_kiota_multi_security_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_kiota_multi_security.yaml")
+  // Security is at operation level, not top-level
+  let assert Some(components) = spec.components
+  dict.size(components.security_schemes) |> should.not_equal(0)
+}
+
+pub fn oss_kiota_multi_security_generates_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_kiota_multi_security.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let result = generate.generate(spec, ctx.config)
+  case result {
+    Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
+    Error(generate.ValidationErrors(errors:)) -> {
+      list.length(validate.errors_only(errors)) |> should.equal(0)
+    }
+  }
+}

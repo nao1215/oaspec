@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-04-09
+
+### Added
+
+- 14 more OSS test fixtures from oapi-codegen (Apache 2.0), openapi-generator (Apache 2.0), and kiota (MIT):
+  - oapi-codegen: colon-in-path, recursive oneOf, recursive additionalProperties, allOf with discriminator, recursive oneOf variants, enum special characters, nullable array items
+  - openapi-generator: wildcard `*/*` content type, dot-delimited operationId, json-patch+json content type, comprehensive petstore server spec
+  - kiota: discriminator with mapping, derived types via allOf, multi-security with OAuth2
+
+## [0.6.2] - 2026-04-09
+
+_No code changes. Re-tagged release._
+
 ## [0.6.1] - 2026-04-09
 
 ### Added
