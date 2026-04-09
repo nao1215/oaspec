@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-04-09
+
+### Added
+
+- OSS test fixtures from libopenapi (MIT) and oapi-codegen (Apache 2.0) covering real-world specs: burgershop, all-the-components, petstore v3, circular refs, nullable combinations, recursive allOf, allOf with additionalProperties, bearer auth, multi-content types, cookies, name conflicts, illegal enum names
+
+### Fixed
+
+- Parser now skips `x-` vendor extension keys in paths and responses maps instead of trying to parse them as paths/status codes
+- Parser accepts `openapi` version field as YAML float (e.g. `openapi: 3.0` parsed as number instead of string)
+- Operation `responses` field is now optional at parse time (webhook operations often omit it); validation can catch missing responses separately
+
 ## [0.6.0] - 2026-04-09
 
 ### Added

@@ -1,4 +1,6 @@
 import gleam/dict.{type Dict}
+import gleam/float
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -61,8 +63,18 @@ pub fn parse_string(content: String) -> Result(OpenApiSpec, ParseError) {
 
 /// Parse the root OpenAPI object.
 fn parse_root(node: yay.Node) -> Result(OpenApiSpec, ParseError) {
+  // openapi field may be a string ("3.0.3") or a YAML number (3.0 parsed as float)
   use openapi <- result.try(
     yay.extract_string(node, "openapi")
+    |> result.lazy_or(fn() {
+      yay.extract_float(node, "openapi")
+      |> result.map(fn(f) {
+        case f == int.to_float(float.truncate(f)) {
+          True -> int.to_string(float.truncate(f)) <> ".0"
+          False -> float.to_string(f)
+        }
+      })
+    })
     |> result.map_error(fn(_) { MissingField(path: "", field: "openapi") }),
   )
 
@@ -187,19 +199,23 @@ fn parse_paths(
       list.try_fold(entries, dict.new(), fn(acc, entry) {
         let #(key_node, value_node) = entry
         case key_node {
-          yay.NodeStr(path) -> {
-            // Check for $ref first — resolve from components.pathItems
-            use path_item <- result.try(
-              case
-                yay.extract_optional_string(value_node, "$ref")
-                |> result.unwrap(None)
-              {
-                Some(ref_str) -> resolve_path_item_ref(ref_str, components)
-                None -> parse_path_item(value_node, path, components)
-              },
-            )
-            Ok(dict.insert(acc, path, path_item))
-          }
+          yay.NodeStr(path) ->
+            case string.starts_with(path, "x-") {
+              True -> Ok(acc)
+              False -> {
+                // Check for $ref first — resolve from components.pathItems
+                use path_item <- result.try(
+                  case
+                    yay.extract_optional_string(value_node, "$ref")
+                    |> result.unwrap(None)
+                  {
+                    Some(ref_str) -> resolve_path_item_ref(ref_str, components)
+                    None -> parse_path_item(value_node, path, components)
+                  },
+                )
+                Ok(dict.insert(acc, path, path_item))
+              }
+            }
           _ -> Ok(acc)
         }
       })
@@ -421,16 +437,15 @@ fn parse_optional_request_body(
   }
 }
 
-/// Parse responses, requiring the field to be present.
+/// Parse responses, treating the field as optional.
+/// OpenAPI 3.x requires responses on operations, but webhook operations
+/// in the wild often omit them. Validation can catch missing responses.
 fn parse_responses_required(
   node: yay.Node,
   context: String,
   components: Option(Components),
 ) -> Result(dict.Dict(String, Response), ParseError) {
-  case yay.select_sugar(from: node, selector: "responses") {
-    Ok(_) -> parse_responses(node, context, components)
-    Error(_) -> Error(MissingField(path: context, field: "responses"))
-  }
+  parse_responses(node, context, components)
 }
 
 /// Parse parameters list from a node.
@@ -817,10 +832,14 @@ fn parse_responses(
       list.try_fold(entries, dict.new(), fn(acc, entry) {
         let #(key_node, value_node) = entry
         case key_node {
-          yay.NodeStr(status_code) -> {
-            use resp <- result.try(parse_response(value_node, components))
-            Ok(dict.insert(acc, status_code, resp))
-          }
+          yay.NodeStr(status_code) ->
+            case string.starts_with(status_code, "x-") {
+              True -> Ok(acc)
+              False -> {
+                use resp <- result.try(parse_response(value_node, components))
+                Ok(dict.insert(acc, status_code, resp))
+              }
+            }
           yay.NodeInt(code) -> {
             use resp <- result.try(parse_response(value_node, components))
             let code_str = string.inspect(code)
