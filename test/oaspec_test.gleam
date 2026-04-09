@@ -7853,3 +7853,137 @@ pub fn oss_kiota_multi_security_generates_test() {
     }
   }
 }
+
+// --- Parser error message quality tests ---
+
+pub fn parse_error_missing_info_has_actionable_message_test() {
+  let result =
+    parser.parse_string(
+      "
+openapi: 3.0.3
+paths: {}
+",
+    )
+  let assert Error(err) = result
+  let msg = parser.parse_error_to_string(err)
+  string.contains(msg, "info") |> should.be_true()
+  string.contains(msg, "root") |> should.be_true()
+}
+
+pub fn parse_error_missing_version_has_path_test() {
+  let result =
+    parser.parse_string(
+      "
+openapi: 3.0.3
+info:
+  title: Test
+paths: {}
+",
+    )
+  let assert Error(err) = result
+  let msg = parser.parse_error_to_string(err)
+  string.contains(msg, "version") |> should.be_true()
+  string.contains(msg, "info") |> should.be_true()
+}
+
+pub fn parse_error_missing_param_name_has_path_test() {
+  let result =
+    parser.parse_string(
+      "
+openapi: 3.0.3
+info:
+  title: Test
+  version: '1.0'
+paths:
+  /x:
+    get:
+      operationId: getX
+      parameters:
+        - in: query
+          schema:
+            type: string
+      responses:
+        '200': { description: ok }
+",
+    )
+  let assert Error(err) = result
+  let msg = parser.parse_error_to_string(err)
+  string.contains(msg, "name") |> should.be_true()
+  string.contains(msg, "parameter") |> should.be_true()
+}
+
+// --- OSS fixture batch: more oapi-codegen regression specs ---
+
+pub fn oss_oapi_codegen_issue_1087_rejects_unresolved_ref_test() {
+  // Has external $ref and numeric response key (304) as component ref
+  let result =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_1087.yaml")
+  let assert Error(err) = result
+  let msg = parser.parse_error_to_string(err)
+  // Should mention the unresolved reference
+  string.contains(msg, "response") |> should.be_true()
+}
+
+pub fn oss_oapi_codegen_issue_1963_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_1963.yaml")
+  let paths = dict.to_list(spec.paths)
+  list.length(paths) |> should.not_equal(0)
+}
+
+pub fn oss_oapi_codegen_issue_2232_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_2232.yaml")
+  let paths = dict.to_list(spec.paths)
+  list.length(paths) |> should.not_equal(0)
+}
+
+pub fn oss_oapi_codegen_issue_2238_header_array_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_2238.yaml")
+  let paths = dict.to_list(spec.paths)
+  list.length(paths) |> should.not_equal(0)
+}
+
+pub fn oss_oapi_codegen_issue_2113_rejects_external_ref_test() {
+  // Has external $ref (./common/spec.yaml#/...) which is not supported
+  let result =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_2113.yaml")
+  let assert Error(err) = result
+  let msg = parser.parse_error_to_string(err)
+  string.contains(msg, "response") |> should.be_true()
+}
+
+pub fn oss_oapi_codegen_issue_1397_rejects_missing_info_test() {
+  let result =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_1397.yaml")
+  let assert Error(err) = result
+  let msg = parser.parse_error_to_string(err)
+  string.contains(msg, "info") |> should.be_true()
+}
+
+pub fn oss_oapi_codegen_issue_1914_rejects_missing_info_test() {
+  let result =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_issue_1914.yaml")
+  let assert Error(err) = result
+  let msg = parser.parse_error_to_string(err)
+  string.contains(msg, "info") |> should.be_true()
+}
+
+pub fn oss_oapi_codegen_head_digit_httpheader_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file(
+      "test/fixtures/oss_oapi_codegen_head_digit_of_httpheader.yaml",
+    )
+  let paths = dict.to_list(spec.paths)
+  list.length(paths) |> should.not_equal(0)
+}
+
+pub fn oss_oapi_codegen_head_digit_operation_id_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file(
+      "test/fixtures/oss_oapi_codegen_head_digit_of_operation_id.yaml",
+    )
+  let paths = dict.to_list(spec.paths)
+  list.length(paths) |> should.not_equal(0)
+}
