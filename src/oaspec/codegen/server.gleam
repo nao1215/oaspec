@@ -184,6 +184,8 @@ fn generate_router(ctx: Context) -> String {
       list.any(operation.parameters, fn(p) {
         case p.schema {
           Some(Inline(schema.IntegerSchema(..))) -> True
+          Some(Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..))) ->
+            True
           _ -> False
         }
       })
@@ -195,6 +197,8 @@ fn generate_router(ctx: Context) -> String {
       list.any(operation.parameters, fn(p) {
         case p.schema {
           Some(Inline(schema.NumberSchema(..))) -> True
+          Some(Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..))) ->
+            True
           _ -> False
         }
       })
@@ -206,6 +210,7 @@ fn generate_router(ctx: Context) -> String {
       list.any(operation.parameters, fn(p) {
         case p.in_, p.schema {
           spec.InCookie, _ -> True
+          spec.InHeader, Some(Inline(schema.ArraySchema(..))) -> True
           _, Some(Inline(schema.BooleanSchema(..))) -> True
           _, _ -> False
         }
@@ -218,7 +223,17 @@ fn generate_router(ctx: Context) -> String {
       list.any(operation.parameters, fn(p) { p.in_ == spec.InCookie })
     })
 
-  let needs_list_import = needs_cookie_lookup
+  let needs_list_import =
+    needs_cookie_lookup
+    || list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(operation.parameters, fn(p) {
+        case p.in_, p.schema {
+          spec.InHeader, Some(Inline(schema.ArraySchema(..))) -> True
+          _, _ -> False
+        }
+      })
+    })
   let needs_uri_import = needs_cookie_lookup
 
   let needs_option =
@@ -636,6 +651,24 @@ fn query_optional_expr(key: String, param: spec.Parameter) -> String {
 /// Generate expression for a required header parameter.
 fn header_required_expr(key: String, param: spec.Parameter) -> String {
   case param.schema {
+    Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
+      "{ let assert Ok(v) = dict.get(headers, \""
+      <> key
+      <> "\") list.map(string.split(v, \",\"), fn(item) { string.trim(item) }) }"
+    Some(Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..))) ->
+      "{ let assert Ok(v) = dict.get(headers, \""
+      <> key
+      <> "\") list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n }) }"
+    Some(Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..))) ->
+      "{ let assert Ok(v) = dict.get(headers, \""
+      <> key
+      <> "\") list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = float.parse(trimmed) n }) }"
+    Some(Inline(schema.ArraySchema(items: Inline(schema.BooleanSchema(..)), ..))) ->
+      "{ let assert Ok(v) = dict.get(headers, \""
+      <> key
+      <> "\") list.map(string.split(v, \",\"), fn(item) { let v = string.trim(item) "
+      <> bool_parse_expr
+      <> " }) }"
     Some(Inline(schema.IntegerSchema(..))) ->
       "{ let assert Ok(v) = dict.get(headers, \""
       <> key
@@ -657,6 +690,24 @@ fn header_required_expr(key: String, param: spec.Parameter) -> String {
 /// Generate expression for an optional header parameter.
 fn header_optional_expr(key: String, param: spec.Parameter) -> String {
   case param.schema {
+    Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
+      "case dict.get(headers, \""
+      <> key
+      <> "\") { Ok(v) -> Some(list.map(string.split(v, \",\"), fn(item) { string.trim(item) })) _ -> None }"
+    Some(Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..))) ->
+      "case dict.get(headers, \""
+      <> key
+      <> "\") { Ok(v) -> Some(list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n })) _ -> None }"
+    Some(Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..))) ->
+      "case dict.get(headers, \""
+      <> key
+      <> "\") { Ok(v) -> Some(list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = float.parse(trimmed) n })) _ -> None }"
+    Some(Inline(schema.ArraySchema(items: Inline(schema.BooleanSchema(..)), ..))) ->
+      "case dict.get(headers, \""
+      <> key
+      <> "\") { Ok(v) -> Some(list.map(string.split(v, \",\"), fn(item) { let v = string.trim(item) "
+      <> bool_parse_expr
+      <> " })) _ -> None }"
     Some(Inline(schema.IntegerSchema(..))) ->
       "case dict.get(headers, \""
       <> key

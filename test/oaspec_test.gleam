@@ -6232,3 +6232,90 @@ paths:
   string.contains(content, "x_threshold: { let assert Ok(v) = dict.get(headers, \"x-threshold\") let assert Ok(n) = float.parse(v) n },")
   |> should.be_true()
 }
+
+pub fn validate_accepts_header_array_params_for_server_codegen_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: x-tags
+          in: header
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "Array parameters")
+    })
+  list.length(server_errors)
+  |> should.equal(0)
+}
+
+pub fn server_header_array_params_are_parsed_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /headers:
+    get:
+      operationId: getHeaders
+      parameters:
+        - name: x-tags
+          in: header
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+        - name: x-scores
+          in: header
+          required: false
+          schema:
+            type: array
+            items:
+              type: integer
+        - name: x-flags
+          in: header
+          required: true
+          schema:
+            type: array
+            items:
+              type: boolean
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(content, "import gleam/list")
+  |> should.be_true()
+  string.contains(content, "x_tags: { let assert Ok(v) = dict.get(headers, \"x-tags\") list.map(string.split(v, \",\"), fn(item) { string.trim(item) }) },")
+  |> should.be_true()
+  string.contains(content, "x_scores: case dict.get(headers, \"x-scores\") { Ok(v) -> Some(list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n })) _ -> None },")
+  |> should.be_true()
+  string.contains(content, "x_flags: { let assert Ok(v) = dict.get(headers, \"x-flags\") list.map(string.split(v, \",\"), fn(item) { let v = string.trim(item) case string.lowercase(v) { \"true\" -> True _ -> False } }) },")
+  |> should.be_true()
+}

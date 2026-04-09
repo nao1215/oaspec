@@ -205,14 +205,25 @@ fn validate_server_structured_param(
     _ -> {
       let schema_obj = resolve_schema_object(param.schema, ctx)
       let array_errors = case param.in_, schema_obj {
-        spec.InQuery, Some(ArraySchema(..))
-        | spec.InHeader, Some(ArraySchema(..))
-        -> [
+        spec.InQuery, Some(ArraySchema(..)) -> [
           ValidationError(
             severity: SeverityError,
             target: TargetServer,
             path: path,
             detail: "Array parameters are not supported for server code generation.",
+          ),
+        ]
+        spec.InHeader, Some(ArraySchema(items: Inline(StringSchema(..)), ..))
+        | spec.InHeader, Some(ArraySchema(items: Inline(IntegerSchema(..)), ..))
+        | spec.InHeader, Some(ArraySchema(items: Inline(NumberSchema(..)), ..))
+        | spec.InHeader, Some(ArraySchema(items: Inline(BooleanSchema(..)), ..)) ->
+          []
+        spec.InHeader, Some(ArraySchema(..)) -> [
+          ValidationError(
+            severity: SeverityError,
+            target: TargetServer,
+            path: path,
+            detail: "Header array parameters are only supported for inline primitive items in server code generation.",
           ),
         ]
         _, _ -> []
