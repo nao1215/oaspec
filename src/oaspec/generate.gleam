@@ -41,7 +41,9 @@ pub fn generate(
   let ctx = context.new(spec, cfg)
 
   // Validate spec for unsupported features
-  let validation_issues = validate.validate(ctx)
+  let validation_issues =
+    validate.validate(ctx)
+    |> validate.filter_by_mode(cfg.mode)
   let blocking_errors = validate.errors_only(validation_issues)
   case list.is_empty(blocking_errors) {
     False -> Error(ValidationErrors(errors: blocking_errors))

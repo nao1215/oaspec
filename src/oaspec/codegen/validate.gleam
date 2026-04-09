@@ -60,6 +60,20 @@ pub fn warnings_only(issues: List(ValidationError)) -> List(ValidationError) {
   list.filter(issues, fn(e) { e.severity == SeverityWarning })
 }
 
+/// Filter validation issues to those relevant for the selected generation mode.
+pub fn filter_by_mode(
+  issues: List(ValidationError),
+  mode: config.GenerateMode,
+) -> List(ValidationError) {
+  case mode {
+    config.Client ->
+      list.filter(issues, fn(e) { e.target != TargetServer })
+    config.Server ->
+      list.filter(issues, fn(e) { e.target != TargetClient })
+    config.Both -> issues
+  }
+}
+
 /// Convert a validation error to a human-readable string.
 pub fn error_to_string(error: ValidationError) -> String {
   let prefix = case error.severity {

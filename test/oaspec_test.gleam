@@ -5980,3 +5980,102 @@ paths:
   list.length(server_errors)
   |> should.equal(1)
 }
+
+pub fn client_mode_ignores_server_target_validation_errors_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: session
+          in: cookie
+          required: true
+          schema:
+            type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+    )
+  generate.generate(spec, cfg)
+  |> should.be_ok()
+}
+
+pub fn filter_by_mode_drops_server_errors_for_client_test() {
+  let issues = [
+    validate.ValidationError(
+      path: "x",
+      detail: "server-only",
+      severity: validate.SeverityError,
+      target: validate.TargetServer,
+    ),
+    validate.ValidationError(
+      path: "y",
+      detail: "shared",
+      severity: validate.SeverityError,
+      target: validate.TargetBoth,
+    ),
+  ]
+  let filtered = validate.filter_by_mode(issues, config.Client)
+  list.length(filtered)
+  |> should.equal(1)
+}
+
+pub fn filter_by_mode_drops_client_errors_for_server_test() {
+  let issues = [
+    validate.ValidationError(
+      path: "x",
+      detail: "client-only",
+      severity: validate.SeverityError,
+      target: validate.TargetClient,
+    ),
+    validate.ValidationError(
+      path: "y",
+      detail: "shared",
+      severity: validate.SeverityError,
+      target: validate.TargetBoth,
+    ),
+  ]
+  let filtered = validate.filter_by_mode(issues, config.Server)
+  list.length(filtered)
+  |> should.equal(1)
+}
+
+pub fn filter_by_mode_keeps_all_errors_for_both_test() {
+  let issues = [
+    validate.ValidationError(
+      path: "x",
+      detail: "client-only",
+      severity: validate.SeverityError,
+      target: validate.TargetClient,
+    ),
+    validate.ValidationError(
+      path: "y",
+      detail: "server-only",
+      severity: validate.SeverityError,
+      target: validate.TargetServer,
+    ),
+    validate.ValidationError(
+      path: "z",
+      detail: "shared",
+      severity: validate.SeverityError,
+      target: validate.TargetBoth,
+    ),
+  ]
+  let filtered = validate.filter_by_mode(issues, config.Both)
+  list.length(filtered)
+  |> should.equal(3)
+}
