@@ -14,7 +14,7 @@ Generate Gleam code from OpenAPI 3.x specifications with strict codegen for a la
 - Parameter support (deepObject, array, complex schema parameters)
 - Content type support (JSON, form-urlencoded, multipart, XML, octet-stream, text/plain)
 - OpenAPI descriptions as doc comments
-- Thoroughly tested: 273+ unit tests, ShellSpec CLI tests, integration compile tests, and 26 real-world OpenAPI spec fixtures
+- Thoroughly tested: 293+ unit tests, ShellSpec CLI tests, integration compile tests, and 40 real-world OpenAPI spec fixtures
 
 ## Install
 
