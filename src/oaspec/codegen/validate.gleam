@@ -194,10 +194,13 @@ fn validate_request_body(
         })
       let multipart_field_errors =
         validate_multipart_request_body_fields(op_id, rb.content, ctx)
+      let form_urlencoded_errors =
+        validate_form_urlencoded_schema(op_id, rb.content, ctx)
       list.flatten([
         content_type_errors,
         schema_errors,
         multipart_field_errors,
+        form_urlencoded_errors,
       ])
     }
   }
@@ -229,6 +232,29 @@ fn validate_multipart_request_body_fields(
           UnsupportedFeature(
             path: op_id <> ".requestBody",
             detail: "multipart/form-data request bodies must use an object schema.",
+          ),
+        ]
+        None -> []
+      }
+    Error(_) -> []
+  }
+}
+
+/// Validate that application/x-www-form-urlencoded uses an object schema.
+/// Non-object schemas produce empty form bodies in the generated code.
+fn validate_form_urlencoded_schema(
+  op_id: String,
+  content: dict.Dict(String, spec.MediaType),
+  ctx: Context,
+) -> List(ValidationError) {
+  case dict.get(content, "application/x-www-form-urlencoded") {
+    Ok(media_type) ->
+      case resolve_schema_object(media_type.schema, ctx) {
+        Some(ObjectSchema(..)) -> []
+        Some(_) -> [
+          UnsupportedFeature(
+            path: op_id <> ".requestBody",
+            detail: "application/x-www-form-urlencoded request bodies must use an object schema.",
           ),
         ]
         None -> []

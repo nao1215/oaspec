@@ -3213,6 +3213,92 @@ pub fn status_code_suffix_range_test() {
   |> should.equal("Status4xx")
 }
 
+// --- form-urlencoded non-object validation tests ---
+
+/// form-urlencoded with non-object schema must be rejected by validation.
+pub fn form_urlencoded_non_object_schema_rejected_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /submit:
+    post:
+      operationId: submit
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  // Must report error for non-object schema with form-urlencoded
+  list.is_empty(errors)
+  |> should.be_false()
+}
+
+/// form-urlencoded with object schema must pass validation.
+pub fn form_urlencoded_object_schema_passes_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /submit:
+    post:
+      operationId: submit
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.Config(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  list.is_empty(errors)
+  |> should.be_true()
+}
+
 // --- AnyOfSchema discriminator tests ---
 
 /// anyOf with discriminator must be preserved in the AST, not lost.
