@@ -307,7 +307,9 @@ paths:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
-  let errors = validate.validate(ctx)
+  let errors =
+    validate.validate(ctx)
+    |> list.filter(fn(e) { e.target != validate.TargetServer })
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
   |> should.be_false()
@@ -336,7 +338,9 @@ paths:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
-  let errors = validate.validate(ctx)
+  let errors =
+    validate.validate(ctx)
+    |> list.filter(fn(e) { e.target != validate.TargetServer })
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
   |> should.be_false()
@@ -528,7 +532,9 @@ fn make_ctx(spec_path: String) -> context.Context {
 
 pub fn validate_accepts_deep_object_test() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
-  let errors = validate.validate(ctx)
+  let errors =
+    validate.validate(ctx)
+    |> list.filter(fn(e) { e.target != validate.TargetServer })
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "deepObject") })
   |> should.be_false()
@@ -536,7 +542,9 @@ pub fn validate_accepts_deep_object_test() {
 
 pub fn validate_accepts_complex_schema_parameter_test() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
-  let errors = validate.validate(ctx)
+  let errors =
+    validate.validate(ctx)
+    |> list.filter(fn(e) { e.target != validate.TargetServer })
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "Complex schema parameters")
@@ -581,7 +589,9 @@ components:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
-  let errors = validate.validate(ctx)
+  let errors =
+    validate.validate(ctx)
+    |> list.filter(fn(e) { e.target != validate.TargetServer })
   errors |> should.equal([])
 }
 
@@ -3717,7 +3727,9 @@ paths:
   let spec = hoist.hoist(spec)
   let spec = dedup.dedup(spec)
   let ctx = make_ctx_from_spec(spec)
-  let errors = validate.validate(ctx)
+  let errors =
+    validate.validate(ctx)
+    |> list.filter(fn(e) { e.target != validate.TargetServer })
   list.is_empty(errors)
   |> should.be_true()
 }
@@ -5859,6 +5871,76 @@ paths:
     list.filter(errors, fn(e) {
       e.target == validate.TargetServer
       && string.contains(e.detail, "Cookie parameters are not supported")
+    })
+  list.length(server_errors)
+  |> should.equal(1)
+}
+
+pub fn validate_rejects_array_params_for_server_codegen_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: tags
+          in: query
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "Array parameters are not supported")
+    })
+  list.length(server_errors)
+  |> should.equal(1)
+}
+
+pub fn validate_rejects_deep_object_params_for_server_codegen_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: searchItems
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          required: true
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let server_errors =
+    list.filter(errors, fn(e) {
+      e.target == validate.TargetServer
+      && string.contains(e.detail, "deepObject parameters are not supported")
     })
   list.length(server_errors)
   |> should.equal(1)

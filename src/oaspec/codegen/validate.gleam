@@ -170,14 +170,54 @@ fn validate_parameters(
     // style. Without it, codegen cannot stringify the value and falls through
     // to raw variable name, producing invalid generated code.
     let complex_schema_errors = validate_complex_param_schema(path, p, ctx)
+    let server_structured_param_errors =
+      validate_server_structured_param(path, p, ctx)
     let cookie_errors = validate_server_cookie_param(path, p, ctx)
     list.flatten([
       style_errors,
       content_errors,
       complex_schema_errors,
+      server_structured_param_errors,
       cookie_errors,
     ])
   })
+}
+
+fn validate_server_structured_param(
+  path: String,
+  param: spec.Parameter,
+  ctx: Context,
+) -> List(ValidationError) {
+  case ctx.config.mode {
+    config.Client -> []
+    _ -> {
+      let schema_obj = resolve_schema_object(param.schema, ctx)
+      let array_errors = case param.in_, schema_obj {
+        spec.InQuery, Some(ArraySchema(..))
+        | spec.InHeader, Some(ArraySchema(..)) -> [
+          ValidationError(
+            severity: SeverityError,
+            target: TargetServer,
+            path: path,
+            detail: "Array parameters are not supported for server code generation.",
+          ),
+        ]
+        _, _ -> []
+      }
+      let deep_object_errors = case param.style {
+        Some(spec.DeepObjectStyle) -> [
+          ValidationError(
+            severity: SeverityError,
+            target: TargetServer,
+            path: path,
+            detail: "deepObject parameters are not supported for server code generation.",
+          ),
+        ]
+        _ -> []
+      }
+      list.flatten([array_errors, deep_object_errors])
+    }
+  }
 }
 
 fn validate_server_cookie_param(
