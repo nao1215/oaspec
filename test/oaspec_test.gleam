@@ -6079,3 +6079,34 @@ pub fn filter_by_mode_keeps_all_errors_for_both_test() {
   list.length(filtered)
   |> should.equal(3)
 }
+
+pub fn generation_summary_includes_warnings_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths:
+  /items:
+    get:
+      operationId: getItems
+      responses:
+        '200':
+          description: ok
+          headers:
+            X-Rate-Limit:
+              description: Rate limit
+              schema: { type: integer }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Both,
+    )
+  let assert Ok(summary) = generate.generate(spec, cfg)
+  { summary.warnings != [] }
+  |> should.be_true()
+}

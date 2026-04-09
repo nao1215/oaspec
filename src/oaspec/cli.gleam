@@ -161,6 +161,15 @@ fn run_generate(
             }
             Ok(summary) -> {
               io.println("Spec loaded: " <> summary.spec_title)
+              case summary.warnings {
+                [] -> Nil
+                warnings -> {
+                  io.println("Warnings:")
+                  list.each(warnings, fn(w) {
+                    io.println("  - " <> validate.error_to_string(w))
+                  })
+                }
+              }
               io.println("Generating code...")
               case
                 writer.write_all(summary.files, cfg, fn(path) {
