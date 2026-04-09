@@ -176,7 +176,6 @@ pub fn retry(max_retries: Int) -> Middleware(req, res)
 - `style: deepObject` query parameters with `key[prop]=value` serialization
 - Array parameters in query/header/cookie with comma-separated serialization
 - Complex schema parameters (object/allOf/oneOf/anyOf) via automatic hoisting
-- Path parameters with `required: false` (treated as optional)
 - Percent-encoding for path/query/cookie parameter values via `uri.percent_encode`
 - Cookie parameters combined into single header
 - `application/json` request bodies with `$ref` resolution (typed, auto-encoded)
