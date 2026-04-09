@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-09
+
+### Added
+
+#### Lossless AST (Phase 1)
+- **8 new types**: `Contact`, `License`, `ServerVariable`, `ExternalDoc`, `Tag`, `Header`, `Link`, `Encoding`
+- **Lossless parsing**: all standard OpenAPI 3.x fields preserved through parsing (info contact/license/summary/termsOfService, server variables, webhooks, tags, externalDocs, jsonSchemaDialect, pathItem servers, operation servers/externalDocs, parameter content/examples, mediaType example/examples/encoding, response headers/links, components headers/examples/links)
+- `ParameterStyle` ADT: `FormStyle`, `SimpleStyle`, `DeepObjectStyle`, `MatrixStyle`, `LabelStyle`, `SpaceDelimitedStyle`, `PipeDelimitedStyle` — replaces stringly-typed `Option(String)`
+- `SecuritySchemeIn` ADT: `SchemeInHeader`, `SchemeInQuery`, `SchemeInCookie` — replaces stringly-typed `String`
+- `SchemaMetadata` expanded with `title`, `readOnly`, `writeOnly`, `default`, `example`
+- Schema constraint fields: `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf` (Integer/Number), `uniqueItems` (Array), `minProperties`, `maxProperties` (Object)
+- OAuth2 `flows` with `authorization_url`, `token_url`, `refresh_url`, and `scopes` preserved in AST
+- OpenAPI 3.1 `type: [string, 'null']` parsed as nullable type
+- OpenAPI 3.1 `type: [string, integer]` multi-type unions rejected with clear error (use `oneOf` instead)
+- HEAD, OPTIONS, TRACE operations parsed and supported in AST and codegen
+
+#### Structured Validation (Phase 2)
+- `ValidationError` with `Severity` (Error/Warning) and `Target` (Both/Client/Server) — replaces flat `UnsupportedFeature`
+- Warnings for parsed-but-unused AST fields (webhooks, response headers/links, mediaType encoding) — do not block generation
+- `errors_only()` and `warnings_only()` helper functions
+
+#### IR-Based Codegen (Phase 3)
+- `ir_build.gleam`: converts component schemas to IR declarations
+- Component schema types generated via `ir_build → ir_render` pipeline
+- `schema_dispatch.gleam`: centralized schema-to-type mapping
+
+#### OpenAPI Feature Implementation (Phase 5)
+- `readOnly` properties filtered from request types and encoders
+- `writeOnly` properties treated as optional in response decoders
+- Validation guards for `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf` (Integer and Number)
+- Server router: typed request construction, handler dispatch, response encoding with status codes
+- `ServerResponse` type with status, body, and headers
+- `default_base_url()` generated from server URL templates with variable substitution
+- `requestBody.required: false` generates `Option(T)` body parameter with case unwrapping
+- `explode: true` query arrays produce repeated `key=a&key=b` (OpenAPI default for `style: form`)
+- Array alias component schemas (e.g. `TagList: type: array`) generate decoder and encoder
+
+### Fixed
+
+- Optional deepObject + array leaf: no longer passes `List` to `uri.percent_encode`
+- form-urlencoded `$ref` array property: resolved to detect arrays, generates proper iteration
+- `$ref` array query parameter: `gleam/list` import now included when needed
+- form-urlencoded nested objects: recursive bracket encoding (`field[sub][key]=value`) for 2+ level nesting
+- Server router tuple syntax: uses `#()` not `()` for Gleam tuples
+- Server router: uses `_json` encoder variants for `json.to_string` compatibility
+- Server router: uses operation-specific decoders instead of nonexistent `decode_body`
+- Server router: always imports `gleam/dict` for route signature, `gleam/option` for optional bodies
+- Callback parse errors propagated instead of silently swallowed
+- `FileTarget` ADT in writer: routes files by target kind, not filename string matching
+- Config `FileReadError` distinguishes ENOENT from other errors
+
+### Changed
+
+- `Parameter.style` type: `Option(String)` → `Option(ParameterStyle)` (ADT)
+- `ApiKeyScheme.in_` type: `String` → `SecuritySchemeIn` (ADT)
+- `OAuth2Scheme` now carries `flows: Dict(String, OAuth2Flow)`
+- `GeneratedFile` has `target: FileTarget` field (SharedTarget/ServerTarget/ClientTarget)
+- `ValidationError` restructured with severity and target scope
+- CLI `run_generate` refactored to pure `generate(spec, cfg) -> Result` pipeline
+- Types generation delegated to IR build → render pipeline
+
 ## [0.4.0] - 2026-04-08
 
 ### Added
