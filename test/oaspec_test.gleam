@@ -4,6 +4,7 @@ import gleam/option.{None, Some}
 import gleam/string
 import gleeunit
 import gleeunit/should
+import oaspec/capability
 import oaspec/codegen/client as client_gen
 import oaspec/codegen/context
 import oaspec/codegen/decoders
@@ -9096,6 +9097,25 @@ pub fn capability_check_uses_registry_test() {
     }
     _ -> should.fail()
   }
+}
+
+// ---------------------------------------------------------------------------
+// README boundaries generated from registry
+// ---------------------------------------------------------------------------
+
+/// README Current Boundaries section mentions all Unsupported capabilities.
+pub fn readme_boundaries_match_registry_test() {
+  let assert Ok(readme) = simplifile.read("README.md")
+  // Every Unsupported capability name must appear in the README
+  let unsupported = capability.by_level(capability.Unsupported)
+  list.each(unsupported, fn(c) {
+    should.be_true(string.contains(readme, c.name))
+  })
+  // Every NotHandled capability name must appear in the README
+  let not_handled = capability.by_level(capability.NotHandled)
+  list.each(not_handled, fn(c) {
+    should.be_true(string.contains(readme, c.name))
+  })
 }
 
 // ---------------------------------------------------------------------------

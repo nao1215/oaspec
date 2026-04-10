@@ -167,14 +167,21 @@ Coverage is strongest in these areas:
 - Security: `apiKey`, HTTP auth schemes, OAuth2, and OpenID Connect
 - Generation safety: name collision handling, keyword escaping, validation guards, and capability errors with clear failure modes
 
+<!-- BEGIN GENERATED:BOUNDARIES -->
 ## Current Boundaries
+
+These boundaries are generated from the capability registry in `src/oaspec/capability.gleam`.
 
 These are the most important limitations today:
 
-- The following JSON Schema 2020-12 keywords are detected and rejected at parse time: `const`, `$defs`, `prefixItems`, `if`/`then`/`else`, `dependentSchemas`, `not`, `unevaluatedProperties`, `unevaluatedItems`, `contentEncoding`, `contentMediaType`, `contentSchema`
-- OpenAPI 3.1 multi-type unions such as `type: [string, integer]` should be modeled with `oneOf` instead
-- `xml` annotations are not used for code generation
-- Some fields are parsed and preserved but not yet used by codegen, including `webhooks`, `externalDocs`, top-level `tags`, parameter examples, media examples and encoding, response headers and links, operation-level servers, and component headers/examples/links
+- The following keywords are detected and rejected: `$defs`, `prefixItems`, `if/then/else`, `dependentSchemas`, `not`, `unevaluatedProperties`, `unevaluatedItems`, `contentEncoding`, `contentMediaType`, `contentSchema`, `mutualTLS`
+- `xml` annotations are not handled by the parser
+- Some fields are parsed and preserved but not yet used by codegen: webhooks, externalDocs, tags, examples, links, operation servers, path servers, response headers, encoding
+- The following are normalized to supported equivalents:
+- `const`: String const normalized to single-value enum
+- `type: [T, null]`: Normalized to nullable
+- `type: [T1, T2]`: Normalized to oneOf
+<!-- END GENERATED:BOUNDARIES -->
 
 ## Development
 
