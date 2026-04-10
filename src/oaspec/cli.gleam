@@ -159,6 +159,12 @@ fn run_generate(
               })
               halt(1)
             }
+            Error(generate.ResolveError(detail:)) -> {
+              io.println(
+                "Error: Failed to resolve component aliases: " <> detail,
+              )
+              halt(1)
+            }
             Ok(summary) -> {
               io.println("Spec loaded: " <> summary.spec_title)
               case summary.warnings {

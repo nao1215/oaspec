@@ -1,4 +1,5 @@
 import gleam/list
+import gleam/result
 import oaspec/codegen/client
 import oaspec/codegen/context.{type Context, type GeneratedFile}
 import oaspec/codegen/decoders
@@ -11,6 +12,8 @@ import oaspec/config.{type Config, Both, Client, Server}
 import oaspec/openapi/dedup
 import oaspec/openapi/hoist
 import oaspec/openapi/normalize
+import oaspec/openapi/parser
+import oaspec/openapi/resolve
 import oaspec/openapi/spec.{type OpenApiSpec}
 
 /// Result of a successful code generation run.
@@ -25,6 +28,7 @@ pub type GenerationSummary {
 /// Errors from the pure generation pipeline.
 pub type GenerateError {
   ValidationErrors(errors: List(validate.ValidationError))
+  ResolveError(detail: String)
 }
 
 /// Pure generation pipeline: normalize → hoist → dedup → validate → generate.
@@ -38,6 +42,14 @@ pub fn generate(
 
   // Normalize OAS 3.1 patterns to 3.0-compatible form
   let spec = normalize.normalize(spec)
+
+  // Resolve component entry aliases ($ref within components)
+  use spec <- result.try(
+    resolve.resolve(spec)
+    |> result.map_error(fn(e) {
+      ResolveError(detail: parser.parse_error_to_string(e))
+    }),
+  )
 
   // Hoist inline complex schemas into components.schemas
   let spec = hoist.hoist(spec)

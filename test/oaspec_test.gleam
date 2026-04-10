@@ -690,6 +690,7 @@ pub fn validate_missing_responses_rejects_test() {
         list.any(error_details, fn(d) { string.contains(d, "no responses") })
       should.be_true(has_missing)
     }
+    Error(generate.ResolveError(_)) -> should.fail()
     Ok(_) -> should.fail()
   }
 }
@@ -7531,6 +7532,7 @@ pub fn oss_oapi_codegen_nullable_generates_test() {
       let blocking = validate.errors_only(errors)
       list.length(blocking) |> should.equal(0)
     }
+    Error(generate.ResolveError(_)) -> should.fail()
   }
 }
 
@@ -7560,6 +7562,7 @@ pub fn oss_oapi_codegen_allof_additional_generates_test() {
       let blocking = validate.errors_only(errors)
       list.length(blocking) |> should.equal(0)
     }
+    Error(generate.ResolveError(_)) -> should.fail()
   }
 }
 
@@ -7611,6 +7614,7 @@ pub fn oss_oapi_codegen_issue_312_generates_test() {
     Error(generate.ValidationErrors(errors:)) -> {
       list.length(validate.errors_only(errors)) |> should.equal(0)
     }
+    Error(generate.ResolveError(_)) -> should.fail()
   }
 }
 
@@ -7641,6 +7645,7 @@ pub fn oss_oapi_codegen_issue_52_generates_test() {
     Error(generate.ValidationErrors(errors:)) -> {
       list.length(validate.errors_only(errors)) |> should.equal(0)
     }
+    Error(generate.ResolveError(_)) -> should.fail()
   }
 }
 
@@ -7688,6 +7693,7 @@ pub fn oss_oapi_codegen_issue_579_generates_test() {
     Error(generate.ValidationErrors(errors:)) -> {
       list.length(validate.errors_only(errors)) |> should.equal(0)
     }
+    Error(generate.ResolveError(_)) -> should.fail()
   }
 }
 
@@ -7709,6 +7715,7 @@ pub fn oss_oapi_codegen_issue_2185_generates_test() {
     Error(generate.ValidationErrors(errors:)) -> {
       list.length(validate.errors_only(errors)) |> should.equal(0)
     }
+    Error(generate.ResolveError(_)) -> should.fail()
   }
 }
 
@@ -7740,6 +7747,7 @@ pub fn oss_openapi_gen_issue_9719_generates_test() {
     Error(generate.ValidationErrors(errors:)) -> {
       list.length(validate.errors_only(errors)) |> should.equal(0)
     }
+    Error(generate.ResolveError(_)) -> should.fail()
   }
 }
 
@@ -7812,6 +7820,7 @@ pub fn oss_kiota_discriminator_generates_test() {
     Error(generate.ValidationErrors(errors:)) -> {
       list.length(validate.errors_only(errors)) |> should.equal(0)
     }
+    Error(generate.ResolveError(_)) -> should.fail()
   }
 }
 
@@ -7832,6 +7841,7 @@ pub fn oss_kiota_derived_types_generates_test() {
     Error(generate.ValidationErrors(errors:)) -> {
       list.length(validate.errors_only(errors)) |> should.equal(0)
     }
+    Error(generate.ResolveError(_)) -> should.fail()
   }
 }
 
@@ -7853,6 +7863,7 @@ pub fn oss_kiota_multi_security_generates_test() {
     Error(generate.ValidationErrors(errors:)) -> {
       list.length(validate.errors_only(errors)) |> should.equal(0)
     }
+    Error(generate.ResolveError(_)) -> should.fail()
   }
 }
 
@@ -8008,6 +8019,7 @@ pub fn oss_openapi_gen_issue_11897_generates_test() {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) ->
       list.length(validate.errors_only(errors)) |> should.equal(0)
+    Error(generate.ResolveError(_)) -> should.fail()
   }
 }
 
@@ -8034,6 +8046,7 @@ pub fn oss_openapi_gen_issue_1666_generates_test() {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) ->
       list.length(validate.errors_only(errors)) |> should.equal(0)
+    Error(generate.ResolveError(_)) -> should.fail()
   }
 }
 
@@ -8060,6 +8073,7 @@ pub fn oss_openapi_gen_issue_18516_generates_test() {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) ->
       list.length(validate.errors_only(errors)) |> should.equal(0)
+    Error(generate.ResolveError(_)) -> should.fail()
   }
 }
 
@@ -8809,6 +8823,7 @@ pub fn validate_invalid_security_ref_rejects_test() {
         })
       should.be_true(has_security)
     }
+    Error(generate.ResolveError(_)) -> should.fail()
     Ok(_) -> should.fail()
   }
 }
