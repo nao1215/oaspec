@@ -12,11 +12,11 @@ import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
   Inline, ObjectSchema, OneOfSchema, Reference,
 }
-import oaspec/openapi/spec.{type OpenApiSpec, ConcreteEntry}
+import oaspec/openapi/spec.{type OpenApiSpec, type SpecStage, Value}
 
 /// Run capability checks on a resolved spec.
 /// Returns errors for unsupported features and warnings for parsed-but-unused features.
-pub fn check(spec: OpenApiSpec) -> List(ValidationError) {
+pub fn check(spec: OpenApiSpec(SpecStage)) -> List(ValidationError) {
   let schema_errors = check_schemas(spec)
   let security_errors = check_security_schemes(spec)
   let scope_warnings = check_scope(spec)
@@ -24,7 +24,7 @@ pub fn check(spec: OpenApiSpec) -> List(ValidationError) {
 }
 
 /// Check all schemas for unsupported keywords stored during lossless parse.
-fn check_schemas(spec: OpenApiSpec) -> List(ValidationError) {
+fn check_schemas(spec: OpenApiSpec(SpecStage)) -> List(ValidationError) {
   case spec.components {
     None -> []
     Some(components) ->
@@ -99,15 +99,15 @@ fn check_schema(path: String, schema_obj: SchemaObject) -> List(ValidationError)
 }
 
 /// Check security schemes for unsupported types (e.g. mutualTLS).
-fn check_security_schemes(spec: OpenApiSpec) -> List(ValidationError) {
+fn check_security_schemes(spec: OpenApiSpec(SpecStage)) -> List(ValidationError) {
   case spec.components {
     None -> []
     Some(components) ->
       dict.to_list(components.security_schemes)
       |> list.filter_map(fn(entry) {
-        let #(_name, component_entry) = entry
-        case component_entry {
-          ConcreteEntry(_scheme) -> {
+        let #(_name, ref_or) = entry
+        case ref_or {
+          Value(_scheme) -> {
             // mutualTLS would have been rejected at parse time since
             // parse_security_scheme doesn't recognize it. Nothing to
             // check here for now.
@@ -120,7 +120,7 @@ fn check_security_schemes(spec: OpenApiSpec) -> List(ValidationError) {
 }
 
 /// Check for parsed-but-unused features using the capability registry.
-fn check_scope(spec: OpenApiSpec) -> List(ValidationError) {
+fn check_scope(spec: OpenApiSpec(SpecStage)) -> List(ValidationError) {
   let webhook_w = case dict.is_empty(spec.webhooks) {
     True -> []
     False -> [
@@ -158,19 +158,24 @@ fn check_scope(spec: OpenApiSpec) -> List(ValidationError) {
   let server_w =
     dict.to_list(spec.paths)
     |> list.flat_map(fn(entry) {
-      let #(path, path_item) = entry
-      let path_w = case list.is_empty(path_item.servers) {
-        True -> []
-        False -> [
-          ValidationError(
-            severity: SeverityWarning,
-            target: TargetClient,
-            path: "paths." <> path <> ".servers",
-            detail: "Path-level servers are parsed but client uses only top-level server URL.",
-          ),
-        ]
+      let #(path, ref_or) = entry
+      case ref_or {
+        Value(path_item) -> {
+          let path_w = case list.is_empty(path_item.servers) {
+            True -> []
+            False -> [
+              ValidationError(
+                severity: SeverityWarning,
+                target: TargetClient,
+                path: "paths." <> path <> ".servers",
+                detail: "Path-level servers are parsed but client uses only top-level server URL.",
+              ),
+            ]
+          }
+          path_w
+        }
+        _ -> []
       }
-      path_w
     })
   // Component headers/examples/links
   let comp_w = case spec.components {

@@ -12,7 +12,7 @@ import oaspec/openapi/schema.{
   BooleanSchema, Inline, IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema,
   Reference, StringSchema,
 }
-import oaspec/openapi/spec
+import oaspec/openapi/spec.{type SpecStage, Value}
 import oaspec/util/http
 import oaspec/util/naming
 import oaspec/util/string_extra as se
@@ -156,32 +156,37 @@ fn generate_anonymous_decoders(
 fn generate_anonymous_response_decoders(
   sb: se.StringBuilder,
   op_id: String,
-  operation: spec.Operation,
+  operation: spec.Operation(SpecStage),
   ctx: Context,
 ) -> se.StringBuilder {
   let responses = dict.to_list(operation.responses)
   list.fold(responses, sb, fn(sb, entry) {
-    let #(status_code, response) = entry
-    let content_entries = dict.to_list(response.content)
-    case content_entries {
-      [#(_, media_type), ..] ->
-        case media_type.schema {
-          Some(Inline(schema_obj)) -> {
-            // Filter out writeOnly properties from response decoders
-            let filtered_schema =
-              type_gen.filter_write_only_properties(schema_obj, ctx)
-            let suffix = "Response" <> http.status_code_suffix(status_code)
-            generate_anonymous_schema_decoder(
-              sb,
-              op_id,
-              suffix,
-              filtered_schema,
-              ctx,
-            )
-          }
+    let #(status_code, ref_or_response) = entry
+    case ref_or_response {
+      Value(response) -> {
+        let content_entries = dict.to_list(response.content)
+        case content_entries {
+          [#(_, media_type), ..] ->
+            case media_type.schema {
+              Some(Inline(schema_obj)) -> {
+                // Filter out writeOnly properties from response decoders
+                let filtered_schema =
+                  type_gen.filter_write_only_properties(schema_obj, ctx)
+                let suffix = "Response" <> http.status_code_suffix(status_code)
+                generate_anonymous_schema_decoder(
+                  sb,
+                  op_id,
+                  suffix,
+                  filtered_schema,
+                  ctx,
+                )
+              }
+              _ -> sb
+            }
           _ -> sb
         }
-      _ -> sb
+      }
+      spec.Ref(_) -> sb
     }
   })
 }
@@ -190,11 +195,11 @@ fn generate_anonymous_response_decoders(
 fn generate_anonymous_request_body_decoder(
   sb: se.StringBuilder,
   op_id: String,
-  operation: spec.Operation,
+  operation: spec.Operation(SpecStage),
   ctx: Context,
 ) -> se.StringBuilder {
   case operation.request_body {
-    Some(rb) -> {
+    Some(Value(rb)) -> {
       let content_entries = dict.to_list(rb.content)
       case content_entries {
         [#(_, media_type), ..] ->
@@ -216,6 +221,7 @@ fn generate_anonymous_request_body_decoder(
         _ -> sb
       }
     }
+    Some(spec.Ref(_)) -> sb
     None -> sb
   }
 }
@@ -1317,11 +1323,11 @@ fn generate_anonymous_encoders(
 fn generate_anonymous_request_body_encoder(
   sb: se.StringBuilder,
   op_id: String,
-  operation: spec.Operation,
+  operation: spec.Operation(SpecStage),
   ctx: Context,
 ) -> se.StringBuilder {
   case operation.request_body {
-    Some(rb) -> {
+    Some(Value(rb)) -> {
       let content_entries = dict.to_list(rb.content)
       case content_entries {
         [#(_, media_type), ..] ->
@@ -1338,6 +1344,7 @@ fn generate_anonymous_request_body_encoder(
         _ -> sb
       }
     }
+    Some(spec.Ref(_)) -> sb
     None -> sb
   }
 }

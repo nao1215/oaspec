@@ -6,7 +6,7 @@ import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
 import oaspec/codegen/types as type_gen
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{type SchemaRef, Inline, ObjectSchema, Reference}
-import oaspec/openapi/spec
+import oaspec/openapi/spec.{type SpecStage, Value}
 import oaspec/util/http
 import oaspec/util/naming
 import oaspec/util/string_extra as se
@@ -66,7 +66,7 @@ fn generate_handlers(ctx: Context) -> String {
 fn generate_handler(
   sb: se.StringBuilder,
   op_id: String,
-  operation: spec.Operation,
+  operation: spec.Operation(SpecStage),
   _ctx: Context,
 ) -> se.StringBuilder {
   let fn_name = naming.operation_to_function_name(op_id)
@@ -121,7 +121,7 @@ fn generate_handler(
 fn generate_callback_handlers(
   sb: se.StringBuilder,
   op_id: String,
-  operation: spec.Operation,
+  operation: spec.Operation(SpecStage),
 ) -> se.StringBuilder {
   let callbacks = dict.to_list(operation.callbacks)
   list.fold(callbacks, sb, fn(sb, entry) {
@@ -170,7 +170,12 @@ fn generate_router(ctx: Context) -> String {
   let has_deep_object =
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
-      list.any(operation.parameters, fn(p) { is_deep_object_param(p, ctx) })
+      list.any(operation.parameters, fn(ref_p) {
+        case ref_p {
+          Value(p) -> is_deep_object_param(p, ctx)
+          _ -> False
+        }
+      })
     })
   let has_form_urlencoded_body =
     list.any(operations, fn(op) {
@@ -186,8 +191,8 @@ fn generate_router(ctx: Context) -> String {
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       case operation.request_body {
-        Some(rb) -> form_urlencoded_body_has_nested_object(rb, ctx)
-        None -> False
+        Some(Value(rb)) -> form_urlencoded_body_has_nested_object(rb, ctx)
+        _ -> False
       }
     })
 
@@ -196,42 +201,61 @@ fn generate_router(ctx: Context) -> String {
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       let has_query =
-        list.any(operation.parameters, fn(p) { p.in_ == spec.InQuery })
+        list.any(operation.parameters, fn(ref_p) {
+          case ref_p {
+            Value(p) -> p.in_ == spec.InQuery
+            _ -> False
+          }
+        })
       let has_header =
-        list.any(operation.parameters, fn(p) { p.in_ == spec.InHeader })
+        list.any(operation.parameters, fn(ref_p) {
+          case ref_p {
+            Value(p) -> p.in_ == spec.InHeader
+            _ -> False
+          }
+        })
       has_query || has_header
     })
 
   let needs_int =
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
-      list.any(operation.parameters, fn(p) {
-        query_schema_needs_int(p.schema) || deep_object_param_needs_int(p, ctx)
+      list.any(operation.parameters, fn(ref_p) {
+        case ref_p {
+          Value(p) ->
+            query_schema_needs_int(p.schema)
+            || deep_object_param_needs_int(p, ctx)
+          _ -> False
+        }
       })
       || case operation.request_body {
-        Some(rb) -> form_urlencoded_body_needs_int(rb, ctx)
-        None -> False
+        Some(Value(rb)) -> form_urlencoded_body_needs_int(rb, ctx)
+        _ -> False
       }
       || case operation.request_body {
-        Some(rb) -> multipart_body_needs_int(rb, ctx)
-        None -> False
+        Some(Value(rb)) -> multipart_body_needs_int(rb, ctx)
+        _ -> False
       }
     })
 
   let needs_float =
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
-      list.any(operation.parameters, fn(p) {
-        query_schema_needs_float(p.schema)
-        || deep_object_param_needs_float(p, ctx)
+      list.any(operation.parameters, fn(ref_p) {
+        case ref_p {
+          Value(p) ->
+            query_schema_needs_float(p.schema)
+            || deep_object_param_needs_float(p, ctx)
+          _ -> False
+        }
       })
       || case operation.request_body {
-        Some(rb) -> form_urlencoded_body_needs_float(rb, ctx)
-        None -> False
+        Some(Value(rb)) -> form_urlencoded_body_needs_float(rb, ctx)
+        _ -> False
       }
       || case operation.request_body {
-        Some(rb) -> multipart_body_needs_float(rb, ctx)
-        None -> False
+        Some(Value(rb)) -> multipart_body_needs_float(rb, ctx)
+        _ -> False
       }
     })
 
@@ -240,25 +264,34 @@ fn generate_router(ctx: Context) -> String {
     || has_multipart_body
     || list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
-      list.any(operation.parameters, fn(p) {
-        case p.in_ {
-          spec.InCookie -> True
-          spec.InQuery | spec.InHeader ->
-            query_schema_needs_string(p.schema)
-            || deep_object_param_needs_string(p, ctx)
-          spec.InPath -> query_schema_needs_string(p.schema)
+      list.any(operation.parameters, fn(ref_p) {
+        case ref_p {
+          Value(p) ->
+            case p.in_ {
+              spec.InCookie -> True
+              spec.InQuery | spec.InHeader ->
+                query_schema_needs_string(p.schema)
+                || deep_object_param_needs_string(p, ctx)
+              spec.InPath -> query_schema_needs_string(p.schema)
+            }
+          _ -> False
         }
       })
       || case operation.request_body {
-        Some(rb) -> form_urlencoded_body_needs_string(rb, ctx)
-        None -> False
+        Some(Value(rb)) -> form_urlencoded_body_needs_string(rb, ctx)
+        _ -> False
       }
     })
 
   let needs_cookie_lookup =
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
-      list.any(operation.parameters, fn(p) { p.in_ == spec.InCookie })
+      list.any(operation.parameters, fn(ref_p) {
+        case ref_p {
+          Value(p) -> p.in_ == spec.InCookie
+          _ -> False
+        }
+      })
     })
 
   let needs_list_import =
@@ -268,11 +301,15 @@ fn generate_router(ctx: Context) -> String {
     || has_multipart_body
     || list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
-      list.any(operation.parameters, fn(p) {
-        case p.in_, p.schema {
-          spec.InQuery, Some(Inline(schema.ArraySchema(..))) -> True
-          spec.InHeader, Some(Inline(schema.ArraySchema(..))) -> True
-          _, _ -> False
+      list.any(operation.parameters, fn(ref_p) {
+        case ref_p {
+          Value(p) ->
+            case p.in_, p.schema {
+              spec.InQuery, Some(Inline(schema.ArraySchema(..))) -> True
+              spec.InHeader, Some(Inline(schema.ArraySchema(..))) -> True
+              _, _ -> False
+            }
+          _ -> False
         }
       })
     })
@@ -282,22 +319,30 @@ fn generate_router(ctx: Context) -> String {
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       let has_optional_params =
-        list.any(operation.parameters, fn(p) { !p.required })
+        list.any(operation.parameters, fn(ref_p) {
+          case ref_p {
+            Value(p) -> !p.required
+            _ -> False
+          }
+        })
       let has_optional_deep_object_fields =
-        list.any(operation.parameters, fn(p) {
-          deep_object_param_has_optional_fields(p, ctx)
+        list.any(operation.parameters, fn(ref_p) {
+          case ref_p {
+            Value(p) -> deep_object_param_has_optional_fields(p, ctx)
+            _ -> False
+          }
         })
       let has_optional_form_urlencoded_fields = case operation.request_body {
-        Some(rb) -> form_urlencoded_body_has_optional_fields(rb, ctx)
-        None -> False
+        Some(Value(rb)) -> form_urlencoded_body_has_optional_fields(rb, ctx)
+        _ -> False
       }
       let has_optional_multipart_fields = case operation.request_body {
-        Some(rb) -> multipart_body_has_optional_fields(rb, ctx)
-        None -> False
+        Some(Value(rb)) -> multipart_body_has_optional_fields(rb, ctx)
+        _ -> False
       }
       let has_optional_body = case operation.request_body {
-        Some(rb) -> !rb.required
-        None -> False
+        Some(Value(rb)) -> !rb.required
+        _ -> False
       }
       has_optional_params
       || has_optional_deep_object_fields
@@ -311,18 +356,23 @@ fn generate_router(ctx: Context) -> String {
       let #(_, operation, _, _) = op
       let responses = dict.to_list(operation.responses)
       list.any(responses, fn(entry) {
-        let #(_, response) = entry
-        let content_entries = dict.to_list(response.content)
-        case content_entries {
-          [#(media_type_name, media_type)] ->
-            case media_type_name {
-              "application/json" ->
-                case media_type.schema {
-                  Some(_) -> True
-                  None -> False
+        let #(_, ref_or) = entry
+        case ref_or {
+          Value(response) -> {
+            let content_entries = dict.to_list(response.content)
+            case content_entries {
+              [#(media_type_name, media_type)] ->
+                case media_type_name {
+                  "application/json" ->
+                    case media_type.schema {
+                      Some(_) -> True
+                      None -> False
+                    }
+                  _ -> False
                 }
               _ -> False
             }
+          }
           _ -> False
         }
       })
@@ -340,15 +390,23 @@ fn generate_router(ctx: Context) -> String {
   let uses_query =
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
-      list.any(operation.parameters, fn(p) { p.in_ == spec.InQuery })
+      list.any(operation.parameters, fn(ref_p) {
+        case ref_p {
+          Value(p) -> p.in_ == spec.InQuery
+          _ -> False
+        }
+      })
     })
 
   let uses_headers =
     has_multipart_body
     || list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
-      list.any(operation.parameters, fn(p) {
-        p.in_ == spec.InHeader || p.in_ == spec.InCookie
+      list.any(operation.parameters, fn(ref_p) {
+        case ref_p {
+          Value(p) -> p.in_ == spec.InHeader || p.in_ == spec.InCookie
+          _ -> False
+        }
       })
     })
 
@@ -705,7 +763,7 @@ fn generate_route_body(
   sb: se.StringBuilder,
   op_id: String,
   fn_name: String,
-  operation: spec.Operation,
+  operation: spec.Operation(SpecStage),
   path: String,
   has_params: Bool,
   ctx: Context,
@@ -744,12 +802,12 @@ fn generate_request_construction(
   sb: se.StringBuilder,
   request_type_name: String,
   op_id: String,
-  operation: spec.Operation,
+  operation: spec.Operation(SpecStage),
   _path: String,
   ctx: Context,
 ) -> se.StringBuilder {
   let sb = case operation.request_body {
-    Some(rb) ->
+    Some(Value(rb)) ->
       case request_body_uses_form_urlencoded(rb) {
         True -> sb |> se.indent(3, "let form_body = parse_form_body(body)")
         False ->
@@ -772,57 +830,69 @@ fn generate_request_construction(
     |> se.indent(3, "let request = request_types." <> request_type_name <> "(")
 
   let sb =
-    list.index_fold(operation.parameters, sb, fn(sb, param, _idx) {
-      let field_name = naming.to_snake_case(param.name)
-      let trailing = ","
-      let value_expr = case param.in_ {
-        spec.InPath -> {
-          // Path param is already bound by the pattern match variable
-          let var_name = naming.to_snake_case(param.name)
-          param_parse_expr(var_name, param)
+    list.index_fold(
+      list.filter_map(operation.parameters, fn(r) {
+        case r {
+          Value(p) -> Ok(p)
+          _ -> Error(Nil)
         }
-        spec.InQuery -> {
-          let key = param.name
-          case is_deep_object_param(param, ctx), param.required {
-            True, True -> deep_object_required_expr(key, param, op_id, ctx)
-            True, False -> deep_object_optional_expr(key, param, op_id, ctx)
-            False, True -> query_required_expr(key, param)
-            False, False -> query_optional_expr(key, param)
+      }),
+      sb,
+      fn(sb, param, _idx) {
+        let field_name = naming.to_snake_case(param.name)
+        let trailing = ","
+        let value_expr = case param.in_ {
+          spec.InPath -> {
+            // Path param is already bound by the pattern match variable
+            let var_name = naming.to_snake_case(param.name)
+            param_parse_expr(var_name, param)
+          }
+          spec.InQuery -> {
+            let key = param.name
+            case is_deep_object_param(param, ctx), param.required {
+              True, True -> deep_object_required_expr(key, param, op_id, ctx)
+              True, False -> deep_object_optional_expr(key, param, op_id, ctx)
+              False, True -> query_required_expr(key, param)
+              False, False -> query_optional_expr(key, param)
+            }
+          }
+          spec.InHeader -> {
+            // HTTP headers are case-insensitive; client sends lowercase names.
+            let key = string.lowercase(param.name)
+            case param.required {
+              True -> header_required_expr(key, param)
+              False -> header_optional_expr(key, param)
+            }
+          }
+          spec.InCookie -> {
+            let key = param.name
+            case param.required {
+              True -> cookie_required_expr(key, param)
+              False -> cookie_optional_expr(key, param)
+            }
           }
         }
-        spec.InHeader -> {
-          // HTTP headers are case-insensitive; client sends lowercase names.
-          let key = string.lowercase(param.name)
-          case param.required {
-            True -> header_required_expr(key, param)
-            False -> header_optional_expr(key, param)
-          }
-        }
-        spec.InCookie -> {
-          let key = param.name
-          case param.required {
-            True -> cookie_required_expr(key, param)
-            False -> cookie_optional_expr(key, param)
-          }
-        }
-      }
-      sb |> se.indent(4, field_name <> ": " <> value_expr <> trailing)
-    })
+        sb |> se.indent(4, field_name <> ": " <> value_expr <> trailing)
+      },
+    )
 
   // Add body field if present
   let sb = case operation.request_body {
-    Some(rb) -> {
+    Some(Value(rb)) -> {
       let body_expr = generate_body_decode_expr(rb, op_id, ctx)
       sb |> se.indent(4, "body: " <> body_expr <> ",")
     }
-    None -> sb
+    _ -> sb
   }
 
   sb |> se.indent(3, ")")
 }
 
 /// Generate parse expression for a path parameter (already bound as String).
-fn param_parse_expr(var_name: String, param: spec.Parameter) -> String {
+fn param_parse_expr(
+  var_name: String,
+  param: spec.Parameter(SpecStage),
+) -> String {
   case param.schema {
     Some(Inline(schema.IntegerSchema(..))) -> {
       // Parse string to int; use 0 as fallback
@@ -839,7 +909,7 @@ fn param_parse_expr(var_name: String, param: spec.Parameter) -> String {
 }
 
 /// Generate expression for a required query parameter.
-fn query_required_expr(key: String, param: spec.Parameter) -> String {
+fn query_required_expr(key: String, param: spec.Parameter(SpecStage)) -> String {
   query_required_expr_with_schema(key, param.schema, param.explode)
 }
 
@@ -917,7 +987,7 @@ fn query_required_expr_with_schema(
 }
 
 /// Generate expression for an optional query parameter.
-fn query_optional_expr(key: String, param: spec.Parameter) -> String {
+fn query_optional_expr(key: String, param: spec.Parameter(SpecStage)) -> String {
   query_optional_expr_with_schema(key, param.schema, param.explode)
 }
 
@@ -1082,7 +1152,7 @@ fn body_field_kind_needs_float(kind: BodyFieldKind) -> Bool {
   }
 }
 
-fn is_deep_object_param(param: spec.Parameter, ctx: Context) -> Bool {
+fn is_deep_object_param(param: spec.Parameter(SpecStage), ctx: Context) -> Bool {
   case param.in_, param.style, param.schema {
     spec.InQuery, Some(spec.DeepObjectStyle), Some(Reference(..) as schema_ref) ->
       case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
@@ -1096,7 +1166,7 @@ fn is_deep_object_param(param: spec.Parameter, ctx: Context) -> Bool {
 }
 
 fn deep_object_properties(
-  param: spec.Parameter,
+  param: spec.Parameter(SpecStage),
   ctx: Context,
 ) -> List(DeepObjectProperty) {
   let details = case param.schema {
@@ -1124,7 +1194,10 @@ fn deep_object_properties(
   })
 }
 
-fn deep_object_type_name(param: spec.Parameter, op_id: String) -> String {
+fn deep_object_type_name(
+  param: spec.Parameter(SpecStage),
+  op_id: String,
+) -> String {
   case param.schema {
     Some(Reference(name:, ..)) -> "types." <> naming.schema_to_type_name(name)
     _ ->
@@ -1137,7 +1210,7 @@ fn deep_object_type_name(param: spec.Parameter, op_id: String) -> String {
 
 fn deep_object_required_expr(
   key: String,
-  param: spec.Parameter,
+  param: spec.Parameter(SpecStage),
   op_id: String,
   ctx: Context,
 ) -> String {
@@ -1146,7 +1219,7 @@ fn deep_object_required_expr(
 
 fn deep_object_optional_expr(
   key: String,
-  param: spec.Parameter,
+  param: spec.Parameter(SpecStage),
   op_id: String,
   ctx: Context,
 ) -> String {
@@ -1166,7 +1239,7 @@ fn deep_object_optional_expr(
 
 fn deep_object_constructor_expr(
   key: String,
-  param: spec.Parameter,
+  param: spec.Parameter(SpecStage),
   op_id: String,
   ctx: Context,
 ) -> String {
@@ -1195,7 +1268,7 @@ fn deep_object_constructor_expr(
 }
 
 fn deep_object_param_has_optional_fields(
-  param: spec.Parameter,
+  param: spec.Parameter(SpecStage),
   ctx: Context,
 ) -> Bool {
   case is_deep_object_param(param, ctx) {
@@ -1205,7 +1278,10 @@ fn deep_object_param_has_optional_fields(
   }
 }
 
-fn deep_object_param_needs_string(param: spec.Parameter, ctx: Context) -> Bool {
+fn deep_object_param_needs_string(
+  param: spec.Parameter(SpecStage),
+  ctx: Context,
+) -> Bool {
   case is_deep_object_param(param, ctx) {
     True ->
       list.any(deep_object_properties(param, ctx), fn(prop) {
@@ -1215,7 +1291,10 @@ fn deep_object_param_needs_string(param: spec.Parameter, ctx: Context) -> Bool {
   }
 }
 
-fn deep_object_param_needs_int(param: spec.Parameter, ctx: Context) -> Bool {
+fn deep_object_param_needs_int(
+  param: spec.Parameter(SpecStage),
+  ctx: Context,
+) -> Bool {
   case is_deep_object_param(param, ctx) {
     True ->
       list.any(deep_object_properties(param, ctx), fn(prop) {
@@ -1225,7 +1304,10 @@ fn deep_object_param_needs_int(param: spec.Parameter, ctx: Context) -> Bool {
   }
 }
 
-fn deep_object_param_needs_float(param: spec.Parameter, ctx: Context) -> Bool {
+fn deep_object_param_needs_float(
+  param: spec.Parameter(SpecStage),
+  ctx: Context,
+) -> Bool {
   case is_deep_object_param(param, ctx) {
     True ->
       list.any(deep_object_properties(param, ctx), fn(prop) {
@@ -1235,25 +1317,27 @@ fn deep_object_param_needs_float(param: spec.Parameter, ctx: Context) -> Bool {
   }
 }
 
-fn request_body_uses_form_urlencoded(rb: spec.RequestBody) -> Bool {
+fn request_body_uses_form_urlencoded(rb: spec.RequestBody(SpecStage)) -> Bool {
   dict.has_key(rb.content, "application/x-www-form-urlencoded")
 }
 
-fn request_body_uses_multipart(rb: spec.RequestBody) -> Bool {
+fn request_body_uses_multipart(rb: spec.RequestBody(SpecStage)) -> Bool {
   dict.has_key(rb.content, "multipart/form-data")
 }
 
-fn operation_uses_form_urlencoded_body(operation: spec.Operation) -> Bool {
+fn operation_uses_form_urlencoded_body(
+  operation: spec.Operation(SpecStage),
+) -> Bool {
   case operation.request_body {
-    Some(rb) -> request_body_uses_form_urlencoded(rb)
-    None -> False
+    Some(Value(rb)) -> request_body_uses_form_urlencoded(rb)
+    _ -> False
   }
 }
 
-fn operation_uses_multipart_body(operation: spec.Operation) -> Bool {
+fn operation_uses_multipart_body(operation: spec.Operation(SpecStage)) -> Bool {
   case operation.request_body {
-    Some(rb) -> request_body_uses_multipart(rb)
-    None -> False
+    Some(Value(rb)) -> request_body_uses_multipart(rb)
+    _ -> False
   }
 }
 
@@ -1284,7 +1368,7 @@ fn object_properties_from_schema_ref(
 }
 
 fn form_urlencoded_body_properties(
-  rb: spec.RequestBody,
+  rb: spec.RequestBody(SpecStage),
   ctx: Context,
 ) -> List(DeepObjectProperty) {
   case dict.get(rb.content, "application/x-www-form-urlencoded") {
@@ -1299,7 +1383,7 @@ fn form_urlencoded_body_properties(
 }
 
 fn multipart_body_properties(
-  rb: spec.RequestBody,
+  rb: spec.RequestBody(SpecStage),
   ctx: Context,
 ) -> List(DeepObjectProperty) {
   case dict.get(rb.content, "multipart/form-data") {
@@ -1331,7 +1415,10 @@ fn form_urlencoded_schema_ref_type_name(schema_ref: SchemaRef) -> String {
   }
 }
 
-fn form_urlencoded_body_type_name(rb: spec.RequestBody, op_id: String) -> String {
+fn form_urlencoded_body_type_name(
+  rb: spec.RequestBody(SpecStage),
+  op_id: String,
+) -> String {
   case dict.get(rb.content, "application/x-www-form-urlencoded") {
     Ok(media_type) ->
       case media_type.schema {
@@ -1345,7 +1432,10 @@ fn form_urlencoded_body_type_name(rb: spec.RequestBody, op_id: String) -> String
   }
 }
 
-fn multipart_body_type_name(rb: spec.RequestBody, op_id: String) -> String {
+fn multipart_body_type_name(
+  rb: spec.RequestBody(SpecStage),
+  op_id: String,
+) -> String {
   case dict.get(rb.content, "multipart/form-data") {
     Ok(media_type) ->
       case media_type.schema {
@@ -1448,7 +1538,7 @@ fn form_urlencoded_object_optional_expr(
 }
 
 fn form_urlencoded_body_constructor_expr(
-  rb: spec.RequestBody,
+  rb: spec.RequestBody(SpecStage),
   op_id: String,
   ctx: Context,
 ) -> String {
@@ -1462,7 +1552,7 @@ fn form_urlencoded_body_constructor_expr(
 }
 
 fn form_urlencoded_body_has_optional_fields(
-  rb: spec.RequestBody,
+  rb: spec.RequestBody(SpecStage),
   ctx: Context,
 ) -> Bool {
   form_urlencoded_properties_have_optional_fields(
@@ -1472,7 +1562,10 @@ fn form_urlencoded_body_has_optional_fields(
   )
 }
 
-fn form_urlencoded_body_needs_string(rb: spec.RequestBody, ctx: Context) -> Bool {
+fn form_urlencoded_body_needs_string(
+  rb: spec.RequestBody(SpecStage),
+  ctx: Context,
+) -> Bool {
   form_urlencoded_properties_need_string(
     form_urlencoded_body_properties(rb, ctx),
     ctx,
@@ -1480,7 +1573,10 @@ fn form_urlencoded_body_needs_string(rb: spec.RequestBody, ctx: Context) -> Bool
   )
 }
 
-fn form_urlencoded_body_needs_int(rb: spec.RequestBody, ctx: Context) -> Bool {
+fn form_urlencoded_body_needs_int(
+  rb: spec.RequestBody(SpecStage),
+  ctx: Context,
+) -> Bool {
   form_urlencoded_properties_need_int(
     form_urlencoded_body_properties(rb, ctx),
     ctx,
@@ -1488,7 +1584,10 @@ fn form_urlencoded_body_needs_int(rb: spec.RequestBody, ctx: Context) -> Bool {
   )
 }
 
-fn form_urlencoded_body_needs_float(rb: spec.RequestBody, ctx: Context) -> Bool {
+fn form_urlencoded_body_needs_float(
+  rb: spec.RequestBody(SpecStage),
+  ctx: Context,
+) -> Bool {
   form_urlencoded_properties_need_float(
     form_urlencoded_body_properties(rb, ctx),
     ctx,
@@ -1497,7 +1596,7 @@ fn form_urlencoded_body_needs_float(rb: spec.RequestBody, ctx: Context) -> Bool 
 }
 
 fn form_urlencoded_body_has_nested_object(
-  rb: spec.RequestBody,
+  rb: spec.RequestBody(SpecStage),
   ctx: Context,
 ) -> Bool {
   list.any(form_urlencoded_body_properties(rb, ctx), fn(prop) {
@@ -1506,7 +1605,7 @@ fn form_urlencoded_body_has_nested_object(
 }
 
 fn multipart_body_constructor_expr(
-  rb: spec.RequestBody,
+  rb: spec.RequestBody(SpecStage),
   op_id: String,
   ctx: Context,
 ) -> String {
@@ -1534,13 +1633,16 @@ fn multipart_body_constructor_expr(
 }
 
 fn multipart_body_has_optional_fields(
-  rb: spec.RequestBody,
+  rb: spec.RequestBody(SpecStage),
   ctx: Context,
 ) -> Bool {
   list.any(multipart_body_properties(rb, ctx), fn(prop) { !prop.required })
 }
 
-fn multipart_body_needs_int(rb: spec.RequestBody, ctx: Context) -> Bool {
+fn multipart_body_needs_int(
+  rb: spec.RequestBody(SpecStage),
+  ctx: Context,
+) -> Bool {
   list.any(multipart_body_properties(rb, ctx), fn(prop) {
     body_field_kind_needs_int(schema_ref_body_field_kind(
       Some(prop.schema_ref),
@@ -1549,7 +1651,10 @@ fn multipart_body_needs_int(rb: spec.RequestBody, ctx: Context) -> Bool {
   })
 }
 
-fn multipart_body_needs_float(rb: spec.RequestBody, ctx: Context) -> Bool {
+fn multipart_body_needs_float(
+  rb: spec.RequestBody(SpecStage),
+  ctx: Context,
+) -> Bool {
   list.any(multipart_body_properties(rb, ctx), fn(prop) {
     body_field_kind_needs_float(schema_ref_body_field_kind(
       Some(prop.schema_ref),
@@ -1855,7 +1960,7 @@ fn multipart_body_optional_expr_with_schema(
 }
 
 /// Generate expression for a required header parameter.
-fn header_required_expr(key: String, param: spec.Parameter) -> String {
+fn header_required_expr(key: String, param: spec.Parameter(SpecStage)) -> String {
   case param.schema {
     Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
       "{ let assert Ok(v) = dict.get(headers, \""
@@ -1894,7 +1999,7 @@ fn header_required_expr(key: String, param: spec.Parameter) -> String {
 }
 
 /// Generate expression for an optional header parameter.
-fn header_optional_expr(key: String, param: spec.Parameter) -> String {
+fn header_optional_expr(key: String, param: spec.Parameter(SpecStage)) -> String {
   case param.schema {
     Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
       "case dict.get(headers, \""
@@ -1934,7 +2039,7 @@ fn header_optional_expr(key: String, param: spec.Parameter) -> String {
 }
 
 /// Generate expression for a required cookie parameter.
-fn cookie_required_expr(key: String, param: spec.Parameter) -> String {
+fn cookie_required_expr(key: String, param: spec.Parameter(SpecStage)) -> String {
   case param.schema {
     Some(Inline(schema.IntegerSchema(..))) ->
       "{ let assert Ok(v) = cookie_lookup(headers, \""
@@ -1955,7 +2060,7 @@ fn cookie_required_expr(key: String, param: spec.Parameter) -> String {
 }
 
 /// Generate expression for an optional cookie parameter.
-fn cookie_optional_expr(key: String, param: spec.Parameter) -> String {
+fn cookie_optional_expr(key: String, param: spec.Parameter(SpecStage)) -> String {
   case param.schema {
     Some(Inline(schema.IntegerSchema(..))) ->
       "case cookie_lookup(headers, \""
@@ -1980,7 +2085,7 @@ fn cookie_optional_expr(key: String, param: spec.Parameter) -> String {
 
 /// Generate the body decode expression for a request body.
 fn generate_body_decode_expr(
-  rb: spec.RequestBody,
+  rb: spec.RequestBody(SpecStage),
   op_id: String,
   ctx: Context,
 ) -> String {
@@ -2030,7 +2135,7 @@ fn generate_body_decode_expr(
 fn generate_response_conversion(
   sb: se.StringBuilder,
   response_type_name: String,
-  operation: spec.Operation,
+  operation: spec.Operation(SpecStage),
   ctx: Context,
 ) -> se.StringBuilder {
   let responses = http.sort_response_entries(dict.to_list(operation.responses))
@@ -2044,127 +2149,132 @@ fn generate_response_conversion(
 
       let sb =
         list.fold(responses, sb, fn(sb, entry) {
-          let #(status_code, response) = entry
-          let variant_name =
-            response_type_name <> http.status_code_suffix(status_code)
-          let status_int = http.status_code_to_int(status_code)
-          let content_entries = dict.to_list(response.content)
+          let #(status_code, ref_or) = entry
+          case ref_or {
+            Value(response) -> {
+              let variant_name =
+                response_type_name <> http.status_code_suffix(status_code)
+              let status_int = http.status_code_to_int(status_code)
+              let content_entries = dict.to_list(response.content)
 
-          case content_entries {
-            [] ->
-              // No content body variant
-              sb
-              |> se.indent(
-                4,
-                "response_types."
-                  <> variant_name
-                  <> " -> ServerResponse(status: "
-                  <> status_int
-                  <> ", body: \"\", headers: [])",
-              )
-            [#(media_type_name, media_type)] ->
-              case media_type_name {
-                "application/json" ->
-                  case media_type.schema {
-                    Some(_) -> {
-                      let encode_fn =
-                        get_encode_function(media_type.schema, ctx)
-                      sb
-                      |> se.indent(
-                        4,
-                        "response_types."
-                          <> variant_name
-                          <> "(data) -> ServerResponse(status: "
-                          <> status_int
-                          <> ", body: json.to_string("
-                          <> encode_fn
-                          <> "(data)), headers: [#(\"content-type\", \"application/json\")])",
-                      )
-                    }
-                    None ->
-                      sb
-                      |> se.indent(
-                        4,
-                        "response_types."
-                          <> variant_name
-                          <> " -> ServerResponse(status: "
-                          <> status_int
-                          <> ", body: \"\", headers: [])",
-                      )
+              case content_entries {
+                [] ->
+                  // No content body variant
+                  sb
+                  |> se.indent(
+                    4,
+                    "response_types."
+                      <> variant_name
+                      <> " -> ServerResponse(status: "
+                      <> status_int
+                      <> ", body: \"\", headers: [])",
+                  )
+                [#(media_type_name, media_type)] ->
+                  case media_type_name {
+                    "application/json" ->
+                      case media_type.schema {
+                        Some(_) -> {
+                          let encode_fn =
+                            get_encode_function(media_type.schema, ctx)
+                          sb
+                          |> se.indent(
+                            4,
+                            "response_types."
+                              <> variant_name
+                              <> "(data) -> ServerResponse(status: "
+                              <> status_int
+                              <> ", body: json.to_string("
+                              <> encode_fn
+                              <> "(data)), headers: [#(\"content-type\", \"application/json\")])",
+                          )
+                        }
+                        None ->
+                          sb
+                          |> se.indent(
+                            4,
+                            "response_types."
+                              <> variant_name
+                              <> " -> ServerResponse(status: "
+                              <> status_int
+                              <> ", body: \"\", headers: [])",
+                          )
+                      }
+                    "text/plain"
+                    | "application/xml"
+                    | "text/xml"
+                    | "application/octet-stream" ->
+                      case media_type.schema {
+                        Some(_) ->
+                          sb
+                          |> se.indent(
+                            4,
+                            "response_types."
+                              <> variant_name
+                              <> "(data) -> ServerResponse(status: "
+                              <> status_int
+                              <> ", body: data, headers: [#(\"content-type\", \""
+                              <> media_type_name
+                              <> "\")])",
+                          )
+                        None ->
+                          sb
+                          |> se.indent(
+                            4,
+                            "response_types."
+                              <> variant_name
+                              <> " -> ServerResponse(status: "
+                              <> status_int
+                              <> ", body: \"\", headers: [])",
+                          )
+                      }
+                    _ ->
+                      case media_type.schema {
+                        Some(_) -> {
+                          let encode_fn =
+                            get_encode_function(media_type.schema, ctx)
+                          sb
+                          |> se.indent(
+                            4,
+                            "response_types."
+                              <> variant_name
+                              <> "(data) -> ServerResponse(status: "
+                              <> status_int
+                              <> ", body: json.to_string("
+                              <> encode_fn
+                              <> "(data)), headers: [#(\"content-type\", \""
+                              <> media_type_name
+                              <> "\")])",
+                          )
+                        }
+                        None ->
+                          sb
+                          |> se.indent(
+                            4,
+                            "response_types."
+                              <> variant_name
+                              <> " -> ServerResponse(status: "
+                              <> status_int
+                              <> ", body: \"\", headers: [])",
+                          )
+                      }
                   }
-                "text/plain"
-                | "application/xml"
-                | "text/xml"
-                | "application/octet-stream" ->
-                  case media_type.schema {
-                    Some(_) ->
-                      sb
-                      |> se.indent(
-                        4,
-                        "response_types."
-                          <> variant_name
-                          <> "(data) -> ServerResponse(status: "
-                          <> status_int
-                          <> ", body: data, headers: [#(\"content-type\", \""
-                          <> media_type_name
-                          <> "\")])",
-                      )
-                    None ->
-                      sb
-                      |> se.indent(
-                        4,
-                        "response_types."
-                          <> variant_name
-                          <> " -> ServerResponse(status: "
-                          <> status_int
-                          <> ", body: \"\", headers: [])",
-                      )
-                  }
-                _ ->
-                  case media_type.schema {
-                    Some(_) -> {
-                      let encode_fn =
-                        get_encode_function(media_type.schema, ctx)
-                      sb
-                      |> se.indent(
-                        4,
-                        "response_types."
-                          <> variant_name
-                          <> "(data) -> ServerResponse(status: "
-                          <> status_int
-                          <> ", body: json.to_string("
-                          <> encode_fn
-                          <> "(data)), headers: [#(\"content-type\", \""
-                          <> media_type_name
-                          <> "\")])",
-                      )
-                    }
-                    None ->
-                      sb
-                      |> se.indent(
-                        4,
-                        "response_types."
-                          <> variant_name
-                          <> " -> ServerResponse(status: "
-                          <> status_int
-                          <> ", body: \"\", headers: [])",
-                      )
-                  }
+                // Multiple content types: variant wraps String.
+                // Use the first content type as default content-type header.
+                [#(first_media_type, _), _, ..] ->
+                  sb
+                  |> se.indent(
+                    4,
+                    "response_types."
+                      <> variant_name
+                      <> "(data) -> ServerResponse(status: "
+                      <> status_int
+                      <> ", body: data, headers: [#(\"content-type\", \""
+                      <> first_media_type
+                      <> "\")])",
+                  )
               }
-            // Multiple content types: variant wraps String.
-            // Use the first content type as default content-type header.
-            [#(first_media_type, _), _, ..] ->
-              sb
-              |> se.indent(
-                4,
-                "response_types."
-                  <> variant_name
-                  <> "(data) -> ServerResponse(status: "
-                  <> status_int
-                  <> ", body: data, headers: [#(\"content-type\", \""
-                  <> first_media_type
-                  <> "\")])",
-              )
+            }
+            _ -> sb
           }
         })
 

@@ -15,7 +15,7 @@ import oaspec/openapi/hoist
 import oaspec/openapi/normalize
 import oaspec/openapi/parser
 import oaspec/openapi/resolve
-import oaspec/openapi/spec.{type OpenApiSpec}
+import oaspec/openapi/spec.{type OpenApiSpec, type SpecStage}
 
 /// Result of a successful code generation run.
 pub type GenerationSummary {
@@ -36,7 +36,7 @@ pub type GenerateError {
 /// Takes an already-parsed spec and config; returns generated files or errors.
 /// Does not perform IO — callers handle writing files and printing output.
 pub fn generate(
-  spec: OpenApiSpec,
+  spec: OpenApiSpec(SpecStage),
   cfg: Config,
 ) -> Result(GenerationSummary, GenerateError) {
   let spec_title = spec.info.title <> " v" <> spec.info.version

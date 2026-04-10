@@ -8,7 +8,7 @@ import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
   Inline, ObjectSchema, OneOfSchema, Reference,
 }
-import oaspec/openapi/spec.{type OpenApiSpec}
+import oaspec/openapi/spec.{type OpenApiSpec, type SpecStage}
 
 /// Errors during reference resolution.
 pub type ResolveError {
@@ -29,7 +29,7 @@ pub fn ref_to_name(ref: String) -> String {
 /// Tracks seen refs to detect circular references.
 pub fn resolve_schema_ref(
   schema_ref: SchemaRef,
-  spec: OpenApiSpec,
+  spec: OpenApiSpec(SpecStage),
 ) -> Result(SchemaObject, ResolveError) {
   resolve_schema_ref_with_seen(schema_ref, spec, set.new())
 }
@@ -37,7 +37,7 @@ pub fn resolve_schema_ref(
 /// Internal resolver that tracks visited refs for cycle detection.
 fn resolve_schema_ref_with_seen(
   schema_ref: SchemaRef,
-  spec: OpenApiSpec,
+  spec: OpenApiSpec(SpecStage),
   seen: Set(String),
 ) -> Result(SchemaObject, ResolveError) {
   case schema_ref {
@@ -71,7 +71,7 @@ fn resolve_schema_ref_with_seen(
 /// Resolve all $ref in a schema object's nested schemas (one level).
 pub fn resolve_schema_refs_in_schema(
   schema: SchemaObject,
-  spec: OpenApiSpec,
+  spec: OpenApiSpec(SpecStage),
 ) -> SchemaObject {
   case schema {
     ObjectSchema(properties:, additional_properties:, ..) as obj -> {
@@ -106,7 +106,10 @@ pub fn resolve_schema_refs_in_schema(
 }
 
 /// Try to resolve a single ref, keeping it as-is if resolution fails.
-fn resolve_one_ref(schema_ref: SchemaRef, spec: OpenApiSpec) -> SchemaRef {
+fn resolve_one_ref(
+  schema_ref: SchemaRef,
+  spec: OpenApiSpec(SpecStage),
+) -> SchemaRef {
   case schema_ref {
     Reference(..) ->
       case resolve_schema_ref(schema_ref, spec) {
@@ -118,6 +121,9 @@ fn resolve_one_ref(schema_ref: SchemaRef, spec: OpenApiSpec) -> SchemaRef {
 }
 
 /// Map a list of schema refs, resolving each.
-fn list_map_ref(refs: List(SchemaRef), spec: OpenApiSpec) -> List(SchemaRef) {
+fn list_map_ref(
+  refs: List(SchemaRef),
+  spec: OpenApiSpec(SpecStage),
+) -> List(SchemaRef) {
   list.map(refs, fn(r) { resolve_one_ref(r, spec) })
 }

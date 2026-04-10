@@ -2,27 +2,55 @@ import gleam/dict.{type Dict}
 import gleam/option.{type Option}
 import oaspec/openapi/schema.{type SchemaRef}
 
-/// A component entry that may be a concrete definition or a $ref alias.
-pub type ComponentEntry(a) {
-  ConcreteEntry(a)
-  AliasEntry(ref: String)
+// ============================================================================
+// Stage and RefOr: core of the stage-typed AST
+// ============================================================================
+
+/// Resolution stage of the AST.
+pub type SpecStage {
+  Unresolved
+  Resolved
 }
 
+/// A value that may be a $ref string or a concrete definition.
+/// At Unresolved stage, both Ref and Value may appear.
+/// At Resolved stage, only Value is present (enforced by resolve).
+pub type RefOr(a) {
+  Ref(String)
+  Value(a)
+}
+
+/// Unwrap a RefOr assuming it has been resolved. Panics on Ref.
+pub fn unwrap_ref(ref_or: RefOr(a)) -> a {
+  case ref_or {
+    Value(v) -> v
+    Ref(r) -> panic as { "unwrap_ref on unresolved $ref: " <> r }
+  }
+}
+
+// ============================================================================
+// Top-level spec
+// ============================================================================
+
 /// Top-level OpenAPI 3.x specification.
-pub type OpenApiSpec {
+pub type OpenApiSpec(stage) {
   OpenApiSpec(
     openapi: String,
     info: Info,
-    paths: Dict(String, PathItem),
-    components: Option(Components),
+    paths: Dict(String, RefOr(PathItem(stage))),
+    components: Option(Components(stage)),
     servers: List(Server),
     security: List(SecurityRequirement),
-    webhooks: Dict(String, PathItem),
+    webhooks: Dict(String, RefOr(PathItem(stage))),
     tags: List(Tag),
     external_docs: Option(ExternalDoc),
     json_schema_dialect: Option(String),
   )
 }
+
+// ============================================================================
+// Metadata types (no stage parameter)
+// ============================================================================
 
 /// API metadata.
 pub type Info {
@@ -79,20 +107,28 @@ pub type Tag {
   )
 }
 
+// ============================================================================
+// Components (stage-typed)
+// ============================================================================
+
 /// Components section containing reusable schemas, parameters, etc.
-pub type Components {
+pub type Components(stage) {
   Components(
     schemas: Dict(String, SchemaRef),
-    parameters: Dict(String, ComponentEntry(Parameter)),
-    request_bodies: Dict(String, ComponentEntry(RequestBody)),
-    responses: Dict(String, ComponentEntry(Response)),
-    security_schemes: Dict(String, ComponentEntry(SecurityScheme)),
-    path_items: Dict(String, ComponentEntry(PathItem)),
+    parameters: Dict(String, RefOr(Parameter(stage))),
+    request_bodies: Dict(String, RefOr(RequestBody(stage))),
+    responses: Dict(String, RefOr(Response(stage))),
+    security_schemes: Dict(String, RefOr(SecurityScheme)),
+    path_items: Dict(String, RefOr(PathItem(stage))),
     headers: Dict(String, Header),
     examples: Dict(String, String),
     links: Dict(String, Link),
   )
 }
+
+// ============================================================================
+// Security types (no stage parameter)
+// ============================================================================
 
 /// Location for apiKey security scheme.
 pub type SecuritySchemeIn {
@@ -135,53 +171,54 @@ pub type SecuritySchemeRef {
   SecuritySchemeRef(scheme_name: String, scopes: List(String))
 }
 
-/// A security requirement: all schemes in the list must be satisfied (AND).
-/// The outer list in operation/top-level security is OR — any one
-/// SecurityRequirement suffices.
+/// A security requirement.
 pub type SecurityRequirement {
   SecurityRequirement(schemes: List(SecuritySchemeRef))
 }
 
+// ============================================================================
+// Path and Operation types (stage-typed)
+// ============================================================================
+
 /// A path item containing operations for each HTTP method.
-pub type PathItem {
+pub type PathItem(stage) {
   PathItem(
     summary: Option(String),
     description: Option(String),
-    get: Option(Operation),
-    post: Option(Operation),
-    put: Option(Operation),
-    delete: Option(Operation),
-    patch: Option(Operation),
-    head: Option(Operation),
-    options: Option(Operation),
-    trace: Option(Operation),
-    parameters: List(Parameter),
+    get: Option(Operation(stage)),
+    post: Option(Operation(stage)),
+    put: Option(Operation(stage)),
+    delete: Option(Operation(stage)),
+    patch: Option(Operation(stage)),
+    head: Option(Operation(stage)),
+    options: Option(Operation(stage)),
+    trace: Option(Operation(stage)),
+    parameters: List(RefOr(Parameter(stage))),
     servers: List(Server),
   )
 }
 
 /// An API operation (endpoint).
-pub type Operation {
+pub type Operation(stage) {
   Operation(
     operation_id: Option(String),
     summary: Option(String),
     description: Option(String),
     tags: List(String),
-    parameters: List(Parameter),
-    request_body: Option(RequestBody),
-    responses: Dict(String, Response),
+    parameters: List(RefOr(Parameter(stage))),
+    request_body: Option(RefOr(RequestBody(stage))),
+    responses: Dict(String, RefOr(Response(stage))),
     deprecated: Bool,
     security: Option(List(SecurityRequirement)),
-    callbacks: Dict(String, Callback),
+    callbacks: Dict(String, Callback(stage)),
     servers: List(Server),
     external_docs: Option(ExternalDoc),
   )
 }
 
 /// A callback object: maps URL expressions to PathItems.
-/// An OpenAPI callback can have multiple URL expressions.
-pub type Callback {
-  Callback(entries: Dict(String, PathItem))
+pub type Callback(stage) {
+  Callback(entries: Dict(String, RefOr(PathItem(stage))))
 }
 
 /// Parameter location.
@@ -192,8 +229,8 @@ pub type ParameterIn {
   InCookie
 }
 
-/// An API parameter.
-pub type Parameter {
+/// An API parameter. Stage parameter is phantom.
+pub type Parameter(stage) {
   Parameter(
     name: String,
     in_: ParameterIn,
@@ -209,8 +246,8 @@ pub type Parameter {
   )
 }
 
-/// A request body definition.
-pub type RequestBody {
+/// A request body definition. Stage parameter is phantom.
+pub type RequestBody(stage) {
   RequestBody(
     description: Option(String),
     content: Dict(String, MediaType),
@@ -247,8 +284,8 @@ pub type Link {
   Link(operation_id: Option(String), description: Option(String))
 }
 
-/// A response definition.
-pub type Response {
+/// A response definition. Stage parameter is phantom.
+pub type Response(stage) {
   Response(
     description: Option(String),
     content: Dict(String, MediaType),
@@ -256,6 +293,10 @@ pub type Response {
     links: Dict(String, Link),
   )
 }
+
+// ============================================================================
+// HTTP method
+// ============================================================================
 
 /// HTTP method enumeration.
 pub type HttpMethod {

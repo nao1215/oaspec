@@ -12,7 +12,7 @@ import oaspec/openapi/schema.{
   BooleanSchema, Inline, IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema,
   Reference, StringSchema,
 }
-import oaspec/openapi/spec
+import oaspec/openapi/spec.{type SpecStage, Value}
 import oaspec/util/content_type
 
 /// Severity level for validation issues.
@@ -86,12 +86,33 @@ fn validate_operations(ctx: Context) -> List(ValidationError) {
   let operations = type_gen.collect_operations(ctx)
   list.flat_map(operations, fn(op) {
     let #(op_id, operation, path, _method) = op
+    let resolved_params =
+      list.filter_map(operation.parameters, fn(ref_p) {
+        case ref_p {
+          Value(p) -> Ok(p)
+          _ -> Error(Nil)
+        }
+      })
+    let resolved_request_body = case operation.request_body {
+      Some(Value(rb)) -> Some(rb)
+      _ -> None
+    }
+    let resolved_responses =
+      dict.to_list(operation.responses)
+      |> list.filter_map(fn(entry) {
+        let #(code, ref_or) = entry
+        case ref_or {
+          Value(resp) -> Ok(#(code, resp))
+          _ -> Error(Nil)
+        }
+      })
+      |> dict.from_list
     let path_errors =
-      validate_path_template_params(op_id, path, operation.parameters)
-    let param_errors = validate_parameters(op_id, operation.parameters, ctx)
-    let body_errors = validate_request_body(op_id, operation.request_body, ctx)
-    let response_errors = validate_responses(op_id, operation.responses, ctx)
-    let missing_responses_errors = case dict.is_empty(operation.responses) {
+      validate_path_template_params(op_id, path, resolved_params)
+    let param_errors = validate_parameters(op_id, resolved_params, ctx)
+    let body_errors = validate_request_body(op_id, resolved_request_body, ctx)
+    let response_errors = validate_responses(op_id, resolved_responses, ctx)
+    let missing_responses_errors = case dict.is_empty(resolved_responses) {
       True -> [
         ValidationError(
           severity: SeverityError,
@@ -118,7 +139,7 @@ fn validate_operations(ctx: Context) -> List(ValidationError) {
 fn validate_path_template_params(
   op_id: String,
   path: String,
-  params: List(spec.Parameter),
+  params: List(spec.Parameter(SpecStage)),
 ) -> List(ValidationError) {
   let template_names = extract_path_template_names(path)
   let path_param_names =
@@ -163,7 +184,7 @@ fn extract_path_template_names(path: String) -> List(String) {
 /// Unsupported: matrix, label, simple, spaceDelimited, pipeDelimited.
 fn validate_parameters(
   op_id: String,
-  params: List(spec.Parameter),
+  params: List(spec.Parameter(SpecStage)),
   ctx: Context,
 ) -> List(ValidationError) {
   list.flat_map(params, fn(p) {
@@ -214,7 +235,7 @@ fn validate_parameters(
 
 fn validate_server_structured_param(
   path: String,
-  param: spec.Parameter,
+  param: spec.Parameter(SpecStage),
   ctx: Context,
 ) -> List(ValidationError) {
   case ctx.config.mode {
@@ -259,7 +280,7 @@ fn validate_server_structured_param(
 
 fn validate_server_deep_object_param(
   path: String,
-  param: spec.Parameter,
+  param: spec.Parameter(SpecStage),
   ctx: Context,
 ) -> List(ValidationError) {
   case param.in_, param.style, resolve_schema_object(param.schema, ctx) {
@@ -317,7 +338,7 @@ fn deep_object_server_leaf_supported(
 
 fn validate_server_cookie_param(
   path: String,
-  param: spec.Parameter,
+  param: spec.Parameter(SpecStage),
   ctx: Context,
 ) -> List(ValidationError) {
   let _ = path
@@ -330,7 +351,7 @@ fn validate_server_cookie_param(
 /// that is not handled by deepObject style.
 fn validate_complex_param_schema(
   path: String,
-  param: spec.Parameter,
+  param: spec.Parameter(SpecStage),
   ctx: Context,
 ) -> List(ValidationError) {
   case param.style {
@@ -375,7 +396,7 @@ fn validate_complex_param_schema(
 /// Validate that a deepObject parameter has no nested object properties.
 fn validate_deep_object_no_nested_objects(
   path: String,
-  param: spec.Parameter,
+  param: spec.Parameter(SpecStage),
   ctx: Context,
 ) -> List(ValidationError) {
   case resolve_schema_object(param.schema, ctx) {
@@ -420,7 +441,7 @@ fn resolve_schema_object(
 /// Validate request body for unsupported patterns.
 fn validate_request_body(
   op_id: String,
-  request_body: Option(spec.RequestBody),
+  request_body: Option(spec.RequestBody(SpecStage)),
   ctx: Context,
 ) -> List(ValidationError) {
   case request_body {
@@ -768,7 +789,7 @@ fn multipart_field_is_stringifiable(schema_ref: SchemaRef, ctx: Context) -> Bool
 /// Validate response schemas and content types.
 fn validate_responses(
   op_id: String,
-  responses: dict.Dict(String, spec.Response),
+  responses: dict.Dict(String, spec.Response(SpecStage)),
   ctx: Context,
 ) -> List(ValidationError) {
   let entries = dict.to_list(responses)
@@ -999,67 +1020,72 @@ fn validate_preserved_but_unused(ctx: Context) -> List(ValidationError) {
       let #(op_id, operation, _path, _method) = op
       let entries = dict.to_list(operation.responses)
       list.flat_map(entries, fn(entry) {
-        let #(status_code, response) = entry
-        let base_path = op_id <> ".responses." <> status_code
-        let multi_content_warnings = case
-          ctx.config.mode,
-          list.length(dict.to_list(response.content))
-        {
-          config.Client, _ -> []
-          _, n if n > 1 -> [
-            ValidationError(
-              severity: SeverityWarning,
-              target: TargetServer,
-              path: base_path <> ".content",
-              detail: "Multiple response content types are not fully supported for server code generation. Generated server responses lose the content-type header.",
-            ),
-          ]
-          _, _ -> []
-        }
-        let header_warnings = case dict.is_empty(response.headers) {
-          True -> []
-          False -> [
-            ValidationError(
-              severity: SeverityWarning,
-              target: TargetBoth,
-              path: base_path <> ".headers",
-              detail: "Response headers are parsed but not used by code generation.",
-            ),
-          ]
-        }
-        let link_warnings = case dict.is_empty(response.links) {
-          True -> []
-          False -> [
-            ValidationError(
-              severity: SeverityWarning,
-              target: TargetBoth,
-              path: base_path <> ".links",
-              detail: "Response links are parsed but not used by code generation.",
-            ),
-          ]
-        }
-        let content_entries = dict.to_list(response.content)
-        let encoding_warnings =
-          list.flat_map(content_entries, fn(ce) {
-            let #(media_type_name, media_type) = ce
-            case dict.is_empty(media_type.encoding) {
+        let #(status_code, ref_or) = entry
+        case ref_or {
+          Value(response) -> {
+            let base_path = op_id <> ".responses." <> status_code
+            let multi_content_warnings = case
+              ctx.config.mode,
+              list.length(dict.to_list(response.content))
+            {
+              config.Client, _ -> []
+              _, n if n > 1 -> [
+                ValidationError(
+                  severity: SeverityWarning,
+                  target: TargetServer,
+                  path: base_path <> ".content",
+                  detail: "Multiple response content types are not fully supported for server code generation. Generated server responses lose the content-type header.",
+                ),
+              ]
+              _, _ -> []
+            }
+            let header_warnings = case dict.is_empty(response.headers) {
               True -> []
               False -> [
                 ValidationError(
                   severity: SeverityWarning,
                   target: TargetBoth,
-                  path: base_path <> "." <> media_type_name <> ".encoding",
-                  detail: "MediaType encoding is parsed but not used by code generation.",
+                  path: base_path <> ".headers",
+                  detail: "Response headers are parsed but not used by code generation.",
                 ),
               ]
             }
-          })
-        list.flatten([
-          multi_content_warnings,
-          header_warnings,
-          link_warnings,
-          encoding_warnings,
-        ])
+            let link_warnings = case dict.is_empty(response.links) {
+              True -> []
+              False -> [
+                ValidationError(
+                  severity: SeverityWarning,
+                  target: TargetBoth,
+                  path: base_path <> ".links",
+                  detail: "Response links are parsed but not used by code generation.",
+                ),
+              ]
+            }
+            let content_entries = dict.to_list(response.content)
+            let encoding_warnings =
+              list.flat_map(content_entries, fn(ce) {
+                let #(media_type_name, media_type) = ce
+                case dict.is_empty(media_type.encoding) {
+                  True -> []
+                  False -> [
+                    ValidationError(
+                      severity: SeverityWarning,
+                      target: TargetBoth,
+                      path: base_path <> "." <> media_type_name <> ".encoding",
+                      detail: "MediaType encoding is parsed but not used by code generation.",
+                    ),
+                  ]
+                }
+              })
+            list.flatten([
+              multi_content_warnings,
+              header_warnings,
+              link_warnings,
+              encoding_warnings,
+            ])
+          }
+          _ -> []
+        }
       })
     })
   // Warn about external docs
@@ -1109,17 +1135,21 @@ fn validate_preserved_but_unused(ctx: Context) -> List(ValidationError) {
   let path_server_warnings =
     dict.to_list(ctx.spec.paths)
     |> list.flat_map(fn(entry) {
-      let #(path, path_item) = entry
-      case list.is_empty(path_item.servers) {
-        True -> []
-        False -> [
-          ValidationError(
-            severity: SeverityWarning,
-            target: TargetClient,
-            path: "paths." <> path <> ".servers",
-            detail: "Path-level servers are parsed but client code generation uses only the top-level server URL.",
-          ),
-        ]
+      let #(path, ref_or) = entry
+      case ref_or {
+        Value(path_item) ->
+          case list.is_empty(path_item.servers) {
+            True -> []
+            False -> [
+              ValidationError(
+                severity: SeverityWarning,
+                target: TargetClient,
+                path: "paths." <> path <> ".servers",
+                detail: "Path-level servers are parsed but client code generation uses only the top-level server URL.",
+              ),
+            ]
+          }
+        _ -> []
       }
     })
 

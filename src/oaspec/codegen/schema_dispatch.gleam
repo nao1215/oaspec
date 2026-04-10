@@ -14,7 +14,7 @@ import oaspec/openapi/schema.{
   BooleanSchema, Inline, IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema,
   Reference, StringSchema,
 }
-import oaspec/openapi/spec.{type OpenApiSpec}
+import oaspec/openapi/spec.{type OpenApiSpec, type SpecStage}
 import oaspec/util/naming
 
 /// Map a schema object to its Gleam type string (without nullable wrapping).
@@ -73,7 +73,7 @@ pub fn to_string_expr(schema: SchemaObject, value: String) -> String {
 pub fn schema_ref_to_string_expr(
   ref: SchemaRef,
   value: String,
-  spec: OpenApiSpec,
+  spec: OpenApiSpec(SpecStage),
 ) -> String {
   case ref {
     Inline(schema) -> to_string_expr(schema, value)
@@ -131,7 +131,7 @@ pub fn json_encoder_fn(ref: SchemaRef) -> String {
 }
 
 /// Map a schema ref to its to_string function reference (for list.map etc).
-pub fn to_string_fn(ref: SchemaRef, spec: OpenApiSpec) -> String {
+pub fn to_string_fn(ref: SchemaRef, spec: OpenApiSpec(SpecStage)) -> String {
   case ref {
     Inline(StringSchema(..)) -> "fn(x) { x }"
     Inline(IntegerSchema(..)) -> "int.to_string"
@@ -152,7 +152,7 @@ pub fn to_string_fn(ref: SchemaRef, spec: OpenApiSpec) -> String {
 /// Resolve a schema ref and return the base type (for parameter type resolution).
 pub fn resolve_param_type(
   schema_ref: Option(SchemaRef),
-  spec: OpenApiSpec,
+  spec: OpenApiSpec(SpecStage),
 ) -> String {
   case schema_ref {
     Some(Inline(schema)) -> schema_base_type(schema)
