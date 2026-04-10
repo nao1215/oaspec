@@ -8441,3 +8441,102 @@ pub fn oss_swagger_parser_java_petstore_parses_test() {
   let assert Some(license) = spec.info.license
   license.name |> should.equal("Apache 2.0")
 }
+
+// ---------------------------------------------------------------------------
+// OSS: openapi-generator (Apache-2.0) — additional tests
+// Test data derived from https://github.com/OpenAPITools/openapi-generator
+// ---------------------------------------------------------------------------
+
+/// openapi-generator: oneOf with multiple schema variants (fruit).
+pub fn oss_openapi_gen_oneof_fruit_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_gen_oneof_fruit.yaml")
+  spec.info.title |> should.equal("fruity")
+  let assert Some(components) = spec.components
+  // fruit + apple + banana + orange
+  dict.size(components.schemas) |> should.equal(4)
+}
+
+/// openapi-generator: array with nullable items.
+pub fn oss_openapi_gen_array_nullable_items_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file(
+      "test/fixtures/oss_openapi_gen_array_nullable_items.yaml",
+    )
+  spec.info.title |> should.equal("Array nullable items")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.equal(1)
+}
+
+/// openapi-generator: type alias ($ref as schema value) and discriminator.
+pub fn oss_openapi_gen_type_alias_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_gen_type_alias.yaml")
+  spec.info.title |> should.equal("broken API")
+  let assert Some(components) = spec.components
+  // MyParameter, MyParameterTextField, TypeAliasToString, BaseModel, ComposedModel
+  dict.size(components.schemas) |> should.equal(5)
+}
+
+/// openapi-generator: enum values with URI format strings.
+pub fn oss_openapi_gen_enum_uri_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_gen_enum_uri.yaml")
+  spec.info.title |> should.equal("Example API")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.equal(1)
+}
+
+/// openapi-generator: spec missing required 'info' field.
+/// The parser rejects this with a clear error.
+pub fn oss_openapi_gen_missing_info_rejects_test() {
+  let result =
+    parser.parse_file("test/fixtures/oss_openapi_gen_missing_info.yaml")
+  case result {
+    Error(parser.MissingField(_, "info")) -> should.be_true(True)
+    Error(e) -> {
+      let msg = parser.parse_error_to_string(e)
+      should.be_true(string.contains(msg, "info"))
+    }
+    Ok(_) -> should.fail()
+  }
+}
+
+/// openapi-generator: petstore missing required info attribute.
+/// Rejects with user-friendly error pointing to the missing field.
+pub fn oss_openapi_gen_missing_info_attr_rejects_test() {
+  let result =
+    parser.parse_file("test/fixtures/oss_openapi_gen_missing_info_attr.yaml")
+  case result {
+    Error(parser.MissingField(_, _)) -> should.be_true(True)
+    _ -> should.fail()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// OSS: openapi-spec-validator (Apache-2.0) — benchmark specs
+// Test data derived from https://github.com/python-openapi/openapi-spec-validator
+// ---------------------------------------------------------------------------
+
+/// openapi-spec-validator: petstore benchmark spec.
+pub fn oss_spec_validator_bench_petstore_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_spec_validator_bench_petstore.yaml")
+  spec.info.title |> should.equal("Swagger Petstore")
+  dict.size(spec.paths) |> should.not_equal(0)
+}
+
+/// openapi-spec-validator: empty OpenAPI 3.0 spec (only version, no info).
+/// The parser rejects this with a user-friendly error about missing 'info'.
+pub fn oss_spec_validator_empty_v30_rejects_test() {
+  let result =
+    parser.parse_file("test/fixtures/oss_spec_validator_empty.yaml")
+  case result {
+    Error(parser.MissingField(_, "info")) -> should.be_true(True)
+    Error(e) -> {
+      let msg = parser.parse_error_to_string(e)
+      should.be_true(string.contains(msg, "info"))
+    }
+    Ok(_) -> should.fail()
+  }
+}
