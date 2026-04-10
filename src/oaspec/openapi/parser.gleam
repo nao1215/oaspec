@@ -624,11 +624,9 @@ fn resolve_parameter_ref(
     Some(comps) ->
       case dict.get(comps.parameters, ref_name) {
         Ok(ConcreteEntry(param)) -> Ok(param)
-        Ok(AliasEntry(_)) ->
-          Error(InvalidValue(
-            path: "parameter.$ref",
-            detail: "Parameter reference points to an alias: " <> ref_str,
-          ))
+        Ok(AliasEntry(ref: alias_ref)) ->
+          // Follow alias chain at parse time
+          resolve_parameter_ref(alias_ref, components)
         Error(_) ->
           Error(InvalidValue(
             path: "parameter.$ref",
@@ -658,11 +656,8 @@ fn resolve_request_body_ref(
     Some(comps) ->
       case dict.get(comps.request_bodies, ref_name) {
         Ok(ConcreteEntry(rb)) -> Ok(rb)
-        Ok(AliasEntry(_)) ->
-          Error(InvalidValue(
-            path: "requestBody.$ref",
-            detail: "RequestBody reference points to an alias: " <> ref_str,
-          ))
+        Ok(AliasEntry(ref: alias_ref)) ->
+          resolve_request_body_ref(alias_ref, components)
         Error(_) ->
           Error(InvalidValue(
             path: "requestBody.$ref",
@@ -692,11 +687,8 @@ fn resolve_response_ref(
     Some(comps) ->
       case dict.get(comps.responses, ref_name) {
         Ok(ConcreteEntry(resp)) -> Ok(resp)
-        Ok(AliasEntry(_)) ->
-          Error(InvalidValue(
-            path: "response.$ref",
-            detail: "Response reference points to an alias: " <> ref_str,
-          ))
+        Ok(AliasEntry(ref: alias_ref)) ->
+          resolve_response_ref(alias_ref, components)
         Error(_) ->
           Error(InvalidValue(
             path: "response.$ref",
@@ -1612,11 +1604,8 @@ fn resolve_path_item_ref(
     Some(comps) ->
       case dict.get(comps.path_items, ref_name) {
         Ok(ConcreteEntry(path_item)) -> Ok(path_item)
-        Ok(AliasEntry(_)) ->
-          Error(InvalidValue(
-            path: "pathItem.$ref",
-            detail: "PathItem reference points to an alias: " <> ref_str,
-          ))
+        Ok(AliasEntry(ref: alias_ref)) ->
+          resolve_path_item_ref(alias_ref, components)
         Error(_) ->
           Error(InvalidValue(
             path: "pathItem.$ref",

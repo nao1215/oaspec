@@ -1,0 +1,11 @@
+openapi: "3.1.0"
+info:
+  title: Normalize Type Null Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    NullableName:
+      type:
+        - string
+        - "null"
