@@ -4,7 +4,7 @@ import gleam/option.{None, Some}
 import gleam/string
 import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
 import oaspec/codegen/schema_dispatch
-import oaspec/codegen/types as type_gen
+import oaspec/openapi/operations
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{Inline, Reference}
 import oaspec/openapi/spec.{type SpecStage, ParameterSchema, Value}
@@ -27,7 +27,7 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
 
 /// Generate the client module with functions for each operation.
 fn generate_client(ctx: Context) -> String {
-  let operations = type_gen.collect_operations(ctx)
+  let operations = operations.collect_operations(ctx)
 
   // Determine which imports are needed based on parameter types
   let all_params =

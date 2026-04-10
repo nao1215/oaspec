@@ -4,12 +4,12 @@ import gleam/option.{type Option, None, Some}
 import gleam/regexp
 import gleam/string
 import oaspec/codegen/context.{type Context}
-import oaspec/codegen/types as type_gen
 import oaspec/config
 import oaspec/openapi/diagnostic.{
   type Diagnostic, SeverityError, SeverityWarning, TargetBoth, TargetClient,
   TargetServer,
 }
+import oaspec/openapi/operations
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
@@ -56,7 +56,7 @@ pub fn error_to_string(error: Diagnostic) -> String {
 
 /// Validate all operations for unsupported patterns.
 fn validate_operations(ctx: Context) -> List(Diagnostic) {
-  let operations = type_gen.collect_operations(ctx)
+  let operations = operations.collect_operations(ctx)
   list.flat_map(operations, fn(op) {
     let #(op_id, operation, path, _method) = op
     let resolved_params =
@@ -941,7 +941,7 @@ fn validate_security_schemes(ctx: Context) -> List(Diagnostic) {
       })
     })
 
-  let operations = type_gen.collect_operations(ctx)
+  let operations = operations.collect_operations(ctx)
   let operation_errors =
     list.flat_map(operations, fn(op) {
       let #(op_id, operation, _path, _method) = op
@@ -985,7 +985,7 @@ fn validate_preserved_but_unused(ctx: Context) -> List(Diagnostic) {
       ),
     ]
   }
-  let operations = type_gen.collect_operations(ctx)
+  let operations = operations.collect_operations(ctx)
   let response_warnings =
     list.flat_map(operations, fn(op) {
       let #(op_id, operation, _path, _method) = op
