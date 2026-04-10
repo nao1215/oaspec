@@ -1710,12 +1710,21 @@ fn parse_callback_object(
           let #(key_node, path_item_node) = entry
           case key_node {
             yay.NodeStr(url_expression) -> {
-              use path_item <- result.try(parse_path_item(
-                path_item_node,
-                context <> ".callbacks." <> url_expression,
-                components,
-              ))
-              Ok([#(url_expression, Value(path_item)), ..acc])
+              // Check for $ref first — preserve as Ref for resolve phase
+              case
+                yay.extract_optional_string(path_item_node, "$ref")
+                |> result.unwrap(None)
+              {
+                Some(ref_str) -> Ok([#(url_expression, Ref(ref_str)), ..acc])
+                None -> {
+                  use path_item <- result.try(parse_path_item(
+                    path_item_node,
+                    context <> ".callbacks." <> url_expression,
+                    components,
+                  ))
+                  Ok([#(url_expression, Value(path_item)), ..acc])
+                }
+              }
             }
             _ -> Ok(acc)
           }
@@ -1856,12 +1865,21 @@ fn parse_webhooks(
         let #(key_node, value_node) = entry
         case key_node {
           yay.NodeStr(name) -> {
-            use path_item <- result.try(parse_path_item(
-              value_node,
-              "webhooks." <> name,
-              components,
-            ))
-            Ok(dict.insert(acc, name, Value(path_item)))
+            // Check for $ref first — preserve as Ref for resolve phase
+            case
+              yay.extract_optional_string(value_node, "$ref")
+              |> result.unwrap(None)
+            {
+              Some(ref_str) -> Ok(dict.insert(acc, name, Ref(ref_str)))
+              None -> {
+                use path_item <- result.try(parse_path_item(
+                  value_node,
+                  "webhooks." <> name,
+                  components,
+                ))
+                Ok(dict.insert(acc, name, Value(path_item)))
+              }
+            }
           }
           _ -> Ok(acc)
         }
