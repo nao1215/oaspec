@@ -1240,7 +1240,7 @@ pub fn parse_schema_object(
           use discriminator <- result.try(
             case yay.select_sugar(from: node, selector: "discriminator") {
               Ok(_) -> {
-                use d <- result.try(parse_discriminator(node))
+                use d <- result.try(parse_discriminator(node, path))
                 Ok(Some(d))
               }
               Error(_) -> Ok(None)
@@ -1257,7 +1257,7 @@ pub fn parse_schema_object(
               use discriminator <- result.try(
                 case yay.select_sugar(from: node, selector: "discriminator") {
                   Ok(_) -> {
-                    use d <- result.try(parse_discriminator(node))
+                    use d <- result.try(parse_discriminator(node, path))
                     Ok(Some(d))
                   }
                   Error(_) -> Ok(None)
@@ -1531,18 +1531,21 @@ fn parse_properties(
 }
 
 /// Parse discriminator from a node.
-fn parse_discriminator(node: yay.Node) -> Result(Discriminator, ParseError) {
+fn parse_discriminator(
+  node: yay.Node,
+  path: String,
+) -> Result(Discriminator, ParseError) {
   use disc_node <- result.try(
     yay.select_sugar(from: node, selector: "discriminator")
     |> result.map_error(fn(_) {
-      MissingField(path: "schema", field: "discriminator")
+      MissingField(path: path, field: "discriminator")
     }),
   )
 
   use property_name <- result.try(
     yay.extract_string(disc_node, "propertyName")
     |> result.map_error(fn(_) {
-      MissingField(path: "discriminator", field: "propertyName")
+      MissingField(path: path <> ".discriminator", field: "propertyName")
     }),
   )
 
