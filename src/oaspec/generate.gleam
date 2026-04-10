@@ -10,6 +10,7 @@ import oaspec/codegen/validate
 import oaspec/config.{type Config, Both, Client, Server}
 import oaspec/openapi/dedup
 import oaspec/openapi/hoist
+import oaspec/openapi/normalize
 import oaspec/openapi/spec.{type OpenApiSpec}
 
 /// Result of a successful code generation run.
@@ -34,6 +35,9 @@ pub fn generate(
   cfg: Config,
 ) -> Result(GenerationSummary, GenerateError) {
   let spec_title = spec.info.title <> " v" <> spec.info.version
+
+  // Normalize OAS 3.1 constructs into 3.0-compatible representation
+  let spec = normalize.normalize(spec)
 
   // Hoist inline complex schemas into components.schemas
   let spec = hoist.hoist(spec)
