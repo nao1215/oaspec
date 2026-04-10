@@ -3,8 +3,9 @@ import gleam/list
 import gleam/option.{None, Some}
 import oaspec/openapi/schema.{
   type SchemaMetadata, type SchemaObject, type SchemaRef, AllOfSchema,
-  AnyOfSchema, ArraySchema, BooleanSchema, Inline, IntegerSchema, NumberSchema,
-  ObjectSchema, OneOfSchema, Reference, SchemaMetadata, StringSchema,
+  AnyOfSchema, ArraySchema, BooleanSchema, Forbidden, Inline, IntegerSchema,
+  NumberSchema, ObjectSchema, OneOfSchema, Reference, SchemaMetadata,
+  StringSchema, Typed,
 }
 import oaspec/openapi/spec.{
   type Callback, type Components, type Header, type MediaType, type OpenApiSpec,
@@ -273,8 +274,7 @@ fn make_typed_schema(type_str: String, metadata: SchemaMetadata) -> SchemaObject
         metadata: metadata,
         properties: dict.new(),
         required: [],
-        additional_properties: None,
-        additional_properties_untyped: False,
+        additional_properties: Forbidden,
         min_properties: None,
         max_properties: None,
       )
@@ -288,20 +288,20 @@ fn normalize_schema_children(s: SchemaObject) -> SchemaObject {
       properties:,
       required:,
       additional_properties:,
-      additional_properties_untyped:,
       min_properties:,
       max_properties:,
     ) -> {
       let properties =
         dict.map_values(properties, fn(_k, v) { normalize_schema_ref(v) })
-      let additional_properties =
-        option.map(additional_properties, normalize_schema_ref)
+      let additional_properties = case additional_properties {
+        Typed(sr) -> Typed(normalize_schema_ref(sr))
+        other -> other
+      }
       ObjectSchema(
         metadata:,
         properties:,
         required:,
         additional_properties:,
-        additional_properties_untyped:,
         min_properties:,
         max_properties:,
       )

@@ -40,6 +40,16 @@ pub fn default_metadata() -> SchemaMetadata {
   )
 }
 
+/// How additionalProperties is modeled in the AST.
+pub type AdditionalProperties {
+  /// additionalProperties: false (or absent with no schema)
+  Forbidden
+  /// additionalProperties: true (accept any JSON value)
+  Untyped
+  /// additionalProperties: { schema }
+  Typed(SchemaRef)
+}
+
 /// Represents a JSON Schema object within OpenAPI 3.x.
 /// This is the core building block for all type generation.
 /// All variants carry shared `metadata` for description, nullable, deprecated.
@@ -82,8 +92,7 @@ pub type SchemaObject {
     metadata: SchemaMetadata,
     properties: Dict(String, SchemaRef),
     required: List(String),
-    additional_properties: Option(SchemaRef),
-    additional_properties_untyped: Bool,
+    additional_properties: AdditionalProperties,
     min_properties: Option(Int),
     max_properties: Option(Int),
   )

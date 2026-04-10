@@ -9,7 +9,7 @@ import oaspec/openapi/diagnostic.{
 }
 import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
-  Inline, ObjectSchema, OneOfSchema, Reference,
+  Inline, ObjectSchema, OneOfSchema, Reference, Typed,
 }
 import oaspec/openapi/spec.{type OpenApiSpec, type SpecStage, Value}
 
@@ -79,8 +79,8 @@ fn check_schema(path: String, schema_obj: SchemaObject) -> List(Diagnostic) {
         dict.to_list(properties)
         |> list.flat_map(fn(e) { check_schema_ref(path <> "." <> e.0, e.1) })
       let ap_errors = case additional_properties {
-        Some(ap) -> check_schema_ref(path <> ".additionalProperties", ap)
-        None -> []
+        Typed(ap) -> check_schema_ref(path <> ".additionalProperties", ap)
+        _ -> []
       }
       list.append(prop_errors, ap_errors)
     }

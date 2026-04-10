@@ -6,7 +6,7 @@ import gleam/set.{type Set}
 import gleam/string
 import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
-  Inline, ObjectSchema, OneOfSchema, Reference,
+  Forbidden, Inline, ObjectSchema, OneOfSchema, Reference, Typed, Untyped,
 }
 import oaspec/openapi/spec.{type OpenApiSpec, type SpecStage}
 
@@ -78,8 +78,9 @@ pub fn resolve_schema_refs_in_schema(
       let resolved_props =
         dict.map_values(properties, fn(_k, v) { resolve_one_ref(v, spec) })
       let resolved_ap = case additional_properties {
-        Some(ap) -> Some(resolve_one_ref(ap, spec))
-        None -> None
+        Typed(ap) -> Typed(resolve_one_ref(ap, spec))
+        Untyped -> Untyped
+        Forbidden -> Forbidden
       }
       ObjectSchema(
         ..obj,

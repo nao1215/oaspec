@@ -4,8 +4,8 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/openapi/schema.{
-  type SchemaObject, type SchemaRef, AnyOfSchema, Inline, ObjectSchema,
-  OneOfSchema, Reference,
+  type SchemaObject, type SchemaRef, AnyOfSchema, Forbidden, Inline,
+  ObjectSchema, OneOfSchema, Reference, Typed, Untyped,
 }
 import oaspec/openapi/spec.{
   type OpenApiSpec, type Operation, type PathItem, Components, OpenApiSpec,
@@ -200,8 +200,9 @@ fn dedup_schema_object(schema_obj: SchemaObject) -> SchemaObject {
         ..obj,
         properties: new_props,
         additional_properties: case additional_properties {
-          Some(ap) -> Some(dedup_schema_ref(ap))
-          None -> None
+          Typed(ap) -> Typed(dedup_schema_ref(ap))
+          Forbidden -> Forbidden
+          Untyped -> Untyped
         },
       )
     }

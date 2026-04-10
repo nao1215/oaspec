@@ -5,7 +5,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
-  Inline, ObjectSchema, OneOfSchema, Reference,
+  Inline, ObjectSchema, OneOfSchema, Reference, Typed,
 }
 import oaspec/openapi/spec.{
   type OpenApiSpec, type PathItem, type RefOr, Components, OpenApiSpec, PathItem,
@@ -242,12 +242,12 @@ fn hoist_within_schema(
 
       // Hoist additional_properties if present
       let #(new_ap, state) = case additional_properties {
-        Some(ap_ref) -> {
+        Typed(ap_ref) -> {
           let #(hoisted, state) =
             hoist_schema_ref(ap_ref, name_prefix, "Value", state)
-          #(Some(hoisted), state)
+          #(Typed(hoisted), state)
         }
-        None -> #(None, state)
+        other -> #(other, state)
       }
 
       let result =

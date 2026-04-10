@@ -511,10 +511,9 @@ pub fn parse_additional_properties_untyped_test() {
   let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "UntypedPayload")
   let assert Ok(schema.Inline(schema.ObjectSchema(
-    additional_properties_untyped: untyped,
+    additional_properties: schema.Untyped,
     ..,
   ))) = dict.get(props, "payload")
-  untyped |> should.be_true()
 }
 
 // --- Validation Tests ---

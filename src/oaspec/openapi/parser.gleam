@@ -1294,18 +1294,18 @@ fn parse_typed_schema(
         Ok(r) -> r
         _ -> []
       }
-      use #(additional_properties, additional_properties_untyped) <- result.try(
+      use additional_properties <- result.try(
         case yay.select_sugar(from: node, selector: "additionalProperties") {
-          Ok(yay.NodeBool(True)) -> Ok(#(None, True))
-          Ok(yay.NodeBool(False)) -> Ok(#(None, False))
+          Ok(yay.NodeBool(True)) -> Ok(schema.Untyped)
+          Ok(yay.NodeBool(False)) -> Ok(schema.Forbidden)
           Ok(ap_node) -> {
             use sr <- result.try(parse_schema_ref(
               ap_node,
               path <> ".additionalProperties",
             ))
-            Ok(#(Some(sr), False))
+            Ok(schema.Typed(sr))
           }
-          _ -> Ok(#(None, False))
+          _ -> Ok(schema.Forbidden)
         },
       )
       let min_properties =
@@ -1319,7 +1319,6 @@ fn parse_typed_schema(
         properties:,
         required:,
         additional_properties:,
-        additional_properties_untyped:,
         min_properties:,
         max_properties:,
       ))
