@@ -8533,3 +8533,179 @@ pub fn oss_spec_validator_empty_v30_rejects_test() {
     Ok(_) -> should.fail()
   }
 }
+
+// ---------------------------------------------------------------------------
+// OSS: swagger-parser-js (MIT) — additional tests
+// Test data derived from https://github.com/APIDevTools/swagger-parser
+// ---------------------------------------------------------------------------
+
+/// swagger-parser-js: OpenAPI 3.1 spec with no paths or webhooks.
+/// Valid minimal 3.1 document (paths is optional in 3.1).
+pub fn oss_swagger_parser_js_no_paths_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_swagger_parser_js_no_paths.yaml")
+  spec.info.title |> should.equal("Invalid API")
+  spec.openapi |> should.equal("3.1")
+  dict.size(spec.paths) |> should.equal(0)
+  dict.size(spec.webhooks) |> should.equal(0)
+}
+
+/// swagger-parser-js: top-level, path-level, and operation-level servers.
+pub fn oss_swagger_parser_js_server_hierarchy_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file(
+      "test/fixtures/oss_swagger_parser_js_server_hierarchy.json",
+    )
+  spec.info.title |> should.equal("Swagger Petstore")
+  // Top-level server
+  list.length(spec.servers) |> should.equal(1)
+  // Path-level and operation-level servers
+  let assert Ok(pet_path) = dict.get(spec.paths, "/pet")
+  list.length(pet_path.servers) |> should.equal(1)
+  let assert Some(get_op) = pet_path.get
+  list.length(get_op.servers) |> should.equal(1)
+}
+
+// ---------------------------------------------------------------------------
+// OSS: spectral (Apache-2.0) — additional tests
+// Test data derived from https://github.com/stoplightio/spectral
+// ---------------------------------------------------------------------------
+
+/// spectral: operation-level and global security with apiKey + OAuth2.
+pub fn oss_spectral_operation_security_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_spectral_operation_security.yaml")
+  spec.openapi |> should.equal("3.0.2")
+  // Global security has 2 entries (apikey OR oauth2)
+  list.length(spec.security) |> should.equal(2)
+  let assert Some(components) = spec.components
+  dict.size(components.security_schemes) |> should.equal(2)
+}
+
+/// spectral: webhooks with inline request body (OpenAPI 3.1).
+pub fn oss_spectral_webhooks_servers_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_spectral_webhooks_servers.yaml")
+  spec.openapi |> should.equal("3.1.0")
+  dict.size(spec.webhooks) |> should.equal(1)
+}
+
+/// spectral: examples with value in parameters and response content.
+pub fn oss_spectral_examples_value_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_spectral_examples_value.yaml")
+  dict.size(spec.paths) |> should.equal(1)
+}
+
+// ---------------------------------------------------------------------------
+// OSS: openapi-dotnet (MIT) — additional tests
+// Test data derived from https://github.com/microsoft/OpenAPI.NET
+// ---------------------------------------------------------------------------
+
+/// openapi-dotnet: multipart encoding, discriminator, allOf inheritance (3.1).
+pub fn oss_openapi_dotnet_encoding_discriminator_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file(
+      "test/fixtures/oss_openapi_dotnet_encoding_discriminator.yaml",
+    )
+  spec.openapi |> should.equal("3.1.2")
+  spec.info.title |> should.equal("A simple OpenAPI 3.1 example")
+  dict.size(spec.paths) |> should.equal(2)
+  let assert Some(components) = spec.components
+  // Pet, Cat, Dog
+  dict.size(components.schemas) |> should.equal(3)
+}
+
+/// openapi-dotnet: reusable pathItems with webhooks and multi-schema (3.1).
+pub fn oss_openapi_dotnet_reusable_paths_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_dotnet_reusable_paths.yaml")
+  spec.openapi |> should.equal("3.1.2")
+  dict.size(spec.webhooks) |> should.not_equal(0)
+  let assert Some(components) = spec.components
+  dict.size(components.path_items) |> should.not_equal(0)
+  dict.size(components.schemas) |> should.equal(2)
+  let assert Some(dialect) = spec.json_schema_dialect
+  should.be_true(string.contains(dialect, "json-schema.org"))
+}
+
+/// openapi-dotnet: spec with x-oai-$self vendor extension (3.1).
+pub fn oss_openapi_dotnet_self_extension_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_openapi_dotnet_self_extension.yaml")
+  spec.openapi |> should.equal("3.1.2")
+  spec.info.title |> should.equal("API with x-oai-$self extension")
+  dict.size(spec.paths) |> should.equal(1)
+}
+
+// ---------------------------------------------------------------------------
+// OSS: swagger-parser-java (Apache-2.0) — 3.1 tests
+// Test data derived from https://github.com/swagger-api/swagger-parser
+// ---------------------------------------------------------------------------
+
+/// swagger-parser-java: OpenAPI 3.1 basic spec uses multi-type unions
+/// (type: [object, string]) which oaspec rejects with a clear error guiding
+/// users to use oneOf instead.
+pub fn oss_swagger_parser_java_31_basic_rejects_multi_type_test() {
+  let result =
+    parser.parse_file("test/fixtures/oss_swagger_parser_java_31_basic.yaml")
+  case result {
+    Error(parser.InvalidValue(_, detail)) ->
+      should.be_true(string.contains(detail, "oneOf"))
+    _ -> should.fail()
+  }
+}
+
+/// swagger-parser-java: OpenAPI 3.1 security scheme includes mutualTLS type
+/// which is a 3.1-only addition. The parser rejects it with a clear error.
+pub fn oss_swagger_parser_java_31_security_rejects_mutualtls_test() {
+  let result =
+    parser.parse_file("test/fixtures/oss_swagger_parser_java_31_security.yaml")
+  case result {
+    Error(parser.InvalidValue(_, detail)) ->
+      should.be_true(string.contains(detail, "mutualTLS"))
+    _ -> should.fail()
+  }
+}
+
+/// swagger-parser-java: OpenAPI 3.1 schema siblings (dependentRequired,
+/// dependentSchemas, if/then/else, examples array).
+pub fn oss_swagger_parser_java_31_schema_siblings_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file(
+      "test/fixtures/oss_swagger_parser_java_31_schema_siblings.yaml",
+    )
+  spec.openapi |> should.equal("3.1.0")
+  let assert Some(components) = spec.components
+  // Payment, PaymentMethod, IfTest, Fruit, Error
+  dict.size(components.schemas) |> should.equal(5)
+}
+
+/// swagger-parser-java: extended petstore 3.1 uses multi-type unions
+/// (type: [string, integer]) which oaspec rejects with a clear error.
+pub fn oss_swagger_parser_java_31_petstore_more_rejects_multi_type_test() {
+  let result =
+    parser.parse_file(
+      "test/fixtures/oss_swagger_parser_java_31_petstore_more.yaml",
+    )
+  case result {
+    Error(parser.InvalidValue(_, detail)) ->
+      should.be_true(string.contains(detail, "oneOf"))
+    _ -> should.fail()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// OSS: openapi-spec-validator (Apache-2.0) — additional tests
+// Test data derived from https://github.com/python-openapi/openapi-spec-validator
+// ---------------------------------------------------------------------------
+
+/// openapi-spec-validator: schema with broken $ref URI.
+/// The parser stores the broken ref as a Reference (no resolution at parse time).
+pub fn oss_spec_validator_broken_ref_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_spec_validator_broken_ref.yaml")
+  spec.info.title |> should.equal("Some Schema")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.not_equal(0)
+}
