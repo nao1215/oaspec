@@ -7,7 +7,7 @@ import oaspec/codegen/schema_dispatch
 import oaspec/codegen/types as type_gen
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{Inline, Reference}
-import oaspec/openapi/spec
+import oaspec/openapi/spec.{type SpecStage, Value}
 import oaspec/util/http
 import oaspec/util/naming
 import oaspec/util/string_extra as se
@@ -33,7 +33,12 @@ fn generate_client(ctx: Context) -> String {
   let all_params =
     list.flat_map(operations, fn(op) {
       let #(_, operation, _, _) = op
-      operation.parameters
+      list.filter_map(operation.parameters, fn(ref_p) {
+        case ref_p {
+          Value(p) -> Ok(p)
+          _ -> Error(Nil)
+        }
+      })
     })
   let needs_bool =
     list.any(all_params, fn(p) {
@@ -53,8 +58,11 @@ fn generate_client(ctx: Context) -> String {
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       list.any(dict.to_list(operation.responses), fn(entry) {
-        let #(_, response) = entry
-        list.length(dict.to_list(response.content)) > 1
+        let #(_, ref_or) = entry
+        case ref_or {
+          Value(response) -> list.length(dict.to_list(response.content)) > 1
+          _ -> False
+        }
       })
     })
 
@@ -63,7 +71,7 @@ fn generate_client(ctx: Context) -> String {
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       case operation.request_body {
-        Some(rb) ->
+        Some(Value(rb)) ->
           list.any(dict.to_list(rb.content), fn(ce) {
             let #(key, _) = ce
             key == "application/x-www-form-urlencoded"
@@ -92,23 +100,28 @@ fn generate_client(ctx: Context) -> String {
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       list.any(dict.to_list(operation.responses), fn(entry) {
-        let #(_, response) = entry
-        list.any(dict.to_list(response.content), fn(ce) {
-          let #(media_type_name, mt) = ce
-          // text/plain responses don't need dyn_decode (body returned directly)
-          case media_type_name {
-            "text/plain" -> False
-            _ ->
-              case mt.schema {
-                Some(Inline(schema.ArraySchema(items: Inline(_), ..))) -> True
-                Some(Inline(schema.StringSchema(..))) -> True
-                Some(Inline(schema.IntegerSchema(..))) -> True
-                Some(Inline(schema.NumberSchema(..))) -> True
-                Some(Inline(schema.BooleanSchema(..))) -> True
-                _ -> False
+        let #(_, ref_or) = entry
+        case ref_or {
+          Value(response) ->
+            list.any(dict.to_list(response.content), fn(ce) {
+              let #(media_type_name, mt) = ce
+              // text/plain responses don't need dyn_decode (body returned directly)
+              case media_type_name {
+                "text/plain" -> False
+                _ ->
+                  case mt.schema {
+                    Some(Inline(schema.ArraySchema(items: Inline(_), ..))) ->
+                      True
+                    Some(Inline(schema.StringSchema(..))) -> True
+                    Some(Inline(schema.IntegerSchema(..))) -> True
+                    Some(Inline(schema.NumberSchema(..))) -> True
+                    Some(Inline(schema.BooleanSchema(..))) -> True
+                    _ -> False
+                  }
               }
-          }
-        })
+            })
+          _ -> False
+        }
       })
     })
 
@@ -118,7 +131,7 @@ fn generate_client(ctx: Context) -> String {
     || list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       case operation.request_body {
-        Some(rb) ->
+        Some(Value(rb)) ->
           list.any(dict.to_list(rb.content), fn(ce) {
             let #(_, mt) = ce
             case mt.schema {
@@ -146,7 +159,7 @@ fn generate_client(ctx: Context) -> String {
     || list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       case operation.request_body {
-        Some(rb) ->
+        Some(Value(rb)) ->
           list.any(dict.to_list(rb.content), fn(ce) {
             let #(key, _) = ce
             key == "multipart/form-data"
@@ -161,7 +174,8 @@ fn generate_client(ctx: Context) -> String {
       }
       list.any(security_schemes, fn(entry) {
         case entry {
-          #(_, spec.ApiKeyScheme(in_: spec.SchemeInQuery, ..)) -> True
+          #(_, spec.Value(spec.ApiKeyScheme(in_: spec.SchemeInQuery, ..))) ->
+            True
           _ -> False
         }
       })
@@ -173,7 +187,7 @@ fn generate_client(ctx: Context) -> String {
       let #(_, operation, _, _) = op
       // Need types/encode when $ref body or $ref params exist
       let has_ref_body = case operation.request_body {
-        Some(rb) ->
+        Some(Value(rb)) ->
           list.any(dict.to_list(rb.content), fn(ce) {
             let #(_, mt) = ce
             case mt.schema {
@@ -186,9 +200,13 @@ fn generate_client(ctx: Context) -> String {
         _ -> False
       }
       let has_ref_params =
-        list.any(operation.parameters, fn(p) {
-          case p.schema {
-            Some(Reference(..)) -> True
+        list.any(operation.parameters, fn(ref_p) {
+          case ref_p {
+            Value(p) ->
+              case p.schema {
+                Some(Reference(..)) -> True
+                _ -> False
+              }
             _ -> False
           }
         })
@@ -198,7 +216,12 @@ fn generate_client(ctx: Context) -> String {
   let needs_option =
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
-      list.any(operation.parameters, fn(p) { !p.required })
+      list.any(operation.parameters, fn(ref_p) {
+        case ref_p {
+          Value(p) -> !p.required
+          _ -> False
+        }
+      })
     })
     || {
       let security_schemes = case ctx.spec.components {
@@ -269,7 +292,8 @@ fn generate_client(ctx: Context) -> String {
     Some(c) ->
       list.any(dict.to_list(c.security_schemes), fn(entry) {
         case entry {
-          #(_, spec.ApiKeyScheme(in_: spec.SchemeInCookie, ..)) -> True
+          #(_, spec.Value(spec.ApiKeyScheme(in_: spec.SchemeInCookie, ..))) ->
+            True
           _ -> False
         }
       })
@@ -453,7 +477,7 @@ fn generate_default_base_url(
 fn generate_client_function(
   sb: se.StringBuilder,
   op_id: String,
-  operation: spec.Operation,
+  operation: spec.Operation(SpecStage),
   path: String,
   method: spec.HttpMethod,
   ctx: Context,
@@ -470,7 +494,7 @@ fn generate_client_function(
   }
   // Add doc comment listing supported content types for multi-content request bodies
   let sb = case operation.request_body {
-    Some(rb) -> {
+    Some(Value(rb)) -> {
       let content_entries = dict.to_list(rb.content)
       case content_entries {
         [_, _, ..] -> {
@@ -486,8 +510,16 @@ fn generate_client_function(
     _ -> sb
   }
 
+  let unwrapped_params =
+    list.filter_map(operation.parameters, fn(ref_p) {
+      case ref_p {
+        Value(p) -> Ok(p)
+        _ -> Error(Nil)
+      }
+    })
+
   let path_params =
-    list.filter(operation.parameters, fn(p) {
+    list.filter(unwrapped_params, fn(p) {
       case p.in_ {
         spec.InPath -> True
         _ -> False
@@ -495,7 +527,7 @@ fn generate_client_function(
     })
 
   let query_params =
-    list.filter(operation.parameters, fn(p) {
+    list.filter(unwrapped_params, fn(p) {
       case p.in_ {
         spec.InQuery -> True
         _ -> False
@@ -503,7 +535,7 @@ fn generate_client_function(
     })
 
   let header_params =
-    list.filter(operation.parameters, fn(p) {
+    list.filter(unwrapped_params, fn(p) {
       case p.in_ {
         spec.InHeader -> True
         _ -> False
@@ -511,7 +543,7 @@ fn generate_client_function(
     })
 
   let cookie_params =
-    list.filter(operation.parameters, fn(p) {
+    list.filter(unwrapped_params, fn(p) {
       case p.in_ {
         spec.InCookie -> True
         _ -> False
@@ -643,7 +675,7 @@ fn generate_client_function(
 
   // Only set content-type for requests with body
   let sb = case operation.request_body {
-    Some(rb) -> {
+    Some(Value(rb)) -> {
       // For optional request bodies, unwrap the Option first
       let sb = case rb.required {
         True -> sb
@@ -833,42 +865,47 @@ fn generate_client_function(
 
   let sb =
     list.fold(responses, sb, fn(sb, entry) {
-      let #(status_code, response) = entry
-      let variant_name =
-        "response_types."
-        <> naming.schema_to_type_name(op_id)
-        <> "Response"
-        <> http.status_code_suffix(status_code)
-      let content_entries = dict.to_list(response.content)
-      case content_entries {
-        [] ->
-          sb
-          |> se.indent(
-            4,
-            http.status_code_to_int_pattern(status_code)
-              <> " -> Ok("
-              <> variant_name
-              <> ")",
-          )
-        [#(single_ct, single_mt)] ->
-          generate_single_content_response(
-            sb,
-            status_code,
-            variant_name,
-            single_ct,
-            single_mt,
-            op_id,
-            ctx,
-          )
-        multiple ->
-          generate_multi_content_response(
-            sb,
-            status_code,
-            variant_name,
-            multiple,
-            op_id,
-            ctx,
-          )
+      let #(status_code, ref_or) = entry
+      case ref_or {
+        Value(response) -> {
+          let variant_name =
+            "response_types."
+            <> naming.schema_to_type_name(op_id)
+            <> "Response"
+            <> http.status_code_suffix(status_code)
+          let content_entries = dict.to_list(response.content)
+          case content_entries {
+            [] ->
+              sb
+              |> se.indent(
+                4,
+                http.status_code_to_int_pattern(status_code)
+                  <> " -> Ok("
+                  <> variant_name
+                  <> ")",
+              )
+            [#(single_ct, single_mt)] ->
+              generate_single_content_response(
+                sb,
+                status_code,
+                variant_name,
+                single_ct,
+                single_mt,
+                op_id,
+                ctx,
+              )
+            multiple ->
+              generate_multi_content_response(
+                sb,
+                status_code,
+                variant_name,
+                multiple,
+                op_id,
+                ctx,
+              )
+          }
+        }
+        _ -> sb
       }
     })
 
@@ -986,11 +1023,11 @@ fn generate_multi_content_response(
 
 /// Build parameter list for function signature.
 fn build_param_list(
-  path_params: List(spec.Parameter),
-  query_params: List(spec.Parameter),
-  header_params: List(spec.Parameter),
-  cookie_params: List(spec.Parameter),
-  operation: spec.Operation,
+  path_params: List(spec.Parameter(SpecStage)),
+  query_params: List(spec.Parameter(SpecStage)),
+  header_params: List(spec.Parameter(SpecStage)),
+  cookie_params: List(spec.Parameter(SpecStage)),
+  operation: spec.Operation(SpecStage),
   op_id: String,
   ctx: Context,
 ) -> String {
@@ -1008,7 +1045,7 @@ fn build_param_list(
 
   let _ = ctx
   let body_param = case operation.request_body {
-    Some(rb) -> {
+    Some(Value(rb)) -> {
       let body_type = get_body_type(rb, op_id)
       let wrapped_type = case rb.required {
         True -> body_type
@@ -1028,7 +1065,7 @@ fn build_param_list(
 }
 
 /// Convert a parameter to its Gleam type string.
-fn param_to_type(param: spec.Parameter, ctx: Context) -> String {
+fn param_to_type(param: spec.Parameter(SpecStage), ctx: Context) -> String {
   let base = schema_dispatch.resolve_param_type(param.schema, ctx.spec)
   case param.required {
     True -> base
@@ -1038,7 +1075,7 @@ fn param_to_type(param: spec.Parameter, ctx: Context) -> String {
 
 /// Convert a parameter value to its String representation for URL/header use.
 fn param_to_string_expr(
-  param: spec.Parameter,
+  param: spec.Parameter(SpecStage),
   param_name: String,
   ctx: Context,
 ) -> String {
@@ -1077,7 +1114,7 @@ fn param_to_string_expr(
 
 /// Convert a required param to string for query building.
 fn to_str_for_required(
-  param: spec.Parameter,
+  param: spec.Parameter(SpecStage),
   param_name: String,
   ctx: Context,
 ) -> String {
@@ -1085,7 +1122,10 @@ fn to_str_for_required(
 }
 
 /// Convert an optional param value (bound to `v`) to string.
-fn to_str_for_optional_value(param: spec.Parameter, ctx: Context) -> String {
+fn to_str_for_optional_value(
+  param: spec.Parameter(SpecStage),
+  ctx: Context,
+) -> String {
   case param.schema {
     Some(Inline(schema.ArraySchema(items:, ..))) -> {
       let item_to_str = schema_dispatch.to_string_fn(items, ctx.spec)
@@ -1107,7 +1147,7 @@ fn to_str_for_optional_value(param: spec.Parameter, ctx: Context) -> String {
 }
 
 /// Get the Gleam type for a request body parameter.
-fn get_body_type(rb: spec.RequestBody, op_id: String) -> String {
+fn get_body_type(rb: spec.RequestBody(SpecStage), op_id: String) -> String {
   let content_entries = dict.to_list(rb.content)
   case content_entries {
     // Multiple content types: use pre-serialized String
@@ -1130,7 +1170,7 @@ fn get_body_type(rb: spec.RequestBody, op_id: String) -> String {
 
 /// Get the encode expression for a request body.
 fn get_body_encode_expr(
-  rb: spec.RequestBody,
+  rb: spec.RequestBody(SpecStage),
   op_id: String,
   _ctx: Context,
 ) -> String {
@@ -1163,7 +1203,7 @@ fn get_body_encode_expr(
 /// Generate multipart/form-data body encoding in the client function.
 fn generate_multipart_body(
   sb: se.StringBuilder,
-  rb: spec.RequestBody,
+  rb: spec.RequestBody(SpecStage),
   _op_id: String,
   ctx: Context,
 ) -> se.StringBuilder {
@@ -1550,7 +1590,7 @@ fn generate_form_bracket_fields(
 /// Generate application/x-www-form-urlencoded body encoding in the client function.
 fn generate_form_urlencoded_body(
   sb: se.StringBuilder,
-  rb: spec.RequestBody,
+  rb: spec.RequestBody(SpecStage),
   _op_id: String,
   ctx: Context,
 ) -> se.StringBuilder {
@@ -1777,7 +1817,10 @@ fn deep_object_array_item_to_string(
 
 /// Check if a parameter is an array with explode behavior.
 /// OpenAPI default: style: form has explode: true by default.
-fn is_exploded_array_param(param: spec.Parameter, ctx: Context) -> Bool {
+fn is_exploded_array_param(
+  param: spec.Parameter(SpecStage),
+  ctx: Context,
+) -> Bool {
   let is_array = case param.schema {
     Some(Inline(schema.ArraySchema(..))) -> True
     Some(Reference(..) as sr) ->
@@ -1807,7 +1850,7 @@ fn is_exploded_array_param(param: spec.Parameter, ctx: Context) -> Bool {
 /// Generate exploded array query parameter: tags=a&tags=b
 fn generate_exploded_array_query_param(
   sb: se.StringBuilder,
-  param: spec.Parameter,
+  param: spec.Parameter(SpecStage),
   param_name: String,
   ctx: Context,
 ) -> se.StringBuilder {
@@ -1862,7 +1905,7 @@ fn generate_exploded_array_query_param(
 }
 
 /// Check if a parameter uses deepObject style with an object schema.
-fn is_deep_object_param(param: spec.Parameter, ctx: Context) -> Bool {
+fn is_deep_object_param(param: spec.Parameter(SpecStage), ctx: Context) -> Bool {
   case param.schema {
     Some(Reference(..) as schema_ref) ->
       case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
@@ -1877,7 +1920,7 @@ fn is_deep_object_param(param: spec.Parameter, ctx: Context) -> Bool {
 /// Generate deepObject-style query parameters: key[prop]=value for each property.
 fn generate_deep_object_query_param(
   sb: se.StringBuilder,
-  param: spec.Parameter,
+  param: spec.Parameter(SpecStage),
   param_name: String,
   ctx: Context,
 ) -> se.StringBuilder {
@@ -2265,7 +2308,10 @@ fn generate_scheme_some_branch(
   case ctx.spec.components {
     Some(components) ->
       case dict.get(components.security_schemes, scheme_ref.scheme_name) {
-        Ok(spec.ApiKeyScheme(name: header_name, in_: spec.SchemeInHeader)) ->
+        Ok(spec.Value(spec.ApiKeyScheme(
+          name: header_name,
+          in_: spec.SchemeInHeader,
+        ))) ->
           sb
           |> se.indent(
             indent,
@@ -2273,7 +2319,10 @@ fn generate_scheme_some_branch(
               <> string.lowercase(header_name)
               <> "\", key)",
           )
-        Ok(spec.ApiKeyScheme(name: query_name, in_: spec.SchemeInQuery)) ->
+        Ok(spec.Value(spec.ApiKeyScheme(
+          name: query_name,
+          in_: spec.SchemeInQuery,
+        ))) ->
           sb
           |> se.indent(indent, "Some(key) -> {")
           |> se.indent(
@@ -2290,7 +2339,10 @@ fn generate_scheme_some_branch(
               <> "=\" <> key)",
           )
           |> se.indent(indent, "}")
-        Ok(spec.ApiKeyScheme(name: cookie_name, in_: spec.SchemeInCookie)) ->
+        Ok(spec.Value(spec.ApiKeyScheme(
+          name: cookie_name,
+          in_: spec.SchemeInCookie,
+        ))) ->
           sb
           |> se.indent(indent, "Some(value) -> {")
           |> se.indent(
@@ -2310,27 +2362,27 @@ fn generate_scheme_some_branch(
             "request.set_header(req, \"cookie\", new_cookie)",
           )
           |> se.indent(indent, "}")
-        Ok(spec.HttpScheme(scheme: "basic", ..)) ->
+        Ok(spec.Value(spec.HttpScheme(scheme: "basic", ..))) ->
           sb
           |> se.indent(
             indent,
             "Some(token) -> request.set_header(req, \"authorization\", \"Basic \" <> token)",
           )
-        Ok(spec.HttpScheme(scheme: "digest", ..)) ->
+        Ok(spec.Value(spec.HttpScheme(scheme: "digest", ..))) ->
           sb
           |> se.indent(
             indent,
             "Some(token) -> request.set_header(req, \"authorization\", \"Digest \" <> token)",
           )
-        Ok(spec.HttpScheme(scheme: "bearer", ..))
-        | Ok(spec.OAuth2Scheme(..))
-        | Ok(spec.OpenIdConnectScheme(..)) ->
+        Ok(spec.Value(spec.HttpScheme(scheme: "bearer", ..)))
+        | Ok(spec.Value(spec.OAuth2Scheme(..)))
+        | Ok(spec.Value(spec.OpenIdConnectScheme(..))) ->
           sb
           |> se.indent(
             indent,
             "Some(token) -> request.set_header(req, \"authorization\", \"Bearer \" <> token)",
           )
-        Ok(spec.HttpScheme(scheme: scheme_name, ..)) ->
+        Ok(spec.Value(spec.HttpScheme(scheme: scheme_name, ..))) ->
           sb
           |> se.indent(
             indent,
@@ -2355,7 +2407,10 @@ fn generate_scheme_apply(
   case ctx.spec.components {
     Some(components) ->
       case dict.get(components.security_schemes, scheme_ref.scheme_name) {
-        Ok(spec.ApiKeyScheme(name: header_name, in_: spec.SchemeInHeader)) ->
+        Ok(spec.Value(spec.ApiKeyScheme(
+          name: header_name,
+          in_: spec.SchemeInHeader,
+        ))) ->
           sb
           |> se.indent(
             indent,
@@ -2365,7 +2420,10 @@ fn generate_scheme_apply(
               <> val_var
               <> ")",
           )
-        Ok(spec.ApiKeyScheme(name: query_name, in_: spec.SchemeInQuery)) ->
+        Ok(spec.Value(spec.ApiKeyScheme(
+          name: query_name,
+          in_: spec.SchemeInQuery,
+        ))) ->
           sb
           |> se.indent(
             indent,
@@ -2382,7 +2440,10 @@ fn generate_scheme_apply(
               <> val_var
               <> ")",
           )
-        Ok(spec.ApiKeyScheme(name: cookie_name, in_: spec.SchemeInCookie)) ->
+        Ok(spec.Value(spec.ApiKeyScheme(
+          name: cookie_name,
+          in_: spec.SchemeInCookie,
+        ))) ->
           sb
           |> se.indent(
             indent,
@@ -2400,7 +2461,7 @@ fn generate_scheme_apply(
             indent,
             "let req = request.set_header(req, \"cookie\", new_cookie)",
           )
-        Ok(spec.HttpScheme(scheme: "basic", ..)) ->
+        Ok(spec.Value(spec.HttpScheme(scheme: "basic", ..))) ->
           sb
           |> se.indent(
             indent,
@@ -2408,7 +2469,7 @@ fn generate_scheme_apply(
               <> val_var
               <> ")",
           )
-        Ok(spec.HttpScheme(scheme: "digest", ..)) ->
+        Ok(spec.Value(spec.HttpScheme(scheme: "digest", ..))) ->
           sb
           |> se.indent(
             indent,
@@ -2416,9 +2477,9 @@ fn generate_scheme_apply(
               <> val_var
               <> ")",
           )
-        Ok(spec.HttpScheme(scheme: "bearer", ..))
-        | Ok(spec.OAuth2Scheme(..))
-        | Ok(spec.OpenIdConnectScheme(..)) ->
+        Ok(spec.Value(spec.HttpScheme(scheme: "bearer", ..)))
+        | Ok(spec.Value(spec.OAuth2Scheme(..)))
+        | Ok(spec.Value(spec.OpenIdConnectScheme(..))) ->
           sb
           |> se.indent(
             indent,
@@ -2426,7 +2487,7 @@ fn generate_scheme_apply(
               <> val_var
               <> ")",
           )
-        Ok(spec.HttpScheme(scheme: scheme_name, ..)) ->
+        Ok(spec.Value(spec.HttpScheme(scheme: scheme_name, ..))) ->
           sb
           |> se.indent(
             indent,
@@ -2444,7 +2505,10 @@ fn generate_scheme_apply(
 
 /// Wrap a value expression with uri.percent_encode or not, based on allowReserved.
 /// When allowReserved is true, reserved characters are sent as-is per OpenAPI spec.
-fn maybe_percent_encode(value_expr: String, param: spec.Parameter) -> String {
+fn maybe_percent_encode(
+  value_expr: String,
+  param: spec.Parameter(SpecStage),
+) -> String {
   case param.allow_reserved {
     True -> value_expr
     False -> "uri.percent_encode(" <> value_expr <> ")"

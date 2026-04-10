@@ -1,4 +1,5 @@
 import gleam/list
+import gleam/result
 import oaspec/codegen/client
 import oaspec/codegen/context.{type Context, type GeneratedFile}
 import oaspec/codegen/decoders
@@ -8,9 +9,13 @@ import oaspec/codegen/server
 import oaspec/codegen/types
 import oaspec/codegen/validate
 import oaspec/config.{type Config, Both, Client, Server}
+import oaspec/openapi/capability_check
 import oaspec/openapi/dedup
 import oaspec/openapi/hoist
-import oaspec/openapi/spec.{type OpenApiSpec}
+import oaspec/openapi/normalize
+import oaspec/openapi/parser
+import oaspec/openapi/resolve
+import oaspec/openapi/spec.{type OpenApiSpec, type SpecStage}
 
 /// Result of a successful code generation run.
 pub type GenerationSummary {
@@ -24,16 +29,39 @@ pub type GenerationSummary {
 /// Errors from the pure generation pipeline.
 pub type GenerateError {
   ValidationErrors(errors: List(validate.ValidationError))
+  ResolveError(detail: String)
 }
 
-/// Pure generation pipeline: hoist → dedup → validate → generate files.
+/// Pure generation pipeline: parse → normalize → resolve → capability_check → hoist → dedup → validate → codegen.
 /// Takes an already-parsed spec and config; returns generated files or errors.
 /// Does not perform IO — callers handle writing files and printing output.
 pub fn generate(
-  spec: OpenApiSpec,
+  spec: OpenApiSpec(SpecStage),
   cfg: Config,
 ) -> Result(GenerationSummary, GenerateError) {
   let spec_title = spec.info.title <> " v" <> spec.info.version
+
+  // Normalize OAS 3.1 patterns to 3.0-compatible form
+  let spec = normalize.normalize(spec)
+
+  // Resolve component entry aliases ($ref within components)
+  use spec <- result.try(
+    resolve.resolve(spec)
+    |> result.map_error(fn(e) {
+      ResolveError(detail: parser.parse_error_to_string(e))
+    }),
+  )
+
+  // Check for unsupported features using capability registry
+  let capability_issues =
+    capability_check.check(spec)
+    |> validate.filter_by_mode(cfg.mode)
+  let capability_errors = validate.errors_only(capability_issues)
+  let capability_warnings = validate.warnings_only(capability_issues)
+  use _ <- result.try(case list.is_empty(capability_errors) {
+    False -> Error(ValidationErrors(errors: capability_errors))
+    True -> Ok(Nil)
+  })
 
   // Hoist inline complex schemas into components.schemas
   let spec = hoist.hoist(spec)
@@ -49,11 +77,12 @@ pub fn generate(
     validate.validate(ctx)
     |> validate.filter_by_mode(cfg.mode)
   let blocking_errors = validate.errors_only(validation_issues)
-  let warnings = validate.warnings_only(validation_issues)
+  let validation_warnings = validate.warnings_only(validation_issues)
   case list.is_empty(blocking_errors) {
     False -> Error(ValidationErrors(errors: blocking_errors))
     True -> {
       let files = generate_all_files(ctx)
+      let warnings = list.append(capability_warnings, validation_warnings)
       Ok(GenerationSummary(files:, spec_title:, warnings:))
     }
   }

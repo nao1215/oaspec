@@ -9,7 +9,7 @@ import oaspec/openapi/schema.{
 }
 import oaspec/openapi/spec.{
   type OpenApiSpec, type Operation, type PathItem, Components, OpenApiSpec,
-  PathItem,
+  PathItem, Ref, Value,
 }
 import oaspec/util/naming
 
@@ -20,7 +20,7 @@ import oaspec/util/naming
 ///   - Function/type name collisions after case conversion of operationIds
 /// Property name and enum variant deduplication is done at codegen time via
 /// dedup_property_names/1 and dedup_enum_variants/1 to preserve JSON wire names.
-pub fn dedup(spec: OpenApiSpec) -> OpenApiSpec {
+pub fn dedup(spec: OpenApiSpec(stage)) -> OpenApiSpec(stage) {
   let spec = dedup_operation_ids(spec)
   let spec = dedup_schemas(spec)
   spec
@@ -29,7 +29,7 @@ pub fn dedup(spec: OpenApiSpec) -> OpenApiSpec {
 /// Deduplicate operationIds across all operations.
 /// If two operations have the same operationId, the second gets "_2" appended, etc.
 /// Also handles function/type name collisions after case conversion.
-fn dedup_operation_ids(spec: OpenApiSpec) -> OpenApiSpec {
+fn dedup_operation_ids(spec: OpenApiSpec(stage)) -> OpenApiSpec(stage) {
   // Collect all operation IDs with their paths
   let all_ops = collect_all_operations(spec)
 
@@ -76,9 +76,14 @@ fn dedup_operation_ids(spec: OpenApiSpec) -> OpenApiSpec {
   let new_paths =
     dict.to_list(spec.paths)
     |> list.map(fn(entry) {
-      let #(path, path_item) = entry
-      let new_item = dedup_path_item_ops(path_item, path, id_map)
-      #(path, new_item)
+      let #(path, ref_or) = entry
+      case ref_or {
+        Value(path_item) -> {
+          let new_item = dedup_path_item_ops(path_item, path, id_map)
+          #(path, Value(new_item))
+        }
+        Ref(_) as r -> #(path, r)
+      }
     })
     |> dict.from_list()
 
@@ -86,10 +91,10 @@ fn dedup_operation_ids(spec: OpenApiSpec) -> OpenApiSpec {
 }
 
 fn dedup_path_item_ops(
-  item: PathItem,
+  item: PathItem(stage),
   path: String,
   id_map: Dict(#(String, String), String),
-) -> PathItem {
+) -> PathItem(stage) {
   PathItem(
     ..item,
     get: apply_deduped_id(item.get, path, "get", id_map),
@@ -104,11 +109,11 @@ fn dedup_path_item_ops(
 }
 
 fn apply_deduped_id(
-  op: Option(Operation),
+  op: Option(Operation(stage)),
   path: String,
   method: String,
   id_map: Dict(#(String, String), String),
-) -> Option(Operation) {
+) -> Option(Operation(stage)) {
   case op {
     None -> None
     Some(operation) ->
@@ -122,33 +127,38 @@ fn apply_deduped_id(
 
 /// Collect all operations as (path, method_str, operation) tuples.
 fn collect_all_operations(
-  spec: OpenApiSpec,
-) -> List(#(String, String, Operation)) {
+  spec: OpenApiSpec(stage),
+) -> List(#(String, String, Operation(stage))) {
   let paths =
     list.sort(dict.to_list(spec.paths), fn(a, b) { string.compare(a.0, b.0) })
   list.flat_map(paths, fn(entry) {
-    let #(path, item) = entry
-    let ops = [
-      #("get", item.get),
-      #("post", item.post),
-      #("put", item.put),
-      #("delete", item.delete),
-      #("patch", item.patch),
-      #("head", item.head),
-      #("options", item.options),
-      #("trace", item.trace),
-    ]
-    list.filter_map(ops, fn(op) {
-      case op {
-        #(method, Some(operation)) -> Ok(#(path, method, operation))
-        _ -> Error(Nil)
+    let #(path, ref_or) = entry
+    case ref_or {
+      Ref(_) -> []
+      Value(item) -> {
+        let ops = [
+          #("get", item.get),
+          #("post", item.post),
+          #("put", item.put),
+          #("delete", item.delete),
+          #("patch", item.patch),
+          #("head", item.head),
+          #("options", item.options),
+          #("trace", item.trace),
+        ]
+        list.filter_map(ops, fn(op) {
+          case op {
+            #(method, Some(operation)) -> Ok(#(path, method, operation))
+            _ -> Error(Nil)
+          }
+        })
       }
-    })
+    }
   })
 }
 
 /// Recurse into nested schemas within components (e.g. oneOf children).
-fn dedup_schemas(spec: OpenApiSpec) -> OpenApiSpec {
+fn dedup_schemas(spec: OpenApiSpec(stage)) -> OpenApiSpec(stage) {
   case spec.components {
     None -> spec
     Some(components) -> {

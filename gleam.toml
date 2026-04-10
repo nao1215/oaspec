@@ -1,5 +1,5 @@
 name = "oaspec"
-version = "0.7.0"
+version = "0.8.0"
 target = "erlang"
 description = "Generate Gleam code from OpenAPI 3.x specifications"
 licences = ["MIT"]

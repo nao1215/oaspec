@@ -1,16 +1,18 @@
 import oaspec/config.{type Config}
-import oaspec/openapi/spec.{type OpenApiSpec}
+import oaspec/openapi/spec.{type OpenApiSpec, type SpecStage}
 
 /// The version of oaspec used for generated code headers.
-pub const version = "0.7.0"
+pub const version = "0.8.0"
 
 /// Context for code generation, carrying all needed state.
+/// Accepts a spec at any stage so the pipeline can create context
+/// before full resolution (hoist/dedup operate on Unresolved).
 pub type Context {
-  Context(spec: OpenApiSpec, config: Config)
+  Context(spec: OpenApiSpec(SpecStage), config: Config)
 }
 
 /// Create a new generation context.
-pub fn new(spec: OpenApiSpec, config: Config) -> Context {
+pub fn new(spec: OpenApiSpec(SpecStage), config: Config) -> Context {
   Context(spec:, config:)
 }
 

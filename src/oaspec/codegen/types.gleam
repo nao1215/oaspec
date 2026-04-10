@@ -13,7 +13,7 @@ import oaspec/openapi/schema.{
   BooleanSchema, Inline, IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema,
   Reference, StringSchema,
 }
-import oaspec/openapi/spec
+import oaspec/openapi/spec.{type SpecStage, Value}
 import oaspec/util/http
 import oaspec/util/naming
 import oaspec/util/string_extra as se
@@ -150,9 +150,14 @@ fn generate_request_types(ctx: Context) -> String {
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       let has_optional_params =
-        list.any(operation.parameters, fn(p) { !p.required })
+        list.any(operation.parameters, fn(ref_p) {
+          case ref_p {
+            Value(p) -> !p.required
+            _ -> False
+          }
+        })
       let has_optional_body = case operation.request_body {
-        Some(rb) -> !rb.required
+        Some(Value(rb)) -> !rb.required
         _ -> False
       }
       has_optional_params || has_optional_body
@@ -163,14 +168,18 @@ fn generate_request_types(ctx: Context) -> String {
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       let has_ref_params =
-        list.any(operation.parameters, fn(p) {
-          case p.schema {
-            Some(Reference(..)) -> True
+        list.any(operation.parameters, fn(ref_p) {
+          case ref_p {
+            Value(p) ->
+              case p.schema {
+                Some(Reference(..)) -> True
+                _ -> False
+              }
             _ -> False
           }
         })
       let has_typed_body = case operation.request_body {
-        Some(rb) ->
+        Some(Value(rb)) ->
           list.any(dict.to_list(rb.content), fn(ce) {
             let #(_, mt) = ce
             case mt.schema {
@@ -211,7 +220,7 @@ fn generate_request_types(ctx: Context) -> String {
 fn generate_request_type(
   sb: se.StringBuilder,
   op_id: String,
-  operation: spec.Operation,
+  operation: spec.Operation(SpecStage),
   ctx: Context,
 ) -> se.StringBuilder {
   let type_name = naming.schema_to_type_name(op_id) <> "Request"
@@ -228,43 +237,48 @@ fn generate_request_type(
       let sb = sb |> se.indent(1, type_name <> "(")
 
       let sb =
-        list.index_fold(params, sb, fn(sb, param, idx) {
-          let field_name = naming.to_snake_case(param.name)
-          let field_type = case param.schema {
-            Some(Inline(StringSchema(..))) -> "String"
-            Some(Inline(IntegerSchema(..))) -> "Int"
-            Some(Inline(NumberSchema(..))) -> "Float"
-            Some(Inline(BooleanSchema(..))) -> "Bool"
-            Some(Inline(ArraySchema(items:, ..))) -> {
-              let item_type = case items {
-                Inline(StringSchema(..)) -> "String"
-                Inline(IntegerSchema(..)) -> "Int"
-                Inline(NumberSchema(..)) -> "Float"
-                Inline(BooleanSchema(..)) -> "Bool"
-                Reference(name:, ..) -> naming.schema_to_type_name(name)
+        list.index_fold(params, sb, fn(sb, ref_p, idx) {
+          case ref_p {
+            Value(param) -> {
+              let field_name = naming.to_snake_case(param.name)
+              let field_type = case param.schema {
+                Some(Inline(StringSchema(..))) -> "String"
+                Some(Inline(IntegerSchema(..))) -> "Int"
+                Some(Inline(NumberSchema(..))) -> "Float"
+                Some(Inline(BooleanSchema(..))) -> "Bool"
+                Some(Inline(ArraySchema(items:, ..))) -> {
+                  let item_type = case items {
+                    Inline(StringSchema(..)) -> "String"
+                    Inline(IntegerSchema(..)) -> "Int"
+                    Inline(NumberSchema(..)) -> "Float"
+                    Inline(BooleanSchema(..)) -> "Bool"
+                    Reference(name:, ..) -> naming.schema_to_type_name(name)
+                    _ -> "String"
+                  }
+                  "List(" <> item_type <> ")"
+                }
+                Some(Reference(name:, ..)) ->
+                  "types." <> naming.schema_to_type_name(name)
                 _ -> "String"
               }
-              "List(" <> item_type <> ")"
+              let final_type = case param.required {
+                True -> field_type
+                False -> "Option(" <> field_type <> ")"
+              }
+              let has_more = idx < list.length(params) - 1
+              let has_body = option.is_some(operation.request_body)
+              let trailing = case has_more || has_body {
+                True -> ","
+                False -> ""
+              }
+              sb |> se.indent(2, field_name <> ": " <> final_type <> trailing)
             }
-            Some(Reference(name:, ..)) ->
-              "types." <> naming.schema_to_type_name(name)
-            _ -> "String"
+            _ -> sb
           }
-          let final_type = case param.required {
-            True -> field_type
-            False -> "Option(" <> field_type <> ")"
-          }
-          let has_more = idx < list.length(params) - 1
-          let has_body = option.is_some(operation.request_body)
-          let trailing = case has_more || has_body {
-            True -> ","
-            False -> ""
-          }
-          sb |> se.indent(2, field_name <> ": " <> final_type <> trailing)
         })
 
       let sb = case operation.request_body {
-        Some(rb) -> {
+        Some(Value(rb)) -> {
           let body_type = extract_request_body_type(rb, op_id, ctx)
           let wrapped = case rb.required {
             True -> body_type
@@ -272,7 +286,7 @@ fn generate_request_type(
           }
           sb |> se.indent(2, "body: " <> wrapped)
         }
-        None -> sb
+        _ -> sb
       }
 
       sb
@@ -285,35 +299,42 @@ fn generate_request_type(
 
 /// Check if any response variant references the types module.
 fn responses_need_types_import(
-  operations: List(#(String, spec.Operation, String, spec.HttpMethod)),
+  operations: List(
+    #(String, spec.Operation(SpecStage), String, spec.HttpMethod),
+  ),
   _ctx: Context,
 ) -> Bool {
   list.any(operations, fn(op) {
     let #(_op_id, operation, _path, _method) = op
     let responses = dict.to_list(operation.responses)
     list.any(responses, fn(entry) {
-      let #(_status_code, response) = entry
-      let content_entries = dict.to_list(response.content)
-      case content_entries {
-        [] -> False
-        [_, _, ..] -> False
-        [#(media_type_name, media_type)] ->
-          case media_type_name {
-            "text/plain"
-            | "application/xml"
-            | "text/xml"
-            | "application/octet-stream" -> False
-            _ ->
-              case media_type.schema {
-                Some(Reference(..)) -> True
-                Some(Inline(ArraySchema(items: Reference(..), ..))) -> True
-                Some(Inline(ObjectSchema(..))) -> True
-                Some(Inline(OneOfSchema(..))) -> True
-                Some(Inline(AnyOfSchema(..))) -> True
-                Some(Inline(AllOfSchema(..))) -> True
-                _ -> False
+      let #(_status_code, ref_or) = entry
+      case ref_or {
+        Value(response) -> {
+          let content_entries = dict.to_list(response.content)
+          case content_entries {
+            [] -> False
+            [_, _, ..] -> False
+            [#(media_type_name, media_type)] ->
+              case media_type_name {
+                "text/plain"
+                | "application/xml"
+                | "text/xml"
+                | "application/octet-stream" -> False
+                _ ->
+                  case media_type.schema {
+                    Some(Reference(..)) -> True
+                    Some(Inline(ArraySchema(items: Reference(..), ..))) -> True
+                    Some(Inline(ObjectSchema(..))) -> True
+                    Some(Inline(OneOfSchema(..))) -> True
+                    Some(Inline(AnyOfSchema(..))) -> True
+                    Some(Inline(AllOfSchema(..))) -> True
+                    _ -> False
+                  }
               }
           }
+        }
+        _ -> False
       }
     })
   })
@@ -344,7 +365,7 @@ fn generate_response_types(ctx: Context) -> String {
 fn generate_response_type(
   sb: se.StringBuilder,
   op_id: String,
-  operation: spec.Operation,
+  operation: spec.Operation(SpecStage),
   ctx: Context,
 ) -> se.StringBuilder {
   let type_name = naming.schema_to_type_name(op_id) <> "Response"
@@ -357,42 +378,55 @@ fn generate_response_type(
 
       let sb =
         list.fold(responses, sb, fn(sb, entry) {
-          let #(status_code, response) = entry
-          let variant_name = status_code_to_variant(status_code, type_name)
-          let content_entries = dict.to_list(response.content)
+          let #(status_code, ref_or) = entry
+          case ref_or {
+            Value(response) -> {
+              let variant_name = status_code_to_variant(status_code, type_name)
+              let content_entries = dict.to_list(response.content)
 
-          case content_entries {
-            [] -> sb |> se.indent(1, variant_name)
-            // Multiple content types: use String to stay type-safe
-            // since different media types may decode to different Gleam types
-            [_, _, ..] -> sb |> se.indent(1, variant_name <> "(String)")
-            [#(media_type_name, media_type)] ->
-              case media_type_name {
-                // text/plain, XML, octet-stream: always use String type
-                "text/plain"
-                | "application/xml"
-                | "text/xml"
-                | "application/octet-stream" ->
-                  case media_type.schema {
-                    Some(_) ->
-                      sb
-                      |> se.indent(1, variant_name <> "(String)")
-                    None -> sb |> se.indent(1, variant_name)
-                  }
-                // JSON and other content types use schema-derived type
-                _ ->
-                  case media_type.schema {
-                    Some(ref) -> {
-                      let suffix =
-                        "Response" <> http.status_code_suffix(status_code)
-                      let inner_type =
-                        schema_ref_to_type_qualified(ref, op_id, suffix, ctx)
-                      sb
-                      |> se.indent(1, variant_name <> "(" <> inner_type <> ")")
-                    }
-                    None -> sb |> se.indent(1, variant_name)
+              case content_entries {
+                [] -> sb |> se.indent(1, variant_name)
+                // Multiple content types: use String to stay type-safe
+                // since different media types may decode to different Gleam types
+                [_, _, ..] -> sb |> se.indent(1, variant_name <> "(String)")
+                [#(media_type_name, media_type)] ->
+                  case media_type_name {
+                    // text/plain, XML, octet-stream: always use String type
+                    "text/plain"
+                    | "application/xml"
+                    | "text/xml"
+                    | "application/octet-stream" ->
+                      case media_type.schema {
+                        Some(_) ->
+                          sb
+                          |> se.indent(1, variant_name <> "(String)")
+                        None -> sb |> se.indent(1, variant_name)
+                      }
+                    // JSON and other content types use schema-derived type
+                    _ ->
+                      case media_type.schema {
+                        Some(ref) -> {
+                          let suffix =
+                            "Response" <> http.status_code_suffix(status_code)
+                          let inner_type =
+                            schema_ref_to_type_qualified(
+                              ref,
+                              op_id,
+                              suffix,
+                              ctx,
+                            )
+                          sb
+                          |> se.indent(
+                            1,
+                            variant_name <> "(" <> inner_type <> ")",
+                          )
+                        }
+                        None -> sb |> se.indent(1, variant_name)
+                      }
                   }
               }
+            }
+            _ -> sb
           }
         })
 
@@ -488,65 +522,78 @@ pub fn merge_allof_schemas(
 /// Collect all operations from the spec with their IDs, paths, and methods.
 pub fn collect_operations(
   ctx: Context,
-) -> List(#(String, spec.Operation, String, spec.HttpMethod)) {
+) -> List(#(String, spec.Operation(SpecStage), String, spec.HttpMethod)) {
   let paths =
     list.sort(dict.to_list(ctx.spec.paths), fn(a, b) {
       string.compare(a.0, b.0)
     })
   list.flat_map(paths, fn(entry) {
-    let #(path, path_item) = entry
-    let ops = [
-      #(path_item.get, spec.Get),
-      #(path_item.post, spec.Post),
-      #(path_item.put, spec.Put),
-      #(path_item.delete, spec.Delete),
-      #(path_item.patch, spec.Patch),
-      #(path_item.head, spec.Head),
-      #(path_item.options, spec.Options),
-      #(path_item.trace, spec.Trace),
-    ]
-    list.filter_map(ops, fn(op_entry) {
-      let #(maybe_op, method) = op_entry
-      case maybe_op {
-        Some(operation) -> {
-          // Merge path-level parameters with operation parameters.
-          // Operation params take precedence by (name, in) key per OpenAPI spec.
-          let op_param_keys =
-            list.map(operation.parameters, fn(p) { #(p.name, p.in_) })
-          let inherited_params =
-            list.filter(path_item.parameters, fn(p) {
-              !list.contains(op_param_keys, #(p.name, p.in_))
-            })
-          let merged_params =
-            list.append(inherited_params, operation.parameters)
-          // Inherit top-level security if operation doesn't define its own.
-          // operation.security = None → inherit, Some([]) → no security,
-          // Some([...]) → use operation-level.
-          let effective_security = case operation.security {
-            Some(sec) -> sec
-            None -> ctx.spec.security
-          }
-          let operation =
-            spec.Operation(
-              ..operation,
-              parameters: merged_params,
-              security: Some(effective_security),
-            )
+    let #(path, ref_or) = entry
+    case ref_or {
+      Value(path_item) -> {
+        let ops = [
+          #(path_item.get, spec.Get),
+          #(path_item.post, spec.Post),
+          #(path_item.put, spec.Put),
+          #(path_item.delete, spec.Delete),
+          #(path_item.patch, spec.Patch),
+          #(path_item.head, spec.Head),
+          #(path_item.options, spec.Options),
+          #(path_item.trace, spec.Trace),
+        ]
+        list.filter_map(ops, fn(op_entry) {
+          let #(maybe_op, method) = op_entry
+          case maybe_op {
+            Some(operation) -> {
+              // Merge path-level parameters with operation parameters.
+              // Operation params take precedence by (name, in) key per OpenAPI spec.
+              let op_param_keys =
+                list.filter_map(operation.parameters, fn(ref_p) {
+                  case ref_p {
+                    Value(p) -> Ok(#(p.name, p.in_))
+                    _ -> Error(Nil)
+                  }
+                })
+              let inherited_params =
+                list.filter(path_item.parameters, fn(ref_p) {
+                  case ref_p {
+                    Value(p) -> !list.contains(op_param_keys, #(p.name, p.in_))
+                    _ -> True
+                  }
+                })
+              let merged_params =
+                list.append(inherited_params, operation.parameters)
+              // Inherit top-level security if operation doesn't define its own.
+              // operation.security = None → inherit, Some([]) → no security,
+              // Some([...]) → use operation-level.
+              let effective_security = case operation.security {
+                Some(sec) -> sec
+                None -> ctx.spec.security
+              }
+              let operation =
+                spec.Operation(
+                  ..operation,
+                  parameters: merged_params,
+                  security: Some(effective_security),
+                )
 
-          let op_id = case operation.operation_id {
-            Some(id) -> id
-            None ->
-              spec.method_to_lower(method)
-              <> "_"
-              <> string.replace(path, "/", "_")
-              |> string.replace("{", "")
-              |> string.replace("}", "")
+              let op_id = case operation.operation_id {
+                Some(id) -> id
+                None ->
+                  spec.method_to_lower(method)
+                  <> "_"
+                  <> string.replace(path, "/", "_")
+                  |> string.replace("{", "")
+                  |> string.replace("}", "")
+              }
+              Ok(#(op_id, operation, path, method))
+            }
+            None -> Error(Nil)
           }
-          Ok(#(op_id, operation, path, method))
-        }
-        None -> Error(Nil)
+        })
       }
-    })
+      _ -> []
+    }
   })
 }
 
@@ -736,7 +783,7 @@ pub fn filter_write_only_properties(
 /// Extract the Gleam type for a request body from its content media types.
 /// Uses types. prefix since request body schemas live in the types module.
 fn extract_request_body_type(
-  rb: spec.RequestBody,
+  rb: spec.RequestBody(SpecStage),
   op_id: String,
   ctx: Context,
 ) -> String {

@@ -7,6 +7,8 @@ components:
   schemas:
     Tuple:
       type: array
+      items:
+        type: string
       prefixItems:
         - type: string
         - type: integer

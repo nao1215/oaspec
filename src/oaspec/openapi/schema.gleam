@@ -16,6 +16,9 @@ pub type SchemaMetadata {
     write_only: Bool,
     default: Option(String),
     example: Option(String),
+    const_value: Option(String),
+    raw_type: Option(List(String)),
+    unsupported_keywords: List(String),
   )
 }
 
@@ -30,6 +33,9 @@ pub fn default_metadata() -> SchemaMetadata {
     write_only: False,
     default: option.None,
     example: option.None,
+    const_value: option.None,
+    raw_type: option.None,
+    unsupported_keywords: [],
   )
 }
 

@@ -8,7 +8,8 @@ import oaspec/openapi/schema.{
   Inline, ObjectSchema, OneOfSchema, Reference,
 }
 import oaspec/openapi/spec.{
-  type OpenApiSpec, type PathItem, Components, OpenApiSpec, PathItem,
+  type OpenApiSpec, type PathItem, type RefOr, Components, OpenApiSpec, PathItem,
+  Ref, Value,
 }
 import oaspec/util/naming
 
@@ -27,7 +28,7 @@ type HoistState {
 /// Hoist inline complex schemas into components.schemas, replacing them with $ref.
 /// This is a pre-processing pass that runs after parsing and before validation.
 /// The function is idempotent: running it twice produces the same result.
-pub fn hoist(spec: OpenApiSpec) -> OpenApiSpec {
+pub fn hoist(spec: OpenApiSpec(stage)) -> OpenApiSpec(stage) {
   let existing_schemas = case spec.components {
     Some(components) -> components.schemas
     None -> dict.new()
@@ -342,24 +343,29 @@ fn hoist_component_schemas(
 
 /// Walk all paths and operations, hoisting inline schemas.
 fn hoist_paths(
-  paths: Dict(String, PathItem),
+  paths: Dict(String, RefOr(PathItem(stage))),
   state: HoistState,
-) -> #(Dict(String, PathItem), HoistState) {
+) -> #(Dict(String, RefOr(PathItem(stage))), HoistState) {
   dict.to_list(paths)
   |> list.fold(#(dict.new(), state), fn(acc, entry) {
     let #(result, state) = acc
-    let #(path, path_item) = entry
-    let #(hoisted_item, state) = hoist_path_item(path_item, path, state)
-    #(dict.insert(result, path, hoisted_item), state)
+    let #(path, ref_or_path_item) = entry
+    case ref_or_path_item {
+      Ref(_) -> #(dict.insert(result, path, ref_or_path_item), state)
+      Value(path_item) -> {
+        let #(hoisted_item, state) = hoist_path_item(path_item, path, state)
+        #(dict.insert(result, path, Value(hoisted_item)), state)
+      }
+    }
   })
 }
 
 /// Hoist schemas within a single PathItem.
 fn hoist_path_item(
-  path_item: PathItem,
+  path_item: PathItem(stage),
   path: String,
   state: HoistState,
-) -> #(PathItem, HoistState) {
+) -> #(PathItem(stage), HoistState) {
   let #(get, state) = hoist_maybe_operation(path_item.get, "get", path, state)
   let #(post, state) =
     hoist_maybe_operation(path_item.post, "post", path, state)
@@ -392,11 +398,11 @@ fn hoist_path_item(
 
 /// Hoist schemas in an optional operation.
 fn hoist_maybe_operation(
-  maybe_op: Option(spec.Operation),
+  maybe_op: Option(spec.Operation(stage)),
   method: String,
   path: String,
   state: HoistState,
-) -> #(Option(spec.Operation), HoistState) {
+) -> #(Option(spec.Operation(stage)), HoistState) {
   case maybe_op {
     None -> #(None, state)
     Some(operation) -> {
@@ -417,10 +423,10 @@ fn hoist_maybe_operation(
 
 /// Hoist schemas within a single Operation.
 fn hoist_operation(
-  operation: spec.Operation,
+  operation: spec.Operation(stage),
   op_id: String,
   state: HoistState,
-) -> #(spec.Operation, HoistState) {
+) -> #(spec.Operation(stage), HoistState) {
   // Hoist parameter schemas (complex object/array params)
   let #(parameters, state) =
     hoist_parameters(operation.parameters, op_id, state)
@@ -428,9 +434,10 @@ fn hoist_operation(
   // Hoist request body schemas
   let #(request_body, state) = case operation.request_body {
     None -> #(None, state)
-    Some(rb) -> {
+    Some(Ref(r)) -> #(Some(Ref(r)), state)
+    Some(Value(rb)) -> {
       let #(hoisted_rb, state) = hoist_request_body(rb, op_id, state)
-      #(Some(hoisted_rb), state)
+      #(Some(Value(hoisted_rb)), state)
     }
   }
 
@@ -444,31 +451,36 @@ fn hoist_operation(
 
 /// Hoist complex schemas within operation parameters.
 fn hoist_parameters(
-  params: List(spec.Parameter),
+  params: List(RefOr(spec.Parameter(stage))),
   op_id: String,
   state: HoistState,
-) -> #(List(spec.Parameter), HoistState) {
-  list.fold(params, #([], state), fn(acc, param) {
+) -> #(List(RefOr(spec.Parameter(stage))), HoistState) {
+  list.fold(params, #([], state), fn(acc, ref_or_param) {
     let #(params_acc, state) = acc
-    case param.schema {
-      Some(schema_ref) -> {
-        let suffix = "Param" <> naming.to_pascal_case(param.name)
-        let #(hoisted, state) =
-          hoist_schema_ref(schema_ref, op_id, suffix, state)
-        let new_param = spec.Parameter(..param, schema: Some(hoisted))
-        #(list.append(params_acc, [new_param]), state)
+    case ref_or_param {
+      Ref(_) -> #(list.append(params_acc, [ref_or_param]), state)
+      Value(param) -> {
+        case param.schema {
+          Some(schema_ref) -> {
+            let suffix = "Param" <> naming.to_pascal_case(param.name)
+            let #(hoisted, state) =
+              hoist_schema_ref(schema_ref, op_id, suffix, state)
+            let new_param = spec.Parameter(..param, schema: Some(hoisted))
+            #(list.append(params_acc, [Value(new_param)]), state)
+          }
+          None -> #(list.append(params_acc, [ref_or_param]), state)
+        }
       }
-      None -> #(list.append(params_acc, [param]), state)
     }
   })
 }
 
 /// Hoist schemas within a RequestBody.
 fn hoist_request_body(
-  rb: spec.RequestBody,
+  rb: spec.RequestBody(stage),
   op_id: String,
   state: HoistState,
-) -> #(spec.RequestBody, HoistState) {
+) -> #(spec.RequestBody(stage), HoistState) {
   let #(new_content, state) =
     dict.to_list(rb.content)
     |> list.fold(#(dict.new(), state), fn(acc, entry) {
@@ -489,31 +501,39 @@ fn hoist_request_body(
 
 /// Hoist schemas within response definitions.
 fn hoist_responses(
-  responses: Dict(String, spec.Response),
+  responses: Dict(String, RefOr(spec.Response(stage))),
   op_id: String,
   state: HoistState,
-) -> #(Dict(String, spec.Response), HoistState) {
+) -> #(Dict(String, RefOr(spec.Response(stage))), HoistState) {
   dict.to_list(responses)
   |> list.fold(#(dict.new(), state), fn(acc, entry) {
     let #(result, state) = acc
-    let #(status_code, response) = entry
-    let #(new_content, state) =
-      dict.to_list(response.content)
-      |> list.fold(#(dict.new(), state), fn(ct_acc, ct_entry) {
-        let #(ct_result, state) = ct_acc
-        let #(media_type_name, media_type) = ct_entry
-        case media_type.schema {
-          Some(schema_ref) -> {
-            let suffix = "Response" <> naming.to_pascal_case(status_code)
-            let #(hoisted, state) =
-              hoist_schema_ref(schema_ref, op_id, suffix, state)
-            let mt = spec.MediaType(..media_type, schema: Some(hoisted))
-            #(dict.insert(ct_result, media_type_name, mt), state)
-          }
-          None -> #(dict.insert(ct_result, media_type_name, media_type), state)
-        }
-      })
-    let hoisted_response = spec.Response(..response, content: new_content)
-    #(dict.insert(result, status_code, hoisted_response), state)
+    let #(status_code, ref_or_response) = entry
+    case ref_or_response {
+      Ref(_) -> #(dict.insert(result, status_code, ref_or_response), state)
+      Value(response) -> {
+        let #(new_content, state) =
+          dict.to_list(response.content)
+          |> list.fold(#(dict.new(), state), fn(ct_acc, ct_entry) {
+            let #(ct_result, state) = ct_acc
+            let #(media_type_name, media_type) = ct_entry
+            case media_type.schema {
+              Some(schema_ref) -> {
+                let suffix = "Response" <> naming.to_pascal_case(status_code)
+                let #(hoisted, state) =
+                  hoist_schema_ref(schema_ref, op_id, suffix, state)
+                let mt = spec.MediaType(..media_type, schema: Some(hoisted))
+                #(dict.insert(ct_result, media_type_name, mt), state)
+              }
+              None -> #(
+                dict.insert(ct_result, media_type_name, media_type),
+                state,
+              )
+            }
+          })
+        let hoisted_response = spec.Response(..response, content: new_content)
+        #(dict.insert(result, status_code, Value(hoisted_response)), state)
+      }
+    }
   })
 }

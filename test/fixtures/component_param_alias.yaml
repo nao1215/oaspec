@@ -1,0 +1,22 @@
+openapi: "3.0.0"
+info:
+  title: Component Parameter Alias Test
+  version: 1.0.0
+paths:
+  /test:
+    get:
+      operationId: getTest
+      parameters:
+        - $ref: "#/components/parameters/AliasedLimit"
+      responses:
+        "200":
+          description: OK
+components:
+  parameters:
+    BaseLimit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+    AliasedLimit:
+      $ref: "#/components/parameters/BaseLimit"
