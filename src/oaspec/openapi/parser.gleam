@@ -547,7 +547,7 @@ fn parse_parameter(
         |> result.unwrap(None)
         |> option.unwrap(False)
 
-      let content = parse_content_map(node)
+      use content <- result.try(parse_content_map(node))
       let examples = parse_string_map(node, "examples")
 
       Ok(Parameter(
@@ -819,7 +819,7 @@ fn parse_required_content(
               yay.extract_optional_string(value_node, "example")
               |> result.unwrap(None)
             let mt_examples = parse_string_map(value_node, "examples")
-            let mt_encoding = parse_encoding_map(value_node)
+            use mt_encoding <- result.try(parse_encoding_map(value_node))
             Ok(dict.insert(
               acc,
               media_type_name,
@@ -866,7 +866,7 @@ fn parse_content(
               yay.extract_optional_string(value_node, "example")
               |> result.unwrap(None)
             let mt_examples = parse_string_map(value_node, "examples")
-            let mt_encoding = parse_encoding_map(value_node)
+            use mt_encoding <- result.try(parse_encoding_map(value_node))
             Ok(dict.insert(
               acc,
               media_type_name,
@@ -937,8 +937,8 @@ fn parse_response(
       )
 
       use content <- result.try(parse_content(node, "response"))
-      let headers = parse_headers_map(node)
-      let links = parse_links_map(node)
+      use headers <- result.try(parse_headers_map(node))
+      use links <- result.try(parse_links_map(node))
 
       Ok(Response(description:, content:, headers:, links:))
     }
@@ -958,9 +958,9 @@ fn parse_components(root: yay.Node) -> Result(Components, ParseError) {
   use responses <- result.try(parse_responses_map(components_node))
   use security_schemes <- result.try(parse_security_schemes_map(components_node))
   use path_items <- result.try(parse_path_items_map(components_node))
-  let headers = parse_headers_map(components_node)
+  use headers <- result.try(parse_headers_map(components_node))
   let examples = parse_string_map(components_node, "examples")
-  let links = parse_links_map(components_node)
+  use links <- result.try(parse_links_map(components_node))
 
   Ok(Components(
     schemas:,
@@ -2030,29 +2030,33 @@ fn parse_string_map(node: yay.Node, key: String) -> Dict(String, String) {
 }
 
 /// Parse a content map (non-result version for use in Parameter).
-fn parse_content_map(node: yay.Node) -> Dict(String, MediaType) {
+fn parse_content_map(
+  node: yay.Node,
+) -> Result(Dict(String, MediaType), ParseError) {
   case yay.select_sugar(from: node, selector: "content") {
     Ok(yay.NodeMap(entries)) ->
-      list.fold(entries, dict.new(), fn(acc, entry) {
+      list.try_fold(entries, dict.new(), fn(acc, entry) {
         let #(key_node, value_node) = entry
         case key_node {
           yay.NodeStr(media_type_name) -> {
-            let mt_schema = case
-              yay.select_sugar(from: value_node, selector: "schema")
-            {
-              Ok(schema_node) ->
-                case parse_schema_ref(schema_node, "content.schema") {
-                  Ok(sr) -> Some(sr)
-                  _ -> None
+            use mt_schema <- result.try(
+              case yay.select_sugar(from: value_node, selector: "schema") {
+                Ok(schema_node) -> {
+                  use sr <- result.try(parse_schema_ref(
+                    schema_node,
+                    "content.schema",
+                  ))
+                  Ok(Some(sr))
                 }
-              _ -> None
-            }
+                _ -> Ok(None)
+              },
+            )
             let mt_example =
               yay.extract_optional_string(value_node, "example")
               |> result.unwrap(None)
             let mt_examples = parse_string_map(value_node, "examples")
-            let mt_encoding = parse_encoding_map(value_node)
-            dict.insert(
+            use mt_encoding <- result.try(parse_encoding_map(value_node))
+            Ok(dict.insert(
               acc,
               media_type_name,
               MediaType(
@@ -2061,57 +2065,61 @@ fn parse_content_map(node: yay.Node) -> Dict(String, MediaType) {
                 examples: mt_examples,
                 encoding: mt_encoding,
               ),
-            )
+            ))
           }
-          _ -> acc
+          _ -> Ok(acc)
         }
       })
-    _ -> dict.new()
+    _ -> Ok(dict.new())
   }
 }
 
 /// Parse encoding map from a media type node.
-fn parse_encoding_map(node: yay.Node) -> Dict(String, Encoding) {
+fn parse_encoding_map(
+  node: yay.Node,
+) -> Result(Dict(String, Encoding), ParseError) {
   case yay.select_sugar(from: node, selector: "encoding") {
     Ok(yay.NodeMap(entries)) ->
-      list.fold(entries, dict.new(), fn(acc, entry) {
+      list.try_fold(entries, dict.new(), fn(acc, entry) {
         let #(key_node, value_node) = entry
         case key_node {
           yay.NodeStr(prop_name) -> {
             let content_type =
               yay.extract_optional_string(value_node, "contentType")
               |> result.unwrap(None)
-            let style =
-              yay.extract_optional_string(value_node, "style")
-              |> result.unwrap(None)
-              |> option.map(fn(s) {
-                case parse_parameter_style(s) {
-                  Ok(parsed) -> Some(parsed)
-                  Error(_) -> None
+            use style <- result.try(
+              case
+                yay.extract_optional_string(value_node, "style")
+                |> result.unwrap(None)
+              {
+                Some(s) -> {
+                  use parsed <- result.try(parse_parameter_style(s))
+                  Ok(Some(parsed))
                 }
-              })
-              |> option.flatten
+                None -> Ok(None)
+              },
+            )
             let explode =
               yay.extract_optional_bool(value_node, "explode")
               |> result.unwrap(None)
-            dict.insert(
+            Ok(dict.insert(
               acc,
               prop_name,
               Encoding(content_type:, style:, explode:),
-            )
+            ))
           }
-          _ -> acc
+          _ -> Ok(acc)
         }
       })
-    _ -> dict.new()
+    _ -> Ok(dict.new())
   }
 }
 
 /// Parse headers map from a node.
-fn parse_headers_map(node: yay.Node) -> Dict(String, Header) {
+fn parse_headers_map(node: yay.Node) -> Result(Dict(String, Header), ParseError) {
   case yay.select_sugar(from: node, selector: "headers") {
     Ok(yay.NodeMap(entries)) ->
-      list.fold(entries, dict.new(), fn(acc, entry) {
+      list.try_fold(entries, dict.new(), fn(acc, entry) {
         let #(key_node, value_node) = entry
         case key_node {
           yay.NodeStr(header_name) -> {
@@ -2122,39 +2130,36 @@ fn parse_headers_map(node: yay.Node) -> Dict(String, Header) {
               yay.extract_optional_bool(value_node, "required")
               |> result.unwrap(None)
               |> option.unwrap(False)
-            let hdr_schema = case
-              yay.select_sugar(from: value_node, selector: "schema")
-            {
-              Ok(schema_node) ->
-                case
-                  parse_schema_ref(
+            use hdr_schema <- result.try(
+              case yay.select_sugar(from: value_node, selector: "schema") {
+                Ok(schema_node) -> {
+                  use sr <- result.try(parse_schema_ref(
                     schema_node,
                     "header." <> header_name <> ".schema",
-                  )
-                {
-                  Ok(sr) -> Some(sr)
-                  _ -> None
+                  ))
+                  Ok(Some(sr))
                 }
-              _ -> None
-            }
-            dict.insert(
+                _ -> Ok(None)
+              },
+            )
+            Ok(dict.insert(
               acc,
               header_name,
               Header(description:, required:, schema: hdr_schema),
-            )
+            ))
           }
-          _ -> acc
+          _ -> Ok(acc)
         }
       })
-    _ -> dict.new()
+    _ -> Ok(dict.new())
   }
 }
 
 /// Parse links map from a node.
-fn parse_links_map(node: yay.Node) -> Dict(String, Link) {
+fn parse_links_map(node: yay.Node) -> Result(Dict(String, Link), ParseError) {
   case yay.select_sugar(from: node, selector: "links") {
     Ok(yay.NodeMap(entries)) ->
-      list.fold(entries, dict.new(), fn(acc, entry) {
+      list.try_fold(entries, dict.new(), fn(acc, entry) {
         let #(key_node, value_node) = entry
         case key_node {
           yay.NodeStr(link_name) -> {
@@ -2164,12 +2169,12 @@ fn parse_links_map(node: yay.Node) -> Dict(String, Link) {
             let description =
               yay.extract_optional_string(value_node, "description")
               |> result.unwrap(None)
-            dict.insert(acc, link_name, Link(operation_id:, description:))
+            Ok(dict.insert(acc, link_name, Link(operation_id:, description:)))
           }
-          _ -> acc
+          _ -> Ok(acc)
         }
       })
-    _ -> dict.new()
+    _ -> Ok(dict.new())
   }
 }
 
