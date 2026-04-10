@@ -3,7 +3,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
-import oaspec/codegen/types as type_gen
+import oaspec/openapi/operations
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{type SchemaRef, Inline, ObjectSchema, Reference}
 import oaspec/openapi/spec
@@ -44,7 +44,7 @@ fn generate_handlers(ctx: Context) -> String {
       ctx.config.package <> "/response_types",
     ])
 
-  let operations = type_gen.collect_operations(ctx)
+  let operations = operations.collect_operations(ctx)
 
   let sb =
     list.fold(operations, sb, fn(sb, op) {
@@ -166,7 +166,7 @@ fn url_expression_to_suffix(url_expression: String) -> String {
 
 /// Generate a router module that dispatches requests.
 fn generate_router(ctx: Context) -> String {
-  let operations = type_gen.collect_operations(ctx)
+  let operations = operations.collect_operations(ctx)
   let has_deep_object =
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op

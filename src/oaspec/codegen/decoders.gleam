@@ -6,6 +6,7 @@ import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
 import oaspec/codegen/schema_dispatch
 import oaspec/codegen/types as type_gen
 import oaspec/openapi/dedup
+import oaspec/openapi/operations
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AdditionalPropertiesForbidden,
@@ -144,7 +145,7 @@ fn generate_anonymous_decoders(
   sb: se.StringBuilder,
   ctx: Context,
 ) -> se.StringBuilder {
-  let operations = type_gen.collect_operations(ctx)
+  let operations = operations.collect_operations(ctx)
   list.fold(operations, sb, fn(sb, op) {
     let #(op_id, operation, _path, _method) = op
     let sb = generate_anonymous_response_decoders(sb, op_id, operation, ctx)
@@ -1306,7 +1307,7 @@ fn generate_anonymous_encoders(
   sb: se.StringBuilder,
   ctx: Context,
 ) -> se.StringBuilder {
-  let operations = type_gen.collect_operations(ctx)
+  let operations = operations.collect_operations(ctx)
   list.fold(operations, sb, fn(sb, op) {
     let #(op_id, operation, _path, _method) = op
     // Only requestBody inline schemas need encoders (for client body encoding)
