@@ -30,8 +30,38 @@ fn coerce_stage(spec: OpenApiSpec(a)) -> OpenApiSpec(b)
 fn resolve_internal(
   spec: OpenApiSpec(stage),
 ) -> Result(OpenApiSpec(stage), List(Diagnostic)) {
+  let empty_components =
+    Components(
+      schemas: dict.new(),
+      parameters: dict.new(),
+      request_bodies: dict.new(),
+      responses: dict.new(),
+      security_schemes: dict.new(),
+      path_items: dict.new(),
+      headers: dict.new(),
+      examples: dict.new(),
+      links: dict.new(),
+    )
   case spec.components {
-    None -> Ok(spec)
+    None -> {
+      // Even without components, paths/webhooks may contain inline $ref
+      // that must be resolved (or reported as errors).
+      use resolved_paths <- result.try(resolve_inline_paths(
+        spec.paths,
+        empty_components,
+      ))
+      use resolved_webhooks <- result.try(resolve_inline_paths(
+        spec.webhooks,
+        empty_components,
+      ))
+      Ok(
+        spec.OpenApiSpec(
+          ..spec,
+          paths: resolved_paths,
+          webhooks: resolved_webhooks,
+        ),
+      )
+    }
     Some(components) -> {
       use parameters <- result.try(
         resolve_component_dict(components.parameters, "components.parameters")

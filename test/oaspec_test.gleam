@@ -8939,12 +8939,29 @@ pub fn validate_invalid_security_ref_rejects_test() {
   }
 }
 
-/// External file $ref for parameter should be rejected.
+/// External file $ref for parameter should produce a resolve error, not a panic.
 pub fn external_param_ref_rejects_test() {
-  // With lazy ref resolution, external refs are stored as Ref(...) at parse time.
-  // Validation/resolution will catch them later.
-  let result = parser.parse_file("test/fixtures/external_param_ref.yaml")
-  let assert Ok(_spec) = result
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/external_param_ref.yaml")
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Both,
+    )
+  // Must produce a diagnostic error, not panic
+  let result = generate.generate(spec, cfg)
+  case result {
+    Error(generate.ValidationErrors(errors:)) -> {
+      list.length(errors) |> should.not_equal(0)
+      let has_ref_error =
+        list.any(errors, fn(e) { string.contains(e.message, "Limit") })
+      should.be_true(has_ref_error)
+    }
+    Ok(_) -> should.fail()
+  }
 }
 
 /// $ref pointing to wrong component kind is now stored as Ref(...) at parse time.
