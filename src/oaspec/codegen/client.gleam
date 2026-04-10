@@ -464,14 +464,7 @@ fn generate_default_base_url(
       |> se.line("}")
       |> se.blank_line()
     }
-    [] -> {
-      sb
-      |> se.doc_comment("Build the base URL from server template variables.")
-      |> se.line("pub fn default_base_url() -> String {")
-      |> se.indent(1, "\"\"")
-      |> se.line("}")
-      |> se.blank_line()
-    }
+    [] -> sb
   }
 }
 

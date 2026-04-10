@@ -5474,12 +5474,9 @@ paths:
   let assert [client_file] = files
   let content = client_file.content
 
-  string.contains(content, "pub fn default_base_url() -> String {")
-  |> should.be_true()
-
-  // With no servers, should return empty string
-  string.contains(content, "  \"\"")
-  |> should.be_true()
+  // With no servers, default_base_url should not be generated
+  string.contains(content, "default_base_url")
+  |> should.be_false()
 }
 
 // --- Feature: Guards for exclusiveMinimum, exclusiveMaximum, multipleOf ---
