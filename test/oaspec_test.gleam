@@ -18,6 +18,7 @@ import oaspec/config
 import oaspec/generate
 import oaspec/openapi/dedup
 import oaspec/openapi/hoist
+import oaspec/openapi/parse_error
 import oaspec/openapi/parser
 import oaspec/openapi/resolver
 import oaspec/openapi/schema
@@ -452,7 +453,7 @@ paths:
 "
   let result = parser.parse_string(yaml)
   should.be_error(result)
-  let assert Error(parser.InvalidValue(path: _, detail: detail)) = result
+  let assert Error(parse_error.InvalidValue(path: _, detail: detail)) = result
   string.contains(detail, "required: true") |> should.be_true()
 }
 
@@ -695,7 +696,7 @@ pub fn validate_missing_responses_rejects_test() {
 pub fn parse_invalid_param_location_fails_test() {
   let result = parser.parse_file("test/fixtures/invalid_param_location.yaml")
   should.be_error(result)
-  let assert Error(parser.InvalidValue(path: "parameter.in", detail: _)) =
+  let assert Error(parse_error.InvalidValue(path: "parameter.in", detail: _)) =
     result
 }
 
@@ -709,7 +710,8 @@ paths: {}
 "
   let result = parser.parse_string(yaml)
   should.be_error(result)
-  let assert Error(parser.MissingField(path: "", field: "openapi")) = result
+  let assert Error(parse_error.MissingField(path: "", field: "openapi")) =
+    result
 }
 
 pub fn parse_missing_info_fails_test() {
@@ -720,7 +722,7 @@ paths: {}
 "
   let result = parser.parse_string(yaml)
   should.be_error(result)
-  let assert Error(parser.MissingField(path: "", field: "info")) = result
+  let assert Error(parse_error.MissingField(path: "", field: "info")) = result
 }
 
 pub fn parse_missing_info_title_fails_test() {
@@ -733,7 +735,8 @@ paths: {}
 "
   let result = parser.parse_string(yaml)
   should.be_error(result)
-  let assert Error(parser.MissingField(path: "info", field: "title")) = result
+  let assert Error(parse_error.MissingField(path: "info", field: "title")) =
+    result
 }
 
 pub fn validate_deep_inline_oneof_in_request_body_accepted_test() {
@@ -7458,7 +7461,7 @@ pub fn oss_libopenapi_all_components_validates_security_test() {
 pub fn oss_libopenapi_burgershop_rejects_not_keyword_test() {
   let result = parser.parse_file("test/fixtures/oss_libopenapi_burgershop.yaml")
   case result {
-    Error(parser.InvalidValue(_, detail)) ->
+    Error(parse_error.InvalidValue(_, detail)) ->
       should.be_true(string.contains(detail, "not"))
     _ -> should.fail()
   }
@@ -8155,7 +8158,7 @@ pub fn oss_kin_openapi_components_json_rejects_invalid_scheme_test() {
   let result =
     parser.parse_file("test/fixtures/oss_kin_openapi_components.json")
   case result {
-    Error(parser.InvalidValue(_, detail)) ->
+    Error(parse_error.InvalidValue(_, detail)) ->
       should.be_true(string.contains(detail, "cookie"))
     _ -> should.fail()
   }
@@ -8195,7 +8198,7 @@ pub fn oss_spec_validator_missing_description_rejects_test() {
       "test/fixtures/oss_spec_validator_missing_description.yaml",
     )
   case result {
-    Error(parser.MissingField(_, "description")) -> should.be_true(True)
+    Error(parse_error.MissingField(_, "description")) -> should.be_true(True)
     Error(e) -> {
       let msg = parser.parse_error_to_string(e)
       should.be_true(string.contains(msg, "description"))
@@ -8480,7 +8483,7 @@ pub fn oss_openapi_gen_missing_info_rejects_test() {
   let result =
     parser.parse_file("test/fixtures/oss_openapi_gen_missing_info.yaml")
   case result {
-    Error(parser.MissingField(_, "info")) -> should.be_true(True)
+    Error(parse_error.MissingField(_, "info")) -> should.be_true(True)
     Error(e) -> {
       let msg = parser.parse_error_to_string(e)
       should.be_true(string.contains(msg, "info"))
@@ -8495,7 +8498,7 @@ pub fn oss_openapi_gen_missing_info_attr_rejects_test() {
   let result =
     parser.parse_file("test/fixtures/oss_openapi_gen_missing_info_attr.yaml")
   case result {
-    Error(parser.MissingField(_, _)) -> should.be_true(True)
+    Error(parse_error.MissingField(_, _)) -> should.be_true(True)
     _ -> should.fail()
   }
 }
@@ -8518,7 +8521,7 @@ pub fn oss_spec_validator_bench_petstore_parses_test() {
 pub fn oss_spec_validator_empty_v30_rejects_test() {
   let result = parser.parse_file("test/fixtures/oss_spec_validator_empty.yaml")
   case result {
-    Error(parser.MissingField(_, "info")) -> should.be_true(True)
+    Error(parse_error.MissingField(_, "info")) -> should.be_true(True)
     Error(e) -> {
       let msg = parser.parse_error_to_string(e)
       should.be_true(string.contains(msg, "info"))
@@ -8643,7 +8646,7 @@ pub fn oss_swagger_parser_java_31_basic_rejects_multi_type_test() {
   let result =
     parser.parse_file("test/fixtures/oss_swagger_parser_java_31_basic.yaml")
   case result {
-    Error(parser.InvalidValue(_, detail)) ->
+    Error(parse_error.InvalidValue(_, detail)) ->
       should.be_true(string.contains(detail, "oneOf"))
     _ -> should.fail()
   }
@@ -8655,7 +8658,7 @@ pub fn oss_swagger_parser_java_31_security_rejects_mutualtls_test() {
   let result =
     parser.parse_file("test/fixtures/oss_swagger_parser_java_31_security.yaml")
   case result {
-    Error(parser.InvalidValue(_, detail)) ->
+    Error(parse_error.InvalidValue(_, detail)) ->
       should.be_true(string.contains(detail, "mutualTLS"))
     _ -> should.fail()
   }
@@ -8671,7 +8674,7 @@ pub fn oss_swagger_parser_java_31_schema_siblings_rejects_test() {
       "test/fixtures/oss_swagger_parser_java_31_schema_siblings.yaml",
     )
   case result {
-    Error(parser.InvalidValue(_, detail)) ->
+    Error(parse_error.InvalidValue(_, detail)) ->
       should.be_true(string.contains(detail, "dependentSchemas"))
     _ -> should.fail()
   }
@@ -8685,7 +8688,7 @@ pub fn oss_swagger_parser_java_31_petstore_more_rejects_multi_type_test() {
       "test/fixtures/oss_swagger_parser_java_31_petstore_more.yaml",
     )
   case result {
-    Error(parser.InvalidValue(_, detail)) ->
+    Error(parse_error.InvalidValue(_, detail)) ->
       should.be_true(string.contains(detail, "oneOf"))
     _ -> should.fail()
   }
@@ -8714,7 +8717,7 @@ pub fn oss_spec_validator_broken_ref_parses_test() {
 pub fn unsupported_const_rejects_test() {
   let result = parser.parse_file("test/fixtures/unsupported_const.yaml")
   case result {
-    Error(parser.InvalidValue(_, detail)) ->
+    Error(parse_error.InvalidValue(_, detail)) ->
       should.be_true(string.contains(detail, "const"))
     _ -> should.fail()
   }
@@ -8724,7 +8727,7 @@ pub fn unsupported_const_rejects_test() {
 pub fn unsupported_if_then_else_rejects_test() {
   let result = parser.parse_file("test/fixtures/unsupported_if_then_else.yaml")
   case result {
-    Error(parser.InvalidValue(_, detail)) -> {
+    Error(parse_error.InvalidValue(_, detail)) -> {
       should.be_true(string.contains(detail, "if"))
       should.be_true(string.contains(detail, "then"))
       should.be_true(string.contains(detail, "else"))
@@ -8737,7 +8740,7 @@ pub fn unsupported_if_then_else_rejects_test() {
 pub fn unsupported_prefix_items_rejects_test() {
   let result = parser.parse_file("test/fixtures/unsupported_prefix_items.yaml")
   case result {
-    Error(parser.InvalidValue(_, detail)) ->
+    Error(parse_error.InvalidValue(_, detail)) ->
       should.be_true(string.contains(detail, "prefixItems"))
     _ -> should.fail()
   }
@@ -8747,7 +8750,7 @@ pub fn unsupported_prefix_items_rejects_test() {
 pub fn unsupported_not_rejects_test() {
   let result = parser.parse_file("test/fixtures/unsupported_not.yaml")
   case result {
-    Error(parser.InvalidValue(_, detail)) ->
+    Error(parse_error.InvalidValue(_, detail)) ->
       should.be_true(string.contains(detail, "not"))
     _ -> should.fail()
   }
@@ -8757,7 +8760,7 @@ pub fn unsupported_not_rejects_test() {
 pub fn unsupported_defs_rejects_test() {
   let result = parser.parse_file("test/fixtures/unsupported_defs.yaml")
   case result {
-    Error(parser.InvalidValue(_, detail)) ->
+    Error(parse_error.InvalidValue(_, detail)) ->
       should.be_true(string.contains(detail, "$defs"))
     _ -> should.fail()
   }
@@ -8767,7 +8770,7 @@ pub fn unsupported_defs_rejects_test() {
 pub fn unsupported_nested_const_rejects_test() {
   let result = parser.parse_file("test/fixtures/unsupported_nested_const.yaml")
   case result {
-    Error(parser.InvalidValue(_, detail)) ->
+    Error(parse_error.InvalidValue(_, detail)) ->
       should.be_true(string.contains(detail, "const"))
     _ -> should.fail()
   }
@@ -8808,7 +8811,7 @@ pub fn validate_invalid_security_ref_rejects_test() {
 pub fn external_param_ref_rejects_test() {
   let result = parser.parse_file("test/fixtures/external_param_ref.yaml")
   case result {
-    Error(parser.InvalidValue(_, detail)) ->
+    Error(parse_error.InvalidValue(_, detail)) ->
       should.be_true(string.contains(detail, "not a local"))
     _ -> should.fail()
   }
@@ -8818,7 +8821,7 @@ pub fn external_param_ref_rejects_test() {
 pub fn wrong_kind_ref_rejects_test() {
   let result = parser.parse_file("test/fixtures/wrong_kind_ref.yaml")
   case result {
-    Error(parser.InvalidValue(_, detail)) ->
+    Error(parse_error.InvalidValue(_, detail)) ->
       should.be_true(string.contains(detail, "not a local parameter"))
     _ -> should.fail()
   }
@@ -8828,7 +8831,7 @@ pub fn wrong_kind_ref_rejects_test() {
 pub fn unknown_param_style_rejects_test() {
   let result = parser.parse_file("test/fixtures/unknown_param_style.yaml")
   case result {
-    Error(parser.InvalidValue(_, detail)) ->
+    Error(parse_error.InvalidValue(_, detail)) ->
       should.be_true(string.contains(detail, "unknownStyle"))
     _ -> should.fail()
   }
