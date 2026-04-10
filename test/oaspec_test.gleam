@@ -8240,7 +8240,9 @@ pub fn oss_spec_validator_petstore_v31_parses_test() {
 /// swagger-parser-js: relative server URL in JSON format.
 pub fn oss_swagger_parser_js_relative_server_parses_test() {
   let assert Ok(spec) =
-    parser.parse_file("test/fixtures/oss_swagger_parser_js_relative_server.json")
+    parser.parse_file(
+      "test/fixtures/oss_swagger_parser_js_relative_server.json",
+    )
   spec.info.title |> should.equal("Swagger Petstore")
   list.length(spec.servers) |> should.equal(1)
   dict.size(spec.paths) |> should.not_equal(0)
@@ -8339,9 +8341,7 @@ pub fn oss_openapi_dotnet_petstore_parses_test() {
 /// openapi-dotnet: spec with reusable headers and examples in components.
 pub fn oss_openapi_dotnet_headers_examples_parses_test() {
   let assert Ok(spec) =
-    parser.parse_file(
-      "test/fixtures/oss_openapi_dotnet_headers_examples.yaml",
-    )
+    parser.parse_file("test/fixtures/oss_openapi_dotnet_headers_examples.yaml")
   spec.openapi |> should.equal("3.0.4")
   let assert Some(components) = spec.components
   dict.size(components.headers) |> should.not_equal(0)
@@ -8380,9 +8380,7 @@ pub fn oss_swagger_parser_java_additional_props_false_parses_test() {
 /// swagger-parser-java issue879: callback using $ref to components/callbacks.
 pub fn oss_swagger_parser_java_callback_ref_parses_test() {
   let assert Ok(spec) =
-    parser.parse_file(
-      "test/fixtures/oss_swagger_parser_java_callback_ref.yaml",
-    )
+    parser.parse_file("test/fixtures/oss_swagger_parser_java_callback_ref.yaml")
   spec.info.title |> should.equal("Callback with ref Example")
   dict.size(spec.paths) |> should.equal(1)
 }
@@ -8423,9 +8421,7 @@ pub fn oss_swagger_parser_java_multiple_tags_parses_test() {
 /// swagger-parser-java issue959: petstore with path-level parameters and tags.
 pub fn oss_swagger_parser_java_path_params_parses_test() {
   let assert Ok(spec) =
-    parser.parse_file(
-      "test/fixtures/oss_swagger_parser_java_path_params.json",
-    )
+    parser.parse_file("test/fixtures/oss_swagger_parser_java_path_params.json")
   spec.info.title |> should.equal("Swagger Petstore")
   list.length(spec.tags) |> should.equal(1)
 }
@@ -8460,9 +8456,7 @@ pub fn oss_openapi_gen_oneof_fruit_parses_test() {
 /// openapi-generator: array with nullable items.
 pub fn oss_openapi_gen_array_nullable_items_parses_test() {
   let assert Ok(spec) =
-    parser.parse_file(
-      "test/fixtures/oss_openapi_gen_array_nullable_items.yaml",
-    )
+    parser.parse_file("test/fixtures/oss_openapi_gen_array_nullable_items.yaml")
   spec.info.title |> should.equal("Array nullable items")
   let assert Some(components) = spec.components
   dict.size(components.schemas) |> should.equal(1)
@@ -8529,8 +8523,7 @@ pub fn oss_spec_validator_bench_petstore_parses_test() {
 /// openapi-spec-validator: empty OpenAPI 3.0 spec (only version, no info).
 /// The parser rejects this with a user-friendly error about missing 'info'.
 pub fn oss_spec_validator_empty_v30_rejects_test() {
-  let result =
-    parser.parse_file("test/fixtures/oss_spec_validator_empty.yaml")
+  let result = parser.parse_file("test/fixtures/oss_spec_validator_empty.yaml")
   case result {
     Error(parser.MissingField(_, "info")) -> should.be_true(True)
     Error(e) -> {
