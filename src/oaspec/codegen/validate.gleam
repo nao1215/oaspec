@@ -6,6 +6,7 @@ import gleam/string
 import oaspec/codegen/context.{type Context}
 import oaspec/codegen/types as type_gen
 import oaspec/config
+import oaspec/openapi/diagnostic
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
@@ -79,6 +80,22 @@ pub fn error_to_string(error: ValidationError) -> String {
     SeverityWarning -> "Warning"
   }
   prefix <> " at " <> error.path <> ": " <> error.detail
+}
+
+/// Convert a ValidationError to a Diagnostic for CLI display.
+pub fn to_diagnostic(error: ValidationError) -> diagnostic.Diagnostic {
+  let severity = case error.severity {
+    SeverityError -> diagnostic.Error
+    SeverityWarning -> diagnostic.Warning
+  }
+  diagnostic.Diagnostic(
+    code: "validation",
+    severity: severity,
+    pointer: error.path,
+    message: error.detail,
+    hint: option.None,
+    phase: diagnostic.Validation,
+  )
 }
 
 /// Validate all operations for unsupported patterns.

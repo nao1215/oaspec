@@ -9,6 +9,7 @@ import oaspec/codegen/validate
 import oaspec/codegen/writer
 import oaspec/config
 import oaspec/generate
+import oaspec/openapi/diagnostic
 import oaspec/openapi/parser
 import simplifile
 
@@ -147,7 +148,9 @@ fn run_generate(
       io.println("Parsing OpenAPI spec: " <> cfg.input)
       case parser.parse_file(cfg.input) {
         Error(e) -> {
-          io.println("Error: " <> parser.parse_error_to_string(e))
+          io.println(
+            parser.parse_error_to_diagnostic(e) |> diagnostic.to_string,
+          )
           halt(1)
         }
         Ok(spec) -> {
@@ -155,7 +158,10 @@ fn run_generate(
             Error(generate.ValidationErrors(errors:)) -> {
               io.println("Error: OpenAPI spec contains unsupported features:")
               list.each(errors, fn(e) {
-                io.println("  - " <> validate.error_to_string(e))
+                io.println(
+                  "  - "
+                  <> { validate.to_diagnostic(e) |> diagnostic.to_string },
+                )
               })
               halt(1)
             }
@@ -166,7 +172,10 @@ fn run_generate(
                 warnings -> {
                   io.println("Warnings:")
                   list.each(warnings, fn(w) {
-                    io.println("  - " <> validate.error_to_string(w))
+                    io.println(
+                      "  - "
+                      <> { validate.to_diagnostic(w) |> diagnostic.to_string },
+                    )
                   })
                 }
               }

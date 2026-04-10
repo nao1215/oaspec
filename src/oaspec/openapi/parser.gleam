@@ -5,6 +5,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import oaspec/openapi/diagnostic
 import oaspec/openapi/schema.{
   type Discriminator, type SchemaObject, type SchemaRef, AllOfSchema,
   AnyOfSchema, ArraySchema, BooleanSchema, Discriminator, Inline, IntegerSchema,
@@ -1501,6 +1502,64 @@ pub fn parse_error_to_string(error: ParseError) -> String {
         p -> p
       }
       "Invalid value at " <> location <> ": " <> detail
+    }
+  }
+}
+
+/// Convert a ParseError to a Diagnostic for CLI display.
+pub fn parse_error_to_diagnostic(error: ParseError) -> diagnostic.Diagnostic {
+  case error {
+    FileError(detail:) ->
+      diagnostic.Diagnostic(
+        code: "file-error",
+        severity: diagnostic.Error,
+        pointer: "",
+        message: detail,
+        hint: option.None,
+        phase: diagnostic.Parsing,
+      )
+    YamlError(detail:) ->
+      diagnostic.Diagnostic(
+        code: "yaml-error",
+        severity: diagnostic.Error,
+        pointer: "",
+        message: detail,
+        hint: option.Some("Check that the file is valid YAML or JSON."),
+        phase: diagnostic.Parsing,
+      )
+    MissingField(path:, field:) -> {
+      let location = case path {
+        "" -> "root"
+        p -> p
+      }
+      diagnostic.Diagnostic(
+        code: "missing-field",
+        severity: diagnostic.Error,
+        pointer: location,
+        message: "Missing required field '" <> field <> "'",
+        hint: option.Some(
+          "Add the '"
+          <> field
+          <> "' field to your OpenAPI spec at "
+          <> location
+          <> ".",
+        ),
+        phase: diagnostic.Parsing,
+      )
+    }
+    InvalidValue(path:, detail:) -> {
+      let location = case path {
+        "" -> "root"
+        p -> p
+      }
+      diagnostic.Diagnostic(
+        code: "invalid-value",
+        severity: diagnostic.Error,
+        pointer: location,
+        message: detail,
+        hint: option.None,
+        phase: diagnostic.Parsing,
+      )
     }
   }
 }
