@@ -41,6 +41,7 @@ gen_client/my_api/
   request_types.gleam
   response_types.gleam
   middleware.gleam
+  guards.gleam
   client.gleam
 ```
 
