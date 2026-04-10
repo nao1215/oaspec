@@ -6,6 +6,10 @@ import gleam/string
 import oaspec/codegen/context.{type Context}
 import oaspec/codegen/types as type_gen
 import oaspec/config
+import oaspec/openapi/diagnostic.{
+  type Diagnostic, SeverityError, SeverityWarning, TargetBoth, TargetClient,
+  TargetServer,
+}
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
@@ -15,34 +19,11 @@ import oaspec/openapi/schema.{
 import oaspec/openapi/spec.{type SpecStage, Value}
 import oaspec/util/content_type
 
-/// Severity level for validation issues.
-pub type Severity {
-  SeverityError
-  SeverityWarning
-}
-
-/// Target indicating which generation mode the issue applies to.
-pub type Target {
-  TargetBoth
-  TargetClient
-  TargetServer
-}
-
-/// A validation issue representing an unsupported or noteworthy OpenAPI feature.
-pub type ValidationError {
-  ValidationError(
-    path: String,
-    detail: String,
-    severity: Severity,
-    target: Target,
-  )
-}
-
 /// Validate the parsed spec for unsupported patterns.
 /// Returns a list of errors; empty list means validation passed.
 /// Name collisions and duplicate operationIds are handled by the dedup pass
 /// before validation, so they are no longer checked here.
-pub fn validate(ctx: Context) -> List(ValidationError) {
+pub fn validate(ctx: Context) -> List(Diagnostic) {
   let op_errors = validate_operations(ctx)
   let schema_errors = validate_component_schemas(ctx)
   let security_errors = validate_security_schemes(ctx)
@@ -51,38 +32,30 @@ pub fn validate(ctx: Context) -> List(ValidationError) {
 }
 
 /// Filter to only errors (not warnings).
-pub fn errors_only(issues: List(ValidationError)) -> List(ValidationError) {
-  list.filter(issues, fn(e) { e.severity == SeverityError })
+pub fn errors_only(issues: List(Diagnostic)) -> List(Diagnostic) {
+  diagnostic.errors_only(issues)
 }
 
 /// Filter to only warnings (not errors).
-pub fn warnings_only(issues: List(ValidationError)) -> List(ValidationError) {
-  list.filter(issues, fn(e) { e.severity == SeverityWarning })
+pub fn warnings_only(issues: List(Diagnostic)) -> List(Diagnostic) {
+  diagnostic.warnings_only(issues)
 }
 
 /// Filter validation issues to those relevant for the selected generation mode.
 pub fn filter_by_mode(
-  issues: List(ValidationError),
+  issues: List(Diagnostic),
   mode: config.GenerateMode,
-) -> List(ValidationError) {
-  case mode {
-    config.Client -> list.filter(issues, fn(e) { e.target != TargetServer })
-    config.Server -> list.filter(issues, fn(e) { e.target != TargetClient })
-    config.Both -> issues
-  }
+) -> List(Diagnostic) {
+  diagnostic.filter_by_mode(issues, mode)
 }
 
 /// Convert a validation error to a human-readable string.
-pub fn error_to_string(error: ValidationError) -> String {
-  let prefix = case error.severity {
-    SeverityError -> "Error"
-    SeverityWarning -> "Warning"
-  }
-  prefix <> " at " <> error.path <> ": " <> error.detail
+pub fn error_to_string(error: Diagnostic) -> String {
+  diagnostic.to_string(error)
 }
 
 /// Validate all operations for unsupported patterns.
-fn validate_operations(ctx: Context) -> List(ValidationError) {
+fn validate_operations(ctx: Context) -> List(Diagnostic) {
   let operations = type_gen.collect_operations(ctx)
   list.flat_map(operations, fn(op) {
     let #(op_id, operation, path, _method) = op
@@ -114,7 +87,7 @@ fn validate_operations(ctx: Context) -> List(ValidationError) {
     let response_errors = validate_responses(op_id, resolved_responses, ctx)
     let missing_responses_errors = case dict.is_empty(resolved_responses) {
       True -> [
-        ValidationError(
+        diagnostic.validation(
           severity: SeverityError,
           target: TargetBoth,
           path: op_id,
@@ -140,7 +113,7 @@ fn validate_path_template_params(
   op_id: String,
   path: String,
   params: List(spec.Parameter(SpecStage)),
-) -> List(ValidationError) {
+) -> List(Diagnostic) {
   let template_names = extract_path_template_names(path)
   let path_param_names =
     list.filter_map(params, fn(p) {
@@ -153,7 +126,7 @@ fn validate_path_template_params(
     case list.contains(path_param_names, name) {
       True -> Error(Nil)
       False ->
-        Ok(ValidationError(
+        Ok(diagnostic.validation(
           severity: SeverityError,
           target: TargetBoth,
           path: op_id <> ".path",
@@ -186,7 +159,7 @@ fn validate_parameters(
   op_id: String,
   params: List(spec.Parameter(SpecStage)),
   ctx: Context,
-) -> List(ValidationError) {
+) -> List(Diagnostic) {
   list.flat_map(params, fn(p) {
     let path = op_id <> ".parameters." <> p.name
     let style_errors = case p.style {
@@ -194,7 +167,7 @@ fn validate_parameters(
       | Some(spec.LabelStyle)
       | Some(spec.SpaceDelimitedStyle)
       | Some(spec.PipeDelimitedStyle) -> [
-        ValidationError(
+        diagnostic.validation(
           severity: SeverityError,
           target: TargetBoth,
           path: path,
@@ -207,7 +180,7 @@ fn validate_parameters(
     // We don't support the content-based parameter serialization.
     let content_errors = case p.schema {
       None -> [
-        ValidationError(
+        diagnostic.validation(
           severity: SeverityError,
           target: TargetBoth,
           path: path,
@@ -237,7 +210,7 @@ fn validate_server_structured_param(
   path: String,
   param: spec.Parameter(SpecStage),
   ctx: Context,
-) -> List(ValidationError) {
+) -> List(Diagnostic) {
   case ctx.config.mode {
     config.Client -> []
     _ -> {
@@ -249,7 +222,7 @@ fn validate_server_structured_param(
         | spec.InQuery, Some(ArraySchema(items: Inline(BooleanSchema(..)), ..))
         -> []
         spec.InQuery, Some(ArraySchema(..)) -> [
-          ValidationError(
+          diagnostic.validation(
             severity: SeverityError,
             target: TargetServer,
             path: path,
@@ -262,7 +235,7 @@ fn validate_server_structured_param(
         | spec.InHeader, Some(ArraySchema(items: Inline(BooleanSchema(..)), ..))
         -> []
         spec.InHeader, Some(ArraySchema(..)) -> [
-          ValidationError(
+          diagnostic.validation(
             severity: SeverityError,
             target: TargetServer,
             path: path,
@@ -282,7 +255,7 @@ fn validate_server_deep_object_param(
   path: String,
   param: spec.Parameter(SpecStage),
   ctx: Context,
-) -> List(ValidationError) {
+) -> List(Diagnostic) {
   case param.in_, param.style, resolve_schema_object(param.schema, ctx) {
     spec.InQuery,
       Some(spec.DeepObjectStyle),
@@ -294,7 +267,7 @@ fn validate_server_deep_object_param(
         case deep_object_server_leaf_supported(prop_ref, ctx) {
           True -> []
           False -> [
-            ValidationError(
+            diagnostic.validation(
               severity: SeverityError,
               target: TargetServer,
               path: path <> "." <> prop_name,
@@ -340,7 +313,7 @@ fn validate_server_cookie_param(
   path: String,
   param: spec.Parameter(SpecStage),
   ctx: Context,
-) -> List(ValidationError) {
+) -> List(Diagnostic) {
   let _ = path
   let _ = param
   let _ = ctx
@@ -353,7 +326,7 @@ fn validate_complex_param_schema(
   path: String,
   param: spec.Parameter(SpecStage),
   ctx: Context,
-) -> List(ValidationError) {
+) -> List(Diagnostic) {
   case param.style {
     Some(spec.DeepObjectStyle) ->
       // deepObject supports one level of object nesting only.
@@ -371,7 +344,7 @@ fn validate_complex_param_schema(
               case ctx.config.mode {
                 config.Client -> []
                 _ -> [
-                  ValidationError(
+                  diagnostic.validation(
                     severity: SeverityError,
                     target: TargetServer,
                     path: path,
@@ -380,7 +353,7 @@ fn validate_complex_param_schema(
                 ]
               }
             _ -> [
-              ValidationError(
+              diagnostic.validation(
                 severity: SeverityError,
                 target: TargetBoth,
                 path: path,
@@ -398,7 +371,7 @@ fn validate_deep_object_no_nested_objects(
   path: String,
   param: spec.Parameter(SpecStage),
   ctx: Context,
-) -> List(ValidationError) {
+) -> List(Diagnostic) {
   case resolve_schema_object(param.schema, ctx) {
     Some(ObjectSchema(properties:, ..)) ->
       dict.to_list(properties)
@@ -409,7 +382,7 @@ fn validate_deep_object_no_nested_objects(
           | Some(AllOfSchema(..))
           | Some(OneOfSchema(..))
           | Some(AnyOfSchema(..)) -> [
-            ValidationError(
+            diagnostic.validation(
               severity: SeverityError,
               target: TargetBoth,
               path: path <> "." <> prop_name,
@@ -443,7 +416,7 @@ fn validate_request_body(
   op_id: String,
   request_body: Option(spec.RequestBody(SpecStage)),
   ctx: Context,
-) -> List(ValidationError) {
+) -> List(Diagnostic) {
   case request_body {
     None -> []
     Some(rb) -> {
@@ -455,7 +428,7 @@ fn validate_request_body(
       let content_type_errors = case unsupported {
         [] -> []
         [media_type, ..] -> [
-          ValidationError(
+          diagnostic.validation(
             severity: SeverityError,
             target: TargetBoth,
             path: op_id <> ".requestBody",
@@ -521,7 +494,7 @@ fn validate_multipart_request_body_fields(
   op_id: String,
   content: dict.Dict(String, spec.MediaType),
   ctx: Context,
-) -> List(ValidationError) {
+) -> List(Diagnostic) {
   case dict.get(content, "multipart/form-data") {
     Ok(media_type) ->
       case resolve_schema_object(media_type.schema, ctx) {
@@ -532,7 +505,7 @@ fn validate_multipart_request_body_fields(
             case multipart_field_is_stringifiable(field_schema, ctx) {
               True -> []
               False -> [
-                ValidationError(
+                diagnostic.validation(
                   severity: SeverityError,
                   target: TargetBoth,
                   path: op_id <> ".requestBody.multipart." <> field_name,
@@ -542,7 +515,7 @@ fn validate_multipart_request_body_fields(
             }
           })
         Some(_) -> [
-          ValidationError(
+          diagnostic.validation(
             severity: SeverityError,
             target: TargetBoth,
             path: op_id <> ".requestBody",
@@ -561,13 +534,13 @@ fn validate_form_urlencoded_schema(
   op_id: String,
   content: dict.Dict(String, spec.MediaType),
   ctx: Context,
-) -> List(ValidationError) {
+) -> List(Diagnostic) {
   case dict.get(content, "application/x-www-form-urlencoded") {
     Ok(media_type) ->
       case resolve_schema_object(media_type.schema, ctx) {
         Some(ObjectSchema(..)) -> []
         Some(_) -> [
-          ValidationError(
+          diagnostic.validation(
             severity: SeverityError,
             target: TargetBoth,
             path: op_id <> ".requestBody",
@@ -590,7 +563,7 @@ fn validate_server_form_urlencoded_request_body(
   content: dict.Dict(String, spec.MediaType),
   content_keys: List(String),
   ctx: Context,
-) -> List(ValidationError) {
+) -> List(Diagnostic) {
   case ctx.config.mode {
     config.Client -> []
     _ ->
@@ -598,7 +571,7 @@ fn validate_server_form_urlencoded_request_body(
         Ok(media_type) -> {
           let content_type_errors = case list.length(content_keys) > 1 {
             True -> [
-              ValidationError(
+              diagnostic.validation(
                 severity: SeverityError,
                 target: TargetServer,
                 path: op_id <> ".requestBody",
@@ -619,7 +592,7 @@ fn validate_server_form_urlencoded_request_body(
                 {
                   True -> []
                   False -> [
-                    ValidationError(
+                    diagnostic.validation(
                       severity: SeverityError,
                       target: TargetServer,
                       path: op_id <> ".requestBody.form." <> field_name,
@@ -641,7 +614,7 @@ fn validate_server_request_body_content_types(
   op_id: String,
   content_keys: List(String),
   ctx: Context,
-) -> List(ValidationError) {
+) -> List(Diagnostic) {
   case ctx.config.mode {
     config.Client -> []
     _ -> {
@@ -653,7 +626,7 @@ fn validate_server_request_body_content_types(
           && content_type.is_supported_request(content_type.from_string(key))
         })
       list.map(non_json_but_supported, fn(media_type) {
-        ValidationError(
+        diagnostic.validation(
           severity: SeverityError,
           target: TargetServer,
           path: op_id <> ".requestBody",
@@ -671,7 +644,7 @@ fn validate_server_multipart_request_body(
   content: dict.Dict(String, spec.MediaType),
   content_keys: List(String),
   ctx: Context,
-) -> List(ValidationError) {
+) -> List(Diagnostic) {
   case ctx.config.mode {
     config.Client -> []
     _ ->
@@ -679,7 +652,7 @@ fn validate_server_multipart_request_body(
         Ok(media_type) -> {
           let content_type_errors = case list.length(content_keys) > 1 {
             True -> [
-              ValidationError(
+              diagnostic.validation(
                 severity: SeverityError,
                 target: TargetServer,
                 path: op_id <> ".requestBody",
@@ -698,7 +671,7 @@ fn validate_server_multipart_request_body(
                 case multipart_server_field_supported(field_schema, ctx) {
                   True -> []
                   False -> [
-                    ValidationError(
+                    diagnostic.validation(
                       severity: SeverityError,
                       target: TargetServer,
                       path: op_id <> ".requestBody.multipart." <> field_name,
@@ -791,7 +764,7 @@ fn validate_responses(
   op_id: String,
   responses: dict.Dict(String, spec.Response(SpecStage)),
   ctx: Context,
-) -> List(ValidationError) {
+) -> List(Diagnostic) {
   let entries = dict.to_list(responses)
   list.flat_map(entries, fn(entry) {
     let #(status_code, response) = entry
@@ -806,7 +779,7 @@ fn validate_responses(
       {
         True -> []
         False -> [
-          ValidationError(
+          diagnostic.validation(
             severity: SeverityError,
             target: TargetBoth,
             path: path,
@@ -826,7 +799,7 @@ fn validate_responses(
 }
 
 /// Validate component schemas recursively.
-fn validate_component_schemas(ctx: Context) -> List(ValidationError) {
+fn validate_component_schemas(ctx: Context) -> List(Diagnostic) {
   let schemas = case ctx.spec.components {
     Some(components) -> dict.to_list(components.schemas)
     None -> []
@@ -847,13 +820,13 @@ fn validate_schema_ref_recursive(
   path: String,
   schema_ref: SchemaRef,
   ctx: Context,
-) -> List(ValidationError) {
+) -> List(Diagnostic) {
   case schema_ref {
     Reference(ref:, ..) ->
       // Detect external refs (not starting with #/) before resolution
       case string.starts_with(ref, "#/") {
         False -> [
-          ValidationError(
+          diagnostic.validation(
             severity: SeverityError,
             target: TargetBoth,
             path: path,
@@ -866,7 +839,7 @@ fn validate_schema_ref_recursive(
           case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
             Ok(_) -> []
             Error(_) -> [
-              ValidationError(
+              diagnostic.validation(
                 severity: SeverityError,
                 target: TargetBoth,
                 path: path,
@@ -886,7 +859,7 @@ fn validate_schema_recursive(
   path: String,
   schema_obj: SchemaObject,
   ctx: Context,
-) -> List(ValidationError) {
+) -> List(Diagnostic) {
   case schema_obj {
     ObjectSchema(
       properties:,
@@ -946,7 +919,7 @@ fn validate_schema_recursive(
 
 /// Validate that all security scheme references in global and operation-level
 /// security requirements point to schemes defined in components.securitySchemes.
-fn validate_security_schemes(ctx: Context) -> List(ValidationError) {
+fn validate_security_schemes(ctx: Context) -> List(Diagnostic) {
   let scheme_names = case ctx.spec.components {
     Some(components) -> dict.keys(components.security_schemes)
     None -> []
@@ -958,7 +931,7 @@ fn validate_security_schemes(ctx: Context) -> List(ValidationError) {
         case list.contains(scheme_names, scheme_ref.scheme_name) {
           True -> Error(Nil)
           False ->
-            Ok(ValidationError(
+            Ok(diagnostic.validation(
               severity: SeverityError,
               target: TargetBoth,
               path: "security." <> scheme_ref.scheme_name,
@@ -981,7 +954,7 @@ fn validate_security_schemes(ctx: Context) -> List(ValidationError) {
               case list.contains(scheme_names, scheme_ref.scheme_name) {
                 True -> Error(Nil)
                 False ->
-                  Ok(ValidationError(
+                  Ok(diagnostic.validation(
                     severity: SeverityError,
                     target: TargetBoth,
                     path: op_id <> ".security." <> scheme_ref.scheme_name,
@@ -1002,11 +975,11 @@ fn validate_security_schemes(ctx: Context) -> List(ValidationError) {
 /// Check for AST fields that are parsed but not used by codegen, emitting
 /// warnings so users are aware their spec contains features we preserve but
 /// do not generate code for.
-fn validate_preserved_but_unused(ctx: Context) -> List(ValidationError) {
+fn validate_preserved_but_unused(ctx: Context) -> List(Diagnostic) {
   let webhook_warnings = case dict.is_empty(ctx.spec.webhooks) {
     True -> []
     False -> [
-      ValidationError(
+      diagnostic.validation(
         severity: SeverityWarning,
         target: TargetBoth,
         path: "webhooks",
@@ -1030,7 +1003,7 @@ fn validate_preserved_but_unused(ctx: Context) -> List(ValidationError) {
             {
               config.Client, _ -> []
               _, n if n > 1 -> [
-                ValidationError(
+                diagnostic.validation(
                   severity: SeverityWarning,
                   target: TargetServer,
                   path: base_path <> ".content",
@@ -1042,7 +1015,7 @@ fn validate_preserved_but_unused(ctx: Context) -> List(ValidationError) {
             let header_warnings = case dict.is_empty(response.headers) {
               True -> []
               False -> [
-                ValidationError(
+                diagnostic.validation(
                   severity: SeverityWarning,
                   target: TargetBoth,
                   path: base_path <> ".headers",
@@ -1053,7 +1026,7 @@ fn validate_preserved_but_unused(ctx: Context) -> List(ValidationError) {
             let link_warnings = case dict.is_empty(response.links) {
               True -> []
               False -> [
-                ValidationError(
+                diagnostic.validation(
                   severity: SeverityWarning,
                   target: TargetBoth,
                   path: base_path <> ".links",
@@ -1068,7 +1041,7 @@ fn validate_preserved_but_unused(ctx: Context) -> List(ValidationError) {
                 case dict.is_empty(media_type.encoding) {
                   True -> []
                   False -> [
-                    ValidationError(
+                    diagnostic.validation(
                       severity: SeverityWarning,
                       target: TargetBoth,
                       path: base_path <> "." <> media_type_name <> ".encoding",
@@ -1091,7 +1064,7 @@ fn validate_preserved_but_unused(ctx: Context) -> List(ValidationError) {
   // Warn about external docs
   let external_docs_warnings = case ctx.spec.external_docs {
     Some(_) -> [
-      ValidationError(
+      diagnostic.validation(
         severity: SeverityWarning,
         target: TargetBoth,
         path: "externalDocs",
@@ -1105,7 +1078,7 @@ fn validate_preserved_but_unused(ctx: Context) -> List(ValidationError) {
   let tag_warnings = case list.is_empty(ctx.spec.tags) {
     True -> []
     False -> [
-      ValidationError(
+      diagnostic.validation(
         severity: SeverityWarning,
         target: TargetBoth,
         path: "tags",
@@ -1121,7 +1094,7 @@ fn validate_preserved_but_unused(ctx: Context) -> List(ValidationError) {
       case list.is_empty(operation.servers) {
         True -> []
         False -> [
-          ValidationError(
+          diagnostic.validation(
             severity: SeverityWarning,
             target: TargetClient,
             path: op_id <> ".servers",
@@ -1141,7 +1114,7 @@ fn validate_preserved_but_unused(ctx: Context) -> List(ValidationError) {
           case list.is_empty(path_item.servers) {
             True -> []
             False -> [
-              ValidationError(
+              diagnostic.validation(
                 severity: SeverityWarning,
                 target: TargetClient,
                 path: "paths." <> path <> ".servers",
@@ -1159,7 +1132,7 @@ fn validate_preserved_but_unused(ctx: Context) -> List(ValidationError) {
       let header_w = case dict.is_empty(components.headers) {
         True -> []
         False -> [
-          ValidationError(
+          diagnostic.validation(
             severity: SeverityWarning,
             target: TargetBoth,
             path: "components.headers",
@@ -1170,7 +1143,7 @@ fn validate_preserved_but_unused(ctx: Context) -> List(ValidationError) {
       let example_w = case dict.is_empty(components.examples) {
         True -> []
         False -> [
-          ValidationError(
+          diagnostic.validation(
             severity: SeverityWarning,
             target: TargetBoth,
             path: "components.examples",
@@ -1181,7 +1154,7 @@ fn validate_preserved_but_unused(ctx: Context) -> List(ValidationError) {
       let link_w = case dict.is_empty(components.links) {
         True -> []
         False -> [
-          ValidationError(
+          diagnostic.validation(
             severity: SeverityWarning,
             target: TargetBoth,
             path: "components.links",

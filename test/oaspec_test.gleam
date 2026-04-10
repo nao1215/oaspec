@@ -17,6 +17,7 @@ import oaspec/codegen/validate
 import oaspec/config
 import oaspec/generate
 import oaspec/openapi/dedup
+import oaspec/openapi/diagnostic.{Diagnostic}
 import oaspec/openapi/hoist
 import oaspec/openapi/normalize
 import oaspec/openapi/parser
@@ -310,7 +311,7 @@ paths:
   let ctx = make_ctx_from_spec(spec)
   let errors =
     validate.validate(ctx)
-    |> list.filter(fn(e) { e.target != validate.TargetServer })
+    |> list.filter(fn(e) { e.target != diagnostic.TargetServer })
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
   |> should.be_false()
@@ -341,7 +342,7 @@ paths:
   let ctx = make_ctx_from_spec(spec)
   let errors =
     validate.validate(ctx)
-    |> list.filter(fn(e) { e.target != validate.TargetServer })
+    |> list.filter(fn(e) { e.target != diagnostic.TargetServer })
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
   |> should.be_false()
@@ -453,7 +454,8 @@ paths:
 "
   let result = parser.parse_string(yaml)
   should.be_error(result)
-  let assert Error(parser.InvalidValue(path: _, detail: detail)) = result
+  let assert Error(Diagnostic(code: "invalid_value", message: detail, ..)) =
+    result
   string.contains(detail, "required: true") |> should.be_true()
 }
 
@@ -535,7 +537,7 @@ pub fn validate_accepts_deep_object_test() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors =
     validate.validate(ctx)
-    |> list.filter(fn(e) { e.target != validate.TargetServer })
+    |> list.filter(fn(e) { e.target != diagnostic.TargetServer })
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "deepObject") })
   |> should.be_false()
@@ -545,7 +547,7 @@ pub fn validate_accepts_complex_schema_parameter_test() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors =
     validate.validate(ctx)
-    |> list.filter(fn(e) { e.target != validate.TargetServer })
+    |> list.filter(fn(e) { e.target != diagnostic.TargetServer })
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "Complex schema parameters")
@@ -592,7 +594,7 @@ components:
   let ctx = make_ctx_from_spec(spec)
   let errors =
     validate.validate(ctx)
-    |> list.filter(fn(e) { e.target != validate.TargetServer })
+    |> list.filter(fn(e) { e.target != diagnostic.TargetServer })
   errors |> should.equal([])
 }
 
@@ -601,7 +603,7 @@ pub fn validate_accepts_multipart_form_data_test() {
   let errors = validate.validate(ctx)
   // Filter out server-targeted errors; multipart is valid for client codegen
   let client_errors =
-    list.filter(errors, fn(e) { e.target != validate.TargetServer })
+    list.filter(errors, fn(e) { e.target != diagnostic.TargetServer })
   let error_strings = list.map(client_errors, validate.error_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "multipart/form-data") })
   |> should.be_false()
@@ -685,8 +687,7 @@ pub fn validate_missing_responses_rejects_test() {
   let result = generate.generate(spec, make_ctx_from_spec(spec).config)
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let error_details =
-        list.map(errors, fn(e) { validate.error_to_string(e) })
+      let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
       let has_missing =
         list.any(error_details, fn(d) { string.contains(d, "no responses") })
       should.be_true(has_missing)
@@ -699,8 +700,11 @@ pub fn validate_missing_responses_rejects_test() {
 pub fn parse_invalid_param_location_fails_test() {
   let result = parser.parse_file("test/fixtures/invalid_param_location.yaml")
   should.be_error(result)
-  let assert Error(parser.InvalidValue(path: "parameter.in", detail: _)) =
-    result
+  let assert Error(Diagnostic(
+    code: "invalid_value",
+    pointer: "parameter.in",
+    ..,
+  )) = result
 }
 
 pub fn parse_missing_openapi_field_fails_test() {
@@ -713,7 +717,12 @@ paths: {}
 "
   let result = parser.parse_string(yaml)
   should.be_error(result)
-  let assert Error(parser.MissingField(path: "", field: "openapi")) = result
+  let assert Error(Diagnostic(
+    code: "missing_field",
+    pointer: "",
+    message: "Missing required field: openapi",
+    ..,
+  )) = result
 }
 
 pub fn parse_missing_info_fails_test() {
@@ -724,7 +733,12 @@ paths: {}
 "
   let result = parser.parse_string(yaml)
   should.be_error(result)
-  let assert Error(parser.MissingField(path: "", field: "info")) = result
+  let assert Error(Diagnostic(
+    code: "missing_field",
+    pointer: "",
+    message: "Missing required field: info",
+    ..,
+  )) = result
 }
 
 pub fn parse_missing_info_title_fails_test() {
@@ -737,7 +751,12 @@ paths: {}
 "
   let result = parser.parse_string(yaml)
   should.be_error(result)
-  let assert Error(parser.MissingField(path: "info", field: "title")) = result
+  let assert Error(Diagnostic(
+    code: "missing_field",
+    pointer: "info",
+    message: "Missing required field: title",
+    ..,
+  )) = result
 }
 
 pub fn validate_deep_inline_oneof_in_request_body_accepted_test() {
@@ -3425,7 +3444,7 @@ paths:
       ),
     )
   let errors = validate.validate(ctx)
-  let assert [validate.ValidationError(detail: msg, ..)] = errors
+  let assert [Diagnostic(message: msg, ..)] = errors
   // Error message must mention form-urlencoded as a supported type
   string.contains(msg, "form-urlencoded")
   |> should.be_true()
@@ -3467,7 +3486,7 @@ paths:
       ),
     )
   let errors = validate.validate(ctx)
-  let assert [validate.ValidationError(detail: msg, ..)] = errors
+  let assert [Diagnostic(message: msg, ..)] = errors
   // Error message must mention XML as a supported type
   string.contains(msg, "xml")
   |> should.be_true()
@@ -5648,9 +5667,9 @@ paths:
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == validate.TargetServer
+      e.target == diagnostic.TargetServer
       && string.contains(
-        e.detail,
+        e.message,
         "multipart/form-data server request bodies only support",
       )
     })
@@ -5694,9 +5713,9 @@ paths:
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == validate.TargetServer
+      e.target == diagnostic.TargetServer
       && string.contains(
-        e.detail,
+        e.message,
         "application/x-www-form-urlencoded server request bodies only support",
       )
     })
@@ -5733,8 +5752,8 @@ paths:
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == validate.TargetServer
-      && string.contains(e.detail, "not supported for server")
+      e.target == diagnostic.TargetServer
+      && string.contains(e.message, "not supported for server")
     })
   list.length(server_errors)
   |> should.equal(0)
@@ -5902,8 +5921,8 @@ paths:
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == validate.TargetServer
-      && string.contains(e.detail, "Query array parameters are only supported")
+      e.target == diagnostic.TargetServer
+      && string.contains(e.message, "Query array parameters are only supported")
     })
   list.length(server_errors)
   |> should.equal(1)
@@ -5914,8 +5933,8 @@ pub fn validate_accepts_deep_object_params_for_server_codegen_test() {
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == validate.TargetServer
-      && string.contains(e.detail, "deepObject")
+      e.target == diagnostic.TargetServer
+      && string.contains(e.message, "deepObject")
     })
   list.length(server_errors)
   |> should.equal(0)
@@ -5949,8 +5968,8 @@ paths:
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == validate.TargetServer
-      && string.contains(e.detail, "Complex path parameters are not supported")
+      e.target == diagnostic.TargetServer
+      && string.contains(e.message, "Complex path parameters are not supported")
     })
   list.length(server_errors)
   |> should.equal(1)
@@ -5991,17 +6010,17 @@ paths:
 
 pub fn filter_by_mode_drops_server_errors_for_client_test() {
   let issues = [
-    validate.ValidationError(
+    diagnostic.validation(
       path: "x",
       detail: "server-only",
-      severity: validate.SeverityError,
-      target: validate.TargetServer,
+      severity: diagnostic.SeverityError,
+      target: diagnostic.TargetServer,
     ),
-    validate.ValidationError(
+    diagnostic.validation(
       path: "y",
       detail: "shared",
-      severity: validate.SeverityError,
-      target: validate.TargetBoth,
+      severity: diagnostic.SeverityError,
+      target: diagnostic.TargetBoth,
     ),
   ]
   let filtered = validate.filter_by_mode(issues, config.Client)
@@ -6011,17 +6030,17 @@ pub fn filter_by_mode_drops_server_errors_for_client_test() {
 
 pub fn filter_by_mode_drops_client_errors_for_server_test() {
   let issues = [
-    validate.ValidationError(
+    diagnostic.validation(
       path: "x",
       detail: "client-only",
-      severity: validate.SeverityError,
-      target: validate.TargetClient,
+      severity: diagnostic.SeverityError,
+      target: diagnostic.TargetClient,
     ),
-    validate.ValidationError(
+    diagnostic.validation(
       path: "y",
       detail: "shared",
-      severity: validate.SeverityError,
-      target: validate.TargetBoth,
+      severity: diagnostic.SeverityError,
+      target: diagnostic.TargetBoth,
     ),
   ]
   let filtered = validate.filter_by_mode(issues, config.Server)
@@ -6031,23 +6050,23 @@ pub fn filter_by_mode_drops_client_errors_for_server_test() {
 
 pub fn filter_by_mode_keeps_all_errors_for_both_test() {
   let issues = [
-    validate.ValidationError(
+    diagnostic.validation(
       path: "x",
       detail: "client-only",
-      severity: validate.SeverityError,
-      target: validate.TargetClient,
+      severity: diagnostic.SeverityError,
+      target: diagnostic.TargetClient,
     ),
-    validate.ValidationError(
+    diagnostic.validation(
       path: "y",
       detail: "server-only",
-      severity: validate.SeverityError,
-      target: validate.TargetServer,
+      severity: diagnostic.SeverityError,
+      target: diagnostic.TargetServer,
     ),
-    validate.ValidationError(
+    diagnostic.validation(
       path: "z",
       detail: "shared",
-      severity: validate.SeverityError,
-      target: validate.TargetBoth,
+      severity: diagnostic.SeverityError,
+      target: diagnostic.TargetBoth,
     ),
   ]
   let filtered = validate.filter_by_mode(issues, config.Both)
@@ -6109,9 +6128,9 @@ paths:
   let issues = validate.validate(ctx)
   let warnings =
     list.filter(issues, fn(issue) {
-      issue.severity == validate.SeverityWarning
-      && issue.target == validate.TargetServer
-      && string.contains(issue.detail, "Multiple response content types")
+      issue.severity == diagnostic.SeverityWarning
+      && issue.target == diagnostic.TargetServer
+      && string.contains(issue.message, "Multiple response content types")
     })
   list.length(warnings)
   |> should.equal(1)
@@ -6153,8 +6172,8 @@ pub fn validate_accepts_cookie_params_for_server_codegen_test() {
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == validate.TargetServer
-      && string.contains(e.detail, "Cookie parameters")
+      e.target == diagnostic.TargetServer
+      && string.contains(e.message, "Cookie parameters")
     })
   list.length(server_errors)
   |> should.equal(0)
@@ -6276,8 +6295,8 @@ paths:
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == validate.TargetServer
-      && string.contains(e.detail, "Array parameters")
+      e.target == diagnostic.TargetServer
+      && string.contains(e.message, "Array parameters")
     })
   list.length(server_errors)
   |> should.equal(0)
@@ -6372,8 +6391,8 @@ paths:
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == validate.TargetServer
-      && string.contains(e.detail, "Array parameters")
+      e.target == diagnostic.TargetServer
+      && string.contains(e.message, "Array parameters")
     })
   list.length(server_errors)
   |> should.equal(0)
@@ -6491,8 +6510,8 @@ pub fn validate_accepts_form_urlencoded_body_for_server_codegen_test() {
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == validate.TargetServer
-      && string.contains(e.detail, "application/x-www-form-urlencoded")
+      e.target == diagnostic.TargetServer
+      && string.contains(e.message, "application/x-www-form-urlencoded")
     })
   list.length(server_errors)
   |> should.equal(0)
@@ -6550,8 +6569,8 @@ pub fn validate_accepts_nested_form_urlencoded_body_for_server_codegen_test() {
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == validate.TargetServer
-      && string.contains(e.detail, "application/x-www-form-urlencoded")
+      e.target == diagnostic.TargetServer
+      && string.contains(e.message, "application/x-www-form-urlencoded")
     })
   list.length(server_errors)
   |> should.equal(0)
@@ -6588,8 +6607,8 @@ pub fn validate_accepts_multipart_body_for_server_codegen_test() {
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == validate.TargetServer
-      && string.contains(e.detail, "multipart/form-data")
+      e.target == diagnostic.TargetServer
+      && string.contains(e.message, "multipart/form-data")
     })
   list.length(server_errors)
   |> should.equal(0)
@@ -6648,8 +6667,8 @@ pub fn validate_accepts_form_urlencoded_ref_fields_for_server_codegen_test() {
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == validate.TargetServer
-      && string.contains(e.detail, "application/x-www-form-urlencoded")
+      e.target == diagnostic.TargetServer
+      && string.contains(e.message, "application/x-www-form-urlencoded")
     })
   list.length(server_errors)
   |> should.equal(0)
@@ -6696,8 +6715,8 @@ pub fn validate_accepts_multipart_ref_fields_for_server_codegen_test() {
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == validate.TargetServer
-      && string.contains(e.detail, "multipart/form-data")
+      e.target == diagnostic.TargetServer
+      && string.contains(e.message, "multipart/form-data")
     })
   list.length(server_errors)
   |> should.equal(0)
@@ -7063,8 +7082,8 @@ paths:
   let errors = validate.validate(ctx)
   let multipart_errors =
     list.filter(errors, fn(e) {
-      string.contains(e.detail, "multipart")
-      && e.target == validate.TargetServer
+      string.contains(e.message, "multipart")
+      && e.target == diagnostic.TargetServer
     })
   list.length(multipart_errors)
   |> should.equal(0)
@@ -7170,8 +7189,8 @@ paths:
   let errors = validate.validate(ctx)
   let form_errors =
     list.filter(errors, fn(e) {
-      string.contains(e.detail, "form-urlencoded")
-      && e.target == validate.TargetServer
+      string.contains(e.message, "form-urlencoded")
+      && e.target == diagnostic.TargetServer
     })
   list.length(form_errors)
   |> should.equal(0)
@@ -7269,7 +7288,7 @@ components:
   let ctx = context.new(spec, cfg)
   let errors = validate.validate(ctx)
   let deep_object_errors =
-    list.filter(errors, fn(e) { string.contains(e.detail, "deepObject") })
+    list.filter(errors, fn(e) { string.contains(e.message, "deepObject") })
   // Should have NO deepObject errors for referenced enum leaf
   list.length(deep_object_errors)
   |> should.equal(0)
@@ -7323,7 +7342,7 @@ components:
   let ctx = context.new(spec, cfg)
   let errors = validate.validate(ctx)
   let deep_object_errors =
-    list.filter(errors, fn(e) { string.contains(e.detail, "deepObject") })
+    list.filter(errors, fn(e) { string.contains(e.message, "deepObject") })
   list.length(deep_object_errors)
   |> should.equal(0)
 }
@@ -7448,7 +7467,7 @@ pub fn oss_libopenapi_all_components_validates_security_test() {
   let blocking = validate.errors_only(errors)
   let has_security_error =
     list.any(blocking, fn(e) {
-      string.contains(validate.error_to_string(e), "api_key")
+      string.contains(diagnostic.to_string(e), "api_key")
     })
   should.be_true(has_security_error)
 }
@@ -7463,8 +7482,7 @@ pub fn oss_libopenapi_burgershop_rejects_not_keyword_test() {
   let result = generate.generate(spec, make_ctx_from_spec(spec).config)
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let error_details =
-        list.map(errors, fn(e) { validate.error_to_string(e) })
+      let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
       let has_not = list.any(error_details, fn(d) { string.contains(d, "not") })
       should.be_true(has_not)
     }
@@ -8181,7 +8199,7 @@ pub fn oss_kin_openapi_components_json_rejects_invalid_scheme_test() {
   let result =
     parser.parse_file("test/fixtures/oss_kin_openapi_components.json")
   case result {
-    Error(parser.InvalidValue(_, detail)) ->
+    Error(Diagnostic(code: "invalid_value", message: detail, ..)) ->
       should.be_true(string.contains(detail, "cookie"))
     _ -> should.fail()
   }
@@ -8221,7 +8239,11 @@ pub fn oss_spec_validator_missing_description_rejects_test() {
       "test/fixtures/oss_spec_validator_missing_description.yaml",
     )
   case result {
-    Error(parser.MissingField(_, "description")) -> should.be_true(True)
+    Error(Diagnostic(
+      code: "missing_field",
+      message: "Missing required field: description",
+      ..,
+    )) -> should.be_true(True)
     Error(e) -> {
       let msg = parser.parse_error_to_string(e)
       should.be_true(string.contains(msg, "description"))
@@ -8506,7 +8528,11 @@ pub fn oss_openapi_gen_missing_info_rejects_test() {
   let result =
     parser.parse_file("test/fixtures/oss_openapi_gen_missing_info.yaml")
   case result {
-    Error(parser.MissingField(_, "info")) -> should.be_true(True)
+    Error(Diagnostic(
+      code: "missing_field",
+      message: "Missing required field: info",
+      ..,
+    )) -> should.be_true(True)
     Error(e) -> {
       let msg = parser.parse_error_to_string(e)
       should.be_true(string.contains(msg, "info"))
@@ -8521,7 +8547,7 @@ pub fn oss_openapi_gen_missing_info_attr_rejects_test() {
   let result =
     parser.parse_file("test/fixtures/oss_openapi_gen_missing_info_attr.yaml")
   case result {
-    Error(parser.MissingField(_, _)) -> should.be_true(True)
+    Error(Diagnostic(code: "missing_field", ..)) -> should.be_true(True)
     _ -> should.fail()
   }
 }
@@ -8544,7 +8570,11 @@ pub fn oss_spec_validator_bench_petstore_parses_test() {
 pub fn oss_spec_validator_empty_v30_rejects_test() {
   let result = parser.parse_file("test/fixtures/oss_spec_validator_empty.yaml")
   case result {
-    Error(parser.MissingField(_, "info")) -> should.be_true(True)
+    Error(Diagnostic(
+      code: "missing_field",
+      message: "Missing required field: info",
+      ..,
+    )) -> should.be_true(True)
     Error(e) -> {
       let msg = parser.parse_error_to_string(e)
       should.be_true(string.contains(msg, "info"))
@@ -8678,7 +8708,7 @@ pub fn oss_swagger_parser_java_31_security_rejects_mutualtls_test() {
   let result =
     parser.parse_file("test/fixtures/oss_swagger_parser_java_31_security.yaml")
   case result {
-    Error(parser.InvalidValue(_, detail)) ->
+    Error(Diagnostic(code: "invalid_value", message: detail, ..)) ->
       should.be_true(string.contains(detail, "mutualTLS"))
     _ -> should.fail()
   }
@@ -8697,8 +8727,7 @@ pub fn oss_swagger_parser_java_31_schema_siblings_rejects_test() {
   let result = generate.generate(spec, make_ctx_from_spec(spec).config)
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let error_details =
-        list.map(errors, fn(e) { validate.error_to_string(e) })
+      let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
       let has_dependent =
         list.any(error_details, fn(d) { string.contains(d, "dependentSchemas") })
       should.be_true(has_dependent)
@@ -8756,8 +8785,7 @@ pub fn unsupported_if_then_else_capability_check_test() {
   let result = generate.generate(spec, make_ctx_from_spec(spec).config)
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let error_details =
-        list.map(errors, fn(e) { validate.error_to_string(e) })
+      let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
       let has_if = list.any(error_details, fn(d) { string.contains(d, "if") })
       should.be_true(has_if)
     }
@@ -8775,8 +8803,7 @@ pub fn unsupported_prefix_items_capability_check_test() {
   let result = generate.generate(spec, make_ctx_from_spec(spec).config)
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let error_details =
-        list.map(errors, fn(e) { validate.error_to_string(e) })
+      let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
       let has_prefix =
         list.any(error_details, fn(d) { string.contains(d, "prefixItems") })
       should.be_true(has_prefix)
@@ -8794,8 +8821,7 @@ pub fn unsupported_not_capability_check_test() {
   let result = generate.generate(spec, make_ctx_from_spec(spec).config)
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let error_details =
-        list.map(errors, fn(e) { validate.error_to_string(e) })
+      let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
       let has_not = list.any(error_details, fn(d) { string.contains(d, "not") })
       should.be_true(has_not)
     }
@@ -8812,8 +8838,7 @@ pub fn unsupported_defs_capability_check_test() {
   let result = generate.generate(spec, make_ctx_from_spec(spec).config)
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let error_details =
-        list.map(errors, fn(e) { validate.error_to_string(e) })
+      let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
       let has_defs =
         list.any(error_details, fn(d) { string.contains(d, "$defs") })
       should.be_true(has_defs)
@@ -8851,8 +8876,7 @@ pub fn validate_invalid_security_ref_rejects_test() {
   let result = generate.generate(spec, make_ctx_from_spec(spec).config)
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let error_details =
-        list.map(errors, fn(e) { validate.error_to_string(e) })
+      let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
       let has_security =
         list.any(error_details, fn(d) {
           string.contains(d, "nonexistent_scheme")
@@ -8883,7 +8907,7 @@ pub fn wrong_kind_ref_rejects_test() {
 pub fn unknown_param_style_rejects_test() {
   let result = parser.parse_file("test/fixtures/unknown_param_style.yaml")
   case result {
-    Error(parser.InvalidValue(_, detail)) ->
+    Error(Diagnostic(code: "invalid_value", message: detail, ..)) ->
       should.be_true(string.contains(detail, "unknownStyle"))
     _ -> should.fail()
   }
@@ -8969,7 +8993,7 @@ pub fn resolve_component_alias_test() {
     Error(generate.ValidationErrors(errors:)) -> {
       // May have warnings but should not have blocking errors about aliases
       let blocking =
-        list.filter(errors, fn(e) { e.severity == validate.SeverityError })
+        list.filter(errors, fn(e) { e.severity == diagnostic.SeverityError })
       list.length(blocking) |> should.equal(0)
     }
     Error(generate.ResolveError(_)) -> should.fail()
@@ -8991,7 +9015,7 @@ pub fn capability_check_uses_registry_test() {
   let result = generate.generate(spec, make_ctx_from_spec(spec).config)
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let details = list.map(errors, fn(e) { validate.error_to_string(e) })
+      let details = list.map(errors, fn(e) { diagnostic.to_string(e) })
       should.be_true(list.any(details, fn(d) { string.contains(d, "if") }))
     }
     _ -> should.fail()
@@ -9004,15 +9028,16 @@ pub fn capability_check_uses_registry_test() {
 
 /// YAML syntax error includes line/column in error message.
 pub fn yaml_error_has_source_location_test() {
-  // Test that SourceLoc type exists and parse_error_to_string formats it
-  let loc = parser.SourceLoc(line: 5, column: 10)
-  let err = parser.YamlError(detail: "test error", loc: loc)
-  let msg = parser.parse_error_to_string(err)
+  // Test that SourceLoc type exists and to_short_string formats it
+  let loc = diagnostic.SourceLoc(line: 5, column: 10)
+  let err = diagnostic.yaml_error(detail: "test error", loc: loc)
+  let msg = diagnostic.to_short_string(err)
   should.be_true(string.contains(msg, "line 5"))
   should.be_true(string.contains(msg, "column 10"))
   // NoSourceLoc case
-  let err2 = parser.YamlError(detail: "test error", loc: parser.NoSourceLoc)
-  let msg2 = parser.parse_error_to_string(err2)
+  let err2 =
+    diagnostic.yaml_error(detail: "test error", loc: diagnostic.NoSourceLoc)
+  let msg2 = diagnostic.to_short_string(err2)
   should.equal(msg2, "test error")
 }
 

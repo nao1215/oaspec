@@ -11,9 +11,9 @@ import oaspec/codegen/validate
 import oaspec/config.{type Config, Both, Client, Server}
 import oaspec/openapi/capability_check
 import oaspec/openapi/dedup
+import oaspec/openapi/diagnostic.{type Diagnostic}
 import oaspec/openapi/hoist
 import oaspec/openapi/normalize
-import oaspec/openapi/parser
 import oaspec/openapi/resolve
 import oaspec/openapi/spec.{type OpenApiSpec, type SpecStage}
 
@@ -22,13 +22,13 @@ pub type GenerationSummary {
   GenerationSummary(
     files: List(GeneratedFile),
     spec_title: String,
-    warnings: List(validate.ValidationError),
+    warnings: List(Diagnostic),
   )
 }
 
 /// Errors from the pure generation pipeline.
 pub type GenerateError {
-  ValidationErrors(errors: List(validate.ValidationError))
+  ValidationErrors(errors: List(Diagnostic))
   ResolveError(detail: String)
 }
 
@@ -48,7 +48,7 @@ pub fn generate(
   use spec <- result.try(
     resolve.resolve(spec)
     |> result.map_error(fn(e) {
-      ResolveError(detail: parser.parse_error_to_string(e))
+      ResolveError(detail: diagnostic.to_short_string(e))
     }),
   )
 

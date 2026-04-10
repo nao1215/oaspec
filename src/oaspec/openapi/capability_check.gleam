@@ -4,9 +4,8 @@ import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import oaspec/capability
-import oaspec/codegen/validate.{
-  type ValidationError, SeverityError, SeverityWarning, TargetBoth, TargetClient,
-  ValidationError,
+import oaspec/openapi/diagnostic.{
+  type Diagnostic, SeverityError, SeverityWarning, TargetBoth, TargetClient,
 }
 import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
@@ -16,7 +15,7 @@ import oaspec/openapi/spec.{type OpenApiSpec, type SpecStage, Value}
 
 /// Run capability checks on a resolved spec.
 /// Returns errors for unsupported features and warnings for parsed-but-unused features.
-pub fn check(spec: OpenApiSpec(SpecStage)) -> List(ValidationError) {
+pub fn check(spec: OpenApiSpec(SpecStage)) -> List(Diagnostic) {
   let schema_errors = check_schemas(spec)
   let security_errors = check_security_schemes(spec)
   let scope_warnings = check_scope(spec)
@@ -24,7 +23,7 @@ pub fn check(spec: OpenApiSpec(SpecStage)) -> List(ValidationError) {
 }
 
 /// Check all schemas for unsupported keywords stored during lossless parse.
-fn check_schemas(spec: OpenApiSpec(SpecStage)) -> List(ValidationError) {
+fn check_schemas(spec: OpenApiSpec(SpecStage)) -> List(Diagnostic) {
   case spec.components {
     None -> []
     Some(components) ->
@@ -37,7 +36,7 @@ fn check_schemas(spec: OpenApiSpec(SpecStage)) -> List(ValidationError) {
 }
 
 /// Check a SchemaRef recursively for unsupported keywords.
-fn check_schema_ref(path: String, ref: SchemaRef) -> List(ValidationError) {
+fn check_schema_ref(path: String, ref: SchemaRef) -> List(Diagnostic) {
   case ref {
     Reference(..) -> []
     Inline(schema_obj) -> check_schema(path, schema_obj)
@@ -45,7 +44,7 @@ fn check_schema_ref(path: String, ref: SchemaRef) -> List(ValidationError) {
 }
 
 /// Check a single schema and recurse into children.
-fn check_schema(path: String, schema_obj: SchemaObject) -> List(ValidationError) {
+fn check_schema(path: String, schema_obj: SchemaObject) -> List(Diagnostic) {
   let metadata = schema.get_metadata(schema_obj)
 
   // Check unsupported keywords stored by lossless parser
@@ -54,7 +53,7 @@ fn check_schema(path: String, schema_obj: SchemaObject) -> List(ValidationError)
     keywords -> {
       let keyword_list = string.join(keywords, "', '")
       [
-        ValidationError(
+        diagnostic.capability(
           severity: SeverityError,
           target: TargetBoth,
           path: path,
@@ -99,7 +98,7 @@ fn check_schema(path: String, schema_obj: SchemaObject) -> List(ValidationError)
 }
 
 /// Check security schemes for unsupported types (e.g. mutualTLS).
-fn check_security_schemes(spec: OpenApiSpec(SpecStage)) -> List(ValidationError) {
+fn check_security_schemes(spec: OpenApiSpec(SpecStage)) -> List(Diagnostic) {
   case spec.components {
     None -> []
     Some(components) ->
@@ -120,11 +119,11 @@ fn check_security_schemes(spec: OpenApiSpec(SpecStage)) -> List(ValidationError)
 }
 
 /// Check for parsed-but-unused features using the capability registry.
-fn check_scope(spec: OpenApiSpec(SpecStage)) -> List(ValidationError) {
+fn check_scope(spec: OpenApiSpec(SpecStage)) -> List(Diagnostic) {
   let webhook_w = case dict.is_empty(spec.webhooks) {
     True -> []
     False -> [
-      ValidationError(
+      diagnostic.capability(
         severity: SeverityWarning,
         target: TargetBoth,
         path: "webhooks",
@@ -134,7 +133,7 @@ fn check_scope(spec: OpenApiSpec(SpecStage)) -> List(ValidationError) {
   }
   let external_docs_w = case spec.external_docs {
     Some(_) -> [
-      ValidationError(
+      diagnostic.capability(
         severity: SeverityWarning,
         target: TargetBoth,
         path: "externalDocs",
@@ -146,7 +145,7 @@ fn check_scope(spec: OpenApiSpec(SpecStage)) -> List(ValidationError) {
   let tags_w = case list.is_empty(spec.tags) {
     True -> []
     False -> [
-      ValidationError(
+      diagnostic.capability(
         severity: SeverityWarning,
         target: TargetBoth,
         path: "tags",
@@ -164,7 +163,7 @@ fn check_scope(spec: OpenApiSpec(SpecStage)) -> List(ValidationError) {
           let path_w = case list.is_empty(path_item.servers) {
             True -> []
             False -> [
-              ValidationError(
+              diagnostic.capability(
                 severity: SeverityWarning,
                 target: TargetClient,
                 path: "paths." <> path <> ".servers",
@@ -183,7 +182,7 @@ fn check_scope(spec: OpenApiSpec(SpecStage)) -> List(ValidationError) {
       let h = case dict.is_empty(c.headers) {
         True -> []
         False -> [
-          ValidationError(
+          diagnostic.capability(
             severity: SeverityWarning,
             target: TargetBoth,
             path: "components.headers",
@@ -194,7 +193,7 @@ fn check_scope(spec: OpenApiSpec(SpecStage)) -> List(ValidationError) {
       let l = case dict.is_empty(c.links) {
         True -> []
         False -> [
-          ValidationError(
+          diagnostic.capability(
             severity: SeverityWarning,
             target: TargetBoth,
             path: "components.links",

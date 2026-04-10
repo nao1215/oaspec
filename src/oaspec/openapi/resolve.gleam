@@ -4,7 +4,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/set
 import gleam/string
-import oaspec/openapi/parser.{type ParseError, InvalidValue}
+import oaspec/openapi/diagnostic.{type Diagnostic}
 import oaspec/openapi/spec.{
   type Callback, type Components, type OpenApiSpec, type Operation,
   type Parameter, type PathItem, type RefOr, type RequestBody, type Response,
@@ -16,7 +16,7 @@ import oaspec/openapi/spec.{
 /// Resolves both component-level aliases and inline $ref within operations.
 pub fn resolve(
   spec: OpenApiSpec(SpecStage),
-) -> Result(OpenApiSpec(SpecStage), ParseError) {
+) -> Result(OpenApiSpec(SpecStage), Diagnostic) {
   case spec.components {
     None -> Ok(spec)
     Some(components) -> {
@@ -70,7 +70,7 @@ pub fn resolve(
 fn resolve_component_dict(
   entries: Dict(String, RefOr(a)),
   context: String,
-) -> Result(Dict(String, RefOr(a)), ParseError) {
+) -> Result(Dict(String, RefOr(a)), Diagnostic) {
   dict.to_list(entries)
   |> list.try_fold(entries, fn(acc, entry) {
     let #(name, value) = entry
@@ -95,10 +95,10 @@ fn resolve_alias(
   ref: String,
   context: String,
   seen: set.Set(String),
-) -> Result(a, ParseError) {
+) -> Result(a, Diagnostic) {
   case set.contains(seen, ref) {
     True ->
-      Error(InvalidValue(
+      Error(diagnostic.resolve_error(
         path: context,
         detail: "Circular component alias detected: " <> ref,
       ))
@@ -109,7 +109,7 @@ fn resolve_alias(
         Ok(Value(value)) -> Ok(value)
         Ok(Ref(next_ref)) -> resolve_alias(entries, next_ref, context, new_seen)
         Error(_) ->
-          Error(InvalidValue(
+          Error(diagnostic.resolve_error(
             path: context,
             detail: "Unresolved component alias: "
               <> ref

@@ -5,10 +5,10 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import glint
 import oaspec/codegen/context
-import oaspec/codegen/validate
 import oaspec/codegen/writer
 import oaspec/config
 import oaspec/generate
+import oaspec/openapi/diagnostic
 import oaspec/openapi/parser
 import simplifile
 
@@ -155,7 +155,7 @@ fn run_generate(
             Error(generate.ValidationErrors(errors:)) -> {
               io.println("Error: OpenAPI spec contains unsupported features:")
               list.each(errors, fn(e) {
-                io.println("  - " <> validate.error_to_string(e))
+                io.println("  - " <> diagnostic.to_string(e))
               })
               halt(1)
             }
@@ -172,7 +172,7 @@ fn run_generate(
                 warnings -> {
                   io.println("Warnings:")
                   list.each(warnings, fn(w) {
-                    io.println("  - " <> validate.error_to_string(w))
+                    io.println("  - " <> diagnostic.to_string(w))
                   })
                 }
               }
