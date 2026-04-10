@@ -1,0 +1,13 @@
+openapi: "3.0.0"
+info:
+  title: No Type With Properties
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    ImplicitObject:
+      properties:
+        name:
+          type: string
+        age:
+          type: integer

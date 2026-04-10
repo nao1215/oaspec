@@ -1,0 +1,10 @@
+openapi: "3.1.0"
+info:
+  title: Const Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Status:
+      type: string
+      const: active

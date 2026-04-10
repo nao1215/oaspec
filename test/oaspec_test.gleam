@@ -7447,28 +7447,15 @@ pub fn oss_libopenapi_all_components_generates_test() {
   }
 }
 
-pub fn oss_libopenapi_burgershop_parses_test() {
-  let assert Ok(spec) =
-    parser.parse_file("test/fixtures/oss_libopenapi_burgershop.yaml")
-  spec.info.title |> should.equal("Burger Shop")
-  spec.info.version |> should.equal("1.2")
-  // Has webhooks
-  dict.size(spec.webhooks) |> should.not_equal(0)
-  // Has security
-  list.length(spec.security) |> should.not_equal(0)
-}
-
-pub fn oss_libopenapi_burgershop_schemas_test() {
-  let assert Ok(spec) =
-    parser.parse_file("test/fixtures/oss_libopenapi_burgershop.yaml")
-  let assert Some(components) = spec.components
-  // Has expected schemas
-  let schema_names = dict.keys(components.schemas)
-  list.contains(schema_names, "Burger") |> should.be_true()
-  list.contains(schema_names, "Error") |> should.be_true()
-  list.contains(schema_names, "Fries") |> should.be_true()
-  list.contains(schema_names, "Dressing") |> should.be_true()
-  list.contains(schema_names, "Drink") |> should.be_true()
+/// libopenapi burgershop uses the JSON Schema 'not' keyword which is
+/// unsupported. The parser rejects it with a clear error.
+pub fn oss_libopenapi_burgershop_rejects_not_keyword_test() {
+  let result = parser.parse_file("test/fixtures/oss_libopenapi_burgershop.yaml")
+  case result {
+    Error(parser.InvalidValue(_, detail)) ->
+      should.be_true(string.contains(detail, "not"))
+    _ -> should.fail()
+  }
 }
 
 pub fn oss_libopenapi_petstorev3_parses_test() {
@@ -8670,15 +8657,18 @@ pub fn oss_swagger_parser_java_31_security_rejects_mutualtls_test() {
 
 /// swagger-parser-java: OpenAPI 3.1 schema siblings (dependentRequired,
 /// dependentSchemas, if/then/else, examples array).
-pub fn oss_swagger_parser_java_31_schema_siblings_parses_test() {
-  let assert Ok(spec) =
+/// swagger-parser-java: schema siblings uses dependentSchemas, if/then/else,
+/// and const which are unsupported. The parser rejects with a clear error.
+pub fn oss_swagger_parser_java_31_schema_siblings_rejects_test() {
+  let result =
     parser.parse_file(
       "test/fixtures/oss_swagger_parser_java_31_schema_siblings.yaml",
     )
-  spec.openapi |> should.equal("3.1.0")
-  let assert Some(components) = spec.components
-  // Payment, PaymentMethod, IfTest, Fruit, Error
-  dict.size(components.schemas) |> should.equal(5)
+  case result {
+    Error(parser.InvalidValue(_, detail)) ->
+      should.be_true(string.contains(detail, "dependentSchemas"))
+    _ -> should.fail()
+  }
 }
 
 /// swagger-parser-java: extended petstore 3.1 uses multi-type unions
@@ -8708,4 +8698,79 @@ pub fn oss_spec_validator_broken_ref_parses_test() {
   spec.info.title |> should.equal("Some Schema")
   let assert Some(components) = spec.components
   dict.size(components.schemas) |> should.not_equal(0)
+}
+
+// ---------------------------------------------------------------------------
+// Unsupported JSON Schema keyword detection
+// ---------------------------------------------------------------------------
+
+/// const keyword should be rejected with clear error.
+pub fn unsupported_const_rejects_test() {
+  let result = parser.parse_file("test/fixtures/unsupported_const.yaml")
+  case result {
+    Error(parser.InvalidValue(_, detail)) ->
+      should.be_true(string.contains(detail, "const"))
+    _ -> should.fail()
+  }
+}
+
+/// if/then/else keywords should be rejected.
+pub fn unsupported_if_then_else_rejects_test() {
+  let result = parser.parse_file("test/fixtures/unsupported_if_then_else.yaml")
+  case result {
+    Error(parser.InvalidValue(_, detail)) -> {
+      should.be_true(string.contains(detail, "if"))
+      should.be_true(string.contains(detail, "then"))
+      should.be_true(string.contains(detail, "else"))
+    }
+    _ -> should.fail()
+  }
+}
+
+/// prefixItems keyword should be rejected.
+pub fn unsupported_prefix_items_rejects_test() {
+  let result = parser.parse_file("test/fixtures/unsupported_prefix_items.yaml")
+  case result {
+    Error(parser.InvalidValue(_, detail)) ->
+      should.be_true(string.contains(detail, "prefixItems"))
+    _ -> should.fail()
+  }
+}
+
+/// not keyword should be rejected.
+pub fn unsupported_not_rejects_test() {
+  let result = parser.parse_file("test/fixtures/unsupported_not.yaml")
+  case result {
+    Error(parser.InvalidValue(_, detail)) ->
+      should.be_true(string.contains(detail, "not"))
+    _ -> should.fail()
+  }
+}
+
+/// $defs keyword should be rejected.
+pub fn unsupported_defs_rejects_test() {
+  let result = parser.parse_file("test/fixtures/unsupported_defs.yaml")
+  case result {
+    Error(parser.InvalidValue(_, detail)) ->
+      should.be_true(string.contains(detail, "$defs"))
+    _ -> should.fail()
+  }
+}
+
+/// const nested inside object properties should be rejected.
+pub fn unsupported_nested_const_rejects_test() {
+  let result = parser.parse_file("test/fixtures/unsupported_nested_const.yaml")
+  case result {
+    Error(parser.InvalidValue(_, detail)) ->
+      should.be_true(string.contains(detail, "const"))
+    _ -> should.fail()
+  }
+}
+
+/// Schema without type but with properties should still parse as object.
+pub fn schema_no_type_with_properties_parses_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/schema_no_type_with_properties.yaml")
+  let assert Some(components) = spec.components
+  dict.size(components.schemas) |> should.equal(1)
 }

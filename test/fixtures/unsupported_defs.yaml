@@ -1,0 +1,15 @@
+openapi: "3.1.0"
+info:
+  title: Defs Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    WithDefs:
+      type: object
+      $defs:
+        Inner:
+          type: string
+      properties:
+        name:
+          $ref: "#/$defs/Inner"

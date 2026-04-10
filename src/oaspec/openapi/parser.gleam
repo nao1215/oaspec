@@ -1078,6 +1078,8 @@ pub fn parse_schema_object(node: yay.Node) -> Result(SchemaObject, ParseError) {
       example:,
     )
 
+  use _ <- result.try(check_unsupported_schema_keywords(node))
+
   // Check for composition keywords first
   case yay.select_sugar(from: node, selector: "allOf") {
     Ok(yay.NodeSeq(items)) -> {
@@ -1117,6 +1119,33 @@ pub fn parse_schema_object(node: yay.Node) -> Result(SchemaObject, ParseError) {
             _ -> parse_typed_schema(node, metadata)
           }
       }
+  }
+}
+
+/// Check for unsupported JSON Schema 2020-12 keywords and return an error
+/// if any are found.
+fn check_unsupported_schema_keywords(node: yay.Node) -> Result(Nil, ParseError) {
+  let unsupported_keywords = [
+    "const", "$defs", "prefixItems", "if", "then", "else", "dependentSchemas",
+    "unevaluatedProperties", "unevaluatedItems", "contentEncoding",
+    "contentMediaType", "contentSchema", "not",
+  ]
+  let found =
+    list.filter(unsupported_keywords, fn(keyword) {
+      case yay.select_sugar(from: node, selector: keyword) {
+        Ok(_) -> True
+        Error(_) -> False
+      }
+    })
+  case found {
+    [] -> Ok(Nil)
+    keywords ->
+      Error(InvalidValue(
+        path: "schema",
+        detail: "Unsupported JSON Schema keyword '"
+          <> string.join(keywords, "', '")
+          <> "' found. This keyword is not supported for code generation. Remove it or model the constraint differently.",
+      ))
   }
 }
 
@@ -1168,6 +1197,10 @@ fn parse_typed_schema(
       }
       Ok(yay.NodeStr(s)) -> Ok(#(s, metadata))
       _ -> {
+        // When type is absent, default to "object".
+        // Unsupported keywords (const, if/then/else, etc.) are already caught
+        // by check_unsupported_schema_keywords before reaching this point,
+        // so this fallback is safe for legitimate type-less schemas.
         let s =
           yay.extract_optional_string(node, "type")
           |> result.unwrap(None)

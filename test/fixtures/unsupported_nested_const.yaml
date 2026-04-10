@@ -1,0 +1,13 @@
+openapi: "3.1.0"
+info:
+  title: Nested Const Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Wrapper:
+      type: object
+      properties:
+        status:
+          type: string
+          const: active

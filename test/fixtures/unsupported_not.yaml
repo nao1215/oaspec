@@ -1,0 +1,10 @@
+openapi: "3.1.0"
+info:
+  title: Not Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    NotNull:
+      not:
+        type: "null"

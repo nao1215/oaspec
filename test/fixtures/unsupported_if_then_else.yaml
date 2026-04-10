@@ -1,0 +1,21 @@
+openapi: "3.1.0"
+info:
+  title: If Then Else Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Conditional:
+      type: object
+      if:
+        properties:
+          country:
+            const: canada
+      then:
+        properties:
+          province:
+            type: string
+      else:
+        properties:
+          state:
+            type: string
