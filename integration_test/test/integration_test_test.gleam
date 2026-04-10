@@ -5,6 +5,7 @@ import api/middleware
 import api/request_types
 import api/response_types
 import api/types
+import gleam/dict
 import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
@@ -24,6 +25,7 @@ pub fn pet_construction_test() {
       name: "Fido",
       status: types.PetStatusAvailable,
       tag: Some("dog"),
+      additional_properties: dict.new(),
     )
   pet.id |> should.equal(1)
   pet.name |> should.equal("Fido")
@@ -46,12 +48,18 @@ pub fn create_pet_request_type_test() {
       name: "Rex",
       status: Some(types.PetStatusAvailable),
       tag: None,
+      additional_properties: dict.new(),
     )
   req.name |> should.equal("Rex")
 }
 
 pub fn error_type_test() {
-  let err = types.Error(code: 404, message: "Not found")
+  let err =
+    types.Error(
+      code: 404,
+      message: "Not found",
+      additional_properties: dict.new(),
+    )
   err.code |> should.equal(404)
   err.message |> should.equal("Not found")
 }
@@ -93,7 +101,13 @@ pub fn list_pets_response_unauthorized_variant_test() {
 
 pub fn create_pet_response_created_variant_test() {
   let pet =
-    types.Pet(id: 1, name: "Rex", status: types.PetStatusAvailable, tag: None)
+    types.Pet(
+      id: 1,
+      name: "Rex",
+      status: types.PetStatusAvailable,
+      tag: None,
+      additional_properties: dict.new(),
+    )
   let response_types.CreatePetResponseCreated(p) =
     response_types.CreatePetResponseCreated(pet)
   p.name |> should.equal("Rex")
@@ -213,6 +227,7 @@ pub fn roundtrip_pet_test() {
       name: "Buddy",
       status: types.PetStatusSold,
       tag: Some("golden"),
+      additional_properties: dict.new(),
     )
   let encoded = encode.encode_pet(original)
   let assert Ok(decoded) = decode.decode_pet(encoded)
@@ -221,7 +236,13 @@ pub fn roundtrip_pet_test() {
 
 pub fn roundtrip_pet_without_tag_test() {
   let original =
-    types.Pet(id: 1, name: "Rex", status: types.PetStatusPending, tag: None)
+    types.Pet(
+      id: 1,
+      name: "Rex",
+      status: types.PetStatusPending,
+      tag: None,
+      additional_properties: dict.new(),
+    )
   let encoded = encode.encode_pet(original)
   let assert Ok(decoded) = decode.decode_pet(encoded)
   decoded |> should.equal(original)
@@ -250,7 +271,13 @@ pub fn handler_list_pets_test() {
 }
 
 pub fn handler_create_pet_test() {
-  let body = types.CreatePetRequest(name: "NewPet", status: None, tag: None)
+  let body =
+    types.CreatePetRequest(
+      name: "NewPet",
+      status: None,
+      tag: None,
+      additional_properties: dict.new(),
+    )
   let req = request_types.CreatePetRequest(body:)
   let resp = handlers.create_pet(req)
   case resp {

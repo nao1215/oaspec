@@ -65,14 +65,6 @@ fn generate_decoders(ctx: Context) -> String {
       type_gen.schema_has_additional_properties(schema_ref, ctx)
     })
 
-  // Check if dynamic module is needed (any schema with additionalProperties —
-  // both typed and untyped use dynamic.dynamic for safe initial dict decode)
-  let needs_dynamic =
-    list.any(schemas, fn(entry) {
-      let #(_, schema_ref) = entry
-      type_gen.schema_has_additional_properties(schema_ref, ctx)
-    })
-
   // Check if types module is needed (any non-primitive schema)
   let needs_types =
     list.any(schemas, fn(entry) {
@@ -87,16 +79,9 @@ fn generate_decoders(ctx: Context) -> String {
       }
     })
 
-  let base_imports = case needs_dict, needs_dynamic {
-    True, True -> [
-      "gleam/dict",
-      "gleam/dynamic",
-      "gleam/dynamic/decode",
-      "gleam/json",
-    ]
-    True, False -> ["gleam/dict", "gleam/dynamic/decode", "gleam/json"]
-    False, True -> ["gleam/dynamic", "gleam/dynamic/decode", "gleam/json"]
-    False, False -> ["gleam/dynamic/decode", "gleam/json"]
+  let base_imports = case needs_dict {
+    True -> ["gleam/dict", "gleam/dynamic/decode", "gleam/json"]
+    False -> ["gleam/dynamic/decode", "gleam/json"]
   }
   let base_imports = case needs_types {
     True -> list.append(base_imports, [ctx.config.package <> "/types"])
@@ -402,7 +387,7 @@ fn generate_decoder(
           sb
           |> se.indent(
             1,
-            "use all_props <- decode.then(decode.dict(decode.string, dynamic.dynamic))",
+            "use all_props <- decode.then(decode.dict(decode.string, decode.new_primitive_decoder(\"Dynamic\", fn(x) { Ok(x) })))",
           )
           |> se.indent(
             1,
@@ -439,7 +424,7 @@ fn generate_decoder(
           sb
           |> se.indent(
             1,
-            "use all_props <- decode.then(decode.dict(decode.string, dynamic.dynamic))",
+            "use all_props <- decode.then(decode.dict(decode.string, decode.new_primitive_decoder(\"Dynamic\", fn(x) { Ok(x) })))",
           )
           |> se.indent(
             1,
@@ -1195,7 +1180,13 @@ fn generate_encoders(ctx: Context) -> String {
     })
 
   let base_imports = case needs_dict, needs_dynamic {
-    True, True -> ["gleam/dict", "gleam/dynamic", "gleam/json", "gleam/list"]
+    True, True -> [
+      "gleam/dict",
+      "gleam/dynamic",
+      "gleam/dynamic/decode",
+      "gleam/json",
+      "gleam/list",
+    ]
     True, False -> ["gleam/dict", "gleam/json", "gleam/list"]
     _, _ -> ["gleam/json"]
   }
@@ -1235,18 +1226,21 @@ fn generate_encoders(ctx: Context) -> String {
       |> se.line("fn encode_dynamic(value: dynamic.Dynamic) -> json.Json {")
       |> se.indent(1, "case dynamic.classify(value) {")
       |> se.indent(2, "\"String\" -> {")
-      |> se.indent(3, "let assert Ok(s) = dynamic.string(value)")
+      |> se.indent(3, "let assert Ok(s) = decode.run(value, decode.string)")
       |> se.indent(3, "json.string(s)")
       |> se.indent(2, "}")
       |> se.indent(2, "\"Int\" -> {")
-      |> se.indent(3, "let assert Ok(i) = dynamic.int(value)")
+      |> se.indent(3, "let assert Ok(i) = decode.run(value, decode.int)")
       |> se.indent(3, "json.int(i)")
       |> se.indent(2, "}")
       |> se.indent(2, "\"Float\" -> {")
-      |> se.indent(3, "let assert Ok(f) = dynamic.float(value)")
+      |> se.indent(3, "let assert Ok(f) = decode.run(value, decode.float)")
       |> se.indent(3, "json.float(f)")
       |> se.indent(2, "}")
-      |> se.indent(2, "\"Bool\" -> json.bool(dynamic.unsafe_coerce(value))")
+      |> se.indent(2, "\"Bool\" -> {")
+      |> se.indent(3, "let assert Ok(b) = decode.run(value, decode.bool)")
+      |> se.indent(3, "json.bool(b)")
+      |> se.indent(2, "}")
       |> se.indent(2, "\"Nil\" -> json.null()")
       |> se.indent(2, "_ -> json.string(dynamic.classify(value))")
       |> se.indent(1, "}")
@@ -1467,7 +1461,7 @@ fn generate_encoder(
           |> se.indent(1, "]")
           |> se.indent(
             1,
-            "let extra_props = dict.to_list(value.additional_properties) |> list.map(fn(entry) { let #(k, v) = entry; #(k, encode_dynamic(v)) })",
+            "let extra_props = dict.to_list(value.additional_properties) |> list.map(fn(entry) { let #(k, v) = entry\n  #(k, encode_dynamic(v)) })",
           )
           |> se.indent(1, "json.object(list.append(base_props, extra_props))")
         }

@@ -4,7 +4,10 @@ import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/codegen/context.{type Context}
 import oaspec/openapi/resolver
-import oaspec/openapi/schema.{type SchemaRef, Inline, ObjectSchema, Reference}
+import oaspec/openapi/schema.{
+  type AdditionalProperties, type SchemaRef, Forbidden, Inline, ObjectSchema,
+  Reference,
+}
 import oaspec/openapi/spec.{type Resolved, Value}
 import oaspec/util/naming
 
@@ -552,6 +555,36 @@ fn schema_ref_resolves_to_object(schema_ref: SchemaRef, ctx: Context) -> Bool {
   }
 }
 
+fn schema_ref_additional_properties(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> AdditionalProperties {
+  case schema_ref {
+    Inline(ObjectSchema(additional_properties:, ..)) -> additional_properties
+    Reference(..) as schema_ref ->
+      case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
+        Ok(ObjectSchema(additional_properties:, ..)) -> additional_properties
+        _ -> Forbidden
+      }
+    _ -> Forbidden
+  }
+}
+
+fn body_additional_properties(
+  rb: spec.RequestBody(Resolved),
+  content_type: String,
+  ctx: Context,
+) -> AdditionalProperties {
+  case dict.get(rb.content, content_type) {
+    Ok(media_type) ->
+      case media_type.schema {
+        Some(schema_ref) -> schema_ref_additional_properties(schema_ref, ctx)
+        None -> Forbidden
+      }
+    Error(_) -> Forbidden
+  }
+}
+
 fn form_urlencoded_schema_ref_type_name(schema_ref: SchemaRef) -> String {
   case schema_ref {
     Reference(name:, ..) -> "types." <> naming.schema_to_type_name(name)
@@ -604,6 +637,7 @@ fn form_urlencoded_object_constructor_expr(
   type_name: String,
   prefix: String,
   properties: List(DeepObjectProperty),
+  additional_properties: AdditionalProperties,
   ctx: Context,
   nesting_depth: Int,
 ) -> String {
@@ -637,7 +671,11 @@ fn form_urlencoded_object_constructor_expr(
       prop.field_name <> ": " <> value_expr
     })
     |> string.join(", ")
-  type_name <> "(" <> fields <> ")"
+  let additional_props_suffix = case additional_properties {
+    Forbidden -> ""
+    _ -> ", additional_properties: dict.new()"
+  }
+  type_name <> "(" <> fields <> additional_props_suffix <> ")"
 }
 
 fn form_urlencoded_object_required_expr(
@@ -650,6 +688,7 @@ fn form_urlencoded_object_required_expr(
     form_urlencoded_schema_ref_type_name(schema_ref),
     prefix,
     object_properties_from_schema_ref(schema_ref, ctx),
+    schema_ref_additional_properties(schema_ref, ctx),
     ctx,
     nesting_depth,
   )
@@ -675,6 +714,7 @@ fn form_urlencoded_object_optional_expr(
     form_urlencoded_schema_ref_type_name(schema_ref),
     prefix,
     props,
+    schema_ref_additional_properties(schema_ref, ctx),
     ctx,
     nesting_depth,
   )
@@ -690,6 +730,7 @@ pub fn form_urlencoded_body_constructor_expr(
     form_urlencoded_body_type_name(rb, op_id),
     "",
     form_urlencoded_body_properties(rb, ctx),
+    body_additional_properties(rb, "application/x-www-form-urlencoded", ctx),
     ctx,
     0,
   )
@@ -773,7 +814,17 @@ pub fn multipart_body_constructor_expr(
       prop.field_name <> ": " <> value_expr
     })
     |> string.join(", ")
-  multipart_body_type_name(rb, op_id) <> "(" <> fields <> ")"
+  let additional_props_suffix = case
+    body_additional_properties(rb, "multipart/form-data", ctx)
+  {
+    Forbidden -> ""
+    _ -> ", additional_properties: dict.new()"
+  }
+  multipart_body_type_name(rb, op_id)
+  <> "("
+  <> fields
+  <> additional_props_suffix
+  <> ")"
 }
 
 pub fn multipart_body_has_optional_fields(

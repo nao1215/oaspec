@@ -45,14 +45,15 @@ cat > "$SCRIPT_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
 import api/request_types
 import api/response_types
 import api/types
+import gleam/dict
 import gleam/option.{None, Some}
 
 /// List all pets - returns hardcoded test data.
 pub fn list_pets(req: request_types.ListPetsRequest) -> response_types.ListPetsResponse {
   let _ = req
   let pets = [
-    types.Pet(id: 1, name: "Fido", status: types.PetStatusAvailable, tag: Some("dog")),
-    types.Pet(id: 2, name: "Whiskers", status: types.PetStatusPending, tag: None),
+    types.Pet(id: 1, name: "Fido", status: types.PetStatusAvailable, tag: Some("dog"), additional_properties: dict.new()),
+    types.Pet(id: 2, name: "Whiskers", status: types.PetStatusPending, tag: None, additional_properties: dict.new()),
   ]
   response_types.ListPetsResponseOk(pets)
 }
@@ -64,6 +65,7 @@ pub fn create_pet(req: request_types.CreatePetRequest) -> response_types.CreateP
     name: req.body.name,
     status: types.PetStatusAvailable,
     tag: req.body.tag,
+    additional_properties: dict.new(),
   )
   response_types.CreatePetResponseCreated(pet)
 }
@@ -72,7 +74,7 @@ pub fn create_pet(req: request_types.CreatePetRequest) -> response_types.CreateP
 pub fn get_pet(req: request_types.GetPetRequest) -> response_types.GetPetResponse {
   case req.pet_id {
     1 -> response_types.GetPetResponseOk(
-      types.Pet(id: 1, name: "Fido", status: types.PetStatusAvailable, tag: Some("dog")),
+      types.Pet(id: 1, name: "Fido", status: types.PetStatusAvailable, tag: Some("dog"), additional_properties: dict.new()),
     )
     _ -> response_types.GetPetResponseNotFound
   }

@@ -520,6 +520,29 @@ pub fn parse_additional_properties_untyped_test() {
   ))) = dict.get(props, "payload")
 }
 
+/// Per JSON Schema, absent additionalProperties means allowed (Untyped),
+/// not forbidden.
+pub fn parse_absent_additional_properties_is_untyped_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: T, version: 1.0.0 }
+paths: {}
+components:
+  schemas:
+    Bag:
+      type: object
+      properties:
+        name: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let assert Some(components) = spec.components
+  let assert Ok(schema.Inline(schema.ObjectSchema(additional_properties: ap, ..))) =
+    dict.get(components.schemas, "Bag")
+  // Absent additionalProperties MUST be Untyped (allowed), not Forbidden
+  ap |> should.equal(schema.Untyped)
+}
+
 // --- Validation Tests ---
 
 fn make_ctx(spec_path: String) -> context.Context {
@@ -1665,8 +1688,8 @@ components:
   // It should use dynamic.dynamic for the initial dict read.
   string.contains(content, "decode.dict(decode.string, decode.string)")
   |> should.be_false()
-  // It should decode the dict with dynamic values first
-  string.contains(content, "dynamic.dynamic")
+  // It should decode the dict with a dynamic primitive decoder first
+  string.contains(content, "new_primitive_decoder")
   |> should.be_true()
 }
 

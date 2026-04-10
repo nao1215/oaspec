@@ -1311,7 +1311,8 @@ fn parse_typed_schema(
             ))
             Ok(schema.Typed(sr))
           }
-          _ -> Ok(schema.Forbidden)
+          // Per JSON Schema, absent additionalProperties means allowed
+          _ -> Ok(schema.Untyped)
         },
       )
       let min_properties =
