@@ -10,6 +10,7 @@ import oaspec/codegen/validate
 import oaspec/config.{type Config, Both, Client, Server}
 import oaspec/openapi/dedup
 import oaspec/openapi/hoist
+import oaspec/openapi/normalize
 import oaspec/openapi/spec.{type OpenApiSpec}
 
 /// Result of a successful code generation run.
@@ -26,7 +27,7 @@ pub type GenerateError {
   ValidationErrors(errors: List(validate.ValidationError))
 }
 
-/// Pure generation pipeline: hoist → dedup → validate → generate files.
+/// Pure generation pipeline: normalize → hoist → dedup → validate → generate.
 /// Takes an already-parsed spec and config; returns generated files or errors.
 /// Does not perform IO — callers handle writing files and printing output.
 pub fn generate(
@@ -34,6 +35,9 @@ pub fn generate(
   cfg: Config,
 ) -> Result(GenerationSummary, GenerateError) {
   let spec_title = spec.info.title <> " v" <> spec.info.version
+
+  // Normalize OAS 3.1 patterns to 3.0-compatible form
+  let spec = normalize.normalize(spec)
 
   // Hoist inline complex schemas into components.schemas
   let spec = hoist.hoist(spec)
