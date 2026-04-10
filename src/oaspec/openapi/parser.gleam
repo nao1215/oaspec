@@ -525,10 +525,18 @@ fn parse_parameter(
         },
       )
 
-      let style =
-        yay.extract_optional_string(node, "style")
-        |> result.unwrap(None)
-        |> option.map(parse_parameter_style)
+      use style <- result.try(
+        case
+          yay.extract_optional_string(node, "style")
+          |> result.unwrap(None)
+        {
+          Some(s) -> {
+            use parsed <- result.try(parse_parameter_style(s))
+            Ok(Some(parsed))
+          }
+          None -> Ok(None)
+        },
+      )
 
       let explode =
         yay.extract_optional_bool(node, "explode")
@@ -690,17 +698,24 @@ fn parse_parameter_in(value: String) -> Result(ParameterIn, ParseError) {
 }
 
 /// Map a style string to a ParameterStyle ADT value.
-fn parse_parameter_style(value: String) -> spec.ParameterStyle {
+fn parse_parameter_style(
+  value: String,
+) -> Result(spec.ParameterStyle, ParseError) {
   case value {
-    "form" -> spec.FormStyle
-    "simple" -> spec.SimpleStyle
-    "deepObject" -> spec.DeepObjectStyle
-    "matrix" -> spec.MatrixStyle
-    "label" -> spec.LabelStyle
-    "spaceDelimited" -> spec.SpaceDelimitedStyle
-    "pipeDelimited" -> spec.PipeDelimitedStyle
-    // Unknown styles default to form (OpenAPI default for query)
-    _ -> spec.FormStyle
+    "form" -> Ok(spec.FormStyle)
+    "simple" -> Ok(spec.SimpleStyle)
+    "deepObject" -> Ok(spec.DeepObjectStyle)
+    "matrix" -> Ok(spec.MatrixStyle)
+    "label" -> Ok(spec.LabelStyle)
+    "spaceDelimited" -> Ok(spec.SpaceDelimitedStyle)
+    "pipeDelimited" -> Ok(spec.PipeDelimitedStyle)
+    _ ->
+      Error(InvalidValue(
+        path: "parameter.style",
+        detail: "Unknown parameter style: '"
+          <> value
+          <> "'. Must be one of: form, simple, deepObject, matrix, label, spaceDelimited, pipeDelimited",
+      ))
   }
 }
 
@@ -2043,7 +2058,13 @@ fn parse_encoding_map(node: yay.Node) -> Dict(String, Encoding) {
             let style =
               yay.extract_optional_string(value_node, "style")
               |> result.unwrap(None)
-              |> option.map(parse_parameter_style)
+              |> option.map(fn(s) {
+                case parse_parameter_style(s) {
+                  Ok(parsed) -> Some(parsed)
+                  Error(_) -> None
+                }
+              })
+              |> option.flatten
             let explode =
               yay.extract_optional_bool(value_node, "explode")
               |> result.unwrap(None)

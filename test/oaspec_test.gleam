@@ -8825,3 +8825,13 @@ pub fn wrong_kind_ref_rejects_test() {
     _ -> should.fail()
   }
 }
+
+/// Unknown parameter style should be rejected with clear error.
+pub fn unknown_param_style_rejects_test() {
+  let result = parser.parse_file("test/fixtures/unknown_param_style.yaml")
+  case result {
+    Error(parser.InvalidValue(_, detail)) ->
+      should.be_true(string.contains(detail, "unknownStyle"))
+    _ -> should.fail()
+  }
+}
