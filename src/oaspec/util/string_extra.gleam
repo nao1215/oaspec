@@ -3,6 +3,7 @@ import gleam/list
 import gleam/string
 import gleam/string_tree.{type StringTree}
 
+/// Type alias for StringTree used as a mutable string builder throughout codegen.
 pub type StringBuilder =
   StringTree
 
