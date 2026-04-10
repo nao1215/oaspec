@@ -8960,6 +8960,33 @@ pub fn normalize_const_to_enum_test() {
   enums |> should.equal(["active"])
 }
 
+/// Non-string const values are preserved, not converted to StringSchema.
+pub fn normalize_preserves_non_string_const_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/normalize_const_types.yaml")
+  let normalized = normalize.normalize(spec)
+  let assert Some(components) = normalized.components
+
+  // String const: normalized to enum
+  let assert Ok(schema.Inline(schema.StringSchema(
+    metadata: str_meta,
+    enum_values: str_enums,
+    ..,
+  ))) = dict.get(components.schemas, "StringConst")
+  str_meta.const_value |> should.equal(None)
+  str_enums |> should.equal(["active"])
+
+  // Bool const: preserved as BooleanSchema with const_value
+  let assert Ok(schema.Inline(schema.BooleanSchema(metadata: bool_meta))) =
+    dict.get(components.schemas, "BoolConst")
+  bool_meta.const_value |> should.equal(Some(value.JsonBool(True)))
+
+  // Int const: preserved as IntegerSchema with const_value
+  let assert Ok(schema.Inline(schema.IntegerSchema(metadata: int_meta, ..))) =
+    dict.get(components.schemas, "IntConst")
+  int_meta.const_value |> should.equal(Some(value.JsonInt(42)))
+}
+
 /// type: [string, integer] is normalized to oneOf by normalize pass.
 pub fn normalize_multi_type_to_oneof_test() {
   let assert Ok(spec) =

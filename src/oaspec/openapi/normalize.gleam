@@ -181,33 +181,22 @@ fn normalize_schema_ref(ref: SchemaRef) -> SchemaRef {
 }
 
 fn normalize_schema(s: SchemaObject) -> SchemaObject {
-  // 1. const_value -> single-value enum
+  // 1. const_value -> single-value enum (string const only)
+  // Non-string const (bool, int, float, object, array, null) is preserved
+  // as-is in metadata — codegen doesn't support const for these types yet,
+  // and capability_check will warn about it.
   let s = case s {
     StringSchema(metadata: m, ..) ->
       case m.const_value {
-        Some(const_val) ->
+        Some(value.JsonString(str_val)) ->
           StringSchema(
             ..s,
-            enum_values: [value.to_display_string(const_val)],
+            enum_values: [str_val],
             metadata: SchemaMetadata(..m, const_value: None),
           )
-        None -> s
+        _ -> s
       }
-    _ ->
-      case schema.get_metadata(s).const_value {
-        Some(val) -> {
-          let m = schema.get_metadata(s)
-          StringSchema(
-            metadata: SchemaMetadata(..m, const_value: None),
-            format: None,
-            enum_values: [value.to_display_string(val)],
-            min_length: None,
-            max_length: None,
-            pattern: None,
-          )
-        }
-        None -> s
-      }
+    _ -> s
   }
 
   // 2. raw_type with multiple types -> oneOf

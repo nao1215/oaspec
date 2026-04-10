@@ -1,0 +1,16 @@
+openapi: "3.1.0"
+info:
+  title: Const Types Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    StringConst:
+      type: string
+      const: active
+    BoolConst:
+      type: boolean
+      const: true
+    IntConst:
+      type: integer
+      const: 42
