@@ -638,7 +638,7 @@ fn validate_server_request_body_content_types(
           path: op_id <> ".requestBody",
           detail: "Content type '"
             <> media_type
-            <> "' is not supported for server code generation. Server router only supports application/json request bodies with typed decoding.",
+            <> "' is not supported for server code generation. Supported: application/json, application/x-www-form-urlencoded, multipart/form-data.",
         )
       })
     }
