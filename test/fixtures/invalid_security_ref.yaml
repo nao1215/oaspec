@@ -1,0 +1,13 @@
+openapi: "3.0.0"
+info:
+  title: Invalid Security Ref
+  version: 1.0.0
+security:
+  - nonexistent_scheme: []
+paths:
+  /test:
+    get:
+      operationId: getTest
+      responses:
+        "200":
+          description: OK

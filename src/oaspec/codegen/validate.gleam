@@ -923,11 +923,59 @@ fn validate_schema_recursive(
   }
 }
 
-/// Validate security schemes for unsupported types.
-/// All scheme types are now supported: apiKey, HTTP (any scheme), OAuth2,
-/// and OpenID Connect.
-fn validate_security_schemes(_ctx: Context) -> List(ValidationError) {
-  []
+/// Validate that all security scheme references in global and operation-level
+/// security requirements point to schemes defined in components.securitySchemes.
+fn validate_security_schemes(ctx: Context) -> List(ValidationError) {
+  let scheme_names = case ctx.spec.components {
+    Some(components) -> dict.keys(components.security_schemes)
+    None -> []
+  }
+
+  let global_errors =
+    list.flat_map(ctx.spec.security, fn(req) {
+      list.filter_map(req.schemes, fn(scheme_ref) {
+        case list.contains(scheme_names, scheme_ref.scheme_name) {
+          True -> Error(Nil)
+          False ->
+            Ok(ValidationError(
+              severity: SeverityError,
+              target: TargetBoth,
+              path: "security." <> scheme_ref.scheme_name,
+              detail: "Security requirement references scheme '"
+                <> scheme_ref.scheme_name
+                <> "' which is not defined in components.securitySchemes.",
+            ))
+        }
+      })
+    })
+
+  let operations = type_gen.collect_operations(ctx)
+  let operation_errors =
+    list.flat_map(operations, fn(op) {
+      let #(op_id, operation, _path, _method) = op
+      case operation.security {
+        Some(reqs) ->
+          list.flat_map(reqs, fn(req) {
+            list.filter_map(req.schemes, fn(scheme_ref) {
+              case list.contains(scheme_names, scheme_ref.scheme_name) {
+                True -> Error(Nil)
+                False ->
+                  Ok(ValidationError(
+                    severity: SeverityError,
+                    target: TargetBoth,
+                    path: op_id <> ".security." <> scheme_ref.scheme_name,
+                    detail: "Security requirement references scheme '"
+                      <> scheme_ref.scheme_name
+                      <> "' which is not defined in components.securitySchemes.",
+                  ))
+              }
+            })
+          })
+        None -> []
+      }
+    })
+
+  list.append(global_errors, operation_errors)
 }
 
 /// Check for AST fields that are parsed but not used by codegen, emitting

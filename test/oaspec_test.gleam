@@ -7440,27 +7440,19 @@ pub fn oss_libopenapi_all_components_parses_test() {
   dict.size(components.schemas) |> should.not_equal(0)
 }
 
-pub fn oss_libopenapi_all_components_validates_test() {
+/// The all_components fixture references security scheme 'api_key' that is
+/// not defined in components.securitySchemes. Validation catches this.
+pub fn oss_libopenapi_all_components_validates_security_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_libopenapi_all_components.yaml")
   let ctx = make_ctx_from_spec(spec)
   let errors = validate.validate(ctx)
   let blocking = validate.errors_only(errors)
-  list.length(blocking) |> should.equal(0)
-}
-
-pub fn oss_libopenapi_all_components_generates_test() {
-  let assert Ok(spec) =
-    parser.parse_file("test/fixtures/oss_libopenapi_all_components.yaml")
-  let ctx = make_ctx_from_spec(spec)
-  let result = generate.generate(spec, ctx.config)
-  case result {
-    Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
-    Error(generate.ValidationErrors(errors:)) -> {
-      let blocking = validate.errors_only(errors)
-      list.length(blocking) |> should.equal(0)
-    }
-  }
+  let has_security_error =
+    list.any(blocking, fn(e) {
+      string.contains(validate.error_to_string(e), "api_key")
+    })
+  should.be_true(has_security_error)
 }
 
 /// libopenapi burgershop uses the JSON Schema 'not' keyword which is
@@ -8794,6 +8786,25 @@ pub fn schema_no_type_with_properties_parses_test() {
 // ---------------------------------------------------------------------------
 // $ref prefix validation
 // ---------------------------------------------------------------------------
+
+/// Security requirement referencing undefined scheme should be rejected.
+pub fn validate_invalid_security_ref_rejects_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/invalid_security_ref.yaml")
+  let result = generate.generate(spec, make_ctx_from_spec(spec).config)
+  case result {
+    Error(generate.ValidationErrors(errors:)) -> {
+      let error_details =
+        list.map(errors, fn(e) { validate.error_to_string(e) })
+      let has_security =
+        list.any(error_details, fn(d) {
+          string.contains(d, "nonexistent_scheme")
+        })
+      should.be_true(has_security)
+    }
+    Ok(_) -> should.fail()
+  }
+}
 
 /// External file $ref for parameter should be rejected.
 pub fn external_param_ref_rejects_test() {
