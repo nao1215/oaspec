@@ -31,6 +31,7 @@ pub fn build_types_module(ctx: Context) -> Module {
       list.sort(dict.to_list(components.schemas), fn(a, b) {
         string.compare(a.0, b.0)
       })
+      |> list.filter(fn(entry) { !is_internal_schema(entry.1) })
     None -> []
   }
 
@@ -663,5 +664,13 @@ fn list_at_or(lst: List(String), idx: Int, default: String) -> String {
     [], _ -> default
     [head, ..], 0 -> head
     [_, ..rest], n -> list_at_or(rest, n - 1, default)
+  }
+}
+
+/// Check if a schema ref is marked as internal (allOf helper type).
+pub fn is_internal_schema(schema_ref: schema.SchemaRef) -> Bool {
+  case schema_ref {
+    Inline(obj) -> schema.get_metadata(obj).internal
+    _ -> False
   }
 }

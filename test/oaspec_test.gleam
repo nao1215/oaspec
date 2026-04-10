@@ -1549,6 +1549,146 @@ components:
   string.contains(types_file.content, "name: String") |> should.be_true()
 }
 
+// --- Feature: allOf PartN helper types must not appear in public generated API ---
+
+pub fn allof_part_types_not_in_generated_types_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    User:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+    AdminUser:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            permissions:
+              type: array
+              items: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = types.generate(ctx)
+  let assert [types_file, ..] = files
+  let content = types_file.content
+
+  // The merged AdminUser type should be present
+  string.contains(content, "pub type AdminUser {") |> should.be_true()
+
+  // PartN helper types must NOT appear in generated types
+  string.contains(content, "AdminUserPart") |> should.be_false()
+}
+
+pub fn allof_part_types_not_in_generated_decoders_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    User:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+    AdminUser:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            permissions:
+              type: array
+              items: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = decoders.generate(ctx)
+
+  // Find decode file
+  let assert Ok(decode_file) =
+    list.find(files, fn(f) { string.contains(f.path, "decode") })
+  let content = decode_file.content
+
+  // The merged AdminUser decoder should be present
+  string.contains(content, "admin_user_decoder") |> should.be_true()
+
+  // PartN helper decoders must NOT appear
+  string.contains(content, "admin_user_part") |> should.be_false()
+}
+
+pub fn allof_part_types_not_in_generated_encoders_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    User:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+    AdminUser:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            permissions:
+              type: array
+              items: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = decoders.generate(ctx)
+
+  // Find encode file
+  let assert Ok(encode_file) =
+    list.find(files, fn(f) { string.contains(f.path, "encode") })
+  let content = encode_file.content
+
+  // The merged AdminUser encoder should be present
+  string.contains(content, "encode_admin_user") |> should.be_true()
+
+  // PartN helper encoders must NOT appear
+  string.contains(content, "admin_user_part") |> should.be_false()
+}
+
 // --- Feature: Validation constraints generate guards (Phase 4-3) ---
 
 pub fn validate_constraints_generate_guards_test() {

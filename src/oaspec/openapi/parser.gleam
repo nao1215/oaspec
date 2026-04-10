@@ -1062,6 +1062,7 @@ pub fn parse_schema_object(
       const_value:,
       raw_type: None,
       unsupported_keywords:,
+      internal: False,
     )
 
   // Check for composition keywords first

@@ -20,6 +20,7 @@ pub type SchemaMetadata {
     const_value: Option(JsonValue),
     raw_type: Option(List(String)),
     unsupported_keywords: List(String),
+    internal: Bool,
   )
 }
 
@@ -37,6 +38,7 @@ pub fn default_metadata() -> SchemaMetadata {
     const_value: option.None,
     raw_type: option.None,
     unsupported_keywords: [],
+    internal: False,
   )
 }
 
@@ -169,5 +171,87 @@ pub fn get_metadata(schema: SchemaObject) -> SchemaMetadata {
     AllOfSchema(metadata:, ..) -> metadata
     OneOfSchema(metadata:, ..) -> metadata
     AnyOfSchema(metadata:, ..) -> metadata
+  }
+}
+
+/// Mark a schema as internal (not part of the public generated API).
+pub fn set_internal(schema: SchemaObject) -> SchemaObject {
+  let meta = get_metadata(schema)
+  let meta = SchemaMetadata(..meta, internal: True)
+  set_metadata(schema, meta)
+}
+
+/// Replace the metadata on a schema object.
+fn set_metadata(schema: SchemaObject, meta: SchemaMetadata) -> SchemaObject {
+  case schema {
+    StringSchema(format:, enum_values:, min_length:, max_length:, pattern:, ..) ->
+      StringSchema(
+        metadata: meta,
+        format:,
+        enum_values:,
+        min_length:,
+        max_length:,
+        pattern:,
+      )
+    IntegerSchema(
+      format:,
+      minimum:,
+      maximum:,
+      exclusive_minimum:,
+      exclusive_maximum:,
+      multiple_of:,
+      ..,
+    ) ->
+      IntegerSchema(
+        metadata: meta,
+        format:,
+        minimum:,
+        maximum:,
+        exclusive_minimum:,
+        exclusive_maximum:,
+        multiple_of:,
+      )
+    NumberSchema(
+      format:,
+      minimum:,
+      maximum:,
+      exclusive_minimum:,
+      exclusive_maximum:,
+      multiple_of:,
+      ..,
+    ) ->
+      NumberSchema(
+        metadata: meta,
+        format:,
+        minimum:,
+        maximum:,
+        exclusive_minimum:,
+        exclusive_maximum:,
+        multiple_of:,
+      )
+    BooleanSchema(..) -> BooleanSchema(metadata: meta)
+    ArraySchema(items:, min_items:, max_items:, unique_items:, ..) ->
+      ArraySchema(metadata: meta, items:, min_items:, max_items:, unique_items:)
+    ObjectSchema(
+      properties:,
+      required:,
+      additional_properties:,
+      min_properties:,
+      max_properties:,
+      ..,
+    ) ->
+      ObjectSchema(
+        metadata: meta,
+        properties:,
+        required:,
+        additional_properties:,
+        min_properties:,
+        max_properties:,
+      )
+    AllOfSchema(schemas:, ..) -> AllOfSchema(metadata: meta, schemas:)
+    OneOfSchema(schemas:, discriminator:, ..) ->
+      OneOfSchema(metadata: meta, schemas:, discriminator:)
+    AnyOfSchema(schemas:, discriminator:, ..) ->
+      AnyOfSchema(metadata: meta, schemas:, discriminator:)
   }
 }

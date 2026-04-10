@@ -310,6 +310,24 @@ fn hoist_within_schema(
           let suffix = "Part" <> int.to_string(idx)
           let #(hoisted, state) =
             hoist_schema_ref(s_ref, name_prefix, suffix, state)
+          // Mark hoisted allOf parts as internal so they don't appear
+          // in the public generated API (types, decoders, encoders).
+          let state = case hoisted {
+            Reference(name:, ..) ->
+              case dict.get(state.new_schemas, name) {
+                Ok(Inline(obj)) ->
+                  HoistState(
+                    ..state,
+                    new_schemas: dict.insert(
+                      state.new_schemas,
+                      name,
+                      Inline(schema.set_internal(obj)),
+                    ),
+                  )
+                _ -> state
+              }
+            _ -> state
+          }
           #([hoisted, ..schemas_acc], state)
         })
       #(

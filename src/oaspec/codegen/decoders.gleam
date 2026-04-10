@@ -3,6 +3,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
+import oaspec/codegen/ir_build
 import oaspec/codegen/schema_dispatch
 import oaspec/codegen/types as type_gen
 import oaspec/openapi/dedup
@@ -101,6 +102,7 @@ fn generate_decoders(ctx: Context) -> String {
       list.sort(dict.to_list(components.schemas), fn(a, b) {
         string.compare(a.0, b.0)
       })
+      |> list.filter(fn(entry) { !ir_build.is_internal_schema(entry.1) })
     None -> []
   }
 
@@ -1141,6 +1143,7 @@ fn generate_encoders(ctx: Context) -> String {
       list.sort(dict.to_list(components.schemas), fn(a, b) {
         string.compare(a.0, b.0)
       })
+      |> list.filter(fn(entry) { !ir_build.is_internal_schema(entry.1) })
     None -> []
   }
 
