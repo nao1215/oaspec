@@ -1,0 +1,34 @@
+openapi: "3.0.0"
+info:
+  title: Examples Value or ExternalValue
+  version: 1.0.0
+paths:
+  /test:
+    get:
+      parameters:
+        - name: id
+          in: query
+          schema:
+            type: string
+          examples:
+            first:
+              value: "123"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+              examples:
+                example1:
+                  value:
+                    name: "test"
+components:
+  examples:
+    SharedExample:
+      summary: A shared example
+      value: hello

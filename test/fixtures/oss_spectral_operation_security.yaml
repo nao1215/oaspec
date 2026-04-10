@@ -1,0 +1,28 @@
+openapi: "3.0.2"
+info:
+  title: Operation Security Defined
+  version: 1.0.0
+components:
+  securitySchemes:
+    apikey:
+      type: apiKey
+      name: api_key
+      in: header
+    oauth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://example.com/api/oauth/dialog
+          tokenUrl: https://example.com/api/oauth/token
+          scopes:
+            "write:pets": modify pets in your account
+            "read:pets": read your pets
+security:
+  - apikey: []
+  - oauth2:
+      - "write:pets"
+paths:
+  /path:
+    get:
+      security:
+        - apikey: []
