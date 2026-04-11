@@ -2,7 +2,9 @@ import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/order
 import gleam/result
+import gleam/string
 import glint
 import oaspec/codegen/context
 import oaspec/codegen/writer
@@ -46,6 +48,20 @@ fn generate_command() -> glint.Command(Nil) {
       |> glint.flag_help("Output directory override"),
     )
 
+    use check <- glint.flag(
+      glint.bool_flag("check")
+      |> glint.flag_default(False)
+      |> glint.flag_help(
+        "Check that generated code matches existing files without writing",
+      ),
+    )
+
+    use fail_on_warnings <- glint.flag(
+      glint.bool_flag("fail-on-warnings")
+      |> glint.flag_default(False)
+      |> glint.flag_help("Treat warnings as errors"),
+    )
+
     glint.command_help(
       "Generate Gleam code from an OpenAPI specification",
       fn() {
@@ -59,8 +75,17 @@ fn generate_command() -> glint.Command(Nil) {
             "" -> None
             s -> Some(s)
           }
+          let check_mode = check(flags) |> result.unwrap(False)
+          let fail_on_warnings_mode =
+            fail_on_warnings(flags) |> result.unwrap(False)
 
-          run_generate(config_path, mode_opt, output_opt)
+          run_generate(
+            config_path,
+            mode_opt,
+            output_opt,
+            check_mode,
+            fail_on_warnings_mode,
+          )
         })
       },
     )
@@ -169,6 +194,8 @@ fn run_generate(
   config_path: String,
   mode_opt: Option(String),
   output_opt: Option(String),
+  check_mode: Bool,
+  fail_on_warnings: Bool,
 ) -> Nil {
   io.println("oaspec v" <> context.version)
   io.println("Loading config from: " <> config_path)
@@ -196,6 +223,7 @@ fn run_generate(
             }
             Ok(summary) -> {
               io.println("Spec loaded: " <> summary.spec_title)
+              let has_warnings = summary.warnings != []
               case summary.warnings {
                 [] -> Nil
                 warnings -> {
@@ -205,29 +233,106 @@ fn run_generate(
                   })
                 }
               }
-              io.println("Generating code...")
-              case
-                writer.write_all(summary.files, cfg, fn(path) {
-                  io.println("  Generated: " <> path)
-                })
-              {
-                Ok(written) -> {
+              case fail_on_warnings && has_warnings {
+                True -> {
                   io.println("")
                   io.println(
-                    "Successfully generated "
-                    <> int.to_string(list.length(written))
-                    <> " files",
+                    "Error: warnings present and --fail-on-warnings is set.",
                   )
-                }
-                Error(e) -> {
-                  io.println("Error: " <> writer.error_to_string(e))
                   halt(1)
+                }
+                False -> Nil
+              }
+              case check_mode {
+                True -> run_check(summary.files, cfg)
+                False -> {
+                  io.println("Generating code...")
+                  case
+                    writer.write_all(summary.files, cfg, fn(path) {
+                      io.println("  Generated: " <> path)
+                    })
+                  {
+                    Ok(written) -> {
+                      io.println("")
+                      io.println(
+                        "Successfully generated "
+                        <> int.to_string(list.length(written))
+                        <> " files",
+                      )
+                    }
+                    Error(e) -> {
+                      io.println("Error: " <> writer.error_to_string(e))
+                      halt(1)
+                    }
+                  }
                 }
               }
             }
           }
         }
       }
+    }
+  }
+}
+
+/// Check that generated code matches existing files on disk.
+/// Exits 0 if all files match, exits 1 if any differ, missing, or orphaned.
+fn run_check(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
+  io.println("Checking generated code against existing files...")
+  let resolved = writer.resolve_paths(files, cfg)
+  let expected_paths = list.map(resolved, fn(entry) { entry.0 })
+
+  // Check for missing or differing files
+  let diffs =
+    list.filter_map(resolved, fn(entry) {
+      let #(path, content) = entry
+      case simplifile.read(path) {
+        Error(_) -> Ok(path <> " (missing)")
+        Ok(existing) ->
+          case string.compare(existing, content) {
+            order.Eq -> Error(Nil)
+            _ -> Ok(path <> " (differs)")
+          }
+      }
+    })
+
+  // Check for orphaned files in output directories
+  let output_dirs = writer.output_dirs(cfg)
+  let orphans =
+    list.flat_map(output_dirs, fn(dir) {
+      case simplifile.read_directory(dir) {
+        Error(_) -> []
+        Ok(entries) ->
+          list.filter_map(entries, fn(name) {
+            case string.ends_with(name, ".gleam") {
+              False -> Error(Nil)
+              True -> {
+                let full_path = dir <> "/" <> name
+                case list.contains(expected_paths, full_path) {
+                  True -> Error(Nil)
+                  False -> Ok(full_path <> " (orphaned)")
+                }
+              }
+            }
+          })
+      }
+    })
+
+  let all_issues = list.append(diffs, orphans)
+  case all_issues {
+    [] -> {
+      io.println("")
+      io.println("All files up to date, check passed.")
+    }
+    _ -> {
+      io.println("")
+      list.each(all_issues, fn(d) { io.println("  " <> d) })
+      io.println(
+        "\n"
+        <> int.to_string(list.length(all_issues))
+        <> " file(s) out of date. Run 'oaspec generate' to update.",
+      )
+      halt(1)
     }
   }
 }

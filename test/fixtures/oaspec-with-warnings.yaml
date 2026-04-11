@@ -1,0 +1,5 @@
+input: test/fixtures/spec-with-warnings.yaml
+output:
+  server: ./test_output/api
+  client: ./test_output_client/api
+package: api
