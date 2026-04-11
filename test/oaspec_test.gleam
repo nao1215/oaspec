@@ -10373,3 +10373,120 @@ pub fn e2e_no_servers_test() {
       list.length(errors) |> should.not_equal(0)
   }
 }
+
+// --- Golden file (snapshot) tests ---
+// These tests verify that generated code output matches committed golden files
+// byte-for-byte. If a codegen change intentionally alters output, update golden
+// files with: just update-golden
+
+/// Helper: generate code from a spec file and return the files list.
+fn golden_generate(spec_path: String) -> List(context.GeneratedFile) {
+  let assert Ok(spec) = parser.parse_file(spec_path)
+  let cfg =
+    config.Config(
+      input: spec_path,
+      output_server: "./golden_unused/api",
+      output_client: "./golden_unused/api",
+      package: "api",
+      mode: config.Both,
+    )
+  let assert Ok(summary) = generate.generate(spec, cfg)
+  summary.files
+}
+
+/// Helper: compare a generated file's content against the golden file on disk.
+/// Panics with a diff-friendly message on mismatch.
+fn assert_matches_golden(file: context.GeneratedFile, golden_dir: String) -> Nil {
+  let golden_path = golden_dir <> "/" <> file.path
+  let assert Ok(expected) = simplifile.read(golden_path)
+  case file.content == expected {
+    True -> Nil
+    False -> {
+      // Find first differing line for a useful error message
+      let gen_lines = string.split(file.content, "\n")
+      let exp_lines = string.split(expected, "\n")
+      let diff_info = find_first_diff(gen_lines, exp_lines, 1)
+      panic as {
+        "Golden file mismatch: "
+        <> file.path
+        <> "\n"
+        <> diff_info
+        <> "\nRun `just update-golden` to update snapshots."
+      }
+    }
+  }
+}
+
+fn find_first_diff(
+  gen: List(String),
+  exp: List(String),
+  line_num: Int,
+) -> String {
+  case gen, exp {
+    [], [] -> "Files differ in length"
+    [], [e, ..] ->
+      "Line "
+      <> string.inspect(line_num)
+      <> ": generated file ends, expected: "
+      <> e
+    [g, ..], [] ->
+      "Line "
+      <> string.inspect(line_num)
+      <> ": golden file ends, generated has: "
+      <> g
+    [g, ..g_rest], [e, ..e_rest] ->
+      case g == e {
+        True -> find_first_diff(g_rest, e_rest, line_num + 1)
+        False ->
+          "Line "
+          <> string.inspect(line_num)
+          <> ":\n  expected: "
+          <> e
+          <> "\n  got:      "
+          <> g
+      }
+  }
+}
+
+/// Helper: run golden comparison for all files from a spec.
+fn assert_all_golden(spec_path: String, golden_dir: String) -> Nil {
+  let files = golden_generate(spec_path)
+  list.each(files, fn(file) { assert_matches_golden(file, golden_dir) })
+}
+
+pub fn golden_petstore_test() {
+  assert_all_golden("test/fixtures/petstore.yaml", "golden/petstore/api")
+}
+
+pub fn golden_complex_supported_test() {
+  assert_all_golden(
+    "test/fixtures/complex_supported_openapi.yaml",
+    "golden/complex_supported/api",
+  )
+}
+
+/// Verify golden files exist for petstore (all 10 expected files).
+pub fn golden_petstore_file_count_test() {
+  let files = golden_generate("test/fixtures/petstore.yaml")
+  // Shared(7) + Server(2) + Client(1) = 10 files
+  list.length(files) |> should.equal(10)
+}
+
+/// Verify golden files exist for complex_supported spec.
+pub fn golden_complex_supported_file_count_test() {
+  let files = golden_generate("test/fixtures/complex_supported_openapi.yaml")
+  // Shared(6, no guards) + Server(2) + Client(1) = 9 files
+  list.length(files) |> should.equal(9)
+}
+
+/// Verify idempotency: generating twice produces identical output.
+pub fn golden_idempotency_test() {
+  let files1 = golden_generate("test/fixtures/petstore.yaml")
+  let files2 = golden_generate("test/fixtures/petstore.yaml")
+  list.length(files1) |> should.equal(list.length(files2))
+  list.map2(files1, files2, fn(f1, f2) {
+    f1.path |> should.equal(f2.path)
+    f1.content |> should.equal(f2.content)
+  })
+  Nil
+}

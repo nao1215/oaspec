@@ -1,0 +1,6 @@
+input: test/fixtures/petstore.yaml
+output:
+  server: ./golden/petstore/api
+  client: ./golden/petstore/api
+package: api
+mode: both
