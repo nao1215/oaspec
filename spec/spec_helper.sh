@@ -24,6 +24,11 @@ generate() {
   cd "$PROJECT_ROOT" && gleam run -- generate "$@" 2>&1
 }
 
+# Helper: run oaspec validate command
+validate_spec() {
+  cd "$PROJECT_ROOT" && gleam run -- validate "$@" 2>&1
+}
+
 # Helper: clean test output
 clean_test_output() {
   rm -rf "$TEST_OUTPUT_DIR" "$TEST_OUTPUT_DIR_CLIENT"

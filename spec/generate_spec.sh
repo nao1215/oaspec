@@ -390,3 +390,46 @@ Describe 'oaspec generate'
     End
   End
 End
+
+# ===================================================================
+# Validate subcommand tests
+# ===================================================================
+
+Describe 'oaspec validate'
+  Include "$SHELLSPEC_SPECDIR/spec_helper.sh"
+
+  Describe 'CLI help'
+    It 'shows usage when called with --help'
+      When run validate_spec --help
+      The status should be success
+      The output should include 'validate'
+      The output should include 'config'
+    End
+  End
+
+  Describe 'successful validation'
+    It 'validates a valid spec without generating files'
+      clean_test_output
+      When run validate_spec --config=test/fixtures/oaspec.yaml
+      The status should be success
+      The output should include 'Validation passed'
+      The output should not include 'Generated'
+      The output should not include 'Successfully generated'
+    End
+
+    It 'does not write any files'
+      clean_test_output
+      When run validate_spec --config=test/fixtures/oaspec.yaml
+      The status should be success
+      The output should not include 'Generated:'
+    End
+  End
+
+  Describe 'error handling'
+    It 'exits with error when config file does not exist'
+      When run validate_spec --config=nonexistent.yaml
+      The status should be failure
+      The output should include 'Error'
+    End
+  End
+End
