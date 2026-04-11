@@ -12699,3 +12699,84 @@ pub fn security_chain_or_with_and_fallback_test() {
   let parts = string.split(result, "config.api_key")
   { list.length(parts) >= 3 } |> should.be_true()
 }
+
+// ===================================================================
+// Regression: router imports decode module when request body exists
+// even if responses have no JSON schema (callback_api pattern)
+// ===================================================================
+
+pub fn router_imports_decode_when_request_body_without_json_response_test() {
+  let assert Ok(test_spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /webhooks:
+    post:
+      operationId: registerWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+      responses:
+        '201':
+          description: registered
+",
+    )
+  let ctx = make_ctx_from_spec(test_spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  // Router must import decode module when request body exists,
+  // regardless of whether responses contain JSON schemas
+  string.contains(router_file.content, "import api/decode")
+  |> should.be_true()
+}
+
+pub fn router_deep_object_includes_additional_properties_field_test() {
+  let assert Ok(test_spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: searchItems
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          required: true
+          schema:
+            type: object
+            required:
+              - name
+            properties:
+              name:
+                type: string
+      responses:
+        '200':
+          description: ok
+",
+    )
+  let ctx = make_ctx_from_spec(test_spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  // deepObject constructor must include additional_properties field
+  // because absent additionalProperties defaults to Untyped
+  string.contains(router_file.content, "additional_properties: dict.new()")
+  |> should.be_true()
+}

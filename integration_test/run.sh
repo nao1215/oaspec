@@ -490,4 +490,243 @@ rm -rf "$MULTI_DIR"
 
 info "Multipart server integration tests passed."
 
+# -------------------------------------------------------
+# Step 11: Generate callback spec and verify it compiles
+# -------------------------------------------------------
+info "Testing callback handler code generation..."
+
+CALLBACK_DIR="$SCRIPT_DIR/callback_test"
+rm -rf "$CALLBACK_DIR"
+mkdir -p "$CALLBACK_DIR/src"
+
+cat > "$CALLBACK_DIR/oaspec-callback.yaml" << 'YAML_EOF'
+input: test/fixtures/callback_api.yaml
+output:
+  server: ./integration_test/callback_test/src/api
+package: api
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$CALLBACK_DIR/oaspec-callback.yaml" \
+  --mode=server
+
+cat > "$CALLBACK_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
+import api/request_types
+import api/response_types
+
+pub fn register_webhook(req: request_types.RegisterWebhookRequest) -> response_types.RegisterWebhookResponse {
+  let _ = req
+  response_types.RegisterWebhookResponseCreated
+}
+
+/// Callback handler stub for onEvent
+pub fn register_webhook_callback_on_event_callback_url() -> String {
+  "callback_ok"
+}
+GLEAM_EOF
+
+cat > "$CALLBACK_DIR/gleam.toml" << 'TOML_EOF'
+name = "callback_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$CALLBACK_DIR/src/callback_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$CALLBACK_DIR"
+gleam deps download
+
+if gleam build --warnings-as-errors 2>&1; then
+  info "PASS: Generated callback code compiles (warnings-as-errors)."
+else
+  fail "Generated callback code failed to compile."
+fi
+
+rm -rf "$CALLBACK_DIR"
+
+info "Callback integration tests passed."
+
+# -------------------------------------------------------
+# Step 12: Generate cookie params server and verify it compiles
+# -------------------------------------------------------
+info "Testing cookie parameter server code generation..."
+
+COOKIE_DIR="$SCRIPT_DIR/cookie_test"
+rm -rf "$COOKIE_DIR"
+mkdir -p "$COOKIE_DIR/src"
+
+cat > "$COOKIE_DIR/cookie_api.yaml" << 'YAML_EOF'
+openapi: "3.0.3"
+info:
+  title: Cookie Params API
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: session
+          in: cookie
+          required: true
+          schema:
+            type: string
+        - name: debug
+          in: cookie
+          required: false
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemList"
+components:
+  schemas:
+    ItemList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            type: string
+YAML_EOF
+
+cat > "$COOKIE_DIR/oaspec-cookie.yaml" << 'YAML_EOF'
+input: ./integration_test/cookie_test/cookie_api.yaml
+output:
+  server: ./integration_test/cookie_test/src/api
+package: api
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$COOKIE_DIR/oaspec-cookie.yaml" \
+  --mode=server
+
+cat > "$COOKIE_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
+import api/request_types
+import api/response_types
+import api/types
+import gleam/dict
+
+pub fn list_items(req: request_types.ListItemsRequest) -> response_types.ListItemsResponse {
+  let _ = req
+  response_types.ListItemsResponseOk(types.ItemList(items: ["item1"], additional_properties: dict.new()))
+}
+GLEAM_EOF
+
+cat > "$COOKIE_DIR/gleam.toml" << 'TOML_EOF'
+name = "cookie_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$COOKIE_DIR/src/cookie_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$COOKIE_DIR"
+gleam deps download
+
+if gleam build --warnings-as-errors 2>&1; then
+  info "PASS: Generated cookie params server code compiles (warnings-as-errors)."
+else
+  fail "Generated cookie params server code failed to compile."
+fi
+
+rm -rf "$COOKIE_DIR"
+
+info "Cookie params integration tests passed."
+
+# -------------------------------------------------------
+# Step 13: Generate deepObject params server and verify it compiles
+# -------------------------------------------------------
+info "Testing deepObject parameter server code generation..."
+
+DEEP_DIR="$SCRIPT_DIR/deepobject_test"
+rm -rf "$DEEP_DIR"
+mkdir -p "$DEEP_DIR/src"
+
+cat > "$DEEP_DIR/oaspec-deep.yaml" << 'YAML_EOF'
+input: test/fixtures/server_deep_object_params.yaml
+output:
+  server: ./integration_test/deepobject_test/src/api
+package: api
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$DEEP_DIR/oaspec-deep.yaml" \
+  --mode=server
+
+cat > "$DEEP_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
+import api/request_types
+import api/response_types
+
+pub fn search_items(req: request_types.SearchItemsRequest) -> response_types.SearchItemsResponse {
+  let _ = req
+  response_types.SearchItemsResponseOk
+}
+GLEAM_EOF
+
+cat > "$DEEP_DIR/gleam.toml" << 'TOML_EOF'
+name = "deepobject_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$DEEP_DIR/src/deepobject_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$DEEP_DIR"
+gleam deps download
+
+if gleam build --warnings-as-errors 2>&1; then
+  info "PASS: Generated deepObject params server code compiles (warnings-as-errors)."
+else
+  fail "Generated deepObject params server code failed to compile."
+fi
+
+rm -rf "$DEEP_DIR"
+
+info "DeepObject params integration tests passed."
+
 info "All integration tests passed!"

@@ -379,10 +379,16 @@ fn generate_router(
     })
 
   let needs_decode =
-    needs_json
-    && list.any(operations, fn(op) {
+    list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
-      option.is_some(operation.request_body)
+      case operation.request_body {
+        Some(Value(rb)) ->
+          list.any(dict.to_list(rb.content), fn(entry) {
+            let #(content_type, _) = entry
+            content_type == "application/json"
+          })
+        _ -> False
+      }
     })
 
   let needs_encode = needs_json

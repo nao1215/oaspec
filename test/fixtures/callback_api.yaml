@@ -1,0 +1,47 @@
+openapi: "3.0.3"
+info:
+  version: 1.0.0
+  title: Callback Test API
+paths:
+  /webhooks:
+    post:
+      operationId: registerWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookRegistration"
+      responses:
+        "201":
+          description: registered
+      callbacks:
+        onEvent:
+          "{$request.body#/callbackUrl}":
+            post:
+              requestBody:
+                content:
+                  application/json:
+                    schema:
+                      $ref: "#/components/schemas/Event"
+              responses:
+                "200":
+                  description: ok
+components:
+  schemas:
+    WebhookRegistration:
+      type: object
+      required:
+        - callbackUrl
+      properties:
+        callbackUrl:
+          type: string
+    Event:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+        payload:
+          type: string
