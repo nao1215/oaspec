@@ -9,6 +9,7 @@ import glint
 import oaspec/codegen/context
 import oaspec/codegen/writer
 import oaspec/config
+import oaspec/formatter
 import oaspec/generate
 import oaspec/openapi/diagnostic
 import oaspec/openapi/parser
@@ -253,6 +254,14 @@ fn run_generate(
                     })
                   {
                     Ok(written) -> {
+                      let output_dirs = writer.output_dirs(cfg)
+                      case formatter.format_files(output_dirs) {
+                        Ok(Nil) -> io.println("  Formatted generated code")
+                        Error(e) -> {
+                          io.println("Error: " <> formatter.error_to_string(e))
+                          halt(1)
+                        }
+                      }
                       io.println("")
                       io.println(
                         "Successfully generated "
@@ -281,6 +290,9 @@ fn run_check(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
   io.println("Checking generated code against existing files...")
   let resolved = writer.resolve_paths(files, cfg)
   let expected_paths = list.map(resolved, fn(entry) { entry.0 })
+
+  // Format generated content via temp files before comparison
+  let resolved = format_resolved_content(resolved)
 
   // Check for missing or differing files
   let diffs =
@@ -334,6 +346,64 @@ fn run_check(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
       )
       halt(1)
     }
+  }
+}
+
+/// Format resolved content by writing to a temp directory, running gleam format,
+/// and reading back the formatted content.
+fn format_resolved_content(
+  resolved: List(#(String, String)),
+) -> List(#(String, String)) {
+  let temp_dir = "/tmp/oaspec_check_" <> unique_id()
+  case simplifile.create_directory_all(temp_dir) {
+    Error(_) -> resolved
+    Ok(Nil) -> {
+      // Write each file to the temp directory with unique indexed names
+      let temp_entries =
+        list.index_map(resolved, fn(entry, idx) {
+          let #(original_path, content) = entry
+          let temp_path = temp_dir <> "/" <> int.to_string(idx) <> ".gleam"
+          let _ = simplifile.write(temp_path, content)
+          #(original_path, temp_path)
+        })
+
+      // Format all temp files
+      let temp_paths = list.map(temp_entries, fn(e) { e.1 })
+      let formatted_resolved = case formatter.format_files(temp_paths) {
+        Ok(Nil) -> {
+          list.map(temp_entries, fn(entry) {
+            let #(original_path, temp_path) = entry
+            case simplifile.read(temp_path) {
+              Ok(formatted) -> #(original_path, formatted)
+              Error(_) -> {
+                let content =
+                  list.find(resolved, fn(r) { r.0 == original_path })
+                  |> result.map(fn(r) { r.1 })
+                  |> result.unwrap("")
+                #(original_path, content)
+              }
+            }
+          })
+        }
+        Error(_) -> resolved
+      }
+
+      // Clean up temp directory
+      let _ = simplifile.delete(temp_dir)
+      formatted_resolved
+    }
+  }
+}
+
+/// Generate a unique ID string for temp directories.
+@external(erlang, "erlang", "unique_integer")
+fn unique_integer() -> Int
+
+fn unique_id() -> String {
+  let n = unique_integer()
+  case n < 0 {
+    True -> "n" <> int.to_string(-n)
+    False -> int.to_string(n)
   }
 }
 

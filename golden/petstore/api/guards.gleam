@@ -4,7 +4,9 @@ import api/types
 import gleam/string
 
 /// Validate string length for CreatePetRequest.name.
-pub fn validate_create_pet_request_name_length(value: String) -> Result(String, String) {
+pub fn validate_create_pet_request_name_length(
+  value: String,
+) -> Result(String, String) {
   let len = string.length(value)
   case len < 1 {
     True -> Error("must be at least 1 characters")
@@ -31,7 +33,9 @@ pub fn validate_pet_name_length(value: String) -> Result(String, String) {
 
 /// Validate all constraints for CreatePetRequest.
 /// Auto-calls all field validators and collects errors.
-pub fn validate_create_pet_request(value: types.CreatePetRequest) -> Result(types.CreatePetRequest, List(String)) {
+pub fn validate_create_pet_request(
+  value: types.CreatePetRequest,
+) -> Result(types.CreatePetRequest, List(String)) {
   let errors = []
   let errors = case validate_create_pet_request_name_length(value.name) {
     Ok(_) -> errors
@@ -56,4 +60,3 @@ pub fn validate_pet(value: types.Pet) -> Result(types.Pet, List(String)) {
     _ -> Error(errors)
   }
 }
-

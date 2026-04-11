@@ -24,4 +24,3 @@ pub type DeletePetResponse {
   DeletePetResponseUnauthorized
   DeletePetResponseNotFound
 }
-

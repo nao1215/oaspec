@@ -16,6 +16,7 @@ import oaspec/codegen/server as server_gen
 import oaspec/codegen/types
 import oaspec/codegen/validate
 import oaspec/config
+import oaspec/formatter
 import oaspec/generate
 import oaspec/openapi/capability_check
 import oaspec/openapi/dedup
@@ -10449,9 +10450,47 @@ fn find_first_diff(
 }
 
 /// Helper: run golden comparison for all files from a spec.
+/// Formats generated content via temp files before comparison to match
+/// the formatted golden files on disk.
 fn assert_all_golden(spec_path: String, golden_dir: String) -> Nil {
   let files = golden_generate(spec_path)
-  list.each(files, fn(file) { assert_matches_golden(file, golden_dir) })
+  let formatted_files = format_generated_files(files)
+  list.each(formatted_files, fn(file) {
+    assert_matches_golden(file, golden_dir)
+  })
+}
+
+/// Format generated files by writing to temp, running gleam format, and reading back.
+fn format_generated_files(
+  files: List(context.GeneratedFile),
+) -> List(context.GeneratedFile) {
+  let temp_dir = "/tmp/oaspec_golden_test"
+  let _ = simplifile.delete(temp_dir)
+  let assert Ok(Nil) = simplifile.create_directory_all(temp_dir)
+
+  // Write each file to temp with indexed names
+  let entries =
+    list.index_map(files, fn(file, idx) {
+      let temp_path = temp_dir <> "/" <> string.inspect(idx) <> ".gleam"
+      let assert Ok(Nil) = simplifile.write(temp_path, file.content)
+      #(file, temp_path)
+    })
+
+  // Format all temp files
+  let temp_paths = list.map(entries, fn(e) { e.1 })
+  let assert Ok(Nil) = formatter.format_files(temp_paths)
+
+  // Read back formatted content
+  let formatted =
+    list.map(entries, fn(entry) {
+      let #(file, temp_path) = entry
+      let assert Ok(content) = simplifile.read(temp_path)
+      context.GeneratedFile(..file, content: content)
+    })
+
+  // Clean up
+  let _ = simplifile.delete(temp_dir)
+  formatted
 }
 
 pub fn golden_petstore_test() {

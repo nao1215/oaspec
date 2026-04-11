@@ -14,4 +14,3 @@ pub type GetUserResponse {
 pub type PostWebhookResponse {
   PostWebhookResponseOk
 }
-

@@ -6,17 +6,32 @@ import gleam/option.{type Option}
 
 /// Request body for creating a new pet
 pub type CreatePetRequest {
-  CreatePetRequest(name: String, status: Option(PetStatus), tag: Option(String), additional_properties: Dict(String, Dynamic))
+  CreatePetRequest(
+    name: String,
+    status: Option(PetStatus),
+    tag: Option(String),
+    additional_properties: Dict(String, Dynamic),
+  )
 }
 
 /// An error response
 pub type Error {
-  Error(code: Int, message: String, additional_properties: Dict(String, Dynamic))
+  Error(
+    code: Int,
+    message: String,
+    additional_properties: Dict(String, Dynamic),
+  )
 }
 
 /// A pet in the store
 pub type Pet {
-  Pet(id: Int, name: String, status: PetStatus, tag: Option(String), additional_properties: Dict(String, Dynamic))
+  Pet(
+    id: Int,
+    name: String,
+    status: PetStatus,
+    tag: Option(String),
+    additional_properties: Dict(String, Dynamic),
+  )
 }
 
 /// The status of a pet in the store
@@ -25,4 +40,3 @@ pub type PetStatus {
   PetStatusPending
   PetStatusSold
 }
-

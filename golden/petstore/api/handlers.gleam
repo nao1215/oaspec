@@ -5,29 +5,36 @@ import api/response_types
 
 /// List all pets
 /// Returns all pets from the system
-pub fn list_pets(req: request_types.ListPetsRequest) -> response_types.ListPetsResponse {
+pub fn list_pets(
+  req: request_types.ListPetsRequest,
+) -> response_types.ListPetsResponse {
   let _ = req
   panic as "unimplemented: list_pets"
 }
 
 /// Create a pet
 /// Creates a new pet in the store
-pub fn create_pet(req: request_types.CreatePetRequest) -> response_types.CreatePetResponse {
+pub fn create_pet(
+  req: request_types.CreatePetRequest,
+) -> response_types.CreatePetResponse {
   let _ = req
   panic as "unimplemented: create_pet"
 }
 
 /// Get a pet by ID
 /// Returns a single pet by its ID
-pub fn get_pet(req: request_types.GetPetRequest) -> response_types.GetPetResponse {
+pub fn get_pet(
+  req: request_types.GetPetRequest,
+) -> response_types.GetPetResponse {
   let _ = req
   panic as "unimplemented: get_pet"
 }
 
 /// Delete a pet
 /// Deletes a pet by its ID
-pub fn delete_pet(req: request_types.DeletePetRequest) -> response_types.DeletePetResponse {
+pub fn delete_pet(
+  req: request_types.DeletePetRequest,
+) -> response_types.DeletePetResponse {
   let _ = req
   panic as "unimplemented: delete_pet"
 }
-
