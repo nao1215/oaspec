@@ -157,9 +157,9 @@ fn inline_enums_from_properties(
           <> naming.schema_to_type_name(prop_name)
         let deduped_variants = dedup.dedup_enum_variants(enum_values)
         let variants =
-          list.index_map(enum_values, fn(value, idx) {
-            let variant_suffix =
-              list_at_or(deduped_variants, idx, naming.to_pascal_case(value))
+          list.zip(enum_values, deduped_variants)
+          |> list.map(fn(pair) {
+            let #(_, variant_suffix) = pair
             naming.schema_to_type_name(type_name) <> variant_suffix
           })
         Ok(Declaration(
@@ -209,10 +209,10 @@ fn schema_type_decls(
         dedup.dedup_property_names(list.map(props, fn(e) { e.0 }))
 
       let fields =
-        list.index_map(props, fn(entry, idx) {
+        list.zip(props, deduped_names)
+        |> list.map(fn(pair) {
+          let #(entry, field_name) = pair
           let #(prop_name, prop_ref) = entry
-          let field_name =
-            list_at_or(deduped_names, idx, naming.to_snake_case(prop_name))
           let field_type =
             schema_ref_to_type_with_inline_enum(
               prop_ref,
@@ -264,9 +264,9 @@ fn schema_type_decls(
     StringSchema(metadata:, enum_values:, ..) if enum_values != [] -> {
       let deduped_variants = dedup.dedup_enum_variants(enum_values)
       let variants =
-        list.index_map(enum_values, fn(value, idx) {
-          let variant_suffix =
-            list_at_or(deduped_variants, idx, naming.to_pascal_case(value))
+        list.zip(enum_values, deduped_variants)
+        |> list.map(fn(pair) {
+          let #(_, variant_suffix) = pair
           naming.schema_to_type_name(type_name) <> variant_suffix
         })
       [
@@ -494,14 +494,6 @@ fn schema_ref_to_type(ref: SchemaRef, _ctx: Context) -> String {
   case ref {
     Inline(s) -> schema_dispatch.schema_type(s)
     Reference(name:, ..) -> naming.schema_to_type_name(name)
-  }
-}
-
-fn list_at_or(lst: List(String), idx: Int, default: String) -> String {
-  case lst, idx {
-    [], _ -> default
-    [head, ..], 0 -> head
-    [_, ..rest], n -> list_at_or(rest, n - 1, default)
   }
 }
 
