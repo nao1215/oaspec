@@ -176,6 +176,54 @@ fn generate_router(
         }
       })
     })
+  // Whether any deep object param has additional_properties (Untyped or Typed)
+  let has_deep_object_with_ap =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(operation.parameters, fn(ref_p) {
+        case ref_p {
+          Value(p) ->
+            decode_helpers.is_deep_object_param(p, ctx)
+            && decode_helpers.deep_object_has_additional_properties(p, ctx)
+          _ -> False
+        }
+      })
+    })
+  // Whether any optional deep object param does NOT use deep_object_present_any.
+  // deep_object_present_any is only used for Untyped AP; all other optional
+  // deep object params (no AP or Typed AP) use deep_object_present.
+  let needs_deep_object_present =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(operation.parameters, fn(ref_p) {
+        case ref_p {
+          Value(p) ->
+            decode_helpers.is_deep_object_param(p, ctx)
+            && !p.required
+            && !decode_helpers.deep_object_has_untyped_additional_properties(
+              p,
+              ctx,
+            )
+          _ -> False
+        }
+      })
+    })
+  // Whether any deep object param has Untyped additional_properties (needs dynamic import)
+  let has_deep_object_untyped_ap =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(operation.parameters, fn(ref_p) {
+        case ref_p {
+          Value(p) ->
+            decode_helpers.is_deep_object_param(p, ctx)
+            && decode_helpers.deep_object_has_untyped_additional_properties(
+              p,
+              ctx,
+            )
+          _ -> False
+        }
+      })
+    })
   let has_form_urlencoded_body =
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
@@ -264,6 +312,7 @@ fn generate_router(
   let needs_string =
     has_form_urlencoded_body
     || has_multipart_body
+    || has_deep_object_with_ap
     || list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
@@ -460,6 +509,10 @@ fn generate_router(
     True -> list.append(std_imports, ["gleam/string"])
     False -> std_imports
   }
+  let std_imports = case has_deep_object_untyped_ap {
+    True -> list.append(std_imports, ["gleam/dynamic"])
+    False -> std_imports
+  }
 
   let pkg_imports = [ctx.config.package <> "/handlers"]
   let pkg_imports = case
@@ -503,7 +556,8 @@ fn generate_router(
     |> se.line("}")
     |> se.blank_line()
 
-  let sb = case has_deep_object {
+  // deep_object_present: only when optional deep object params without AP exist
+  let sb = case needs_deep_object_present {
     True ->
       sb
       |> se.line(
@@ -514,6 +568,62 @@ fn generate_router(
         "list.any(props, fn(prop) { dict.has_key(query, prefix <> \"[\" <> prop <> \"]\") })",
       )
       |> se.line("}")
+      |> se.blank_line()
+    False -> sb
+  }
+
+  // deep_object_present_any and deep_object_additional_properties:
+  // only when deep object params with additional_properties exist
+  let sb = case has_deep_object_with_ap {
+    True ->
+      sb
+      |> se.line(
+        "fn deep_object_present_any(query: Dict(String, List(String)), prefix: String) -> Bool {",
+      )
+      |> se.indent(1, "let prefix_bracket = prefix <> \"[\"")
+      |> se.indent(
+        1,
+        "dict.fold(query, False, fn(found, k, _v) { found || string.starts_with(k, prefix_bracket) })",
+      )
+      |> se.line("}")
+      |> se.blank_line()
+      |> se.line(
+        "fn deep_object_additional_properties(query: Dict(String, List(String)), prefix: String, known_props: List(String)) -> Dict(String, List(String)) {",
+      )
+      |> se.indent(1, "let prefix_bracket = prefix <> \"[\"")
+      |> se.indent(1, "let prefix_len = string.length(prefix_bracket)")
+      |> se.indent(1, "dict.fold(query, dict.new(), fn(acc, k, v) {")
+      |> se.indent(
+        2,
+        "case string.starts_with(k, prefix_bracket) && string.ends_with(k, \"]\") {",
+      )
+      |> se.indent(3, "True -> {")
+      |> se.indent(
+        4,
+        "let prop = string.slice(k, prefix_len, string.length(k) - prefix_len - 1)",
+      )
+      |> se.indent(
+        4,
+        "case list.contains(known_props, prop) { True -> acc False -> dict.insert(acc, prop, v) }",
+      )
+      |> se.indent(3, "}")
+      |> se.indent(3, "False -> acc")
+      |> se.indent(2, "}")
+      |> se.indent(1, "})")
+      |> se.line("}")
+      |> se.blank_line()
+    False -> sb
+  }
+
+  // coerce_dict: type-safe identity for converting Dict value types at compile time
+  // Only needed when deepObject params with Untyped additional_properties exist
+  let sb = case has_deep_object_untyped_ap {
+    True ->
+      sb
+      |> se.line("@external(erlang, \"gleam_stdlib\", \"identity\")")
+      |> se.line(
+        "fn coerce_dict(value: Dict(String, List(String))) -> Dict(String, dynamic.Dynamic)",
+      )
       |> se.blank_line()
     False -> sb
   }

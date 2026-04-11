@@ -6896,11 +6896,6 @@ pub fn server_deep_object_params_are_parsed_test() {
 
   string.contains(content, "import api/types")
   |> should.be_true()
-  string.contains(
-    content,
-    "fn deep_object_present(query: Dict(String, List(String)), prefix: String, props: List(String)) -> Bool {",
-  )
-  |> should.be_true()
   string.contains(content, "filter: types.SearchItemsParamFilter(")
   |> should.be_true()
   string.contains(
@@ -6925,7 +6920,7 @@ pub fn server_deep_object_params_are_parsed_test() {
   |> should.be_true()
   string.contains(
     content,
-    "options: case deep_object_present(query, \"options\", [",
+    "options: case deep_object_present_any(query, \"options\")",
   )
   |> should.be_true()
   string.contains(
@@ -6936,6 +6931,30 @@ pub fn server_deep_object_params_are_parsed_test() {
   string.contains(
     content,
     "enabled: case dict.get(query, \"options[enabled]\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
+  )
+  |> should.be_true()
+  // additional_properties field should call deep_object_additional_properties helper
+  // wrapped with coerce_dict for Untyped additional_properties (Dict -> Dynamic)
+  string.contains(
+    content,
+    "additional_properties: coerce_dict(deep_object_additional_properties(query, \"filter\", [\"active\", \"name\", \"ratio\", \"scores\"]))",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "additional_properties: coerce_dict(deep_object_additional_properties(query, \"options\", [\"enabled\", \"tags\"]))",
+  )
+  |> should.be_true()
+  // deep_object_additional_properties helper function should be generated
+  string.contains(
+    content,
+    "fn deep_object_additional_properties(query: Dict(String, List(String)), prefix: String, known_props: List(String)) -> Dict(String, List(String)) {",
+  )
+  |> should.be_true()
+  // deep_object_present_any helper function should be generated
+  string.contains(
+    content,
+    "fn deep_object_present_any(query: Dict(String, List(String)), prefix: String) -> Bool {",
   )
   |> should.be_true()
 }
@@ -12777,6 +12796,9 @@ paths:
     list.find(files, fn(f) { f.path == "router.gleam" })
   // deepObject constructor must include additional_properties field
   // because absent additionalProperties defaults to Untyped
-  string.contains(router_file.content, "additional_properties: dict.new()")
+  string.contains(
+    router_file.content,
+    "additional_properties: coerce_dict(deep_object_additional_properties(query, \"filter\", [\"name\"]))",
+  )
   |> should.be_true()
 }
