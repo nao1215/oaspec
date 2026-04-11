@@ -409,8 +409,36 @@ fn deep_object_constructor_expr(
       }
       prop.field_name <> ": " <> value_expr
     })
-    |> string.join(", ")
-  deep_object_type_name(param, op_id) <> "(" <> fields <> ")"
+
+  // Add additional_properties field if the schema has it
+  let has_additional_properties =
+    deep_object_has_additional_properties(param, ctx)
+  let fields = case has_additional_properties {
+    True -> list.append(fields, ["additional_properties: dict.new()"])
+    False -> fields
+  }
+
+  let fields_str = string.join(fields, ", ")
+  deep_object_type_name(param, op_id) <> "(" <> fields_str <> ")"
+}
+
+fn deep_object_has_additional_properties(
+  param: spec.Parameter(Resolved),
+  ctx: Context,
+) -> Bool {
+  case spec.parameter_schema(param) {
+    Some(Reference(..) as schema_ref) ->
+      case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
+        Ok(ObjectSchema(additional_properties: schema.Typed(_), ..)) -> True
+        Ok(ObjectSchema(additional_properties: schema.Untyped, ..)) -> True
+        _ -> False
+      }
+    Some(Inline(ObjectSchema(additional_properties: schema.Typed(_), ..))) ->
+      True
+    Some(Inline(ObjectSchema(additional_properties: schema.Untyped, ..))) ->
+      True
+    _ -> False
+  }
 }
 
 pub fn deep_object_param_has_optional_fields(
