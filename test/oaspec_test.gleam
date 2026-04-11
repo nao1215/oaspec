@@ -15,6 +15,7 @@ import oaspec/codegen/schema_dispatch
 import oaspec/codegen/server as server_gen
 import oaspec/codegen/types
 import oaspec/codegen/validate
+import oaspec/codegen/writer
 import oaspec/config
 import oaspec/formatter
 import oaspec/generate
@@ -11035,4 +11036,104 @@ pub fn resolve_three_way_circular_alias_error_test() {
     }
     Ok(_) -> should.fail()
   }
+}
+
+// --- Writer Tests ---
+
+fn test_config(mode: config.GenerateMode) -> config.Config {
+  config.Config(
+    input: "test.yaml",
+    output_server: "./gen/api",
+    output_client: "./gen_client/api",
+    package: "api",
+    mode: mode,
+  )
+}
+
+fn test_files() -> List(context.GeneratedFile) {
+  [
+    context.GeneratedFile(
+      path: "types.gleam",
+      content: "// types",
+      target: context.SharedTarget,
+    ),
+    context.GeneratedFile(
+      path: "server.gleam",
+      content: "// server",
+      target: context.ServerTarget,
+    ),
+    context.GeneratedFile(
+      path: "client.gleam",
+      content: "// client",
+      target: context.ClientTarget,
+    ),
+  ]
+}
+
+pub fn resolve_paths_server_mode_test() {
+  let result = writer.resolve_paths(test_files(), test_config(config.Server))
+  // Server mode: shared + server files under server path
+  result
+  |> should.equal([
+    #("./gen/api/types.gleam", "// types"),
+    #("./gen/api/server.gleam", "// server"),
+  ])
+}
+
+pub fn resolve_paths_client_mode_test() {
+  let result = writer.resolve_paths(test_files(), test_config(config.Client))
+  // Client mode: shared + client files under client path
+  result
+  |> should.equal([
+    #("./gen_client/api/types.gleam", "// types"),
+    #("./gen_client/api/client.gleam", "// client"),
+  ])
+}
+
+pub fn resolve_paths_both_mode_test() {
+  let result = writer.resolve_paths(test_files(), test_config(config.Both))
+  // Both mode: server entries first, then client entries
+  result
+  |> should.equal([
+    #("./gen/api/types.gleam", "// types"),
+    #("./gen/api/server.gleam", "// server"),
+    #("./gen_client/api/types.gleam", "// types"),
+    #("./gen_client/api/client.gleam", "// client"),
+  ])
+}
+
+pub fn resolve_paths_empty_files_test() {
+  let result = writer.resolve_paths([], test_config(config.Both))
+  result |> should.equal([])
+}
+
+pub fn output_dirs_server_mode_test() {
+  writer.output_dirs(test_config(config.Server))
+  |> should.equal(["./gen/api"])
+}
+
+pub fn output_dirs_client_mode_test() {
+  writer.output_dirs(test_config(config.Client))
+  |> should.equal(["./gen_client/api"])
+}
+
+pub fn output_dirs_both_mode_test() {
+  writer.output_dirs(test_config(config.Both))
+  |> should.equal(["./gen/api", "./gen_client/api"])
+}
+
+pub fn error_to_string_directory_create_error_test() {
+  writer.error_to_string(writer.DirectoryCreateError(
+    path: "/tmp/out",
+    detail: "permission denied",
+  ))
+  |> should.equal("Failed to create directory /tmp/out: permission denied")
+}
+
+pub fn error_to_string_file_write_error_test() {
+  writer.error_to_string(writer.FileWriteError(
+    path: "/tmp/out/types.gleam",
+    detail: "disk full",
+  ))
+  |> should.equal("Failed to write file /tmp/out/types.gleam: disk full")
 }
