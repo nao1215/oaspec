@@ -236,6 +236,7 @@ fn generate_request_type(
       let sb = sb |> se.line("pub type " <> type_name <> " {")
       let sb = sb |> se.indent(1, type_name <> "(")
 
+      let param_count = list.length(params)
       let sb =
         list.index_fold(params, sb, fn(sb, ref_p, idx) {
           case ref_p {
@@ -265,7 +266,7 @@ fn generate_request_type(
                 True -> field_type
                 False -> "Option(" <> field_type <> ")"
               }
-              let has_more = idx < list.length(params) - 1
+              let has_more = idx < param_count - 1
               let has_body = option.is_some(operation.request_body)
               let trailing = case has_more || has_body {
                 True -> ","

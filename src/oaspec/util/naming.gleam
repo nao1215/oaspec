@@ -1,14 +1,34 @@
 import gleam/dict
 import gleam/int
 import gleam/list
-import gleam/regexp
+import gleam/regexp.{type Regexp}
 import gleam/string
+
+/// Pre-compiled regexes used by naming functions.
+/// Compiled once per public function call instead of on every internal call.
+type Regexes {
+  Regexes(
+    word_separator: Regexp,
+    camel_case: Regexp,
+    underscore_before_caps: Regexp,
+  )
+}
+
+fn compile_regexes() -> Regexes {
+  let assert Ok(word_separator) = regexp.from_string("[_\\-\\s./]+")
+  let assert Ok(camel_case) =
+    regexp.from_string("([A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+)")
+  let assert Ok(underscore_before_caps) =
+    regexp.from_string("([a-z0-9])([A-Z])")
+  Regexes(word_separator:, camel_case:, underscore_before_caps:)
+}
 
 /// Convert a string to PascalCase for Gleam type names.
 /// Examples: "pet_store" -> "PetStore", "get-user" -> "GetUser"
 pub fn to_pascal_case(input: String) -> String {
+  let re = compile_regexes()
   input
-  |> split_words
+  |> split_words(re)
   |> list.map(capitalize)
   |> string.join("")
 }
@@ -17,10 +37,11 @@ pub fn to_pascal_case(input: String) -> String {
 /// Examples: "PetStore" -> "pet_store", "getUserById" -> "get_user_by_id"
 /// Gleam keywords are suffixed with _ to avoid syntax errors.
 pub fn to_snake_case(input: String) -> String {
+  let re = compile_regexes()
   let result =
     input
-    |> insert_underscores_before_caps
-    |> split_words
+    |> insert_underscores_before_caps(re)
+    |> split_words(re)
     |> list.map(string.lowercase)
     |> string.join("_")
   escape_keyword(result)
@@ -77,19 +98,16 @@ pub fn capitalize(input: String) -> String {
 }
 
 /// Split a string into words by common separators.
-fn split_words(input: String) -> List(String) {
-  let assert Ok(re) = regexp.from_string("[_\\-\\s./]+")
-  let parts = regexp.split(re, input)
+fn split_words(input: String, re: Regexes) -> List(String) {
+  let parts = regexp.split(re.word_separator, input)
   parts
-  |> list.flat_map(split_camel_case)
+  |> list.flat_map(split_camel_case(_, re))
   |> list.filter(fn(s) { s != "" })
 }
 
 /// Split camelCase/PascalCase into separate words.
-fn split_camel_case(input: String) -> List(String) {
-  let assert Ok(re) =
-    regexp.from_string("([A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+)")
-  let matches = regexp.scan(re, input)
+fn split_camel_case(input: String, re: Regexes) -> List(String) {
+  let matches = regexp.scan(re.camel_case, input)
   case matches {
     [] -> [input]
     _ ->
@@ -101,9 +119,8 @@ fn split_camel_case(input: String) -> List(String) {
 }
 
 /// Insert underscores before capital letters in camelCase strings.
-fn insert_underscores_before_caps(input: String) -> String {
-  let assert Ok(re) = regexp.from_string("([a-z0-9])([A-Z])")
-  regexp.replace(re, input, "\\1_\\2")
+fn insert_underscores_before_caps(input: String, re: Regexes) -> String {
+  regexp.replace(re.underscore_before_caps, input, "\\1_\\2")
 }
 
 /// Deduplicate a list of names by appending _2, _3, etc. to duplicates.
