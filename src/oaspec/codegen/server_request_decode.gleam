@@ -7,7 +7,7 @@ import oaspec/codegen/ir_build
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{
   type AdditionalProperties, type SchemaRef, Forbidden, Inline, ObjectSchema,
-  Reference,
+  Reference, Untyped,
 }
 import oaspec/openapi/spec.{type Resolved, Value}
 import oaspec/util/naming
@@ -374,11 +374,15 @@ pub fn deep_object_optional_expr(
     props
     |> list.map(fn(prop) { "\"" <> prop.name <> "\"" })
     |> string.join(", ")
-  "case deep_object_present(query, \""
-  <> key
-  <> "\", ["
-  <> prop_names
-  <> "]) { True -> Some("
+  let has_ap = deep_object_has_additional_properties(param, ctx)
+  let presence_check = case has_ap {
+    True -> "deep_object_present_any(query, \"" <> key <> "\")"
+    False ->
+      "deep_object_present(query, \"" <> key <> "\", [" <> prop_names <> "])"
+  }
+  "case "
+  <> presence_check
+  <> " { True -> Some("
   <> deep_object_constructor_expr(key, param, op_id, ctx)
   <> ") False -> None }"
 }
@@ -411,18 +415,37 @@ fn deep_object_constructor_expr(
     })
 
   // Add additional_properties field if the schema has it
-  let has_additional_properties =
-    deep_object_has_additional_properties(param, ctx)
-  let fields = case has_additional_properties {
-    True -> list.append(fields, ["additional_properties: dict.new()"])
-    False -> fields
+  let ap_kind = case spec.parameter_schema(param) {
+    Some(schema_ref) -> schema_ref_additional_properties(schema_ref, ctx)
+    None -> Forbidden
+  }
+  let fields = case ap_kind {
+    Forbidden -> fields
+    Untyped -> {
+      let prop_names =
+        deep_object_properties(param, ctx)
+        |> list.map(fn(prop) { "\"" <> prop.name <> "\"" })
+        |> string.join(", ")
+      let expr =
+        "coerce_dict(deep_object_additional_properties(query, \""
+        <> key
+        <> "\", ["
+        <> prop_names
+        <> "]))"
+      list.append(fields, ["additional_properties: " <> expr])
+    }
+    _ -> {
+      // Typed additional properties need type-specific conversion;
+      // use empty dict as fallback until type-aware collection is implemented
+      list.append(fields, ["additional_properties: dict.new()"])
+    }
   }
 
   let fields_str = string.join(fields, ", ")
   deep_object_type_name(param, op_id) <> "(" <> fields_str <> ")"
 }
 
-fn deep_object_has_additional_properties(
+pub fn deep_object_has_additional_properties(
   param: spec.Parameter(Resolved),
   ctx: Context,
 ) -> Bool {
@@ -438,6 +461,20 @@ fn deep_object_has_additional_properties(
     Some(Inline(ObjectSchema(additional_properties: schema.Untyped, ..))) ->
       True
     _ -> False
+  }
+}
+
+pub fn deep_object_has_untyped_additional_properties(
+  param: spec.Parameter(Resolved),
+  ctx: Context,
+) -> Bool {
+  case spec.parameter_schema(param) {
+    Some(schema_ref) ->
+      case schema_ref_additional_properties(schema_ref, ctx) {
+        Untyped -> True
+        _ -> False
+      }
+    None -> False
   }
 }
 
