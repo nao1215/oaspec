@@ -275,299 +275,29 @@ fn generate_decoder(
       additional_properties:,
       metadata:,
       ..,
-    )) -> {
-      let sb = maybe_doc_comment(sb, metadata.description)
-      let sb =
-        sb
-        |> se.line(
-          "pub fn "
-          <> decoder_fn_name
-          <> "() -> decode.Decoder(types."
-          <> type_name
-          <> ") {",
-        )
+    )) ->
+      generate_object_decoder(
+        sb,
+        name,
+        type_name,
+        fn_name,
+        decoder_fn_name,
+        metadata.description,
+        properties,
+        required,
+        additional_properties,
+        ctx,
+      )
 
-      let props = ir_build.sorted_entries(properties)
-      let deduped_names =
-        dedup.dedup_property_names(list.map(props, fn(e) { e.0 }))
-      let sb =
-        list.index_fold(props, sb, fn(sb, entry, idx) {
-          let #(prop_name, prop_ref) = entry
-          let field_name =
-            list_at_or(deduped_names, idx, naming.to_snake_case(prop_name))
-          // writeOnly fields may not appear in responses, so treat them
-          // as optional even if listed in required
-          let is_write_only = type_gen.schema_ref_is_write_only(prop_ref, ctx)
-          let is_required = list.contains(required, prop_name) && !is_write_only
-          let field_decoder =
-            schema_ref_to_decoder(prop_ref, name, prop_name, ctx)
-          let is_nullable_schema = schema_ref_is_nullable(prop_ref, ctx)
-
-          // For nullable schemas, the Gleam type is Option(T),
-          // so the decoder must be decode.optional(inner_decoder).
-          let effective_decoder = case is_nullable_schema {
-            True -> "decode.optional(" <> field_decoder <> ")"
-            False -> field_decoder
-          }
-
-          case is_required {
-            True ->
-              sb
-              |> se.indent(
-                1,
-                "use "
-                  <> field_name
-                  <> " <- decode.field(\""
-                  <> prop_name
-                  <> "\", "
-                  <> effective_decoder
-                  <> ")",
-              )
-            False ->
-              case is_nullable_schema {
-                True ->
-                  // Type is Option(T), default is None
-                  sb
-                  |> se.indent(
-                    1,
-                    "use "
-                      <> field_name
-                      <> " <- decode.optional_field(\""
-                      <> prop_name
-                      <> "\", option.None, "
-                      <> effective_decoder
-                      <> ")",
-                  )
-                False ->
-                  sb
-                  |> se.indent(
-                    1,
-                    "use "
-                      <> field_name
-                      <> " <- decode.optional_field(\""
-                      <> prop_name
-                      <> "\", option.None, decode.optional("
-                      <> field_decoder
-                      <> "))",
-                  )
-              }
-          }
-        })
-
-      // Decode additional_properties as Dict, then drop known property keys
-      // so only unknown/extra keys remain in additional_properties.
-      let known_keys_expr = case list.is_empty(props) {
-        True -> "[]"
-        False ->
-          "["
-          <> se.join_with(
-            list.map(props, fn(entry) {
-              let #(prop_name, _) = entry
-              "\"" <> prop_name <> "\""
-            }),
-            ", ",
-          )
-          <> "]"
-      }
-      // For additionalProperties, decode the raw dict with dynamic values first
-      // to avoid forcing the value decoder on known properties (which may have
-      // incompatible types). Then drop known keys and decode remaining values.
-      let sb = case additional_properties {
-        Typed(ap_ref) -> {
-          let inner_decoder =
-            schema_ref_to_decoder(ap_ref, name, "additional_properties", ctx)
-          sb
-          |> se.indent(
-            1,
-            "use all_props <- decode.then(decode.dict(decode.string, decode.new_primitive_decoder(\"Dynamic\", fn(x) { Ok(x) })))",
-          )
-          |> se.indent(
-            1,
-            "let extra_props = dict.drop(all_props, " <> known_keys_expr <> ")",
-          )
-          |> se.indent(
-            1,
-            "let additional_properties_result = dict.fold(extra_props, Ok(dict.new()), fn(acc, k, v) {",
-          )
-          |> se.indent(2, "case acc {")
-          |> se.indent(3, "Ok(decoded_acc) ->")
-          |> se.indent(4, "case decode.run(v, " <> inner_decoder <> ") {")
-          |> se.indent(
-            5,
-            "Ok(decoded) -> Ok(dict.insert(decoded_acc, k, decoded))",
-          )
-          |> se.indent(5, "Error(_) -> Error(Nil)")
-          |> se.indent(4, "}")
-          |> se.indent(3, "Error(_) -> Error(Nil)")
-          |> se.indent(2, "}")
-          |> se.indent(1, "})")
-          |> se.indent(
-            1,
-            "use additional_properties <- decode.then(case additional_properties_result {",
-          )
-          |> se.indent(2, "Ok(decoded) -> decode.success(decoded)")
-          |> se.indent(
-            2,
-            "Error(_) -> decode.failure(dict.new(), \"additionalProperties\")",
-          )
-          |> se.indent(1, "})")
-        }
-        Untyped -> {
-          sb
-          |> se.indent(
-            1,
-            "use all_props <- decode.then(decode.dict(decode.string, decode.new_primitive_decoder(\"Dynamic\", fn(x) { Ok(x) })))",
-          )
-          |> se.indent(
-            1,
-            "let additional_properties = dict.drop(all_props, "
-              <> known_keys_expr
-              <> ")",
-          )
-        }
-        Forbidden -> sb
-      }
-
-      let param_names =
-        list.index_map(props, fn(entry, idx) {
-          let #(prop_name, _) = entry
-          let field_name =
-            list_at_or(deduped_names, idx, naming.to_snake_case(prop_name))
-          field_name <> ": " <> field_name
-        })
-
-      // Add additional_properties to param names if present
-      let param_names = case additional_properties {
-        Typed(_) | Untyped ->
-          list.append(param_names, [
-            "additional_properties: additional_properties",
-          ])
-        Forbidden -> param_names
-      }
-
-      let sb =
-        sb
-        |> se.indent(
-          1,
-          "decode.success(types."
-            <> type_name
-            <> "("
-            <> se.join_with(param_names, ", ")
-            <> "))",
-        )
-
-      let sb = sb |> se.line("}") |> se.blank_line()
-
-      // json.parse wrapper
-      let sb =
-        sb
-        |> se.line(
-          "pub fn "
-          <> fn_name
-          <> "(json_string: String) -> Result(types."
-          <> type_name
-          <> ", json.DecodeError) {",
-        )
-        |> se.indent(1, "json.parse(json_string, " <> decoder_fn_name <> "())")
-        |> se.line("}")
-        |> se.blank_line()
-
-      // List decoder for typed client array responses
-      let list_fn_name = fn_name <> "_list"
-      let list_decoder_fn_name = decoder_fn_name <> "_list"
-      let sb =
-        sb
-        |> se.line(
-          "pub fn "
-          <> list_decoder_fn_name
-          <> "() -> decode.Decoder(List(types."
-          <> type_name
-          <> ")) {",
-        )
-        |> se.indent(1, "decode.list(" <> decoder_fn_name <> "())")
-        |> se.line("}")
-        |> se.blank_line()
-        |> se.line(
-          "pub fn "
-          <> list_fn_name
-          <> "(json_string: String) -> Result(List(types."
-          <> type_name
-          <> "), json.DecodeError) {",
-        )
-        |> se.indent(
-          1,
-          "json.parse(json_string, " <> list_decoder_fn_name <> "())",
-        )
-        |> se.line("}")
-        |> se.blank_line()
-
-      sb
-    }
-
-    Inline(StringSchema(metadata:, enum_values:, ..)) if enum_values != [] -> {
-      let sb = maybe_doc_comment(sb, metadata.description)
-      let sb =
-        sb
-        |> se.line(
-          "pub fn "
-          <> decoder_fn_name
-          <> "() -> decode.Decoder(types."
-          <> type_name
-          <> ") {",
-        )
-        |> se.indent(1, "use value <- decode.then(decode.string)")
-        |> se.indent(1, "case value {")
-
-      let deduped_variants = dedup.dedup_enum_variants(enum_values)
-      let sb =
-        list.index_fold(enum_values, sb, fn(sb, value, idx) {
-          let variant_suffix =
-            list_at_or(deduped_variants, idx, naming.to_pascal_case(value))
-          let variant = naming.schema_to_type_name(type_name) <> variant_suffix
-          sb
-          |> se.indent(
-            2,
-            "\"" <> value <> "\" -> decode.success(types." <> variant <> ")",
-          )
-        })
-
-      // Unknown enum values → decode failure, not silent fallback
-      let first_variant_suffix =
-        list_at_or(deduped_variants, 0, case enum_values {
-          [first, ..] -> naming.to_pascal_case(first)
-          [] -> "Unknown"
-        })
-      let sb =
-        sb
-        |> se.indent(
-          2,
-          "_ -> decode.failure(types."
-            <> naming.schema_to_type_name(type_name)
-            <> first_variant_suffix
-            <> ", \""
-            <> type_name
-            <> "\")",
-        )
-        |> se.indent(1, "}")
-        |> se.line("}")
-        |> se.blank_line()
-
-      // json.parse wrapper
-      let sb =
-        sb
-        |> se.line(
-          "pub fn "
-          <> fn_name
-          <> "(json_string: String) -> Result(types."
-          <> type_name
-          <> ", json.DecodeError) {",
-        )
-        |> se.indent(1, "json.parse(json_string, " <> decoder_fn_name <> "())")
-        |> se.line("}")
-        |> se.blank_line()
-
-      sb
-    }
+    Inline(StringSchema(metadata:, enum_values:, ..)) if enum_values != [] ->
+      generate_enum_decoder(
+        sb,
+        type_name,
+        fn_name,
+        decoder_fn_name,
+        metadata.description,
+        enum_values,
+      )
 
     Inline(AllOfSchema(metadata:, schemas:)) -> {
       let merged = type_gen.merge_allof_schemas(schemas, ctx)
@@ -583,7 +313,7 @@ fn generate_decoder(
       generate_decoder(sb, name, merged_schema, ctx)
     }
 
-    Inline(OneOfSchema(metadata:, schemas:, discriminator:)) -> {
+    Inline(OneOfSchema(metadata:, schemas:, discriminator:)) ->
       generate_oneof_decoder(
         sb,
         name,
@@ -595,117 +325,29 @@ fn generate_decoder(
         discriminator,
         ctx,
       )
-    }
 
-    Inline(AnyOfSchema(metadata:, schemas:, ..)) -> {
-      // anyOf = inclusive union: try all sub-decoders, collect successes
-      let sb = maybe_doc_comment(sb, metadata.description)
+    Inline(AnyOfSchema(metadata:, schemas:, ..)) ->
+      generate_anyof_decoder(
+        sb,
+        type_name,
+        fn_name,
+        decoder_fn_name,
+        metadata.description,
+        schemas,
+      )
 
-      // Generate field decoders that try each variant
-      let variant_fields =
-        list.map(schemas, fn(s_ref) {
-          case s_ref {
-            Reference(name: ref_name, ..) -> {
-              let field_name = naming.to_snake_case(ref_name)
-              let decoder_name =
-                "decode_" <> naming.to_snake_case(ref_name) <> "_decoder"
-              #(field_name, decoder_name, ref_name)
-            }
-            Inline(_) -> #("unknown", "decode.string", "Unknown")
-          }
-        })
-
-      // Decoder function
-      let sb =
-        sb
-        |> se.line(
-          "pub fn "
-          <> decoder_fn_name
-          <> "() -> decode.Decoder(types."
-          <> type_name
-          <> ") {",
-        )
-
-      // Try each variant decoder, wrap in Some on success, None on failure
-      let sb =
-        list.fold(variant_fields, sb, fn(sb, field) {
-          let #(field_name, decoder_name, _) = field
-          sb
-          |> se.indent(
-            1,
-            "use "
-              <> field_name
-              <> " <- decode.then(decode.one_of(["
-              <> decoder_name
-              <> "() |> decode.map(option.Some)], option.None))",
-          )
-        })
-
-      // Construct the record
-      let field_assignments =
-        list.map(variant_fields, fn(f) {
-          let #(field_name, _, _) = f
-          field_name <> ": " <> field_name
-        })
-      let sb =
-        sb
-        |> se.indent(
-          1,
-          "decode.success(types."
-            <> type_name
-            <> "("
-            <> string.join(field_assignments, ", ")
-            <> "))",
-        )
-      let sb = sb |> se.line("}") |> se.blank_line()
-
-      // JSON parse wrapper
-      let sb =
-        sb
-        |> se.line(
-          "pub fn "
-          <> fn_name
-          <> "(json_string: String) -> Result(types."
-          <> type_name
-          <> ", json.DecodeError) {",
-        )
-        |> se.indent(1, "json.parse(json_string, " <> decoder_fn_name <> "())")
-        |> se.line("}")
-        |> se.blank_line()
-
-      sb
-    }
-
-    // Primitive schemas: generate decoder/encoder wrappers
-    // Nullable primitives use decode.optional / Option(T) types.
     Inline(StringSchema(metadata:, enum_values: [], ..)) -> {
       let #(gleam_type, decoder_expr) = case metadata.nullable {
         True -> #("Option(String)", "decode.optional(decode.string)")
         False -> #("String", "decode.string")
       }
-      let sb =
-        sb
-        |> se.line(
-          "pub fn "
-          <> decoder_fn_name
-          <> "() -> decode.Decoder("
-          <> gleam_type
-          <> ") {",
-        )
-        |> se.indent(1, decoder_expr)
-        |> se.line("}")
-        |> se.blank_line()
-        |> se.line(
-          "pub fn "
-          <> fn_name
-          <> "(json_string: String) -> Result("
-          <> gleam_type
-          <> ", json.DecodeError) {",
-        )
-        |> se.indent(1, "json.parse(json_string, " <> decoder_expr <> ")")
-        |> se.line("}")
-        |> se.blank_line()
-      sb
+      generate_primitive_decoder(
+        sb,
+        fn_name,
+        decoder_fn_name,
+        gleam_type,
+        decoder_expr,
+      )
     }
 
     Inline(IntegerSchema(metadata:, ..)) -> {
@@ -713,29 +355,13 @@ fn generate_decoder(
         True -> #("Option(Int)", "decode.optional(decode.int)")
         False -> #("Int", "decode.int")
       }
-      let sb =
-        sb
-        |> se.line(
-          "pub fn "
-          <> decoder_fn_name
-          <> "() -> decode.Decoder("
-          <> gleam_type
-          <> ") {",
-        )
-        |> se.indent(1, decoder_expr)
-        |> se.line("}")
-        |> se.blank_line()
-        |> se.line(
-          "pub fn "
-          <> fn_name
-          <> "(json_string: String) -> Result("
-          <> gleam_type
-          <> ", json.DecodeError) {",
-        )
-        |> se.indent(1, "json.parse(json_string, " <> decoder_expr <> ")")
-        |> se.line("}")
-        |> se.blank_line()
-      sb
+      generate_primitive_decoder(
+        sb,
+        fn_name,
+        decoder_fn_name,
+        gleam_type,
+        decoder_expr,
+      )
     }
 
     Inline(NumberSchema(metadata:, ..)) -> {
@@ -743,29 +369,13 @@ fn generate_decoder(
         True -> #("Option(Float)", "decode.optional(decode.float)")
         False -> #("Float", "decode.float")
       }
-      let sb =
-        sb
-        |> se.line(
-          "pub fn "
-          <> decoder_fn_name
-          <> "() -> decode.Decoder("
-          <> gleam_type
-          <> ") {",
-        )
-        |> se.indent(1, decoder_expr)
-        |> se.line("}")
-        |> se.blank_line()
-        |> se.line(
-          "pub fn "
-          <> fn_name
-          <> "(json_string: String) -> Result("
-          <> gleam_type
-          <> ", json.DecodeError) {",
-        )
-        |> se.indent(1, "json.parse(json_string, " <> decoder_expr <> ")")
-        |> se.line("}")
-        |> se.blank_line()
-      sb
+      generate_primitive_decoder(
+        sb,
+        fn_name,
+        decoder_fn_name,
+        gleam_type,
+        decoder_expr,
+      )
     }
 
     Inline(BooleanSchema(metadata:)) -> {
@@ -773,62 +383,464 @@ fn generate_decoder(
         True -> #("Option(Bool)", "decode.optional(decode.bool)")
         False -> #("Bool", "decode.bool")
       }
-      let sb =
-        sb
-        |> se.line(
-          "pub fn "
-          <> decoder_fn_name
-          <> "() -> decode.Decoder("
-          <> gleam_type
-          <> ") {",
-        )
-        |> se.indent(1, decoder_expr)
-        |> se.line("}")
-        |> se.blank_line()
-        |> se.line(
-          "pub fn "
-          <> fn_name
-          <> "(json_string: String) -> Result("
-          <> gleam_type
-          <> ", json.DecodeError) {",
-        )
-        |> se.indent(1, "json.parse(json_string, " <> decoder_expr <> ")")
-        |> se.line("}")
-        |> se.blank_line()
-      sb
+      generate_primitive_decoder(
+        sb,
+        fn_name,
+        decoder_fn_name,
+        gleam_type,
+        decoder_expr,
+      )
     }
 
-    Inline(ArraySchema(items:, ..)) -> {
-      let inner_decoder = schema_ref_to_decoder(items, name, "", ctx)
-      let inner_type = qualified_schema_ref_type(items, ctx)
-      let gleam_type = "List(" <> inner_type <> ")"
-      let sb =
-        sb
-        |> se.line(
-          "pub fn "
-          <> decoder_fn_name
-          <> "() -> decode.Decoder("
-          <> gleam_type
-          <> ") {",
-        )
-        |> se.indent(1, "decode.list(" <> inner_decoder <> ")")
-        |> se.line("}")
-        |> se.blank_line()
-        |> se.line(
-          "pub fn "
-          <> fn_name
-          <> "(json_string: String) -> Result("
-          <> gleam_type
-          <> ", json.DecodeError) {",
-        )
-        |> se.indent(1, "json.parse(json_string, " <> decoder_fn_name <> "())")
-        |> se.line("}")
-        |> se.blank_line()
-      sb
-    }
+    Inline(ArraySchema(items:, ..)) ->
+      generate_array_decoder(sb, name, fn_name, decoder_fn_name, items, ctx)
 
     _ -> sb
   }
+}
+
+/// Generate decoder for an ObjectSchema (properties, required, additionalProperties).
+fn generate_object_decoder(
+  sb: se.StringBuilder,
+  name: String,
+  type_name: String,
+  fn_name: String,
+  decoder_fn_name: String,
+  description: Option(String),
+  properties: dict.Dict(String, SchemaRef),
+  required: List(String),
+  additional_properties: schema.AdditionalProperties,
+  ctx: Context,
+) -> se.StringBuilder {
+  let sb = maybe_doc_comment(sb, description)
+  let sb =
+    sb
+    |> se.line(
+      "pub fn "
+      <> decoder_fn_name
+      <> "() -> decode.Decoder(types."
+      <> type_name
+      <> ") {",
+    )
+
+  let props = ir_build.sorted_entries(properties)
+  let deduped_names = dedup.dedup_property_names(list.map(props, fn(e) { e.0 }))
+  let sb =
+    list.index_fold(props, sb, fn(sb, entry, idx) {
+      let #(prop_name, prop_ref) = entry
+      let field_name =
+        list_at_or(deduped_names, idx, naming.to_snake_case(prop_name))
+      // writeOnly fields may not appear in responses, so treat them
+      // as optional even if listed in required
+      let is_write_only = type_gen.schema_ref_is_write_only(prop_ref, ctx)
+      let is_required = list.contains(required, prop_name) && !is_write_only
+      let field_decoder = schema_ref_to_decoder(prop_ref, name, prop_name, ctx)
+      let is_nullable_schema = schema_ref_is_nullable(prop_ref, ctx)
+
+      // For nullable schemas, the Gleam type is Option(T),
+      // so the decoder must be decode.optional(inner_decoder).
+      let effective_decoder = case is_nullable_schema {
+        True -> "decode.optional(" <> field_decoder <> ")"
+        False -> field_decoder
+      }
+
+      case is_required {
+        True ->
+          sb
+          |> se.indent(
+            1,
+            "use "
+              <> field_name
+              <> " <- decode.field(\""
+              <> prop_name
+              <> "\", "
+              <> effective_decoder
+              <> ")",
+          )
+        False ->
+          case is_nullable_schema {
+            True ->
+              // Type is Option(T), default is None
+              sb
+              |> se.indent(
+                1,
+                "use "
+                  <> field_name
+                  <> " <- decode.optional_field(\""
+                  <> prop_name
+                  <> "\", option.None, "
+                  <> effective_decoder
+                  <> ")",
+              )
+            False ->
+              sb
+              |> se.indent(
+                1,
+                "use "
+                  <> field_name
+                  <> " <- decode.optional_field(\""
+                  <> prop_name
+                  <> "\", option.None, decode.optional("
+                  <> field_decoder
+                  <> "))",
+              )
+          }
+      }
+    })
+
+  // Decode additional_properties as Dict, then drop known property keys
+  // so only unknown/extra keys remain in additional_properties.
+  let known_keys_expr = case list.is_empty(props) {
+    True -> "[]"
+    False ->
+      "["
+      <> se.join_with(
+        list.map(props, fn(entry) {
+          let #(prop_name, _) = entry
+          "\"" <> prop_name <> "\""
+        }),
+        ", ",
+      )
+      <> "]"
+  }
+  // For additionalProperties, decode the raw dict with dynamic values first
+  // to avoid forcing the value decoder on known properties (which may have
+  // incompatible types). Then drop known keys and decode remaining values.
+  let sb = case additional_properties {
+    Typed(ap_ref) -> {
+      let inner_decoder =
+        schema_ref_to_decoder(ap_ref, name, "additional_properties", ctx)
+      sb
+      |> se.indent(
+        1,
+        "use all_props <- decode.then(decode.dict(decode.string, decode.new_primitive_decoder(\"Dynamic\", fn(x) { Ok(x) })))",
+      )
+      |> se.indent(
+        1,
+        "let extra_props = dict.drop(all_props, " <> known_keys_expr <> ")",
+      )
+      |> se.indent(
+        1,
+        "let additional_properties_result = dict.fold(extra_props, Ok(dict.new()), fn(acc, k, v) {",
+      )
+      |> se.indent(2, "case acc {")
+      |> se.indent(3, "Ok(decoded_acc) ->")
+      |> se.indent(4, "case decode.run(v, " <> inner_decoder <> ") {")
+      |> se.indent(5, "Ok(decoded) -> Ok(dict.insert(decoded_acc, k, decoded))")
+      |> se.indent(5, "Error(_) -> Error(Nil)")
+      |> se.indent(4, "}")
+      |> se.indent(3, "Error(_) -> Error(Nil)")
+      |> se.indent(2, "}")
+      |> se.indent(1, "})")
+      |> se.indent(
+        1,
+        "use additional_properties <- decode.then(case additional_properties_result {",
+      )
+      |> se.indent(2, "Ok(decoded) -> decode.success(decoded)")
+      |> se.indent(
+        2,
+        "Error(_) -> decode.failure(dict.new(), \"additionalProperties\")",
+      )
+      |> se.indent(1, "})")
+    }
+    Untyped -> {
+      sb
+      |> se.indent(
+        1,
+        "use all_props <- decode.then(decode.dict(decode.string, decode.new_primitive_decoder(\"Dynamic\", fn(x) { Ok(x) })))",
+      )
+      |> se.indent(
+        1,
+        "let additional_properties = dict.drop(all_props, "
+          <> known_keys_expr
+          <> ")",
+      )
+    }
+    Forbidden -> sb
+  }
+
+  let param_names =
+    list.index_map(props, fn(entry, idx) {
+      let #(prop_name, _) = entry
+      let field_name =
+        list_at_or(deduped_names, idx, naming.to_snake_case(prop_name))
+      field_name <> ": " <> field_name
+    })
+
+  // Add additional_properties to param names if present
+  let param_names = case additional_properties {
+    Typed(_) | Untyped ->
+      list.append(param_names, [
+        "additional_properties: additional_properties",
+      ])
+    Forbidden -> param_names
+  }
+
+  let sb =
+    sb
+    |> se.indent(
+      1,
+      "decode.success(types."
+        <> type_name
+        <> "("
+        <> se.join_with(param_names, ", ")
+        <> "))",
+    )
+
+  let sb = sb |> se.line("}") |> se.blank_line()
+
+  // json.parse wrapper
+  let sb =
+    sb
+    |> se.line(
+      "pub fn "
+      <> fn_name
+      <> "(json_string: String) -> Result(types."
+      <> type_name
+      <> ", json.DecodeError) {",
+    )
+    |> se.indent(1, "json.parse(json_string, " <> decoder_fn_name <> "())")
+    |> se.line("}")
+    |> se.blank_line()
+
+  // List decoder for typed client array responses
+  let list_fn_name = fn_name <> "_list"
+  let list_decoder_fn_name = decoder_fn_name <> "_list"
+  sb
+  |> se.line(
+    "pub fn "
+    <> list_decoder_fn_name
+    <> "() -> decode.Decoder(List(types."
+    <> type_name
+    <> ")) {",
+  )
+  |> se.indent(1, "decode.list(" <> decoder_fn_name <> "())")
+  |> se.line("}")
+  |> se.blank_line()
+  |> se.line(
+    "pub fn "
+    <> list_fn_name
+    <> "(json_string: String) -> Result(List(types."
+    <> type_name
+    <> "), json.DecodeError) {",
+  )
+  |> se.indent(1, "json.parse(json_string, " <> list_decoder_fn_name <> "())")
+  |> se.line("}")
+  |> se.blank_line()
+}
+
+/// Generate decoder for a string enum schema.
+fn generate_enum_decoder(
+  sb: se.StringBuilder,
+  type_name: String,
+  fn_name: String,
+  decoder_fn_name: String,
+  description: Option(String),
+  enum_values: List(String),
+) -> se.StringBuilder {
+  let sb = maybe_doc_comment(sb, description)
+  let sb =
+    sb
+    |> se.line(
+      "pub fn "
+      <> decoder_fn_name
+      <> "() -> decode.Decoder(types."
+      <> type_name
+      <> ") {",
+    )
+    |> se.indent(1, "use value <- decode.then(decode.string)")
+    |> se.indent(1, "case value {")
+
+  let deduped_variants = dedup.dedup_enum_variants(enum_values)
+  let sb =
+    list.index_fold(enum_values, sb, fn(sb, value, idx) {
+      let variant_suffix =
+        list_at_or(deduped_variants, idx, naming.to_pascal_case(value))
+      let variant = naming.schema_to_type_name(type_name) <> variant_suffix
+      sb
+      |> se.indent(
+        2,
+        "\"" <> value <> "\" -> decode.success(types." <> variant <> ")",
+      )
+    })
+
+  // Unknown enum values → decode failure, not silent fallback
+  let first_variant_suffix =
+    list_at_or(deduped_variants, 0, case enum_values {
+      [first, ..] -> naming.to_pascal_case(first)
+      [] -> "Unknown"
+    })
+  sb
+  |> se.indent(
+    2,
+    "_ -> decode.failure(types."
+      <> naming.schema_to_type_name(type_name)
+      <> first_variant_suffix
+      <> ", \""
+      <> type_name
+      <> "\")",
+  )
+  |> se.indent(1, "}")
+  |> se.line("}")
+  |> se.blank_line()
+  // json.parse wrapper
+  |> se.line(
+    "pub fn "
+    <> fn_name
+    <> "(json_string: String) -> Result(types."
+    <> type_name
+    <> ", json.DecodeError) {",
+  )
+  |> se.indent(1, "json.parse(json_string, " <> decoder_fn_name <> "())")
+  |> se.line("}")
+  |> se.blank_line()
+}
+
+/// Generate decoder for an anyOf (inclusive union) schema.
+fn generate_anyof_decoder(
+  sb: se.StringBuilder,
+  type_name: String,
+  fn_name: String,
+  decoder_fn_name: String,
+  description: Option(String),
+  schemas: List(SchemaRef),
+) -> se.StringBuilder {
+  let sb = maybe_doc_comment(sb, description)
+
+  // Generate field decoders that try each variant
+  let variant_fields =
+    list.map(schemas, fn(s_ref) {
+      case s_ref {
+        Reference(name: ref_name, ..) -> {
+          let field_name = naming.to_snake_case(ref_name)
+          let decoder_name =
+            "decode_" <> naming.to_snake_case(ref_name) <> "_decoder"
+          #(field_name, decoder_name, ref_name)
+        }
+        Inline(_) -> #("unknown", "decode.string", "Unknown")
+      }
+    })
+
+  // Decoder function
+  let sb =
+    sb
+    |> se.line(
+      "pub fn "
+      <> decoder_fn_name
+      <> "() -> decode.Decoder(types."
+      <> type_name
+      <> ") {",
+    )
+
+  // Try each variant decoder, wrap in Some on success, None on failure
+  let sb =
+    list.fold(variant_fields, sb, fn(sb, field) {
+      let #(field_name, decoder_name, _) = field
+      sb
+      |> se.indent(
+        1,
+        "use "
+          <> field_name
+          <> " <- decode.then(decode.one_of("
+          <> decoder_name
+          <> "() |> decode.map(option.Some), or: [decode.success(option.None)]))",
+      )
+    })
+
+  // Construct the record
+  let field_assignments =
+    list.map(variant_fields, fn(f) {
+      let #(field_name, _, _) = f
+      field_name <> ": " <> field_name
+    })
+  sb
+  |> se.indent(
+    1,
+    "decode.success(types."
+      <> type_name
+      <> "("
+      <> string.join(field_assignments, ", ")
+      <> "))",
+  )
+  |> se.line("}")
+  |> se.blank_line()
+  // JSON parse wrapper
+  |> se.line(
+    "pub fn "
+    <> fn_name
+    <> "(json_string: String) -> Result(types."
+    <> type_name
+    <> ", json.DecodeError) {",
+  )
+  |> se.indent(1, "json.parse(json_string, " <> decoder_fn_name <> "())")
+  |> se.line("}")
+  |> se.blank_line()
+}
+
+/// Generate decoder for a primitive type (String, Int, Float, Bool).
+fn generate_primitive_decoder(
+  sb: se.StringBuilder,
+  fn_name: String,
+  decoder_fn_name: String,
+  gleam_type: String,
+  decoder_expr: String,
+) -> se.StringBuilder {
+  sb
+  |> se.line(
+    "pub fn "
+    <> decoder_fn_name
+    <> "() -> decode.Decoder("
+    <> gleam_type
+    <> ") {",
+  )
+  |> se.indent(1, decoder_expr)
+  |> se.line("}")
+  |> se.blank_line()
+  |> se.line(
+    "pub fn "
+    <> fn_name
+    <> "(json_string: String) -> Result("
+    <> gleam_type
+    <> ", json.DecodeError) {",
+  )
+  |> se.indent(1, "json.parse(json_string, " <> decoder_expr <> ")")
+  |> se.line("}")
+  |> se.blank_line()
+}
+
+/// Generate decoder for an ArraySchema.
+fn generate_array_decoder(
+  sb: se.StringBuilder,
+  name: String,
+  fn_name: String,
+  decoder_fn_name: String,
+  items: SchemaRef,
+  ctx: Context,
+) -> se.StringBuilder {
+  let inner_decoder = schema_ref_to_decoder(items, name, "", ctx)
+  let inner_type = qualified_schema_ref_type(items, ctx)
+  let gleam_type = "List(" <> inner_type <> ")"
+  sb
+  |> se.line(
+    "pub fn "
+    <> decoder_fn_name
+    <> "() -> decode.Decoder("
+    <> gleam_type
+    <> ") {",
+  )
+  |> se.indent(1, "decode.list(" <> inner_decoder <> ")")
+  |> se.line("}")
+  |> se.blank_line()
+  |> se.line(
+    "pub fn "
+    <> fn_name
+    <> "(json_string: String) -> Result("
+    <> gleam_type
+    <> ", json.DecodeError) {",
+  )
+  |> se.indent(1, "json.parse(json_string, " <> decoder_fn_name <> "())")
+  |> se.line("}")
+  |> se.blank_line()
 }
 
 /// Generate decoder for oneOf/anyOf union types.
@@ -1696,30 +1708,18 @@ fn generate_encoder(
       }
     }
 
-    // Primitive schemas: generate encoder wrappers
-    // Nullable primitives use json.nullable / Option(T) types.
     Inline(StringSchema(metadata:, enum_values: [], ..)) -> {
       let #(gleam_type, json_expr) = case metadata.nullable {
         True -> #("Option(String)", "json.nullable(value, json.string)")
         False -> #("String", "json.string(value)")
       }
-      sb
-      |> se.line(
-        "pub fn "
-        <> json_fn_name
-        <> "(value: "
-        <> gleam_type
-        <> ") -> json.Json {",
+      generate_primitive_encoder(
+        sb,
+        fn_name,
+        json_fn_name,
+        gleam_type,
+        json_expr,
       )
-      |> se.indent(1, json_expr)
-      |> se.line("}")
-      |> se.blank_line()
-      |> se.line(
-        "pub fn " <> fn_name <> "(value: " <> gleam_type <> ") -> String {",
-      )
-      |> se.indent(1, json_fn_name <> "(value) |> json.to_string()")
-      |> se.line("}")
-      |> se.blank_line()
     }
 
     Inline(IntegerSchema(metadata:, ..)) -> {
@@ -1727,23 +1727,13 @@ fn generate_encoder(
         True -> #("Option(Int)", "json.nullable(value, json.int)")
         False -> #("Int", "json.int(value)")
       }
-      sb
-      |> se.line(
-        "pub fn "
-        <> json_fn_name
-        <> "(value: "
-        <> gleam_type
-        <> ") -> json.Json {",
+      generate_primitive_encoder(
+        sb,
+        fn_name,
+        json_fn_name,
+        gleam_type,
+        json_expr,
       )
-      |> se.indent(1, json_expr)
-      |> se.line("}")
-      |> se.blank_line()
-      |> se.line(
-        "pub fn " <> fn_name <> "(value: " <> gleam_type <> ") -> String {",
-      )
-      |> se.indent(1, json_fn_name <> "(value) |> json.to_string()")
-      |> se.line("}")
-      |> se.blank_line()
     }
 
     Inline(NumberSchema(metadata:, ..)) -> {
@@ -1751,23 +1741,13 @@ fn generate_encoder(
         True -> #("Option(Float)", "json.nullable(value, json.float)")
         False -> #("Float", "json.float(value)")
       }
-      sb
-      |> se.line(
-        "pub fn "
-        <> json_fn_name
-        <> "(value: "
-        <> gleam_type
-        <> ") -> json.Json {",
+      generate_primitive_encoder(
+        sb,
+        fn_name,
+        json_fn_name,
+        gleam_type,
+        json_expr,
       )
-      |> se.indent(1, json_expr)
-      |> se.line("}")
-      |> se.blank_line()
-      |> se.line(
-        "pub fn " <> fn_name <> "(value: " <> gleam_type <> ") -> String {",
-      )
-      |> se.indent(1, json_fn_name <> "(value) |> json.to_string()")
-      |> se.line("}")
-      |> se.blank_line()
     }
 
     Inline(BooleanSchema(metadata:)) -> {
@@ -1775,50 +1755,53 @@ fn generate_encoder(
         True -> #("Option(Bool)", "json.nullable(value, json.bool)")
         False -> #("Bool", "json.bool(value)")
       }
-      sb
-      |> se.line(
-        "pub fn "
-        <> json_fn_name
-        <> "(value: "
-        <> gleam_type
-        <> ") -> json.Json {",
+      generate_primitive_encoder(
+        sb,
+        fn_name,
+        json_fn_name,
+        gleam_type,
+        json_expr,
       )
-      |> se.indent(1, json_expr)
-      |> se.line("}")
-      |> se.blank_line()
-      |> se.line(
-        "pub fn " <> fn_name <> "(value: " <> gleam_type <> ") -> String {",
-      )
-      |> se.indent(1, json_fn_name <> "(value) |> json.to_string()")
-      |> se.line("}")
-      |> se.blank_line()
     }
 
     Inline(ArraySchema(items:, ..)) -> {
       let inner_type = qualified_schema_ref_type(items, ctx)
       let gleam_type = "List(" <> inner_type <> ")"
       let inner_encoder = schema_ref_to_json_encoder_fn(items, name, "", ctx)
-      sb
-      |> se.line(
-        "pub fn "
-        <> json_fn_name
-        <> "(value: "
-        <> gleam_type
-        <> ") -> json.Json {",
+      generate_primitive_encoder(
+        sb,
+        fn_name,
+        json_fn_name,
+        gleam_type,
+        "json.array(value, " <> inner_encoder <> ")",
       )
-      |> se.indent(1, "json.array(value, " <> inner_encoder <> ")")
-      |> se.line("}")
-      |> se.blank_line()
-      |> se.line(
-        "pub fn " <> fn_name <> "(value: " <> gleam_type <> ") -> String {",
-      )
-      |> se.indent(1, json_fn_name <> "(value) |> json.to_string()")
-      |> se.line("}")
-      |> se.blank_line()
     }
 
     _ -> sb
   }
+}
+
+/// Generate encoder for a primitive type (String, Int, Float, Bool) or Array.
+fn generate_primitive_encoder(
+  sb: se.StringBuilder,
+  fn_name: String,
+  json_fn_name: String,
+  gleam_type: String,
+  json_expr: String,
+) -> se.StringBuilder {
+  sb
+  |> se.line(
+    "pub fn " <> json_fn_name <> "(value: " <> gleam_type <> ") -> json.Json {",
+  )
+  |> se.indent(1, json_expr)
+  |> se.line("}")
+  |> se.blank_line()
+  |> se.line(
+    "pub fn " <> fn_name <> "(value: " <> gleam_type <> ") -> String {",
+  )
+  |> se.indent(1, json_fn_name <> "(value) |> json.to_string()")
+  |> se.line("}")
+  |> se.blank_line()
 }
 
 /// Convert a SchemaRef to a json.Json encoder expression.
