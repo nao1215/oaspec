@@ -26,6 +26,11 @@ pub type GenerationSummary {
   )
 }
 
+/// Result of a successful validation-only run.
+pub type ValidationSummary {
+  ValidationSummary(spec_title: String, warnings: List(Diagnostic))
+}
+
 /// Errors from the pure generation pipeline.
 pub type GenerateError {
   ValidationErrors(errors: List(Diagnostic))
@@ -91,6 +96,58 @@ pub fn generate(
           validation_warnings,
         ])
       Ok(GenerationSummary(files:, spec_title:, warnings:))
+    }
+  }
+}
+
+/// Validation-only pipeline: parse → normalize → resolve → capability_check → hoist → dedup → validate.
+/// Runs the same checks as generate() but skips code generation and file writing.
+pub fn validate_only(
+  spec: OpenApiSpec(Unresolved),
+  cfg: Config,
+) -> Result(ValidationSummary, GenerateError) {
+  let spec_title = spec.info.title <> " v" <> spec.info.version
+
+  let spec = normalize.normalize(spec)
+
+  use spec <- result.try(
+    resolve.resolve(spec)
+    |> result.map_error(fn(errors) { ValidationErrors(errors:) }),
+  )
+
+  let capability_issues =
+    capability_check.check(spec)
+    |> validate.filter_by_mode(cfg.mode)
+  let capability_errors = validate.errors_only(capability_issues)
+  let capability_warnings = validate.warnings_only(capability_issues)
+  use _ <- result.try(case list.is_empty(capability_errors) {
+    False -> Error(ValidationErrors(errors: capability_errors))
+    True -> Ok(Nil)
+  })
+
+  let spec = hoist.hoist(spec)
+  let spec = dedup.dedup(spec)
+  let ctx = context.new(spec, cfg)
+
+  let preserved_warnings =
+    capability_check.check_preserved(ctx)
+    |> diagnostic.filter_by_mode(cfg.mode)
+
+  let validation_issues =
+    validate.validate(ctx)
+    |> validate.filter_by_mode(cfg.mode)
+  let blocking_errors = validate.errors_only(validation_issues)
+  let validation_warnings = validate.warnings_only(validation_issues)
+  case list.is_empty(blocking_errors) {
+    False -> Error(ValidationErrors(errors: blocking_errors))
+    True -> {
+      let warnings =
+        list.flatten([
+          capability_warnings,
+          preserved_warnings,
+          validation_warnings,
+        ])
+      Ok(ValidationSummary(spec_title:, warnings:))
     }
   }
 }

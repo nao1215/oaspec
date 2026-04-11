@@ -19,6 +19,7 @@ pub fn app() -> glint.Glint(Nil) {
   |> glint.global_help("Generate Gleam code from OpenAPI 3.x specifications")
   |> glint.pretty_help(glint.default_pretty_help())
   |> glint.add(at: ["generate"], do: generate_command())
+  |> glint.add(at: ["validate"], do: validate_command())
   |> glint.add(at: ["init"], do: init_command())
 }
 
@@ -60,6 +61,40 @@ fn generate_command() -> glint.Command(Nil) {
           }
 
           run_generate(config_path, mode_opt, output_opt)
+        })
+      },
+    )
+  }
+}
+
+/// The validate command definition.
+fn validate_command() -> glint.Command(Nil) {
+  {
+    use config_path <- glint.flag(
+      glint.string_flag("config")
+      |> glint.flag_default("./oaspec.yaml")
+      |> glint.flag_help("Path to config file"),
+    )
+
+    use mode <- glint.flag(
+      glint.string_flag("mode")
+      |> glint.flag_default("")
+      |> glint.flag_help(
+        "Generation mode: server, client, or both (overrides config)",
+      ),
+    )
+
+    glint.command_help(
+      "Validate an OpenAPI specification without generating code",
+      fn() {
+        glint.command(fn(_named_args, _args, flags) {
+          let config_path = config_path(flags) |> result.unwrap("./oaspec.yaml")
+          let mode_opt = case mode(flags) |> result.unwrap("") {
+            "" -> None
+            s -> Some(s)
+          }
+
+          run_validate(config_path, mode_opt)
         })
       },
     )
@@ -189,6 +224,53 @@ fn run_generate(
                   halt(1)
                 }
               }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/// Execute the validation-only pipeline.
+fn run_validate(config_path: String, mode_opt: Option(String)) -> Nil {
+  io.println("oaspec v" <> context.version)
+  io.println("Loading config from: " <> config_path)
+
+  case load_config(config_path, mode_opt, None) {
+    Error(msg) -> {
+      io.println("Error: " <> msg)
+      halt(1)
+    }
+    Ok(cfg) -> {
+      io.println("Parsing OpenAPI spec: " <> cfg.input)
+      case parser.parse_file(cfg.input) {
+        Error(e) -> {
+          io.println("Error: " <> parser.parse_error_to_string(e))
+          halt(1)
+        }
+        Ok(spec) -> {
+          case generate.validate_only(spec, cfg) {
+            Error(generate.ValidationErrors(errors:)) -> {
+              io.println("Error: OpenAPI spec contains unsupported features:")
+              list.each(errors, fn(e) {
+                io.println("  - " <> diagnostic.to_string(e))
+              })
+              halt(1)
+            }
+            Ok(summary) -> {
+              io.println("Spec loaded: " <> summary.spec_title)
+              case summary.warnings {
+                [] -> Nil
+                warnings -> {
+                  io.println("Warnings:")
+                  list.each(warnings, fn(w) {
+                    io.println("  - " <> diagnostic.to_string(w))
+                  })
+                }
+              }
+              io.println("")
+              io.println("Validation passed.")
             }
           }
         }
