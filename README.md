@@ -1,6 +1,7 @@
 # oaspec
 
 [![Hex](https://img.shields.io/hexpm/v/oaspec)](https://hex.pm/packages/oaspec)
+[![Hex Downloads](https://img.shields.io/hexpm/dt/oaspec)](https://hex.pm/packages/oaspec)
 [![CI](https://github.com/nao1215/oaspec/actions/workflows/ci.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci.yml)
 
 Generate usable Gleam code from OpenAPI 3.x specifications.
@@ -10,7 +11,7 @@ Generate usable Gleam code from OpenAPI 3.x specifications.
 - Generate client and server-side modules from a single spec
 - Produce readable Gleam types, encoders, decoders, request types, and response types
 - Handle real-world OpenAPI patterns: unions, nullable fields, `additionalProperties`, form bodies, multipart, and security
-- Backed by 470 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 178 test fixtures (including 94 OSS-derived edge-case specs)
+- Backed by 575 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 179 test fixtures (including 94 OSS-derived edge-case specs)
 
 ## Why oaspec
 

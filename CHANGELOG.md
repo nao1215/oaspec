@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-11
+
+### Added
+
+- **deepObject additional_properties collection**: generated server routers now collect unmatched `{param}[{key}]` query keys into the `additional_properties` dict instead of always passing an empty dict (#92)
+- `deep_object_additional_properties` helper function generated in router for collecting unknown keys from query parameters
+- `deep_object_present_any` helper function for broader presence detection on optional deepObject parameters with Untyped additionalProperties
+- `coerce_dict` Erlang FFI helper for safely converting `Dict(String, List(String))` to `Dict(String, Dynamic)` in generated routers
+- Integration tests for callbacks, cookies, and deepObject parameters (#46)
+- Unit tests for `generate_security_or_chain` in `client_security.gleam` (#83)
+- Expanded unit test coverage for codegen modules: `client_request`, `server_request_decode`, `decoders`, `client_response`, `client_security`, `ir_build`, `allof_merge` (#45)
+- Unit tests for `resolve.gleam` error paths: circular refs, unresolved refs, wrong-kind refs (#60)
+- Unit tests for `writer.gleam` public functions: `resolve_paths`, `output_dirs`, `error_to_string` (#61)
+
+### Fixed
+
+- **deepObject additional_properties**: generated router no longer passes `dict.new()` for deepObject parameters with additionalProperties; unknown query keys are now collected (#92)
+- Presence check for optional deepObject parameters with Typed additionalProperties uses `deep_object_present` (known keys only), keeping it consistent with the `dict.new()` fallback for Typed AP
+- CLI diagnostic output uses `to_short_string` by default, removing verbose `[Phase]` prefix (#63)
+- Removed dead code: unused `_method` parameter in `parser.gleam` and unused `indent_offset` in `client.gleam` (#65)
+- Resolved regex recompilation and quadratic list operations in naming utilities (#54)
+- Corrected `decode.one_of` call signature in anyOf decoder generation
+
+### Changed
+
+- Extracted duplicated schema helper functions into shared `schema_utils.gleam` module (#53)
+- Consolidated duplicated parameter parsing generators in `server_request_decode.gleam` (#56)
+- Extracted shared import-needs analysis into `import_analysis.gleam` (#57)
+- Unified three separate allOf property merging implementations into `allof_merge.merge_allof_schemas` (#58)
+- Split `generate_decoder` god function (560+ lines) into per-schema-type functions (#59)
+- Reduced deep nesting in `cli.gleam` and extracted shared pipeline in `generate.gleam` (#55)
+- README: added library API usage section (#27), mode-specific support matrix (#28), clarified OAuth2/OpenID Connect scope (#23), documented validate command and CLI flags (#52), added platform install guidance (#62)
+- CONTRIBUTING.md: recommend `just all` instead of `just ci` (#64)
+
 ## [0.10.0] - 2026-04-11
 
 ### Added
