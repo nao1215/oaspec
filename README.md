@@ -138,12 +138,46 @@ Generated server code is written to `<dir>/<package>`. Generated client code is 
 | `output.server` | no | `<dir>/<package>` | Server output path |
 | `output.client` | no | `<dir>_client/<package>` | Client output path |
 
-CLI options:
+### CLI commands
 
-```text
---config=<path>   Path to config file (default: ./oaspec.yaml)
---mode=<mode>     server, client, or both (default: both)
---output=<path>   Override output base directory
+| Command | Description |
+|---------|-------------|
+| `oaspec generate` | Generate Gleam code from an OpenAPI specification |
+| `oaspec validate` | Validate an OpenAPI specification without generating code |
+| `oaspec init` | Create a default `oaspec.yaml` config file |
+
+### CLI options for `generate`
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config=<path>` | `./oaspec.yaml` | Path to config file |
+| `--mode=<mode>` | `both` | `server`, `client`, or `both` (overrides config) |
+| `--output=<path>` | - | Override output base directory |
+| `--check` | `false` | Check that generated code matches existing files without writing |
+| `--fail-on-warnings` | `false` | Treat warnings as errors |
+
+### CLI options for `validate`
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config=<path>` | `./oaspec.yaml` | Path to config file |
+| `--mode=<mode>` | `both` | `server`, `client`, or `both` (overrides config) |
+
+### Validate
+
+Check a spec for unsupported patterns without generating code:
+
+```sh
+oaspec validate --config=oaspec.yaml
+```
+
+### CI integration
+
+Use `--check` and `--fail-on-warnings` to verify generated code stays in sync:
+
+```sh
+# Fail if generated code would differ from what's committed
+oaspec generate --config=oaspec.yaml --check --fail-on-warnings
 ```
 
 ## Best For
