@@ -78,9 +78,9 @@ pub fn list_pets(req: request_types.ListPetsRequest)
 
 ## Quickstart
 
-### Install from GitHub release
+### Install from GitHub release (Linux / macOS)
 
-Requires Erlang/OTP 27+.
+Requires Erlang/OTP 27+. The release binary is an Erlang escript that runs on any platform with Erlang installed.
 
 ```sh
 curl -fSL -o oaspec https://github.com/nao1215/oaspec/releases/latest/download/oaspec
@@ -88,17 +88,26 @@ chmod +x oaspec
 sudo mv oaspec /usr/local/bin/
 ```
 
-### Build from source
+> On Windows, download `oaspec` from the [latest release](https://github.com/nao1215/oaspec/releases/latest) and run it with `escript oaspec <command>`. Erlang/OTP 27+ must be on your `PATH`.
 
-Requires Gleam 1.15+, Erlang/OTP 27+, and `rebar3`.
+### Build from source (all platforms)
+
+Requires Gleam 1.15+, Erlang/OTP 27+, and `rebar3`. Works on Linux, macOS, and Windows.
 
 ```sh
 git clone https://github.com/nao1215/oaspec.git
 cd oaspec
 gleam deps download
 gleam run -m gleescript
+```
+
+On Linux/macOS, move the binary into your PATH:
+
+```sh
 sudo mv oaspec /usr/local/bin/
 ```
+
+On Windows, move `oaspec` to a directory on your `PATH` and run it with `escript oaspec <command>`.
 
 ### Generate code
 
