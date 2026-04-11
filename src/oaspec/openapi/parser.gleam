@@ -13,14 +13,14 @@ import oaspec/openapi/schema.{
 }
 import oaspec/openapi/spec.{
   type Callback, type Components, type Contact, type Encoding, type ExternalDoc,
-  type Header, type HttpMethod, type Info, type License, type Link,
-  type MediaType, type OpenApiSpec, type Operation, type Parameter,
-  type ParameterIn, type PathItem, type RefOr, type RequestBody, type Response,
+  type Header, type Info, type License, type Link, type MediaType,
+  type OpenApiSpec, type Operation, type Parameter, type ParameterIn,
+  type PathItem, type RefOr, type RequestBody, type Response,
   type SecurityRequirement, type Server, type ServerVariable, type Tag,
-  type Unresolved, Callback, Components, Contact, Delete, Encoding, ExternalDoc,
-  Get, Head, Header, Info, License, Link, MediaType, OpenApiSpec, Operation,
-  Options, Parameter, Patch, PathItem, Post, Put, Ref, RequestBody, Response,
-  SecurityRequirement, Server, ServerVariable, Tag, Trace, Value,
+  type Unresolved, Callback, Components, Contact, Encoding, ExternalDoc, Header,
+  Info, License, Link, MediaType, OpenApiSpec, Operation, Parameter, PathItem,
+  Ref, RequestBody, Response, SecurityRequirement, Server, ServerVariable, Tag,
+  Value,
 }
 import oaspec/openapi/value
 import oaspec/util/http
@@ -267,60 +267,42 @@ fn parse_path_item(
     |> result.unwrap(None)
 
   // Operations are optional, but if present must parse correctly.
-  use get <- result.try(parse_optional_operation(
-    node,
-    "get",
-    path,
-    Get,
-    components,
-  ))
+  use get <- result.try(parse_optional_operation(node, "get", path, components))
   use post <- result.try(parse_optional_operation(
     node,
     "post",
     path,
-    Post,
     components,
   ))
-  use put <- result.try(parse_optional_operation(
-    node,
-    "put",
-    path,
-    Put,
-    components,
-  ))
+  use put <- result.try(parse_optional_operation(node, "put", path, components))
   use delete <- result.try(parse_optional_operation(
     node,
     "delete",
     path,
-    Delete,
     components,
   ))
   use patch <- result.try(parse_optional_operation(
     node,
     "patch",
     path,
-    Patch,
     components,
   ))
   use head <- result.try(parse_optional_operation(
     node,
     "head",
     path,
-    Head,
     components,
   ))
   use options <- result.try(parse_optional_operation(
     node,
     "options",
     path,
-    Options,
     components,
   ))
   use trace <- result.try(parse_optional_operation(
     node,
     "trace",
     path,
-    Trace,
     components,
   ))
 
@@ -349,7 +331,6 @@ fn parse_optional_operation(
   node: yay.Node,
   method_key: String,
   path: String,
-  method: HttpMethod,
   components: Option(Components(Unresolved)),
 ) -> Result(Option(Operation(Unresolved)), Diagnostic) {
   case yay.select_sugar(from: node, selector: method_key) {
@@ -358,7 +339,6 @@ fn parse_optional_operation(
         node,
         method_key,
         path,
-        method,
         components,
       ))
       Ok(Some(op))
@@ -372,7 +352,6 @@ fn parse_operation_at(
   node: yay.Node,
   method_key: String,
   path: String,
-  _method: HttpMethod,
   components: Option(Components(Unresolved)),
 ) -> Result(Operation(Unresolved), Diagnostic) {
   use op_node <- result.try(

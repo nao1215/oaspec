@@ -695,11 +695,6 @@ fn generate_client_function(
           |> se.indent(1, "let req = case body {")
           |> se.indent(2, "Some(body) -> {")
       }
-      let indent_offset = case rb.required {
-        True -> 0
-        False -> 2
-      }
-      let _ = indent_offset
       let content_entries = ir_build.sorted_entries(rb.content)
       let sb = case content_entries {
         // Multiple content types: accept pre-serialized String body
