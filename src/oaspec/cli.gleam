@@ -443,7 +443,7 @@ fn format_generate_error(err: generate.GenerateError) -> String {
     generate.ValidationErrors(errors:) ->
       "Error: OpenAPI spec contains unsupported features:\n"
       <> string.join(
-        list.map(errors, fn(e) { "  - " <> diagnostic.to_string(e) }),
+        list.map(errors, fn(e) { "  - " <> diagnostic.to_short_string(e) }),
         "\n",
       )
   }
@@ -456,7 +456,7 @@ fn print_warnings(warnings: List(diagnostic.Diagnostic)) -> Nil {
     _ -> {
       io.println("Warnings:")
       list.each(warnings, fn(w) {
-        io.println("  - " <> diagnostic.to_string(w))
+        io.println("  - " <> diagnostic.to_short_string(w))
       })
     }
   }
