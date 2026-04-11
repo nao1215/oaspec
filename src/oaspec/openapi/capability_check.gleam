@@ -16,6 +16,7 @@ import oaspec/openapi/schema.{
   Inline, ObjectSchema, OneOfSchema, Reference, Typed,
 }
 import oaspec/openapi/spec.{type OpenApiSpec, type Resolved, Value}
+import oaspec/util/http
 
 /// Run capability checks on a resolved spec.
 /// Returns errors for unsupported features and warnings for parsed-but-unused features.
@@ -106,7 +107,11 @@ fn check_operation_schemas(
             case mt.schema {
               Some(sr) ->
                 check_schema_ref(
-                  base_path <> ".responses." <> code <> "." <> ct,
+                  base_path
+                    <> ".responses."
+                    <> http.status_code_to_string(code)
+                    <> "."
+                    <> ct,
                   sr,
                 )
               None -> []
@@ -237,7 +242,8 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
         let #(status_code, ref_or) = entry
         case ref_or {
           Value(response) -> {
-            let base_path = op_id <> ".responses." <> status_code
+            let base_path =
+              op_id <> ".responses." <> http.status_code_to_string(status_code)
             let multi_content_warnings = case
               ctx.config.mode,
               list.length(dict.to_list(response.content))

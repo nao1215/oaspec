@@ -513,9 +513,9 @@ fn option_try(
 
 /// Map over dict values with a fallible function, collecting first error.
 fn try_map_values(
-  d: Dict(String, a),
-  f: fn(String, a) -> Result(a, List(Diagnostic)),
-) -> Result(Dict(String, a), List(Diagnostic)) {
+  d: Dict(k, a),
+  f: fn(k, a) -> Result(a, List(Diagnostic)),
+) -> Result(Dict(k, a), List(Diagnostic)) {
   dict.to_list(d)
   |> list.try_fold(dict.new(), fn(acc, entry) {
     let #(key, value) = entry

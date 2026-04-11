@@ -927,7 +927,7 @@ fn generate_client_function(
   let has_default =
     list.any(responses, fn(entry) {
       let #(code, _) = entry
-      code == "default"
+      code == http.DefaultStatus
     })
   let sb = case has_default {
     True -> sb

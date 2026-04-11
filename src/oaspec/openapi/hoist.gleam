@@ -11,6 +11,7 @@ import oaspec/openapi/spec.{
   type OpenApiSpec, type PathItem, type RefOr, Components, OpenApiSpec, PathItem,
   Ref, Value,
 }
+import oaspec/util/http
 import oaspec/util/naming
 
 /// Accumulated state during the hoisting traversal.
@@ -523,10 +524,10 @@ fn hoist_request_body(
 
 /// Hoist schemas within response definitions.
 fn hoist_responses(
-  responses: Dict(String, RefOr(spec.Response(stage))),
+  responses: Dict(http.HttpStatusCode, RefOr(spec.Response(stage))),
   op_id: String,
   state: HoistState,
-) -> #(Dict(String, RefOr(spec.Response(stage))), HoistState) {
+) -> #(Dict(http.HttpStatusCode, RefOr(spec.Response(stage))), HoistState) {
   dict.to_list(responses)
   |> list.fold(#(dict.new(), state), fn(acc, entry) {
     let #(result, state) = acc
@@ -541,7 +542,7 @@ fn hoist_responses(
             let #(media_type_name, media_type) = ct_entry
             case media_type.schema {
               Some(schema_ref) -> {
-                let suffix = "Response" <> naming.to_pascal_case(status_code)
+                let suffix = "Response" <> http.status_code_suffix(status_code)
                 let #(hoisted, state) =
                   hoist_schema_ref(schema_ref, op_id, suffix, state)
                 let mt = spec.MediaType(..media_type, schema: Some(hoisted))

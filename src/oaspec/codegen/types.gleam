@@ -437,7 +437,10 @@ fn generate_response_type(
 
 /// Convert an HTTP status code to a Gleam variant name.
 /// Prefixed with the type name to avoid duplicate constructors across types.
-fn status_code_to_variant(code: String, type_name: String) -> String {
+fn status_code_to_variant(
+  code: http.HttpStatusCode,
+  type_name: String,
+) -> String {
   type_name <> http.status_code_suffix(code)
 }
 

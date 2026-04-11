@@ -1196,13 +1196,13 @@ paths:
   let assert Some(components) = hoisted.components
 
   // The inline response schema should be extracted (with status code in name)
-  dict.has_key(components.schemas, "ListPetsResponse200")
+  dict.has_key(components.schemas, "ListPetsResponseOk")
   |> should.be_true()
 
   // The response should now reference the extracted schema
   let assert Ok(spec.Value(path_item)) = dict.get(hoisted.paths, "/pets")
   let assert Some(op) = path_item.get
-  let assert Ok(spec.Value(response)) = dict.get(op.responses, "200")
+  let assert Ok(spec.Value(response)) = dict.get(op.responses, http.Status(200))
   let assert Ok(media_type) = dict.get(response.content, "application/json")
   let assert Some(schema.Reference(ref: ref, ..)) = media_type.schema
   string.contains(ref, "#/components/schemas/") |> should.be_true()
@@ -3658,24 +3658,24 @@ paths:
 /// status_code_to_int_pattern must not pass through range codes like "2XX".
 pub fn status_code_range_pattern_test() {
   // Range codes must produce valid Gleam patterns, not raw "2XX"
-  http.status_code_to_int_pattern("2XX")
+  http.status_code_to_int_pattern(http.StatusRange(2))
   |> should.not_equal("2XX")
 
   // Exact codes still work
-  http.status_code_to_int_pattern("200")
+  http.status_code_to_int_pattern(http.Status(200))
   |> should.equal("200")
 
   // Default is wildcard
-  http.status_code_to_int_pattern("default")
+  http.status_code_to_int_pattern(http.DefaultStatus)
   |> should.equal("_")
 }
 
 /// status_code_suffix must handle range codes.
 pub fn status_code_suffix_range_test() {
-  http.status_code_suffix("2XX")
+  http.status_code_suffix(http.StatusRange(2))
   |> should.equal("Status2xx")
 
-  http.status_code_suffix("4XX")
+  http.status_code_suffix(http.StatusRange(4))
   |> should.equal("Status4xx")
 }
 
@@ -5116,7 +5116,7 @@ paths:
   let assert Ok(parsed) = parser.parse_string(yaml)
   let assert Ok(spec.Value(pi)) = dict.get(parsed.paths, "/items")
   let assert Some(op) = pi.get
-  let assert Ok(spec.Value(resp)) = dict.get(op.responses, "200")
+  let assert Ok(spec.Value(resp)) = dict.get(op.responses, http.Status(200))
   let assert Ok(header) = dict.get(resp.headers, "X-Rate-Limit")
   header.description |> should.equal(Some("Rate limit"))
   header.required |> should.be_true()
@@ -9677,7 +9677,7 @@ pub fn parse_empty_response_body_test() {
   spec.info.title |> should.equal("Empty Response Body API")
   let assert Ok(spec.Value(path_item)) = dict.get(spec.paths, "/items")
   let assert Some(op) = path_item.post
-  let assert Ok(_) = dict.get(op.responses, "201")
+  let assert Ok(_) = dict.get(op.responses, http.Status(201))
 }
 
 pub fn parse_enum_edge_cases_test() {
@@ -9743,7 +9743,7 @@ pub fn parse_default_response_only_test() {
   spec.info.title |> should.equal("Default Response Only API")
   let assert Ok(spec.Value(path_item)) = dict.get(spec.paths, "/proxy")
   let assert Some(op) = path_item.get
-  let assert Ok(_) = dict.get(op.responses, "default")
+  let assert Ok(_) = dict.get(op.responses, http.DefaultStatus)
 }
 
 pub fn parse_abbreviation_identifiers_test() {

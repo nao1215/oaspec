@@ -23,6 +23,7 @@ import oaspec/openapi/spec.{
   SecurityRequirement, Server, ServerVariable, Tag, Trace, Value,
 }
 import oaspec/openapi/value
+import oaspec/util/http
 import simplifile
 import yay
 
@@ -473,7 +474,10 @@ fn parse_responses_required(
   node: yay.Node,
   context: String,
   components: Option(Components(Unresolved)),
-) -> Result(dict.Dict(String, RefOr(Response(Unresolved))), Diagnostic) {
+) -> Result(
+  dict.Dict(http.HttpStatusCode, RefOr(Response(Unresolved))),
+  Diagnostic,
+) {
   parse_responses(node, context, components)
 }
 
@@ -801,7 +805,7 @@ fn parse_responses(
   node: yay.Node,
   _context: String,
   components: Option(Components(Unresolved)),
-) -> Result(Dict(String, RefOr(Response(Unresolved))), Diagnostic) {
+) -> Result(Dict(http.HttpStatusCode, RefOr(Response(Unresolved))), Diagnostic) {
   case yay.select_sugar(from: node, selector: "responses") {
     Ok(yay.NodeMap(entries)) -> {
       list.try_fold(entries, dict.new(), fn(acc, entry) {
@@ -810,15 +814,21 @@ fn parse_responses(
           yay.NodeStr(status_code) ->
             case string.starts_with(status_code, "x-") {
               True -> Ok(acc)
-              False -> {
-                use resp <- result.try(parse_response(value_node, components))
-                Ok(dict.insert(acc, status_code, resp))
-              }
+              False ->
+                case http.parse_status_code(status_code) {
+                  Ok(code) -> {
+                    use resp <- result.try(parse_response(
+                      value_node,
+                      components,
+                    ))
+                    Ok(dict.insert(acc, code, resp))
+                  }
+                  Error(_) -> Ok(acc)
+                }
             }
           yay.NodeInt(code) -> {
             use resp <- result.try(parse_response(value_node, components))
-            let code_str = string.inspect(code)
-            Ok(dict.insert(acc, code_str, resp))
+            Ok(dict.insert(acc, http.Status(code), resp))
           }
           _ -> Ok(acc)
         }

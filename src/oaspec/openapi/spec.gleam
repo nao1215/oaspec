@@ -2,6 +2,7 @@ import gleam/dict.{type Dict}
 import gleam/option.{type Option}
 import oaspec/openapi/schema.{type SchemaRef}
 import oaspec/openapi/value.{type JsonValue}
+import oaspec/util/http
 
 // ============================================================================
 // Stage and RefOr: core of the stage-typed AST
@@ -217,7 +218,7 @@ pub type Operation(stage) {
     tags: List(String),
     parameters: List(RefOr(Parameter(stage))),
     request_body: Option(RefOr(RequestBody(stage))),
-    responses: Dict(String, RefOr(Response(stage))),
+    responses: Dict(http.HttpStatusCode, RefOr(Response(stage))),
     deprecated: Bool,
     security: Option(List(SecurityRequirement)),
     callbacks: Dict(String, Callback(stage)),

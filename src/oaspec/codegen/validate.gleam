@@ -17,6 +17,7 @@ import oaspec/openapi/schema.{
 }
 import oaspec/openapi/spec.{type Resolved}
 import oaspec/util/content_type
+import oaspec/util/http
 
 /// Validate the parsed spec for unsupported patterns.
 /// Returns a list of errors; empty list means validation passed.
@@ -66,8 +67,8 @@ fn validate_operations(ctx: Context) -> List(Diagnostic) {
     let resolved_responses =
       dict.to_list(operation.responses)
       |> list.map(fn(entry) {
-        let #(code, ref_or) = entry
-        #(code, spec.unwrap_ref(ref_or))
+        let #(status_code, ref_or) = entry
+        #(status_code, spec.unwrap_ref(ref_or))
       })
       |> dict.from_list
     let path_errors =
@@ -818,7 +819,7 @@ fn multipart_field_is_stringifiable(schema_ref: SchemaRef, ctx: Context) -> Bool
 /// Validate response schemas and content types.
 fn validate_responses(
   op_id: String,
-  responses: dict.Dict(String, spec.Response(Resolved)),
+  responses: dict.Dict(http.HttpStatusCode, spec.Response(Resolved)),
   ctx: Context,
 ) -> List(Diagnostic) {
   let entries = dict.to_list(responses)
@@ -827,7 +828,8 @@ fn validate_responses(
     let content_entries = dict.to_list(response.content)
     list.flat_map(content_entries, fn(ce) {
       let #(media_type_name, media_type) = ce
-      let path = op_id <> ".responses." <> status_code
+      let path =
+        op_id <> ".responses." <> http.status_code_to_string(status_code)
       let content_type_errors = case
         content_type.is_supported_response(content_type.from_string(
           media_type_name,

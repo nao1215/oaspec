@@ -10,7 +10,7 @@ import oaspec/util/string_extra as se
 /// Generate response handling for a single content type.
 pub fn generate_single_content_response(
   sb: se.StringBuilder,
-  status_code: String,
+  status_code: http.HttpStatusCode,
   variant_name: String,
   media_type_name: String,
   media_type: spec.MediaType,
@@ -76,7 +76,7 @@ pub fn generate_single_content_response(
 /// all branches return resp.body directly.
 pub fn generate_multi_content_response(
   sb: se.StringBuilder,
-  status_code: String,
+  status_code: http.HttpStatusCode,
   variant_name: String,
   _content_entries: List(#(String, spec.MediaType)),
   _op_id: String,
@@ -97,7 +97,7 @@ pub fn generate_multi_content_response(
 pub fn get_response_decode_expr(
   schema_ref: schema.SchemaRef,
   op_id: String,
-  status_code: String,
+  status_code: http.HttpStatusCode,
   _ctx: Context,
 ) -> String {
   case schema_ref {

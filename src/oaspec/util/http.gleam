@@ -1,82 +1,110 @@
 import gleam/int
 import gleam/list
 
-/// Shared HTTP status code utilities for code generation.
-/// Get a human-readable suffix for a given HTTP status code.
-/// Used to build anonymous type names like "ListPetsResponseOk".
-pub fn status_code_suffix(code: String) -> String {
+/// Type-safe HTTP status code representation.
+/// Replaces raw String status codes throughout the codebase.
+pub type HttpStatusCode {
+  /// An exact HTTP status code, e.g. 200, 404, 500.
+  Status(Int)
+  /// A wildcard range, e.g. 2XX is StatusRange(2), 4XX is StatusRange(4).
+  StatusRange(Int)
+  /// The OpenAPI "default" catch-all response.
+  DefaultStatus
+}
+
+/// Parse a raw status code string from an OpenAPI spec into an HttpStatusCode.
+/// Returns Error(Nil) for unrecognisable strings.
+pub fn parse_status_code(code: String) -> Result(HttpStatusCode, Nil) {
   case code {
-    "200" -> "Ok"
-    "201" -> "Created"
-    "204" -> "NoContent"
-    "400" -> "BadRequest"
-    "401" -> "Unauthorized"
-    "403" -> "Forbidden"
-    "404" -> "NotFound"
-    "409" -> "Conflict"
-    "422" -> "UnprocessableEntity"
-    "500" -> "InternalServerError"
-    "default" -> "Default"
-    "1XX" | "1xx" -> "Status1xx"
-    "2XX" | "2xx" -> "Status2xx"
-    "3XX" | "3xx" -> "Status3xx"
-    "4XX" | "4xx" -> "Status4xx"
-    "5XX" | "5xx" -> "Status5xx"
-    other -> "Status" <> other
+    "default" -> Ok(DefaultStatus)
+    "1XX" | "1xx" -> Ok(StatusRange(1))
+    "2XX" | "2xx" -> Ok(StatusRange(2))
+    "3XX" | "3xx" -> Ok(StatusRange(3))
+    "4XX" | "4xx" -> Ok(StatusRange(4))
+    "5XX" | "5xx" -> Ok(StatusRange(5))
+    _ ->
+      case int.parse(code) {
+        Ok(n) -> Ok(Status(n))
+        Error(_) -> Error(Nil)
+      }
   }
 }
 
-/// Convert a status code string to a valid Gleam case pattern.
-/// Exact codes become integer literals, range codes become guard expressions,
-/// and "default" becomes "_" (catch-all).
-pub fn status_code_to_int_pattern(code: String) -> String {
+/// Convert an HttpStatusCode back to its canonical string form.
+pub fn status_code_to_string(code: HttpStatusCode) -> String {
   case code {
-    "default" -> "_"
-    "1XX" | "1xx" -> "status if status >= 100 && status <= 199"
-    "2XX" | "2xx" -> "status if status >= 200 && status <= 299"
-    "3XX" | "3xx" -> "status if status >= 300 && status <= 399"
-    "4XX" | "4xx" -> "status if status >= 400 && status <= 499"
-    "5XX" | "5xx" -> "status if status >= 500 && status <= 599"
-    _ -> code
+    Status(n) -> int.to_string(n)
+    StatusRange(n) -> int.to_string(n) <> "XX"
+    DefaultStatus -> "default"
+  }
+}
+
+/// Shared HTTP status code utilities for code generation.
+/// Get a human-readable suffix for a given HTTP status code.
+/// Used to build anonymous type names like "ListPetsResponseOk".
+pub fn status_code_suffix(code: HttpStatusCode) -> String {
+  case code {
+    Status(200) -> "Ok"
+    Status(201) -> "Created"
+    Status(204) -> "NoContent"
+    Status(400) -> "BadRequest"
+    Status(401) -> "Unauthorized"
+    Status(403) -> "Forbidden"
+    Status(404) -> "NotFound"
+    Status(409) -> "Conflict"
+    Status(422) -> "UnprocessableEntity"
+    Status(500) -> "InternalServerError"
+    Status(n) -> "Status" <> int.to_string(n)
+    StatusRange(1) -> "Status1xx"
+    StatusRange(2) -> "Status2xx"
+    StatusRange(3) -> "Status3xx"
+    StatusRange(4) -> "Status4xx"
+    StatusRange(5) -> "Status5xx"
+    StatusRange(n) -> "Status" <> int.to_string(n) <> "xx"
+    DefaultStatus -> "Default"
+  }
+}
+
+/// Convert an HttpStatusCode to a valid Gleam case pattern.
+/// Exact codes become integer literals, range codes become guard expressions,
+/// and DefaultStatus becomes "_" (catch-all).
+pub fn status_code_to_int_pattern(code: HttpStatusCode) -> String {
+  case code {
+    DefaultStatus -> "_"
+    StatusRange(n) -> {
+      let low = int.to_string(n * 100)
+      let high = int.to_string(n * 100 + 99)
+      "status if status >= " <> low <> " && status <= " <> high
+    }
+    Status(n) -> int.to_string(n)
   }
 }
 
 /// Sort response entries so that exact codes come before ranges,
 /// and ranges come before the default catch-all. This ensures
 /// correct pattern matching order in generated case expressions.
-pub fn sort_response_entries(entries: List(#(String, a))) -> List(#(String, a)) {
+pub fn sort_response_entries(
+  entries: List(#(HttpStatusCode, a)),
+) -> List(#(HttpStatusCode, a)) {
   list.sort(entries, fn(a, b) {
     int.compare(status_sort_priority(a.0), status_sort_priority(b.0))
   })
 }
 
-/// Convert a status code string to an integer string for use in ServerResponse.
-/// Range codes and "default" map to a representative status code.
-pub fn status_code_to_int(code: String) -> String {
+/// Convert an HttpStatusCode to an integer string for use in ServerResponse.
+/// Range codes and DefaultStatus map to a representative status code.
+pub fn status_code_to_int(code: HttpStatusCode) -> String {
   case code {
-    "default" -> "500"
-    "1XX" | "1xx" -> "100"
-    "2XX" | "2xx" -> "200"
-    "3XX" | "3xx" -> "300"
-    "4XX" | "4xx" -> "400"
-    "5XX" | "5xx" -> "500"
-    _ -> code
+    DefaultStatus -> "500"
+    StatusRange(n) -> int.to_string(n * 100)
+    Status(n) -> int.to_string(n)
   }
 }
 
-fn status_sort_priority(code: String) -> Int {
+fn status_sort_priority(code: HttpStatusCode) -> Int {
   case code {
-    "default" -> 9999
-    "1XX" | "1xx" -> 1100
-    "2XX" | "2xx" -> 1200
-    "3XX" | "3xx" -> 1300
-    "4XX" | "4xx" -> 1400
-    "5XX" | "5xx" -> 1500
-    _ -> {
-      case int.parse(code) {
-        Ok(n) -> n
-        Error(_) -> 9998
-      }
-    }
+    DefaultStatus -> 9999
+    StatusRange(n) -> n * 100 + 1000
+    Status(n) -> n
   }
 }
