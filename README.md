@@ -88,7 +88,7 @@ chmod +x oaspec
 sudo mv oaspec /usr/local/bin/
 ```
 
-> **Windows**: Download the `oaspec` file from the [latest release](https://github.com/nao1215/oaspec/releases/latest) and run it with `escript oaspec <command>`. Erlang/OTP 27+ must be on your `PATH`.
+> On Windows, download `oaspec` from the [latest release](https://github.com/nao1215/oaspec/releases/latest) and run it with `escript oaspec <command>`. Erlang/OTP 27+ must be on your `PATH`.
 
 ### Build from source (all platforms)
 
