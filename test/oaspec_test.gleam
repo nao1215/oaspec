@@ -1795,6 +1795,88 @@ fn string_index(haystack: String, needle: String) -> Result(Int, Nil) {
   }
 }
 
+// --- Feature: Validation diagnostics include actionable hints ---
+
+pub fn validation_errors_include_hints_test() {
+  // A spec with an unsupported content type should produce a diagnostic with a hint
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: T
+  version: 1.0.0
+paths:
+  /upload:
+    post:
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          text/csv:
+            schema:
+              type: string
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Both,
+    )
+  let assert Error(generate.ValidationErrors(errors:)) =
+    generate.validate_only(spec, cfg)
+  // All validation errors must have hints
+  list.each(errors, fn(e) { option.is_some(e.hint) |> should.be_true() })
+}
+
+pub fn capability_warnings_include_hints_test() {
+  // A spec with webhooks should produce a capability warning with a hint
+  let yaml =
+    "
+openapi: 3.1.0
+info:
+  title: T
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+webhooks:
+  newPet:
+    post:
+      operationId: newPetHook
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Both,
+    )
+  let assert Ok(summary) = generate.validate_only(spec, cfg)
+  // Should have at least one warning (webhooks parsed but unused)
+  { summary.warnings != [] } |> should.be_true()
+  // All warnings must have hints
+  list.each(summary.warnings, fn(w) {
+    option.is_some(w.hint) |> should.be_true()
+  })
+}
+
 // --- Feature: Validation constraints generate guards (Phase 4-3) ---
 
 pub fn validate_constraints_generate_guards_test() {
@@ -6351,12 +6433,14 @@ pub fn filter_by_mode_drops_server_errors_for_client_test() {
       detail: "server-only",
       severity: diagnostic.SeverityError,
       target: diagnostic.TargetServer,
+      hint: None,
     ),
     diagnostic.validation(
       path: "y",
       detail: "shared",
       severity: diagnostic.SeverityError,
       target: diagnostic.TargetBoth,
+      hint: None,
     ),
   ]
   let filtered = validate.filter_by_mode(issues, config.Client)
@@ -6371,12 +6455,14 @@ pub fn filter_by_mode_drops_client_errors_for_server_test() {
       detail: "client-only",
       severity: diagnostic.SeverityError,
       target: diagnostic.TargetClient,
+      hint: None,
     ),
     diagnostic.validation(
       path: "y",
       detail: "shared",
       severity: diagnostic.SeverityError,
       target: diagnostic.TargetBoth,
+      hint: None,
     ),
   ]
   let filtered = validate.filter_by_mode(issues, config.Server)
@@ -6391,18 +6477,21 @@ pub fn filter_by_mode_keeps_all_errors_for_both_test() {
       detail: "client-only",
       severity: diagnostic.SeverityError,
       target: diagnostic.TargetClient,
+      hint: None,
     ),
     diagnostic.validation(
       path: "y",
       detail: "server-only",
       severity: diagnostic.SeverityError,
       target: diagnostic.TargetServer,
+      hint: None,
     ),
     diagnostic.validation(
       path: "z",
       detail: "shared",
       severity: diagnostic.SeverityError,
       target: diagnostic.TargetBoth,
+      hint: None,
     ),
   ]
   let filtered = validate.filter_by_mode(issues, config.Both)

@@ -155,6 +155,9 @@ fn resolve_alias(
       Error(diagnostic.resolve_error(
         path: context,
         detail: "Circular component alias detected: " <> ref,
+        hint: Some(
+          "Check that component $ref chains don't form a cycle. Each $ref must eventually point to a concrete definition.",
+        ),
       ))
     False -> {
       let new_seen = set.insert(seen, ref)
@@ -170,6 +173,9 @@ fn resolve_alias(
               <> " — target '"
               <> ref_name
               <> "' not found.",
+            hint: Some(
+              "Verify the target component exists and the $ref path is spelled correctly.",
+            ),
           ))
       }
     }
@@ -201,6 +207,9 @@ fn validate_ref_kind(
           <> "' points to wrong component kind; expected prefix '"
           <> expected_prefix
           <> "'",
+        hint: Some(
+          "Use the correct $ref prefix for the component type (e.g., #/components/schemas/ for schemas).",
+        ),
       ))
   }
 }
@@ -257,6 +266,9 @@ fn resolve_path_item_ref(
                 detail: "Unresolved $ref: "
                   <> ref_str
                   <> " — target not found in components",
+                hint: Some(
+                  "Verify the referenced component exists and the $ref path is spelled correctly.",
+                ),
               ))
           }
         }
@@ -267,6 +279,9 @@ fn resolve_path_item_ref(
         detail: "Unresolved $ref: "
           <> ref_str
           <> " — target not found in components",
+        hint: Some(
+          "Verify the referenced component exists and the $ref path is spelled correctly.",
+        ),
       ))
     Error(_) ->
       Error(diagnostic.resolve_error(
@@ -274,6 +289,9 @@ fn resolve_path_item_ref(
         detail: "Unresolved $ref: "
           <> ref_str
           <> " — target not found in components",
+        hint: Some(
+          "Verify the referenced component exists and the $ref path is spelled correctly.",
+        ),
       ))
   }
 }
@@ -415,6 +433,7 @@ fn resolve_param_ref(
             detail: "Unresolved $ref: "
               <> ref_str
               <> " — target not found in components.parameters",
+            hint: Some("Verify the parameter exists in components.parameters."),
           ))
       }
     }
@@ -443,6 +462,9 @@ fn resolve_request_body_ref(
             detail: "Unresolved $ref: "
               <> ref_str
               <> " — target not found in components.requestBodies",
+            hint: Some(
+              "Verify the request body exists in components.requestBodies.",
+            ),
           ))
       }
     }
@@ -471,6 +493,7 @@ fn resolve_response_ref(
             detail: "Unresolved $ref: "
               <> ref_str
               <> " — target not found in components.responses",
+            hint: Some("Verify the response exists in components.responses."),
           ))
       }
     }

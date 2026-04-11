@@ -107,7 +107,11 @@ pub fn invalid_value(path path: String, detail detail: String) -> Diagnostic {
 // Convenience constructors for resolve phase
 // ============================================================================
 
-pub fn resolve_error(path path: String, detail detail: String) -> Diagnostic {
+pub fn resolve_error(
+  path path: String,
+  detail detail: String,
+  hint hint: Option(String),
+) -> Diagnostic {
   Diagnostic(
     code: "resolve_error",
     phase: PhaseResolve,
@@ -116,7 +120,7 @@ pub fn resolve_error(path path: String, detail detail: String) -> Diagnostic {
     pointer: path,
     source_loc: NoSourceLoc,
     message: detail,
-    hint: None,
+    hint: hint,
   )
 }
 
@@ -129,6 +133,7 @@ pub fn capability(
   detail detail: String,
   severity severity: Severity,
   target target: Target,
+  hint hint: Option(String),
 ) -> Diagnostic {
   Diagnostic(
     code: "capability",
@@ -138,7 +143,7 @@ pub fn capability(
     pointer: path,
     source_loc: NoSourceLoc,
     message: detail,
-    hint: None,
+    hint: hint,
   )
 }
 
@@ -151,6 +156,7 @@ pub fn validation(
   detail detail: String,
   severity severity: Severity,
   target target: Target,
+  hint hint: Option(String),
 ) -> Diagnostic {
   Diagnostic(
     code: "validation",
@@ -160,7 +166,7 @@ pub fn validation(
     pointer: path,
     source_loc: NoSourceLoc,
     message: detail,
-    hint: None,
+    hint: hint,
   )
 }
 

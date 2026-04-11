@@ -150,6 +150,9 @@ fn check_schema(path: String, schema_obj: SchemaObject) -> List(Diagnostic) {
             }),
             "; ",
           ),
+          hint: Some(
+            "Remove the keyword or restructure the schema using supported constructs.",
+          ),
         ),
       ]
     }
@@ -197,6 +200,9 @@ fn check_security_schemes(spec: OpenApiSpec(Resolved)) -> List(Diagnostic) {
               detail: "Unsupported security scheme type: '"
                 <> scheme_type
                 <> "'. Supported types: apiKey, http, oauth2, openIdConnect.",
+              hint: Some(
+                "Use apiKey, http (bearer), oauth2, or openIdConnect instead.",
+              ),
             ))
           _ -> Error(Nil)
         }
@@ -216,6 +222,9 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
         target: TargetBoth,
         path: "webhooks",
         detail: "Webhooks are parsed but not used by code generation.",
+        hint: Some(
+          "Webhooks will not appear in generated code. No action needed unless you expected them.",
+        ),
       ),
     ]
   }
@@ -240,6 +249,9 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
                   target: TargetServer,
                   path: base_path <> ".content",
                   detail: "Multiple response content types are not fully supported for server code generation. Generated server responses lose the content-type header.",
+                  hint: Some(
+                    "Use a single content type per response for full server code generation support.",
+                  ),
                 ),
               ]
               _, _ -> []
@@ -252,6 +264,9 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
                   target: TargetBoth,
                   path: base_path <> ".headers",
                   detail: "Response headers are parsed but not used by code generation.",
+                  hint: Some(
+                    "Response headers will not appear in generated code. No action needed.",
+                  ),
                 ),
               ]
             }
@@ -263,6 +278,9 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
                   target: TargetBoth,
                   path: base_path <> ".links",
                   detail: "Response links are parsed but not used by code generation.",
+                  hint: Some(
+                    "Response links will not appear in generated code. No action needed.",
+                  ),
                 ),
               ]
             }
@@ -278,6 +296,9 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
                       target: TargetBoth,
                       path: base_path <> "." <> media_type_name <> ".encoding",
                       detail: "MediaType encoding is parsed but not used by code generation.",
+                      hint: Some(
+                        "Encoding settings will not affect generated code. No action needed.",
+                      ),
                     ),
                   ]
                 }
@@ -300,6 +321,9 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
         target: TargetBoth,
         path: "externalDocs",
         detail: "External docs are parsed but not used by code generation.",
+        hint: Some(
+          "External docs will not appear in generated code. Include documentation in descriptions instead.",
+        ),
       ),
     ]
     None -> []
@@ -312,6 +336,7 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
         target: TargetBoth,
         path: "tags",
         detail: "Top-level tags are parsed but not used by code generation.",
+        hint: Some("Tags will not appear in generated code. No action needed."),
       ),
     ]
   }
@@ -326,6 +351,9 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
             target: TargetClient,
             path: op_id <> ".servers",
             detail: "Operation-level servers are parsed but client code generation uses only the top-level server URL.",
+            hint: Some(
+              "Only the first top-level server URL is used for default_base_url(). Override at runtime via ClientConfig if needed.",
+            ),
           ),
         ]
       }
@@ -344,6 +372,9 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
                 target: TargetClient,
                 path: "paths." <> path <> ".servers",
                 detail: "Path-level servers are parsed but client code generation uses only the top-level server URL.",
+                hint: Some(
+                  "Only the first top-level server URL is used for default_base_url(). Override at runtime via ClientConfig if needed.",
+                ),
               ),
             ]
           }
@@ -360,6 +391,9 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
             target: TargetBoth,
             path: "components.headers",
             detail: "Component headers are parsed but not used by code generation.",
+            hint: Some(
+              "Component headers will not appear in generated code. No action needed.",
+            ),
           ),
         ]
       }
@@ -371,6 +405,9 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
             target: TargetBoth,
             path: "components.examples",
             detail: "Component examples are parsed but not used by code generation.",
+            hint: Some(
+              "Component examples will not appear in generated code. Include examples in descriptions instead.",
+            ),
           ),
         ]
       }
@@ -382,6 +419,9 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
             target: TargetBoth,
             path: "components.links",
             detail: "Component links are parsed but not used by code generation.",
+            hint: Some(
+              "Component links will not appear in generated code. No action needed.",
+            ),
           ),
         ]
       }

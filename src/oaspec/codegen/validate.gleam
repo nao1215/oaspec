@@ -82,6 +82,9 @@ fn validate_operations(ctx: Context) -> List(Diagnostic) {
           target: TargetBoth,
           path: op_id,
           detail: "Operation has no responses defined. OpenAPI 3.x requires at least one response.",
+          hint: Some(
+            "Add at least one response (e.g., '200': { description: ok }) to this operation.",
+          ),
         ),
       ]
       False -> []
@@ -115,7 +118,12 @@ fn validate_path_template_params(
   list.filter_map(template_names, fn(name) {
     case list.contains(path_param_names, name) {
       True -> Error(Nil)
-      False ->
+      False -> {
+        let defined = case path_param_names {
+          [] -> ""
+          names ->
+            " Defined path parameters: " <> string.join(names, ", ") <> "."
+        }
         Ok(diagnostic.validation(
           severity: SeverityError,
           target: TargetBoth,
@@ -125,7 +133,12 @@ fn validate_path_template_params(
             <> "}' in '"
             <> path
             <> "' has no corresponding parameter definition.",
+          hint: Some(
+            "Add a parameter definition with 'in: path' for this variable, or remove it from the path template."
+            <> defined,
+          ),
         ))
+      }
     }
   })
 }
@@ -162,6 +175,7 @@ fn validate_parameters(
           target: TargetBoth,
           path: path,
           detail: "Parameter style is not supported. Supported styles: form, deepObject, simple.",
+          hint: Some("Use style 'form', 'simple', or 'deepObject' instead."),
         ),
       ]
       _ -> []
@@ -175,6 +189,9 @@ fn validate_parameters(
           target: TargetBoth,
           path: path,
           detail: "Parameters using 'content' instead of 'schema' are not supported.",
+          hint: Some(
+            "Replace the 'content' field with a 'schema' field in the parameter definition.",
+          ),
         ),
       ]
       spec.ParameterSchema(_) -> []
@@ -217,6 +234,9 @@ fn validate_server_structured_param(
             target: TargetServer,
             path: path,
             detail: "Query array parameters are only supported for inline primitive items in server code generation.",
+            hint: Some(
+              "Use inline primitive items (string, integer, number, boolean) for array query parameters.",
+            ),
           ),
         ]
         spec.InHeader, Some(ArraySchema(items: Inline(StringSchema(..)), ..))
@@ -230,6 +250,9 @@ fn validate_server_structured_param(
             target: TargetServer,
             path: path,
             detail: "Header array parameters are only supported for inline primitive items in server code generation.",
+            hint: Some(
+              "Use inline primitive items (string, integer, number, boolean) for array header parameters.",
+            ),
           ),
         ]
         _, _ -> []
@@ -266,6 +289,9 @@ fn validate_server_deep_object_param(
               target: TargetServer,
               path: path <> "." <> prop_name,
               detail: "deepObject properties are only supported for inline primitive scalars and inline primitive array leaves in server code generation.",
+              hint: Some(
+                "Simplify deepObject properties to primitive scalars or primitive arrays.",
+              ),
             ),
           ]
         }
@@ -343,6 +369,9 @@ fn validate_complex_param_schema(
                     target: TargetServer,
                     path: path,
                     detail: "Complex path parameters are not supported for server code generation.",
+                    hint: Some(
+                      "Use a simple scalar type (string, integer, number, boolean) for path parameters.",
+                    ),
                   ),
                 ]
               }
@@ -352,6 +381,9 @@ fn validate_complex_param_schema(
                 target: TargetBoth,
                 path: path,
                 detail: "Complex schema (object/oneOf/allOf/anyOf) parameters require style: deepObject. Without it, the parameter cannot be serialized.",
+                hint: Some(
+                  "Add 'style: deepObject' to the parameter definition.",
+                ),
               ),
             ]
           }
@@ -381,6 +413,9 @@ fn validate_deep_object_no_nested_objects(
               target: TargetBoth,
               path: path <> "." <> prop_name,
               detail: "Nested object properties in deepObject parameters are not supported. Only one level of object nesting is supported (e.g., filter[name]=value).",
+              hint: Some(
+                "Flatten the property structure to a single level of nesting.",
+              ),
             ),
           ]
           _ -> []
@@ -429,6 +464,9 @@ fn validate_request_body(
             detail: "Content type '"
               <> media_type
               <> "' is not supported. Supported request content types: application/json, multipart/form-data, application/x-www-form-urlencoded.",
+            hint: Some(
+              "Use application/json, multipart/form-data, or application/x-www-form-urlencoded.",
+            ),
           ),
         ]
       }
@@ -504,6 +542,9 @@ fn validate_multipart_request_body_fields(
                   target: TargetBoth,
                   path: op_id <> ".requestBody.multipart." <> field_name,
                   detail: "multipart/form-data fields must be string, integer, number, boolean, binary, or string enums.",
+                  hint: Some(
+                    "Use a primitive scalar type, binary, or string enum for multipart fields.",
+                  ),
                 ),
               ]
             }
@@ -514,6 +555,9 @@ fn validate_multipart_request_body_fields(
             target: TargetBoth,
             path: op_id <> ".requestBody",
             detail: "multipart/form-data request bodies must use an object schema.",
+            hint: Some(
+              "Wrap fields in an object schema with properties for each form field.",
+            ),
           ),
         ]
         None -> []
@@ -539,6 +583,9 @@ fn validate_form_urlencoded_schema(
             target: TargetBoth,
             path: op_id <> ".requestBody",
             detail: "application/x-www-form-urlencoded request bodies must use an object schema.",
+            hint: Some(
+              "Wrap fields in an object schema with properties for each form field.",
+            ),
           ),
         ]
         None -> []
@@ -570,6 +617,9 @@ fn validate_server_form_urlencoded_request_body(
                 target: TargetServer,
                 path: op_id <> ".requestBody",
                 detail: "application/x-www-form-urlencoded request bodies are only supported as the sole request content type for server code generation.",
+                hint: Some(
+                  "Remove other content type definitions from this operation's request body.",
+                ),
               ),
             ]
             False -> []
@@ -591,6 +641,9 @@ fn validate_server_form_urlencoded_request_body(
                       target: TargetServer,
                       path: op_id <> ".requestBody.form." <> field_name,
                       detail: "application/x-www-form-urlencoded server request bodies only support primitive scalars, primitive arrays, and nested objects with primitive leaves (max 5 levels).",
+                      hint: Some(
+                        "Simplify to primitive scalars, primitive arrays, or shallow nested objects.",
+                      ),
                     ),
                   ]
                 }
@@ -627,6 +680,9 @@ fn validate_server_request_body_content_types(
           detail: "Content type '"
             <> media_type
             <> "' is not supported for server code generation. Server router only supports application/json request bodies with typed decoding.",
+          hint: Some(
+            "Use application/json for typed server request bodies, or multipart/form-data and application/x-www-form-urlencoded for form data.",
+          ),
         )
       })
     }
@@ -651,6 +707,9 @@ fn validate_server_multipart_request_body(
                 target: TargetServer,
                 path: op_id <> ".requestBody",
                 detail: "multipart/form-data request bodies are only supported as the sole request content type for server code generation.",
+                hint: Some(
+                  "Remove other content type definitions from this operation's request body.",
+                ),
               ),
             ]
             False -> []
@@ -670,6 +729,9 @@ fn validate_server_multipart_request_body(
                       target: TargetServer,
                       path: op_id <> ".requestBody.multipart." <> field_name,
                       detail: "multipart/form-data server request bodies only support primitive scalar fields.",
+                      hint: Some(
+                        "Use primitive scalar types or arrays of primitive scalars (string, integer, number, boolean) for multipart form fields.",
+                      ),
                     ),
                   ]
                 }
@@ -780,6 +842,9 @@ fn validate_responses(
             detail: "Response content type '"
               <> media_type_name
               <> "' is not supported. Supported response content types: application/json, text/plain, application/octet-stream, application/xml, text/xml.",
+            hint: Some(
+              "Use application/json, text/plain, application/octet-stream, application/xml, or text/xml.",
+            ),
           ),
         ]
       }
@@ -827,6 +892,9 @@ fn validate_schema_ref_recursive(
             detail: "External $ref '"
               <> ref
               <> "' is not supported. Only local references (#/components/...) are supported.",
+            hint: Some(
+              "Inline the external schema or copy it into #/components/schemas/ and use a local $ref.",
+            ),
           ),
         ]
         True ->
@@ -840,6 +908,9 @@ fn validate_schema_ref_recursive(
                 detail: "Unresolved schema reference: '"
                   <> ref
                   <> "'. The referenced schema does not exist in components.",
+                hint: Some(
+                  "Verify the schema is defined in components.schemas and the $ref path is spelled correctly.",
+                ),
               ),
             ]
           }
@@ -926,6 +997,9 @@ fn validate_security_schemes(ctx: Context) -> List(Diagnostic) {
               detail: "Security requirement references scheme '"
                 <> scheme_ref.scheme_name
                 <> "' which is not defined in components.securitySchemes.",
+              hint: Some(
+                "Add the security scheme definition to components.securitySchemes or fix the scheme name.",
+              ),
             ))
         }
       })
@@ -949,6 +1023,9 @@ fn validate_security_schemes(ctx: Context) -> List(Diagnostic) {
                     detail: "Security requirement references scheme '"
                       <> scheme_ref.scheme_name
                       <> "' which is not defined in components.securitySchemes.",
+                    hint: Some(
+                      "Add the security scheme definition to components.securitySchemes or fix the scheme name.",
+                    ),
                   ))
               }
             })
