@@ -40,6 +40,7 @@ import oaspec/openapi/value
 import oaspec/util/content_type
 import oaspec/util/http
 import oaspec/util/naming
+import oaspec/util/string_extra as se
 import simplifile
 
 pub fn main() {
@@ -12397,4 +12398,304 @@ components:
   let assert Ok(encode_file) =
     list.find(files, fn(f) { f.path == "encode.gleam" })
   string.contains(encode_file.content, "encode_user") |> should.be_true()
+}
+
+// ===================================================================
+// client_security.generate_security_or_chain tests
+// ===================================================================
+
+fn make_security_ctx(
+  schemes: List(#(String, spec.SecurityScheme)),
+) -> context.Context {
+  let components =
+    spec.Components(
+      schemas: dict.new(),
+      parameters: dict.new(),
+      request_bodies: dict.new(),
+      responses: dict.new(),
+      security_schemes: dict.from_list(
+        list.map(schemes, fn(entry) {
+          let #(name, scheme) = entry
+          #(name, spec.Value(scheme))
+        }),
+      ),
+      path_items: dict.new(),
+      headers: dict.new(),
+      examples: dict.new(),
+      links: dict.new(),
+    )
+  let test_spec =
+    spec.OpenApiSpec(
+      openapi: "3.0.3",
+      info: spec.Info(
+        title: "Test",
+        description: None,
+        version: "1.0.0",
+        summary: None,
+        terms_of_service: None,
+        contact: None,
+        license: None,
+      ),
+      paths: dict.new(),
+      components: Some(components),
+      servers: [],
+      security: [],
+      webhooks: dict.new(),
+      tags: [],
+      external_docs: None,
+      json_schema_dialect: None,
+    )
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Both,
+    )
+  context.new(test_spec, cfg)
+}
+
+fn run_security_chain(
+  ctx: context.Context,
+  alternatives: List(spec.SecurityRequirement),
+) -> String {
+  let sb = se.new()
+  let sb = client_security.generate_security_or_chain(sb, ctx, alternatives, 1)
+  se.to_string(sb)
+}
+
+pub fn security_chain_empty_alternatives_test() {
+  let ctx = make_security_ctx([])
+  let result = run_security_chain(ctx, [])
+  result |> should.equal("")
+}
+
+pub fn security_chain_single_api_key_header_test() {
+  let ctx =
+    make_security_ctx([
+      #(
+        "ApiKey",
+        spec.ApiKeyScheme(name: "X-API-Key", in_: spec.SchemeInHeader),
+      ),
+    ])
+  let alt =
+    spec.SecurityRequirement(schemes: [
+      spec.SecuritySchemeRef(scheme_name: "ApiKey", scopes: []),
+    ])
+  let result = run_security_chain(ctx, [alt])
+  string.contains(result, "config.api_key") |> should.be_true()
+  string.contains(result, "x-api-key") |> should.be_true()
+  string.contains(result, "set_header") |> should.be_true()
+  string.contains(result, "None -> req") |> should.be_true()
+}
+
+pub fn security_chain_single_bearer_test() {
+  let ctx =
+    make_security_ctx([
+      #(
+        "BearerAuth",
+        spec.HttpScheme(scheme: "bearer", bearer_format: Some("JWT")),
+      ),
+    ])
+  let alt =
+    spec.SecurityRequirement(schemes: [
+      spec.SecuritySchemeRef(scheme_name: "BearerAuth", scopes: []),
+    ])
+  let result = run_security_chain(ctx, [alt])
+  string.contains(result, "config.bearer_auth") |> should.be_true()
+  string.contains(result, "\"authorization\"") |> should.be_true()
+  string.contains(result, "\"Bearer \"") |> should.be_true()
+  string.contains(result, "None -> req") |> should.be_true()
+}
+
+pub fn security_chain_single_basic_test() {
+  let ctx =
+    make_security_ctx([
+      #("BasicAuth", spec.HttpScheme(scheme: "basic", bearer_format: None)),
+    ])
+  let alt =
+    spec.SecurityRequirement(schemes: [
+      spec.SecuritySchemeRef(scheme_name: "BasicAuth", scopes: []),
+    ])
+  let result = run_security_chain(ctx, [alt])
+  string.contains(result, "\"Basic \"") |> should.be_true()
+}
+
+pub fn security_chain_single_api_key_query_test() {
+  let ctx =
+    make_security_ctx([
+      #("ApiKey", spec.ApiKeyScheme(name: "api_key", in_: spec.SchemeInQuery)),
+    ])
+  let alt =
+    spec.SecurityRequirement(schemes: [
+      spec.SecuritySchemeRef(scheme_name: "ApiKey", scopes: []),
+    ])
+  let result = run_security_chain(ctx, [alt])
+  string.contains(result, "api_key=") |> should.be_true()
+  string.contains(result, "req.path") |> should.be_true()
+  string.contains(result, "None -> req") |> should.be_true()
+}
+
+pub fn security_chain_single_api_key_cookie_test() {
+  let ctx =
+    make_security_ctx([
+      #(
+        "SessionId",
+        spec.ApiKeyScheme(name: "session_id", in_: spec.SchemeInCookie),
+      ),
+    ])
+  let alt =
+    spec.SecurityRequirement(schemes: [
+      spec.SecuritySchemeRef(scheme_name: "SessionId", scopes: []),
+    ])
+  let result = run_security_chain(ctx, [alt])
+  string.contains(result, "session_id=") |> should.be_true()
+  string.contains(result, "cookie") |> should.be_true()
+  string.contains(result, "None -> req") |> should.be_true()
+}
+
+pub fn security_chain_or_two_alternatives_test() {
+  let ctx =
+    make_security_ctx([
+      #("BearerAuth", spec.HttpScheme(scheme: "bearer", bearer_format: None)),
+      #(
+        "ApiKey",
+        spec.ApiKeyScheme(name: "X-API-Key", in_: spec.SchemeInHeader),
+      ),
+    ])
+  let alt1 =
+    spec.SecurityRequirement(schemes: [
+      spec.SecuritySchemeRef(scheme_name: "BearerAuth", scopes: []),
+    ])
+  let alt2 =
+    spec.SecurityRequirement(schemes: [
+      spec.SecuritySchemeRef(scheme_name: "ApiKey", scopes: []),
+    ])
+  let result = run_security_chain(ctx, [alt1, alt2])
+  // First alternative tries BearerAuth
+  string.contains(result, "config.bearer_auth") |> should.be_true()
+  string.contains(result, "\"Bearer \"") |> should.be_true()
+  // None branch falls through to second alternative (ApiKey)
+  string.contains(result, "None -> {") |> should.be_true()
+  string.contains(result, "config.api_key") |> should.be_true()
+  string.contains(result, "x-api-key") |> should.be_true()
+}
+
+pub fn security_chain_and_multiple_schemes_test() {
+  let ctx =
+    make_security_ctx([
+      #(
+        "ApiKey",
+        spec.ApiKeyScheme(name: "X-API-Key", in_: spec.SchemeInHeader),
+      ),
+      #("BearerAuth", spec.HttpScheme(scheme: "bearer", bearer_format: None)),
+    ])
+  // AND requirement: both ApiKey AND BearerAuth must be present
+  let alt =
+    spec.SecurityRequirement(schemes: [
+      spec.SecuritySchemeRef(scheme_name: "ApiKey", scopes: []),
+      spec.SecuritySchemeRef(scheme_name: "BearerAuth", scopes: []),
+    ])
+  let result = run_security_chain(ctx, [alt])
+  // Tuple match pattern: case config.api_key, config.bearer_auth
+  string.contains(result, "config.api_key") |> should.be_true()
+  string.contains(result, "config.bearer_auth") |> should.be_true()
+  // Some(api_key_val), Some(bearer_auth_val) pattern
+  string.contains(result, "Some(api_key_val)") |> should.be_true()
+  string.contains(result, "Some(bearer_auth_val)") |> should.be_true()
+  // Wildcard fallback
+  string.contains(result, "_, _ -> req") |> should.be_true()
+}
+
+pub fn security_chain_oauth2_uses_bearer_test() {
+  let ctx =
+    make_security_ctx([
+      #("OAuth2", spec.OAuth2Scheme(description: None, flows: dict.new())),
+    ])
+  let alt =
+    spec.SecurityRequirement(schemes: [
+      spec.SecuritySchemeRef(scheme_name: "OAuth2", scopes: ["read"]),
+    ])
+  let result = run_security_chain(ctx, [alt])
+  string.contains(result, "\"Bearer \"") |> should.be_true()
+}
+
+pub fn security_chain_openid_connect_uses_bearer_test() {
+  let ctx =
+    make_security_ctx([
+      #(
+        "OidcAuth",
+        spec.OpenIdConnectScheme(
+          open_id_connect_url: "https://example.com/.well-known/openid-configuration",
+          description: None,
+        ),
+      ),
+    ])
+  let alt =
+    spec.SecurityRequirement(schemes: [
+      spec.SecuritySchemeRef(scheme_name: "OidcAuth", scopes: []),
+    ])
+  let result = run_security_chain(ctx, [alt])
+  string.contains(result, "\"Bearer \"") |> should.be_true()
+  string.contains(result, "config.oidc_auth") |> should.be_true()
+}
+
+pub fn security_chain_digest_test() {
+  let ctx =
+    make_security_ctx([
+      #("DigestAuth", spec.HttpScheme(scheme: "digest", bearer_format: None)),
+    ])
+  let alt =
+    spec.SecurityRequirement(schemes: [
+      spec.SecuritySchemeRef(scheme_name: "DigestAuth", scopes: []),
+    ])
+  let result = run_security_chain(ctx, [alt])
+  string.contains(result, "\"Digest \"") |> should.be_true()
+}
+
+pub fn security_chain_custom_http_scheme_test() {
+  let ctx =
+    make_security_ctx([
+      #("HmacAuth", spec.HttpScheme(scheme: "hoba", bearer_format: None)),
+    ])
+  let alt =
+    spec.SecurityRequirement(schemes: [
+      spec.SecuritySchemeRef(scheme_name: "HmacAuth", scopes: []),
+    ])
+  let result = run_security_chain(ctx, [alt])
+  // Custom scheme name should be capitalized
+  string.contains(result, "\"Hoba \"") |> should.be_true()
+}
+
+pub fn security_chain_or_with_and_fallback_test() {
+  let ctx =
+    make_security_ctx([
+      #(
+        "ApiKey",
+        spec.ApiKeyScheme(name: "X-API-Key", in_: spec.SchemeInHeader),
+      ),
+      #("BearerAuth", spec.HttpScheme(scheme: "bearer", bearer_format: None)),
+    ])
+  // First alternative: AND (both required)
+  let alt1 =
+    spec.SecurityRequirement(schemes: [
+      spec.SecuritySchemeRef(scheme_name: "ApiKey", scopes: []),
+      spec.SecuritySchemeRef(scheme_name: "BearerAuth", scopes: []),
+    ])
+  // Second alternative: single scheme fallback
+  let alt2 =
+    spec.SecurityRequirement(schemes: [
+      spec.SecuritySchemeRef(scheme_name: "ApiKey", scopes: []),
+    ])
+  let result = run_security_chain(ctx, [alt1, alt2])
+  // AND branch with tuple match
+  string.contains(result, "Some(api_key_val), Some(bearer_auth_val)")
+  |> should.be_true()
+  // Wildcard falls through to second alternative
+  string.contains(result, "_, _ -> {") |> should.be_true()
+  // Second alternative checks just ApiKey
+  // The output contains "config.api_key" at least twice (once per alternative)
+  let parts = string.split(result, "config.api_key")
+  { list.length(parts) >= 3 } |> should.be_true()
 }
