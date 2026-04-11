@@ -5,15 +5,21 @@ import gleam/string
 import gleeunit
 import gleeunit/should
 import oaspec/capability
+import oaspec/codegen/allof_merge
 import oaspec/codegen/client as client_gen
+import oaspec/codegen/client_request
+import oaspec/codegen/client_response
+import oaspec/codegen/client_security
 import oaspec/codegen/context
 import oaspec/codegen/decoders
 import oaspec/codegen/guards
 import oaspec/codegen/import_analysis
 import oaspec/codegen/ir
+import oaspec/codegen/ir_build
 import oaspec/codegen/ir_render
 import oaspec/codegen/schema_dispatch
 import oaspec/codegen/server as server_gen
+import oaspec/codegen/server_request_decode
 import oaspec/codegen/types
 import oaspec/codegen/validate
 import oaspec/codegen/writer
@@ -11436,4 +11442,959 @@ pub fn import_analysis_multiple_operations_any_match_test() {
   // All operations without typed schemas
   import_analysis.operations_need_typed_schemas([op_no_typed])
   |> should.equal(False)
+}
+
+// ===================================================================
+// Test helper: flexible parameter constructor
+// ===================================================================
+
+fn make_test_param(
+  name: String,
+  in_: spec.ParameterIn,
+  required: Bool,
+  payload: spec.ParameterPayload,
+  style: option.Option(spec.ParameterStyle),
+  explode: option.Option(Bool),
+  allow_reserved: Bool,
+) -> spec.Parameter(spec.Resolved) {
+  spec.Parameter(
+    name: name,
+    in_: in_,
+    description: None,
+    required: required,
+    payload: payload,
+    style: style,
+    explode: explode,
+    deprecated: False,
+    allow_reserved: allow_reserved,
+    examples: dict.new(),
+  )
+}
+
+fn string_schema() -> schema.SchemaObject {
+  schema.StringSchema(
+    metadata: schema.default_metadata(),
+    format: None,
+    enum_values: [],
+    min_length: None,
+    max_length: None,
+    pattern: None,
+  )
+}
+
+fn int_schema() -> schema.SchemaObject {
+  schema.IntegerSchema(
+    metadata: schema.default_metadata(),
+    format: None,
+    minimum: None,
+    maximum: None,
+    exclusive_minimum: None,
+    exclusive_maximum: None,
+    multiple_of: None,
+  )
+}
+
+fn float_schema() -> schema.SchemaObject {
+  schema.NumberSchema(
+    metadata: schema.default_metadata(),
+    format: None,
+    minimum: None,
+    maximum: None,
+    exclusive_minimum: None,
+    exclusive_maximum: None,
+    multiple_of: None,
+  )
+}
+
+fn bool_schema() -> schema.SchemaObject {
+  schema.BooleanSchema(metadata: schema.default_metadata())
+}
+
+fn simple_param(
+  name: String,
+  required: Bool,
+  schema_obj: schema.SchemaObject,
+) -> spec.Parameter(spec.Resolved) {
+  make_test_param(
+    name,
+    spec.InQuery,
+    required,
+    spec.ParameterSchema(schema.Inline(schema_obj)),
+    None,
+    None,
+    False,
+  )
+}
+
+fn make_minimal_ctx() -> context.Context {
+  let minimal_spec =
+    spec.OpenApiSpec(
+      openapi: "3.0.3",
+      info: spec.Info(
+        title: "Test",
+        description: None,
+        version: "1.0.0",
+        summary: None,
+        terms_of_service: None,
+        contact: None,
+        license: None,
+      ),
+      paths: dict.new(),
+      components: None,
+      servers: [],
+      security: [],
+      webhooks: dict.new(),
+      tags: [],
+      external_docs: None,
+      json_schema_dialect: None,
+    )
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Both,
+    )
+  context.new(minimal_spec, cfg)
+}
+
+// ===================================================================
+// client_security tests
+// ===================================================================
+
+pub fn client_security_capitalize_first_normal_test() {
+  client_security.capitalize_first("bearer")
+  |> should.equal("Bearer")
+}
+
+pub fn client_security_capitalize_first_empty_test() {
+  client_security.capitalize_first("")
+  |> should.equal("")
+}
+
+pub fn client_security_capitalize_first_single_char_test() {
+  client_security.capitalize_first("b")
+  |> should.equal("B")
+}
+
+pub fn client_security_capitalize_first_already_upper_test() {
+  client_security.capitalize_first("Bearer")
+  |> should.equal("Bearer")
+}
+
+pub fn client_security_capitalize_first_all_lower_test() {
+  client_security.capitalize_first("basic")
+  |> should.equal("Basic")
+}
+
+pub fn client_security_maybe_percent_encode_reserved_false_test() {
+  let param = simple_param("q", True, string_schema())
+  client_security.maybe_percent_encode("value", param)
+  |> should.equal("uri.percent_encode(value)")
+}
+
+pub fn client_security_maybe_percent_encode_reserved_true_test() {
+  let param =
+    make_test_param(
+      "q",
+      spec.InQuery,
+      True,
+      spec.ParameterSchema(schema.Inline(string_schema())),
+      None,
+      None,
+      True,
+    )
+  client_security.maybe_percent_encode("value", param)
+  |> should.equal("value")
+}
+
+// ===================================================================
+// client_response tests
+// ===================================================================
+
+pub fn client_response_inline_schema_to_decoder_string_test() {
+  client_response.inline_schema_to_decoder(string_schema())
+  |> should.equal("dyn_decode.string")
+}
+
+pub fn client_response_inline_schema_to_decoder_int_test() {
+  client_response.inline_schema_to_decoder(int_schema())
+  |> should.equal("dyn_decode.int")
+}
+
+pub fn client_response_inline_schema_to_decoder_float_test() {
+  client_response.inline_schema_to_decoder(float_schema())
+  |> should.equal("dyn_decode.float")
+}
+
+pub fn client_response_inline_schema_to_decoder_bool_test() {
+  client_response.inline_schema_to_decoder(bool_schema())
+  |> should.equal("dyn_decode.bool")
+}
+
+pub fn client_response_inline_schema_to_decoder_object_fallback_test() {
+  let obj =
+    schema.ObjectSchema(
+      metadata: schema.default_metadata(),
+      properties: dict.new(),
+      required: [],
+      additional_properties: schema.Forbidden,
+      min_properties: None,
+      max_properties: None,
+    )
+  client_response.inline_schema_to_decoder(obj)
+  |> should.equal("dyn_decode.string")
+}
+
+pub fn client_response_get_response_decode_expr_reference_test() {
+  let ctx = make_minimal_ctx()
+  let schema_ref =
+    schema.Reference(ref: "#/components/schemas/User", name: "User")
+  client_response.get_response_decode_expr(
+    schema_ref,
+    "getUser",
+    http.Status(200),
+    ctx,
+  )
+  |> should.equal("decode.decode_user(resp.body)")
+}
+
+pub fn client_response_get_response_decode_expr_inline_string_test() {
+  let ctx = make_minimal_ctx()
+  let schema_ref = schema.Inline(string_schema())
+  client_response.get_response_decode_expr(
+    schema_ref,
+    "getUser",
+    http.Status(200),
+    ctx,
+  )
+  |> should.equal("json.parse(resp.body, dyn_decode.string)")
+}
+
+pub fn client_response_get_response_decode_expr_inline_int_test() {
+  let ctx = make_minimal_ctx()
+  let schema_ref = schema.Inline(int_schema())
+  client_response.get_response_decode_expr(
+    schema_ref,
+    "getUser",
+    http.Status(200),
+    ctx,
+  )
+  |> should.equal("json.parse(resp.body, dyn_decode.int)")
+}
+
+pub fn client_response_get_response_decode_expr_array_ref_test() {
+  let ctx = make_minimal_ctx()
+  let schema_ref =
+    schema.Inline(schema.ArraySchema(
+      metadata: schema.default_metadata(),
+      items: schema.Reference(ref: "#/components/schemas/Pet", name: "Pet"),
+      min_items: None,
+      max_items: None,
+      unique_items: False,
+    ))
+  client_response.get_response_decode_expr(
+    schema_ref,
+    "listPets",
+    http.Status(200),
+    ctx,
+  )
+  |> should.equal("decode.decode_pet_list(resp.body)")
+}
+
+pub fn client_response_get_response_decode_expr_array_inline_test() {
+  let ctx = make_minimal_ctx()
+  let schema_ref =
+    schema.Inline(schema.ArraySchema(
+      metadata: schema.default_metadata(),
+      items: schema.Inline(int_schema()),
+      min_items: None,
+      max_items: None,
+      unique_items: False,
+    ))
+  client_response.get_response_decode_expr(
+    schema_ref,
+    "getNumbers",
+    http.Status(200),
+    ctx,
+  )
+  |> should.equal("json.parse(resp.body, decode.list(dyn_decode.int))")
+}
+
+// ===================================================================
+// server_request_decode tests
+// ===================================================================
+
+pub fn server_request_decode_body_field_kind_needs_int_true_test() {
+  server_request_decode.body_field_kind_needs_int(
+    server_request_decode.BodyFieldInt,
+  )
+  |> should.be_true()
+  server_request_decode.body_field_kind_needs_int(
+    server_request_decode.BodyFieldIntArray,
+  )
+  |> should.be_true()
+}
+
+pub fn server_request_decode_body_field_kind_needs_int_false_test() {
+  server_request_decode.body_field_kind_needs_int(
+    server_request_decode.BodyFieldString,
+  )
+  |> should.be_false()
+  server_request_decode.body_field_kind_needs_int(
+    server_request_decode.BodyFieldFloat,
+  )
+  |> should.be_false()
+  server_request_decode.body_field_kind_needs_int(
+    server_request_decode.BodyFieldUnknown,
+  )
+  |> should.be_false()
+}
+
+pub fn server_request_decode_body_field_kind_needs_float_true_test() {
+  server_request_decode.body_field_kind_needs_float(
+    server_request_decode.BodyFieldFloat,
+  )
+  |> should.be_true()
+  server_request_decode.body_field_kind_needs_float(
+    server_request_decode.BodyFieldFloatArray,
+  )
+  |> should.be_true()
+}
+
+pub fn server_request_decode_body_field_kind_needs_float_false_test() {
+  server_request_decode.body_field_kind_needs_float(
+    server_request_decode.BodyFieldString,
+  )
+  |> should.be_false()
+  server_request_decode.body_field_kind_needs_float(
+    server_request_decode.BodyFieldInt,
+  )
+  |> should.be_false()
+}
+
+pub fn server_request_decode_body_field_kind_inline_test() {
+  let ctx = make_minimal_ctx()
+  server_request_decode.body_field_kind(schema.Inline(string_schema()), ctx)
+  |> should.equal(server_request_decode.BodyFieldString)
+  server_request_decode.body_field_kind(schema.Inline(int_schema()), ctx)
+  |> should.equal(server_request_decode.BodyFieldInt)
+  server_request_decode.body_field_kind(schema.Inline(float_schema()), ctx)
+  |> should.equal(server_request_decode.BodyFieldFloat)
+  server_request_decode.body_field_kind(schema.Inline(bool_schema()), ctx)
+  |> should.equal(server_request_decode.BodyFieldBool)
+}
+
+pub fn server_request_decode_body_field_kind_array_test() {
+  let ctx = make_minimal_ctx()
+  let arr =
+    schema.Inline(schema.ArraySchema(
+      metadata: schema.default_metadata(),
+      items: schema.Inline(int_schema()),
+      min_items: None,
+      max_items: None,
+      unique_items: False,
+    ))
+  server_request_decode.body_field_kind(arr, ctx)
+  |> should.equal(server_request_decode.BodyFieldIntArray)
+}
+
+pub fn server_request_decode_schema_ref_body_field_kind_none_test() {
+  let ctx = make_minimal_ctx()
+  server_request_decode.schema_ref_body_field_kind(None, ctx)
+  |> should.equal(server_request_decode.BodyFieldUnknown)
+}
+
+pub fn server_request_decode_query_schema_needs_string_test() {
+  server_request_decode.query_schema_needs_string(
+    Some(schema.Inline(bool_schema())),
+  )
+  |> should.be_true()
+  server_request_decode.query_schema_needs_string(
+    Some(schema.Inline(string_schema())),
+  )
+  |> should.be_false()
+  server_request_decode.query_schema_needs_string(None)
+  |> should.be_false()
+}
+
+pub fn server_request_decode_query_schema_needs_int_test() {
+  server_request_decode.query_schema_needs_int(
+    Some(schema.Inline(int_schema())),
+  )
+  |> should.be_true()
+  server_request_decode.query_schema_needs_int(
+    Some(schema.Inline(string_schema())),
+  )
+  |> should.be_false()
+}
+
+pub fn server_request_decode_query_schema_needs_float_test() {
+  server_request_decode.query_schema_needs_float(
+    Some(schema.Inline(float_schema())),
+  )
+  |> should.be_true()
+  server_request_decode.query_schema_needs_float(
+    Some(schema.Inline(int_schema())),
+  )
+  |> should.be_false()
+}
+
+pub fn server_request_decode_param_parse_expr_string_test() {
+  let param = simple_param("name", True, string_schema())
+  server_request_decode.param_parse_expr("name_val", param)
+  |> should.equal("name_val")
+}
+
+pub fn server_request_decode_param_parse_expr_int_test() {
+  let param = simple_param("id", True, int_schema())
+  server_request_decode.param_parse_expr("id_val", param)
+  |> should.equal("{ let assert Ok(v) = int.parse(id_val) v }")
+}
+
+pub fn server_request_decode_param_parse_expr_float_test() {
+  let param = simple_param("price", True, float_schema())
+  server_request_decode.param_parse_expr("price_val", param)
+  |> should.equal("{ let assert Ok(v) = float.parse(price_val) v }")
+}
+
+pub fn server_request_decode_request_body_uses_form_urlencoded_test() {
+  let rb =
+    spec.RequestBody(
+      description: None,
+      content: dict.from_list([
+        #(
+          "application/x-www-form-urlencoded",
+          spec.MediaType(
+            schema: None,
+            example: None,
+            examples: dict.new(),
+            encoding: dict.new(),
+          ),
+        ),
+      ]),
+      required: True,
+    )
+  server_request_decode.request_body_uses_form_urlencoded(rb)
+  |> should.be_true()
+}
+
+pub fn server_request_decode_request_body_uses_multipart_test() {
+  let rb =
+    spec.RequestBody(
+      description: None,
+      content: dict.from_list([
+        #(
+          "multipart/form-data",
+          spec.MediaType(
+            schema: None,
+            example: None,
+            examples: dict.new(),
+            encoding: dict.new(),
+          ),
+        ),
+      ]),
+      required: True,
+    )
+  server_request_decode.request_body_uses_multipart(rb)
+  |> should.be_true()
+}
+
+pub fn server_request_decode_request_body_not_form_test() {
+  let rb =
+    spec.RequestBody(
+      description: None,
+      content: dict.from_list([
+        #(
+          "application/json",
+          spec.MediaType(
+            schema: None,
+            example: None,
+            examples: dict.new(),
+            encoding: dict.new(),
+          ),
+        ),
+      ]),
+      required: True,
+    )
+  server_request_decode.request_body_uses_form_urlencoded(rb)
+  |> should.be_false()
+  server_request_decode.request_body_uses_multipart(rb)
+  |> should.be_false()
+}
+
+// ===================================================================
+// client_request tests
+// ===================================================================
+
+pub fn client_request_get_body_type_reference_test() {
+  let rb =
+    spec.RequestBody(
+      description: None,
+      content: dict.from_list([
+        #(
+          "application/json",
+          spec.MediaType(
+            schema: Some(schema.Reference(
+              ref: "#/components/schemas/Pet",
+              name: "Pet",
+            )),
+            example: None,
+            examples: dict.new(),
+            encoding: dict.new(),
+          ),
+        ),
+      ]),
+      required: True,
+    )
+  client_request.get_body_type(rb, "createPet")
+  |> should.equal("types.Pet")
+}
+
+pub fn client_request_get_body_type_inline_string_test() {
+  let rb =
+    spec.RequestBody(
+      description: None,
+      content: dict.from_list([
+        #(
+          "application/json",
+          spec.MediaType(
+            schema: Some(schema.Inline(string_schema())),
+            example: None,
+            examples: dict.new(),
+            encoding: dict.new(),
+          ),
+        ),
+      ]),
+      required: True,
+    )
+  client_request.get_body_type(rb, "createMessage")
+  |> should.equal("String")
+}
+
+pub fn client_request_get_body_type_inline_int_test() {
+  let rb =
+    spec.RequestBody(
+      description: None,
+      content: dict.from_list([
+        #(
+          "application/json",
+          spec.MediaType(
+            schema: Some(schema.Inline(int_schema())),
+            example: None,
+            examples: dict.new(),
+            encoding: dict.new(),
+          ),
+        ),
+      ]),
+      required: True,
+    )
+  client_request.get_body_type(rb, "setCount")
+  |> should.equal("Int")
+}
+
+pub fn client_request_get_body_type_multi_content_test() {
+  let mt =
+    spec.MediaType(
+      schema: None,
+      example: None,
+      examples: dict.new(),
+      encoding: dict.new(),
+    )
+  let rb =
+    spec.RequestBody(
+      description: None,
+      content: dict.from_list([
+        #("application/json", mt),
+        #("text/plain", mt),
+      ]),
+      required: True,
+    )
+  client_request.get_body_type(rb, "createItem")
+  |> should.equal("String")
+}
+
+pub fn client_request_get_body_type_empty_content_test() {
+  let rb =
+    spec.RequestBody(description: None, content: dict.new(), required: True)
+  client_request.get_body_type(rb, "noContent")
+  |> should.equal("String")
+}
+
+pub fn client_request_get_body_type_inline_object_test() {
+  let obj =
+    schema.ObjectSchema(
+      metadata: schema.default_metadata(),
+      properties: dict.new(),
+      required: [],
+      additional_properties: schema.Forbidden,
+      min_properties: None,
+      max_properties: None,
+    )
+  let rb =
+    spec.RequestBody(
+      description: None,
+      content: dict.from_list([
+        #(
+          "application/json",
+          spec.MediaType(
+            schema: Some(schema.Inline(obj)),
+            example: None,
+            examples: dict.new(),
+            encoding: dict.new(),
+          ),
+        ),
+      ]),
+      required: True,
+    )
+  client_request.get_body_type(rb, "createItem")
+  |> should.equal("types.CreateItemRequestBody")
+}
+
+pub fn client_request_is_exploded_array_param_default_test() {
+  let ctx = make_minimal_ctx()
+  let arr =
+    schema.ArraySchema(
+      metadata: schema.default_metadata(),
+      items: schema.Inline(string_schema()),
+      min_items: None,
+      max_items: None,
+      unique_items: False,
+    )
+  let param =
+    make_test_param(
+      "tags",
+      spec.InQuery,
+      True,
+      spec.ParameterSchema(schema.Inline(arr)),
+      None,
+      None,
+      False,
+    )
+  // Default: form style + explode=true
+  client_request.is_exploded_array_param(param, ctx)
+  |> should.be_true()
+}
+
+pub fn client_request_is_exploded_array_param_explicit_false_test() {
+  let ctx = make_minimal_ctx()
+  let arr =
+    schema.ArraySchema(
+      metadata: schema.default_metadata(),
+      items: schema.Inline(string_schema()),
+      min_items: None,
+      max_items: None,
+      unique_items: False,
+    )
+  let param =
+    make_test_param(
+      "tags",
+      spec.InQuery,
+      True,
+      spec.ParameterSchema(schema.Inline(arr)),
+      None,
+      Some(False),
+      False,
+    )
+  client_request.is_exploded_array_param(param, ctx)
+  |> should.be_false()
+}
+
+pub fn client_request_is_exploded_array_param_non_array_test() {
+  let ctx = make_minimal_ctx()
+  let param = simple_param("name", True, string_schema())
+  client_request.is_exploded_array_param(param, ctx)
+  |> should.be_false()
+}
+
+pub fn client_request_is_deep_object_param_object_test() {
+  let ctx = make_minimal_ctx()
+  let obj =
+    schema.ObjectSchema(
+      metadata: schema.default_metadata(),
+      properties: dict.new(),
+      required: [],
+      additional_properties: schema.Forbidden,
+      min_properties: None,
+      max_properties: None,
+    )
+  let param =
+    make_test_param(
+      "filter",
+      spec.InQuery,
+      True,
+      spec.ParameterSchema(schema.Inline(obj)),
+      None,
+      None,
+      False,
+    )
+  client_request.is_deep_object_param(param, ctx)
+  |> should.be_true()
+}
+
+pub fn client_request_is_deep_object_param_string_test() {
+  let ctx = make_minimal_ctx()
+  let param = simple_param("name", True, string_schema())
+  client_request.is_deep_object_param(param, ctx)
+  |> should.be_false()
+}
+
+pub fn client_request_multipart_field_is_binary_true_test() {
+  let ctx = make_minimal_ctx()
+  let binary_schema =
+    schema.StringSchema(
+      metadata: schema.default_metadata(),
+      format: Some("binary"),
+      enum_values: [],
+      min_length: None,
+      max_length: None,
+      pattern: None,
+    )
+  client_request.multipart_field_is_binary(schema.Inline(binary_schema), ctx)
+  |> should.be_true()
+}
+
+pub fn client_request_multipart_field_is_binary_false_test() {
+  let ctx = make_minimal_ctx()
+  client_request.multipart_field_is_binary(schema.Inline(string_schema()), ctx)
+  |> should.be_false()
+}
+
+// ===================================================================
+// ir_build tests
+// ===================================================================
+
+pub fn ir_build_sorted_entries_empty_test() {
+  ir_build.sorted_entries(dict.new())
+  |> should.equal([])
+}
+
+pub fn ir_build_sorted_entries_ordering_test() {
+  let d = dict.from_list([#("cherry", 3), #("apple", 1), #("banana", 2)])
+  ir_build.sorted_entries(d)
+  |> should.equal([#("apple", 1), #("banana", 2), #("cherry", 3)])
+}
+
+pub fn ir_build_sorted_entries_single_test() {
+  let d = dict.from_list([#("only", 42)])
+  ir_build.sorted_entries(d)
+  |> should.equal([#("only", 42)])
+}
+
+pub fn ir_build_is_internal_schema_true_test() {
+  let meta = schema.SchemaMetadata(..schema.default_metadata(), internal: True)
+  let s =
+    schema.StringSchema(
+      metadata: meta,
+      format: None,
+      enum_values: [],
+      min_length: None,
+      max_length: None,
+      pattern: None,
+    )
+  ir_build.is_internal_schema(schema.Inline(s))
+  |> should.be_true()
+}
+
+pub fn ir_build_is_internal_schema_false_test() {
+  ir_build.is_internal_schema(schema.Inline(string_schema()))
+  |> should.be_false()
+}
+
+pub fn ir_build_is_internal_schema_reference_test() {
+  ir_build.is_internal_schema(schema.Reference(
+    ref: "#/components/schemas/User",
+    name: "User",
+  ))
+  |> should.be_false()
+}
+
+// ===================================================================
+// allof_merge tests
+// ===================================================================
+
+pub fn allof_merge_single_object_test() {
+  let ctx = make_minimal_ctx()
+  let obj =
+    schema.ObjectSchema(
+      metadata: schema.default_metadata(),
+      properties: dict.from_list([
+        #("name", schema.Inline(string_schema())),
+        #("age", schema.Inline(int_schema())),
+      ]),
+      required: ["name"],
+      additional_properties: schema.Forbidden,
+      min_properties: None,
+      max_properties: None,
+    )
+  let result = allof_merge.merge_allof_schemas([schema.Inline(obj)], ctx)
+  dict.size(result.properties) |> should.equal(2)
+  result.required |> should.equal(["name"])
+  result.additional_properties |> should.equal(schema.Forbidden)
+}
+
+pub fn allof_merge_two_objects_test() {
+  let ctx = make_minimal_ctx()
+  let obj1 =
+    schema.ObjectSchema(
+      metadata: schema.default_metadata(),
+      properties: dict.from_list([
+        #("name", schema.Inline(string_schema())),
+      ]),
+      required: ["name"],
+      additional_properties: schema.Forbidden,
+      min_properties: None,
+      max_properties: None,
+    )
+  let obj2 =
+    schema.ObjectSchema(
+      metadata: schema.default_metadata(),
+      properties: dict.from_list([
+        #("age", schema.Inline(int_schema())),
+      ]),
+      required: ["age"],
+      additional_properties: schema.Forbidden,
+      min_properties: None,
+      max_properties: None,
+    )
+  let result =
+    allof_merge.merge_allof_schemas(
+      [schema.Inline(obj1), schema.Inline(obj2)],
+      ctx,
+    )
+  dict.size(result.properties) |> should.equal(2)
+  list.contains(result.required, "name") |> should.be_true()
+  list.contains(result.required, "age") |> should.be_true()
+}
+
+pub fn allof_merge_non_object_value_field_test() {
+  let ctx = make_minimal_ctx()
+  let result =
+    allof_merge.merge_allof_schemas([schema.Inline(string_schema())], ctx)
+  dict.has_key(result.properties, "value") |> should.be_true()
+}
+
+pub fn allof_merge_additional_properties_typed_wins_test() {
+  let ctx = make_minimal_ctx()
+  let obj1 =
+    schema.ObjectSchema(
+      metadata: schema.default_metadata(),
+      properties: dict.new(),
+      required: [],
+      additional_properties: schema.Untyped,
+      min_properties: None,
+      max_properties: None,
+    )
+  let obj2 =
+    schema.ObjectSchema(
+      metadata: schema.default_metadata(),
+      properties: dict.new(),
+      required: [],
+      additional_properties: schema.Typed(schema.Inline(string_schema())),
+      min_properties: None,
+      max_properties: None,
+    )
+  let result =
+    allof_merge.merge_allof_schemas(
+      [schema.Inline(obj1), schema.Inline(obj2)],
+      ctx,
+    )
+  // Typed should take precedence over Untyped
+  case result.additional_properties {
+    schema.Typed(_) -> True
+    _ -> False
+  }
+  |> should.be_true()
+}
+
+pub fn allof_merge_empty_schemas_test() {
+  let ctx = make_minimal_ctx()
+  let result = allof_merge.merge_allof_schemas([], ctx)
+  dict.size(result.properties) |> should.equal(0)
+  result.required |> should.equal([])
+}
+
+// ===================================================================
+// decoders tests (additional)
+// ===================================================================
+
+pub fn decoders_empty_spec_generates_files_test() {
+  let ctx = make_minimal_ctx()
+  let files = decoders.generate(ctx)
+  list.length(files) |> should.equal(2)
+}
+
+pub fn decoders_empty_spec_decode_file_has_header_test() {
+  let ctx = make_minimal_ctx()
+  let files = decoders.generate(ctx)
+  let assert Ok(decode_file) =
+    list.find(files, fn(f) { f.path == "decode.gleam" })
+  string.contains(decode_file.content, "// Code generated by oaspec")
+  |> should.be_true()
+}
+
+pub fn decoders_empty_spec_encode_file_has_header_test() {
+  let ctx = make_minimal_ctx()
+  let files = decoders.generate(ctx)
+  let assert Ok(encode_file) =
+    list.find(files, fn(f) { f.path == "encode.gleam" })
+  string.contains(encode_file.content, "// Code generated by oaspec")
+  |> should.be_true()
+}
+
+pub fn decoders_single_object_schema_test() {
+  let assert Ok(test_spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    User:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        age:
+          type: integer
+",
+    )
+  let ctx = make_ctx_from_spec(test_spec)
+  let files = decoders.generate(ctx)
+  let assert Ok(decode_file) =
+    list.find(files, fn(f) { f.path == "decode.gleam" })
+  string.contains(decode_file.content, "decode_user") |> should.be_true()
+}
+
+pub fn decoders_single_object_encoder_test() {
+  let assert Ok(test_spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    User:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+",
+    )
+  let ctx = make_ctx_from_spec(test_spec)
+  let files = decoders.generate(ctx)
+  let assert Ok(encode_file) =
+    list.find(files, fn(f) { f.path == "encode.gleam" })
+  string.contains(encode_file.content, "encode_user") |> should.be_true()
 }
