@@ -53,6 +53,10 @@ all: clean deps
   @echo ""
   @echo "All checks passed."
 
+# Regenerate golden test snapshot files
+update-golden:
+  bash scripts/update_golden.sh
+
 clean:
   gleam clean
   rm -rf test_output test_output_client integration_test/src/api integration_test/build oaspec

@@ -1,0 +1,6 @@
+input: test/fixtures/complex_supported_openapi.yaml
+output:
+  server: ./golden/complex_supported/api
+  client: ./golden/complex_supported/api
+package: api
+mode: both
