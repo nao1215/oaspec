@@ -201,87 +201,50 @@ fn run_generate(
   io.println("oaspec v" <> context.version)
   io.println("Loading config from: " <> config_path)
 
-  case load_config(config_path, mode_opt, output_opt) {
-    Error(msg) -> {
-      io.println("Error: " <> msg)
+  use cfg <- require(load_config(config_path, mode_opt, output_opt), fn(msg) {
+    "Error: " <> msg
+  })
+
+  io.println("Parsing OpenAPI spec: " <> cfg.input)
+  use spec <- require(parser.parse_file(cfg.input), fn(e) {
+    "Error: " <> parser.parse_error_to_string(e)
+  })
+
+  use summary <- require(generate.generate(spec, cfg), format_generate_error)
+
+  io.println("Spec loaded: " <> summary.spec_title)
+  print_warnings(summary.warnings)
+  case fail_on_warnings && summary.warnings != [] {
+    True -> {
+      io.println("")
+      io.println("Error: warnings present and --fail-on-warnings is set.")
       halt(1)
     }
-    Ok(cfg) -> {
-      io.println("Parsing OpenAPI spec: " <> cfg.input)
-      case parser.parse_file(cfg.input) {
-        Error(e) -> {
-          io.println("Error: " <> parser.parse_error_to_string(e))
-          halt(1)
-        }
-        Ok(spec) -> {
-          case generate.generate(spec, cfg) {
-            Error(generate.ValidationErrors(errors:)) -> {
-              io.println("Error: OpenAPI spec contains unsupported features:")
-              list.each(errors, fn(e) {
-                io.println("  - " <> diagnostic.to_string(e))
-              })
-              halt(1)
-            }
-            Ok(summary) -> {
-              io.println("Spec loaded: " <> summary.spec_title)
-              let has_warnings = summary.warnings != []
-              case summary.warnings {
-                [] -> Nil
-                warnings -> {
-                  io.println("Warnings:")
-                  list.each(warnings, fn(w) {
-                    io.println("  - " <> diagnostic.to_string(w))
-                  })
-                }
-              }
-              case fail_on_warnings && has_warnings {
-                True -> {
-                  io.println("")
-                  io.println(
-                    "Error: warnings present and --fail-on-warnings is set.",
-                  )
-                  halt(1)
-                }
-                False -> Nil
-              }
-              case check_mode {
-                True -> run_check(summary.files, cfg)
-                False -> {
-                  io.println("Generating code...")
-                  case
-                    writer.write_all(summary.files, cfg, fn(path) {
-                      io.println("  Generated: " <> path)
-                    })
-                  {
-                    Ok(written) -> {
-                      let output_dirs = writer.output_dirs(cfg)
-                      case formatter.format_files(output_dirs) {
-                        Ok(Nil) -> io.println("  Formatted generated code")
-                        Error(e) -> {
-                          io.println("Error: " <> formatter.error_to_string(e))
-                          halt(1)
-                        }
-                      }
-                      io.println("")
-                      io.println(
-                        "Successfully generated "
-                        <> int.to_string(list.length(written))
-                        <> " files",
-                      )
-                    }
-                    Error(e) -> {
-                      io.println("Error: " <> writer.error_to_string(e))
-                      halt(1)
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+    False -> Nil
   }
+  case check_mode {
+    True -> run_check(summary.files, cfg)
+    False -> write_files(summary.files, cfg)
+  }
+}
+
+/// Write generated files to disk, format them, and print summary.
+fn write_files(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
+  io.println("Generating code...")
+  use written <- require(
+    writer.write_all(files, cfg, fn(path) {
+      io.println("  Generated: " <> path)
+    }),
+    fn(e) { "Error: " <> writer.error_to_string(e) },
+  )
+  use _ <- require(formatter.format_files(writer.output_dirs(cfg)), fn(e) {
+    "Error: " <> formatter.error_to_string(e)
+  })
+  io.println("  Formatted generated code")
+  io.println("")
+  io.println(
+    "Successfully generated " <> int.to_string(list.length(written)) <> " files",
+  )
 }
 
 /// Check that generated code matches existing files on disk.
@@ -412,46 +375,24 @@ fn run_validate(config_path: String, mode_opt: Option(String)) -> Nil {
   io.println("oaspec v" <> context.version)
   io.println("Loading config from: " <> config_path)
 
-  case load_config(config_path, mode_opt, None) {
-    Error(msg) -> {
-      io.println("Error: " <> msg)
-      halt(1)
-    }
-    Ok(cfg) -> {
-      io.println("Parsing OpenAPI spec: " <> cfg.input)
-      case parser.parse_file(cfg.input) {
-        Error(e) -> {
-          io.println("Error: " <> parser.parse_error_to_string(e))
-          halt(1)
-        }
-        Ok(spec) -> {
-          case generate.validate_only(spec, cfg) {
-            Error(generate.ValidationErrors(errors:)) -> {
-              io.println("Error: OpenAPI spec contains unsupported features:")
-              list.each(errors, fn(e) {
-                io.println("  - " <> diagnostic.to_string(e))
-              })
-              halt(1)
-            }
-            Ok(summary) -> {
-              io.println("Spec loaded: " <> summary.spec_title)
-              case summary.warnings {
-                [] -> Nil
-                warnings -> {
-                  io.println("Warnings:")
-                  list.each(warnings, fn(w) {
-                    io.println("  - " <> diagnostic.to_string(w))
-                  })
-                }
-              }
-              io.println("")
-              io.println("Validation passed.")
-            }
-          }
-        }
-      }
-    }
-  }
+  use cfg <- require(load_config(config_path, mode_opt, None), fn(msg) {
+    "Error: " <> msg
+  })
+
+  io.println("Parsing OpenAPI spec: " <> cfg.input)
+  use spec <- require(parser.parse_file(cfg.input), fn(e) {
+    "Error: " <> parser.parse_error_to_string(e)
+  })
+
+  use summary <- require(
+    generate.validate_only(spec, cfg),
+    format_generate_error,
+  )
+
+  io.println("Spec loaded: " <> summary.spec_title)
+  print_warnings(summary.warnings)
+  io.println("")
+  io.println("Validation passed.")
 }
 
 /// Pure config loading and validation pipeline.
@@ -478,6 +419,47 @@ fn load_config(
   config.validate_output_package_match(cfg)
   |> result.map(fn(_) { cfg })
   |> result.map_error(config.error_to_string)
+}
+
+/// Unwrap a Result or print the error message and exit.
+/// Designed for use with `use value <- require(result, to_message)`.
+fn require(
+  result: Result(a, b),
+  to_message: fn(b) -> String,
+  continue: fn(a) -> Nil,
+) -> Nil {
+  case result {
+    Ok(value) -> continue(value)
+    Error(err) -> {
+      io.println(to_message(err))
+      halt(1)
+    }
+  }
+}
+
+/// Format a GenerateError into a printable error message.
+fn format_generate_error(err: generate.GenerateError) -> String {
+  case err {
+    generate.ValidationErrors(errors:) ->
+      "Error: OpenAPI spec contains unsupported features:\n"
+      <> string.join(
+        list.map(errors, fn(e) { "  - " <> diagnostic.to_string(e) }),
+        "\n",
+      )
+  }
+}
+
+/// Print warnings if any exist.
+fn print_warnings(warnings: List(diagnostic.Diagnostic)) -> Nil {
+  case warnings {
+    [] -> Nil
+    _ -> {
+      io.println("Warnings:")
+      list.each(warnings, fn(w) {
+        io.println("  - " <> diagnostic.to_string(w))
+      })
+    }
+  }
 }
 
 /// Exit the process with a status code.

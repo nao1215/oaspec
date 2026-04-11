@@ -36,13 +36,18 @@ pub type GenerateError {
   ValidationErrors(errors: List(Diagnostic))
 }
 
-/// Pure generation pipeline: parse → normalize → resolve → capability_check → hoist → dedup → validate → codegen.
-/// Takes an already-parsed spec and config; returns generated files or errors.
-/// Does not perform IO — callers handle writing files and printing output.
-pub fn generate(
+/// Intermediate result from the shared pipeline.
+/// Contains the validated context and accumulated warnings.
+type PreparedContext {
+  PreparedContext(ctx: Context, spec_title: String, warnings: List(Diagnostic))
+}
+
+/// Shared pipeline: normalize → resolve → capability_check → hoist → dedup → validate.
+/// Returns a validated context with accumulated warnings, or errors.
+fn prepare_context(
   spec: OpenApiSpec(Unresolved),
   cfg: Config,
-) -> Result(GenerationSummary, GenerateError) {
+) -> Result(PreparedContext, GenerateError) {
   let spec_title = spec.info.title <> " v" <> spec.info.version
 
   // Normalize OAS 3.1 patterns to 3.0-compatible form
@@ -85,19 +90,30 @@ pub fn generate(
     |> validate.filter_by_mode(cfg.mode)
   let blocking_errors = validate.errors_only(validation_issues)
   let validation_warnings = validate.warnings_only(validation_issues)
-  case list.is_empty(blocking_errors) {
+  use _ <- result.try(case list.is_empty(blocking_errors) {
     False -> Error(ValidationErrors(errors: blocking_errors))
-    True -> {
-      let files = generate_all_files(ctx)
-      let warnings =
-        list.flatten([
-          capability_warnings,
-          preserved_warnings,
-          validation_warnings,
-        ])
-      Ok(GenerationSummary(files:, spec_title:, warnings:))
-    }
-  }
+    True -> Ok(Nil)
+  })
+
+  let warnings =
+    list.flatten([capability_warnings, preserved_warnings, validation_warnings])
+  Ok(PreparedContext(ctx:, spec_title:, warnings:))
+}
+
+/// Pure generation pipeline: parse → normalize → resolve → capability_check → hoist → dedup → validate → codegen.
+/// Takes an already-parsed spec and config; returns generated files or errors.
+/// Does not perform IO — callers handle writing files and printing output.
+pub fn generate(
+  spec: OpenApiSpec(Unresolved),
+  cfg: Config,
+) -> Result(GenerationSummary, GenerateError) {
+  use prepared <- result.try(prepare_context(spec, cfg))
+  let files = generate_all_files(prepared.ctx)
+  Ok(GenerationSummary(
+    files:,
+    spec_title: prepared.spec_title,
+    warnings: prepared.warnings,
+  ))
 }
 
 /// Validation-only pipeline: parse → normalize → resolve → capability_check → hoist → dedup → validate.
@@ -106,50 +122,11 @@ pub fn validate_only(
   spec: OpenApiSpec(Unresolved),
   cfg: Config,
 ) -> Result(ValidationSummary, GenerateError) {
-  let spec_title = spec.info.title <> " v" <> spec.info.version
-
-  let spec = normalize.normalize(spec)
-
-  use spec <- result.try(
-    resolve.resolve(spec)
-    |> result.map_error(fn(errors) { ValidationErrors(errors:) }),
-  )
-
-  let capability_issues =
-    capability_check.check(spec)
-    |> validate.filter_by_mode(cfg.mode)
-  let capability_errors = validate.errors_only(capability_issues)
-  let capability_warnings = validate.warnings_only(capability_issues)
-  use _ <- result.try(case list.is_empty(capability_errors) {
-    False -> Error(ValidationErrors(errors: capability_errors))
-    True -> Ok(Nil)
-  })
-
-  let spec = hoist.hoist(spec)
-  let spec = dedup.dedup(spec)
-  let ctx = context.new(spec, cfg)
-
-  let preserved_warnings =
-    capability_check.check_preserved(ctx)
-    |> diagnostic.filter_by_mode(cfg.mode)
-
-  let validation_issues =
-    validate.validate(ctx)
-    |> validate.filter_by_mode(cfg.mode)
-  let blocking_errors = validate.errors_only(validation_issues)
-  let validation_warnings = validate.warnings_only(validation_issues)
-  case list.is_empty(blocking_errors) {
-    False -> Error(ValidationErrors(errors: blocking_errors))
-    True -> {
-      let warnings =
-        list.flatten([
-          capability_warnings,
-          preserved_warnings,
-          validation_warnings,
-        ])
-      Ok(ValidationSummary(spec_title:, warnings:))
-    }
-  }
+  use prepared <- result.try(prepare_context(spec, cfg))
+  Ok(ValidationSummary(
+    spec_title: prepared.spec_title,
+    warnings: prepared.warnings,
+  ))
 }
 
 /// Pure file generation: produce all GeneratedFile values without any IO.
