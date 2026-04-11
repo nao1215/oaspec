@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-04-11
+
+### Added
+
+- **`gleam format` post-processing**: generated code now passes `gleam format --check` out of the box (#24)
+- **Erlang FFI for subprocess execution**: `oaspec_ffi.erl` with `find_executable/1` and `run_executable/2` using `open_port` + `spawn_executable` for safe, injection-free process invocation
+- **`oaspec/formatter` module**: wraps `gleam format` invocation with error handling and `gleam` binary detection
+- **`--check` mode formatting**: generated content is formatted via temp files before comparison with existing on-disk files
+- **Golden file format verification**: `scripts/update_golden.sh` now verifies `gleam format --check` compliance after regeneration
+
+### Changed
+
+- Golden test helper formats generated content before comparison to match formatted golden files on disk
+- All golden files updated to reflect `gleam format` output
+
+## [0.9.0] - 2026-04-11
+
+### Added
+
+- **`validate` subcommand**: run spec validation without code generation (#42)
+- **Actionable validation hints**: all validation and capability diagnostics include fix suggestions (#43)
+- **`--check` flag**: verify generated code matches existing files without writing (`generate --check`) (#32)
+- **`--fail-on-warnings` flag**: treat warnings as errors in CI
+- **Type-safe `HttpStatusCode` enum**: replace raw String status codes with an ADT for compile-time safety (#40)
+- **Deterministic output ordering**: all `dict.to_list` calls in codegen sorted for reproducible output (#47)
+- **Golden file (snapshot) testing**: byte-for-byte comparison of generated output against committed golden files (#44)
+- 40 edge-case test fixtures and 89 additional unit tests for parsing, validation, and codegen
+
+### Fixed
+
+- `default_base_url()` no longer generated when spec has no `servers` defined (#34)
+- allOf `PartN` helper types excluded from generated public API (#21)
+- Generated handler stubs use `panic` instead of `todo` for clearer unimplemented markers (#20)
+- `additionalProperties` absent now defaults to Untyped per JSON Schema spec (was incorrectly Forbidden)
+- `$ref` path prefix validated to prevent wrong-kind resolution
+- Unsupported keywords checked in inline operation schemas, not just components
+- Panic on unresolved `$ref` when spec has no components section
+
+### Changed
+
+- allOf merge logic unified into single `allof_merge.gleam` module
+- README test counts and feature notes updated
+
 ## [0.8.0] - 2026-04-11
 
 ### Added
