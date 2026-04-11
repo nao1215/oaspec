@@ -257,6 +257,68 @@ These are the most important limitations today:
 | `multipart/form-data` | restricted | yes | Server: must be sole content type; only primitive scalar fields |
 | Security (apiKey, HTTP, OAuth2, OpenID Connect) | yes | yes | Client attaches credentials via config; OAuth2/OpenID Connect: bearer token only |
 
+## Library API
+
+`oaspec` can be used as a Gleam library, not just a CLI tool. The generation pipeline is pure (no IO) and split into composable steps.
+
+### Pipeline overview
+
+```text
+parse → normalize → resolve → capability check → hoist → dedup → validate → codegen
+```
+
+The `oaspec/generate` module wraps this pipeline into two entry points:
+
+- `generate.generate(spec, config)` — run the full pipeline and return generated files
+- `generate.validate_only(spec, config)` — run validation without code generation
+
+### Example: generate files from a parsed spec
+
+```gleam
+import oaspec/config
+import oaspec/generate
+import oaspec/openapi/parser
+
+let assert Ok(spec) = parser.parse_file("openapi.yaml")
+let cfg = config.Config(
+  input: "openapi.yaml",
+  output_server: "./gen/my_api",
+  output_client: "./gen_client/my_api",
+  package: "my_api",
+  mode: config.Both,
+)
+
+case generate.generate(spec, cfg) {
+  Ok(summary) -> {
+    // summary.files: List(GeneratedFile) — path and content for each file
+    // summary.warnings: List(Diagnostic) — non-blocking warnings
+    // summary.spec_title: String
+  }
+  Error(generate.ValidationErrors(errors:)) -> {
+    // errors: List(Diagnostic) — blocking validation errors
+  }
+}
+```
+
+### Example: validate without generating
+
+```gleam
+case generate.validate_only(spec, cfg) {
+  Ok(summary) -> // spec is valid; summary.warnings may be non-empty
+  Error(generate.ValidationErrors(errors:)) -> // spec has errors
+}
+```
+
+### Key modules
+
+| Module | Purpose |
+|--------|---------|
+| `oaspec/openapi/parser` | Parse YAML/JSON spec into `OpenApiSpec(Unresolved)` |
+| `oaspec/config` | Load config from YAML or construct programmatically |
+| `oaspec/generate` | Pure generation pipeline (parse → codegen) |
+| `oaspec/codegen/writer` | Write generated files to disk |
+| `oaspec/openapi/diagnostic` | Structured warnings and errors |
+
 ## Development
 
 This project uses [mise](https://mise.jdx.dev/) for tool versions and [just](https://just.systems/) as a task runner.
