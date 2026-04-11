@@ -16,7 +16,6 @@ import oaspec/codegen/schema_dispatch
 import oaspec/codegen/schema_utils
 import oaspec/openapi/dedup
 import oaspec/openapi/operations
-import oaspec/openapi/resolver
 import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, Forbidden, Inline,
   ObjectSchema, OneOfSchema, Reference, StringSchema, Typed, Untyped,
@@ -124,19 +123,8 @@ fn inline_enums_for_schema(
     Inline(ObjectSchema(properties:, ..)) ->
       inline_enums_from_properties(parent_name, properties, ctx)
     Inline(AllOfSchema(schemas:, ..)) -> {
-      let merged_props =
-        list.fold(schemas, dict.new(), fn(acc, s_ref) {
-          case s_ref {
-            Inline(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-            Reference(..) ->
-              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
-                Ok(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-                _ -> acc
-              }
-            _ -> acc
-          }
-        })
-      inline_enums_from_properties(parent_name, merged_props, ctx)
+      let merged = allof_merge.merge_allof_schemas(schemas, ctx)
+      inline_enums_from_properties(parent_name, merged.properties, ctx)
     }
     _ -> []
   }

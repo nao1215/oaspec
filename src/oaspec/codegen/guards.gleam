@@ -4,6 +4,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import oaspec/codegen/allof_merge
 import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
 import oaspec/codegen/ir_build
 import oaspec/codegen/types as type_gen
@@ -240,19 +241,10 @@ fn generate_guards_for_schema_object(
       })
     }
     AllOfSchema(schemas:, ..) -> {
-      let merged_props =
-        list.fold(schemas, dict.new(), fn(acc, s_ref) {
-          case s_ref {
-            Inline(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-            Reference(..) ->
-              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
-                Ok(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-                _ -> acc
-              }
-            _ -> acc
-          }
-        })
-      let props = ir_build.sorted_entries(merged_props)
+      let props =
+        ir_build.sorted_entries(
+          allof_merge.merge_allof_schemas(schemas, ctx).properties,
+        )
       list.fold(props, sb, fn(sb, entry) {
         let #(prop_name, prop_ref) = entry
         generate_field_guard(sb, name, prop_name, prop_ref, ctx)
@@ -1166,7 +1158,7 @@ fn collect_guard_calls(
       list.append(prop_calls, size_calls)
     }
     Ok(AllOfSchema(schemas:, ..)) -> {
-      let merged = merge_allof_props_and_required(schemas, ctx)
+      let merged = allof_merge.merge_allof_schemas(schemas, ctx)
       ir_build.sorted_entries(merged.properties)
       |> list.flat_map(fn(entry) {
         let #(prop_name, prop_ref) = entry
@@ -1390,38 +1382,4 @@ fn collect_field_guard_calls(
     }
     _ -> []
   }
-}
-
-/// Merge properties and required lists from allOf sub-schemas.
-type MergedProps {
-  MergedProps(properties: dict.Dict(String, SchemaRef), required: List(String))
-}
-
-fn merge_allof_props_and_required(
-  schemas: List(SchemaRef),
-  ctx: Context,
-) -> MergedProps {
-  list.fold(
-    schemas,
-    MergedProps(properties: dict.new(), required: []),
-    fn(acc, s_ref) {
-      case s_ref {
-        Inline(ObjectSchema(properties:, required:, ..)) ->
-          MergedProps(
-            properties: dict.merge(acc.properties, properties),
-            required: list.append(acc.required, required),
-          )
-        Reference(..) ->
-          case resolver.resolve_schema_ref(s_ref, ctx.spec) {
-            Ok(ObjectSchema(properties:, required:, ..)) ->
-              MergedProps(
-                properties: dict.merge(acc.properties, properties),
-                required: list.append(acc.required, required),
-              )
-            _ -> acc
-          }
-        _ -> acc
-      }
-    },
-  )
 }

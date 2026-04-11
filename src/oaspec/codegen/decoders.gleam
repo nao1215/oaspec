@@ -2,6 +2,7 @@ import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import oaspec/codegen/allof_merge
 import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
 import oaspec/codegen/ir_build
 import oaspec/codegen/schema_dispatch
@@ -236,21 +237,10 @@ fn generate_inline_enum_decoders(
 ) -> se.StringBuilder {
   let props = case schema_ref {
     Inline(ObjectSchema(properties:, ..)) -> ir_build.sorted_entries(properties)
-    Inline(AllOfSchema(schemas:, ..)) -> {
-      let merged =
-        list.fold(schemas, dict.new(), fn(acc, s_ref) {
-          case s_ref {
-            Inline(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-            Reference(..) ->
-              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
-                Ok(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-                _ -> acc
-              }
-            _ -> acc
-          }
-        })
-      ir_build.sorted_entries(merged)
-    }
+    Inline(AllOfSchema(schemas:, ..)) ->
+      ir_build.sorted_entries(
+        allof_merge.merge_allof_schemas(schemas, ctx).properties,
+      )
     _ -> []
   }
   list.fold(props, sb, fn(sb, entry) {
@@ -1264,21 +1254,10 @@ fn generate_inline_enum_encoders(
 ) -> se.StringBuilder {
   let props = case schema_ref {
     Inline(ObjectSchema(properties:, ..)) -> ir_build.sorted_entries(properties)
-    Inline(AllOfSchema(schemas:, ..)) -> {
-      let merged =
-        list.fold(schemas, dict.new(), fn(acc, s_ref) {
-          case s_ref {
-            Inline(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-            Reference(..) ->
-              case resolver.resolve_schema_ref(s_ref, ctx.spec) {
-                Ok(ObjectSchema(properties:, ..)) -> dict.merge(acc, properties)
-                _ -> acc
-              }
-            _ -> acc
-          }
-        })
-      ir_build.sorted_entries(merged)
-    }
+    Inline(AllOfSchema(schemas:, ..)) ->
+      ir_build.sorted_entries(
+        allof_merge.merge_allof_schemas(schemas, ctx).properties,
+      )
     _ -> []
   }
   list.fold(props, sb, fn(sb, entry) {
