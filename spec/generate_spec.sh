@@ -355,7 +355,7 @@ Describe 'oaspec generate'
     # Inline object in response
 
     It 'generates anonymous type for inline response object'
-      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'pub type PostSearchResponse200 {'
+      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'pub type PostSearchResponseOk {'
       The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'results: Option(List(User))'
       The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'total: Option(Int)'
     End
@@ -363,9 +363,9 @@ Describe 'oaspec generate'
     # oneOf with $ref in response
 
     It 'generates oneOf type with $ref variants'
-      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'pub type GetUserResponse200 {'
-      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'GetUserResponse200AdminUser(AdminUser)'
-      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'GetUserResponse200RegularUser(RegularUser)'
+      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'pub type GetUserResponseOk {'
+      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'GetUserResponseOkAdminUser(AdminUser)'
+      The contents of file "$TEST_OUTPUT_DIR/api/types.gleam" should include 'GetUserResponseOkRegularUser(RegularUser)'
     End
 
     # allOf merged requestBody
@@ -379,8 +379,8 @@ Describe 'oaspec generate'
     # Response types reference anonymous types
 
     It 'response types reference anonymous types correctly'
-      The contents of file "$TEST_OUTPUT_DIR/api/response_types.gleam" should include 'PostSearchResponseOk(types.PostSearchResponse200)'
-      The contents of file "$TEST_OUTPUT_DIR/api/response_types.gleam" should include 'GetUserResponseOk(types.GetUserResponse200)'
+      The contents of file "$TEST_OUTPUT_DIR/api/response_types.gleam" should include 'PostSearchResponseOk(types.PostSearchResponseOk)'
+      The contents of file "$TEST_OUTPUT_DIR/api/response_types.gleam" should include 'GetUserResponseOk(types.GetUserResponseOk)'
     End
 
     # Request types reference merged allOf type
