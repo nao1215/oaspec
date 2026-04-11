@@ -49,19 +49,17 @@ fn generate_command() -> glint.Command(Nil) {
     )
 
     use check <- glint.flag(
-      glint.string_flag("check")
-      |> glint.flag_default("")
+      glint.bool_flag("check")
+      |> glint.flag_default(False)
       |> glint.flag_help(
-        "Check that generated code matches existing files without writing (pass --check=true)",
+        "Check that generated code matches existing files without writing",
       ),
     )
 
     use fail_on_warnings <- glint.flag(
-      glint.string_flag("fail-on-warnings")
-      |> glint.flag_default("")
-      |> glint.flag_help(
-        "Treat warnings as errors (pass --fail-on-warnings=true)",
-      ),
+      glint.bool_flag("fail-on-warnings")
+      |> glint.flag_default(False)
+      |> glint.flag_help("Treat warnings as errors"),
     )
 
     glint.command_help(
@@ -77,16 +75,9 @@ fn generate_command() -> glint.Command(Nil) {
             "" -> None
             s -> Some(s)
           }
-          let check_mode = case check(flags) |> result.unwrap("") {
-            "true" -> True
-            _ -> False
-          }
-          let fail_on_warnings_mode = case
-            fail_on_warnings(flags) |> result.unwrap("")
-          {
-            "true" -> True
-            _ -> False
-          }
+          let check_mode = check(flags) |> result.unwrap(False)
+          let fail_on_warnings_mode =
+            fail_on_warnings(flags) |> result.unwrap(False)
 
           run_generate(
             config_path,

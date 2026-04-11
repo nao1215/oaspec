@@ -446,7 +446,7 @@ Describe 'oaspec generate --check'
     Before 'setup'
 
     It 'passes when generated code matches existing files'
-      When run generate --config=test/fixtures/oaspec.yaml --check=true
+      When run generate --config=test/fixtures/oaspec.yaml --check
       The status should be success
       The output should include 'check passed'
     End
@@ -456,7 +456,7 @@ Describe 'oaspec generate --check'
     Before 'clean_test_output'
 
     It 'fails when output files do not exist'
-      When run generate --config=test/fixtures/oaspec.yaml --check=true
+      When run generate --config=test/fixtures/oaspec.yaml --check
       The status should be failure
       The output should include 'out of date'
     End
@@ -473,9 +473,19 @@ Describe 'oaspec generate --fail-on-warnings'
   Describe 'with a clean spec'
     It 'succeeds when there are no warnings'
       clean_test_output
-      When run generate --config=test/fixtures/oaspec.yaml --fail-on-warnings=true
+      When run generate --config=test/fixtures/oaspec.yaml --fail-on-warnings
       The status should be success
       The output should include 'Successfully generated'
+    End
+  End
+
+  Describe 'with a spec that has warnings'
+    It 'fails when warnings are present'
+      clean_test_output
+      When run generate --config=test/fixtures/oaspec-with-warnings.yaml --fail-on-warnings
+      The status should be failure
+      The output should include 'Warnings:'
+      The output should include '--fail-on-warnings is set'
     End
   End
 End
