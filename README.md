@@ -207,7 +207,7 @@ Coverage is strongest in these areas:
 - Parameters: path, query, header, and cookie parameters, including array serialization and `style: deepObject`
 - Request bodies: `application/json`, `application/x-www-form-urlencoded`, and `multipart/form-data`
 - Responses: typed status-code variants, `$ref` responses, `default` responses, and text or binary passthrough cases
-- Security: `apiKey`, HTTP auth schemes, OAuth2, and OpenID Connect
+- Security: `apiKey` (header, query, cookie), HTTP auth (bearer, basic, digest), OAuth2, and OpenID Connect. For OAuth2 and OpenID Connect, the generated client attaches a bearer token to requests; token acquisition, refresh, and flow execution are outside the generated code.
 - Generation safety: name collision handling, keyword escaping, validation guards, and capability errors with clear failure modes
 
 <!-- BEGIN GENERATED:BOUNDARIES -->
