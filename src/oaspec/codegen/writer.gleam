@@ -126,6 +126,15 @@ pub fn resolve_paths(
   list.append(server_entries, client_entries)
 }
 
+/// Return the output directories that would be written to for the given config.
+pub fn output_dirs(cfg: config.Config) -> List(String) {
+  case cfg.mode {
+    Server -> [cfg.output_server]
+    Client -> [cfg.output_client]
+    Both -> [cfg.output_server, cfg.output_client]
+  }
+}
+
 /// Convert a write error to a human-readable string.
 pub fn error_to_string(error: WriteError) -> String {
   case error {

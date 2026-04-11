@@ -442,11 +442,10 @@ Describe 'oaspec generate --check'
   Include "$SHELLSPEC_SPECDIR/spec_helper.sh"
 
   Describe 'when output matches'
+    setup() { clean_test_output; generate --config=test/fixtures/oaspec.yaml >/dev/null 2>&1 || true; }
+    Before 'setup'
+
     It 'passes when generated code matches existing files'
-      clean_test_output
-      # First generate normally
-      generate --config=test/fixtures/oaspec.yaml >/dev/null 2>&1
-      # Then check — should pass
       When run generate --config=test/fixtures/oaspec.yaml --check=true
       The status should be success
       The output should include 'check passed'
@@ -454,8 +453,9 @@ Describe 'oaspec generate --check'
   End
 
   Describe 'when output does not exist'
+    Before 'clean_test_output'
+
     It 'fails when output files do not exist'
-      clean_test_output
       When run generate --config=test/fixtures/oaspec.yaml --check=true
       The status should be failure
       The output should include 'out of date'

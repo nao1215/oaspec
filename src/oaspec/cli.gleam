@@ -285,12 +285,15 @@ fn run_generate(
 }
 
 /// Check that generated code matches existing files on disk.
-/// Exits 0 if all files match, exits 1 if any differ or are missing.
+/// Exits 0 if all files match, exits 1 if any differ, missing, or orphaned.
 fn run_check(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
   io.println("Checking generated code against existing files...")
+  let resolved = writer.resolve_paths(files, cfg)
+  let expected_paths = list.map(resolved, fn(entry) { entry.0 })
+
+  // Check for missing or differing files
   let diffs =
-    writer.resolve_paths(files, cfg)
-    |> list.filter_map(fn(entry) {
+    list.filter_map(resolved, fn(entry) {
       let #(path, content) = entry
       case simplifile.read(path) {
         Error(_) -> Ok(path <> " (missing)")
@@ -301,17 +304,41 @@ fn run_check(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
           }
       }
     })
-  case diffs {
+
+  // Check for orphaned files in output directories
+  let output_dirs = writer.output_dirs(cfg)
+  let orphans =
+    list.flat_map(output_dirs, fn(dir) {
+      case simplifile.read_directory(dir) {
+        Error(_) -> []
+        Ok(entries) ->
+          list.filter_map(entries, fn(name) {
+            case string.ends_with(name, ".gleam") {
+              False -> Error(Nil)
+              True -> {
+                let full_path = dir <> "/" <> name
+                case list.contains(expected_paths, full_path) {
+                  True -> Error(Nil)
+                  False -> Ok(full_path <> " (orphaned)")
+                }
+              }
+            }
+          })
+      }
+    })
+
+  let all_issues = list.append(diffs, orphans)
+  case all_issues {
     [] -> {
       io.println("")
       io.println("All files up to date, check passed.")
     }
     _ -> {
       io.println("")
-      list.each(diffs, fn(d) { io.println("  " <> d) })
+      list.each(all_issues, fn(d) { io.println("  " <> d) })
       io.println(
         "\n"
-        <> int.to_string(list.length(diffs))
+        <> int.to_string(list.length(all_issues))
         <> " file(s) out of date. Run 'oaspec generate' to update.",
       )
       halt(1)
