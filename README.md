@@ -226,6 +226,37 @@ These are the most important limitations today:
 - `type: [T1, T2]`: Normalized to oneOf
 <!-- END GENERATED:BOUNDARIES -->
 
+## Mode-Specific Support
+
+`oaspec` generates different files depending on the `--mode` flag. Some features have mode-specific restrictions enforced at validation time.
+
+### Generated files
+
+| File | server | client |
+|------|--------|--------|
+| `types.gleam` | yes | yes |
+| `decode.gleam` | yes | yes |
+| `encode.gleam` | yes | yes |
+| `request_types.gleam` | yes | yes |
+| `response_types.gleam` | yes | yes |
+| `middleware.gleam` | yes | yes |
+| `guards.gleam` | yes | yes |
+| `handlers.gleam` | yes | - |
+| `router.gleam` | yes | - |
+| `client.gleam` | - | yes |
+
+### Feature restrictions by mode
+
+| Feature | server | client | Notes |
+|---------|--------|--------|-------|
+| JSON request/response bodies | yes | yes | |
+| Path / query / header / cookie parameters | yes | yes | |
+| `style: deepObject` parameters | restricted | yes | Server: only primitive scalars and primitive arrays |
+| Array query parameters | restricted | yes | Server: only inline primitive item schemas |
+| `application/x-www-form-urlencoded` | restricted | yes | Server: must be sole content type; only primitive fields and shallow nested objects |
+| `multipart/form-data` | restricted | yes | Server: must be sole content type; only primitive scalar fields |
+| Security (apiKey, HTTP, OAuth2, OpenID Connect) | yes | yes | Client attaches credentials via config; OAuth2/OpenID Connect: bearer token only |
+
 ## Development
 
 This project uses [mise](https://mise.jdx.dev/) for tool versions and [just](https://just.systems/) as a task runner.
