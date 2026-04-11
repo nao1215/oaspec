@@ -4,20 +4,25 @@ import api/request_types
 import api/response_types
 
 /// Complex search
-pub fn post_search(req: request_types.PostSearchRequest) -> response_types.PostSearchResponse {
+pub fn post_search(
+  req: request_types.PostSearchRequest,
+) -> response_types.PostSearchResponse {
   let _ = req
   panic as "unimplemented: post_search"
 }
 
 /// Get user with polymorphic response
-pub fn get_user(req: request_types.GetUserRequest) -> response_types.GetUserResponse {
+pub fn get_user(
+  req: request_types.GetUserRequest,
+) -> response_types.GetUserResponse {
   let _ = req
   panic as "unimplemented: get_user"
 }
 
 /// Receive webhook
-pub fn post_webhook(req: request_types.PostWebhookRequest) -> response_types.PostWebhookResponse {
+pub fn post_webhook(
+  req: request_types.PostWebhookRequest,
+) -> response_types.PostWebhookResponse {
   let _ = req
   panic as "unimplemented: post_webhook"
 }
-

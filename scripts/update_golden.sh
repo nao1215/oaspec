@@ -14,5 +14,9 @@ gleam run -- generate --config=golden/petstore.oaspec.yaml
 rm -rf golden/complex_supported/api
 gleam run -- generate --config=golden/complex_supported.oaspec.yaml
 
+# Verify formatting compliance
+echo "Verifying format compliance..."
+gleam format --check golden/petstore/api/ golden/complex_supported/api/
+
 echo "Done. Golden files updated."
 echo "Review changes with: git diff golden/"

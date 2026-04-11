@@ -27,15 +27,30 @@ pub type UserType {
 }
 
 pub type AdminUser {
-  AdminUser(id: String, name: String, permissions: Option(List(String)), type_: Option(AdminUserType), additional_properties: Dict(String, Dynamic))
+  AdminUser(
+    id: String,
+    name: String,
+    permissions: Option(List(String)),
+    type_: Option(AdminUserType),
+    additional_properties: Dict(String, Dynamic),
+  )
 }
 
 pub type Error {
-  Error(code: Int, details: Option(List(String)), message: String, additional_properties: Dict(String, Dynamic))
+  Error(
+    code: Int,
+    details: Option(List(String)),
+    message: String,
+    additional_properties: Dict(String, Dynamic),
+  )
 }
 
 pub type Filter {
-  Filter(field: String, op: FilterOp, additional_properties: Dict(String, Dynamic))
+  Filter(
+    field: String,
+    op: FilterOp,
+    additional_properties: Dict(String, Dynamic),
+  )
 }
 
 pub type GetUserResponseOk {
@@ -44,26 +59,54 @@ pub type GetUserResponseOk {
 }
 
 pub type Pagination {
-  Pagination(page: Option(Int), per_page: Option(Int), additional_properties: Dict(String, Dynamic))
+  Pagination(
+    page: Option(Int),
+    per_page: Option(Int),
+    additional_properties: Dict(String, Dynamic),
+  )
 }
 
 pub type PostSearchRequest {
-  PostSearchRequest(filters: Option(List(Filter)), page: Option(Int), per_page: Option(Int), query: Option(String), additional_properties: Dict(String, Dynamic))
+  PostSearchRequest(
+    filters: Option(List(Filter)),
+    page: Option(Int),
+    per_page: Option(Int),
+    query: Option(String),
+    additional_properties: Dict(String, Dynamic),
+  )
 }
 
 pub type PostSearchResponseOk {
-  PostSearchResponseOk(results: Option(List(User)), total: Option(Int), additional_properties: Dict(String, Dynamic))
+  PostSearchResponseOk(
+    results: Option(List(User)),
+    total: Option(Int),
+    additional_properties: Dict(String, Dynamic),
+  )
 }
 
 pub type RegularUser {
-  RegularUser(id: String, name: String, subscription: Option(String), type_: Option(RegularUserType), additional_properties: Dict(String, Dynamic))
+  RegularUser(
+    id: String,
+    name: String,
+    subscription: Option(String),
+    type_: Option(RegularUserType),
+    additional_properties: Dict(String, Dynamic),
+  )
 }
 
 pub type User {
-  User(id: String, name: String, type_: Option(UserType), additional_properties: Dict(String, Dynamic))
+  User(
+    id: String,
+    name: String,
+    type_: Option(UserType),
+    additional_properties: Dict(String, Dynamic),
+  )
 }
 
 pub type WebhookEvent {
-  WebhookEvent(callback_url: String, type_: String, additional_properties: Dict(String, Dynamic))
+  WebhookEvent(
+    callback_url: String,
+    type_: String,
+    additional_properties: Dict(String, Dynamic),
+  )
 }
-
