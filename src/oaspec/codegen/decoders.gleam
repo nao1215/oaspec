@@ -741,9 +741,9 @@ fn generate_anyof_decoder(
         1,
         "use "
           <> field_name
-          <> " <- decode.then(decode.one_of(["
+          <> " <- decode.then(decode.one_of("
           <> decoder_name
-          <> "() |> decode.map(option.Some)], option.None))",
+          <> "() |> decode.map(option.Some), or: [decode.success(option.None)]))",
       )
     })
 
