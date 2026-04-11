@@ -3,6 +3,7 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
+import oaspec/codegen/import_analysis
 import oaspec/codegen/ir_build
 import oaspec/codegen/server_request_decode as decode_helpers
 import oaspec/openapi/operations
@@ -14,8 +15,9 @@ import oaspec/util/string_extra as se
 
 /// Generate server stub files.
 pub fn generate(ctx: Context) -> List(GeneratedFile) {
-  let handlers_content = generate_handlers(ctx)
-  let router_content = generate_router(ctx)
+  let operations = operations.collect_operations(ctx)
+  let handlers_content = generate_handlers(ctx, operations)
+  let router_content = generate_router(ctx, operations)
 
   [
     GeneratedFile(
@@ -32,15 +34,16 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
 }
 
 /// Generate handler stubs for all operations.
-fn generate_handlers(ctx: Context) -> String {
+fn generate_handlers(
+  ctx: Context,
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+) -> String {
   let sb =
     se.file_header(context.version)
     |> se.imports([
       ctx.config.package <> "/request_types",
       ctx.config.package <> "/response_types",
     ])
-
-  let operations = operations.collect_operations(ctx)
 
   let sb =
     list.fold(operations, sb, fn(sb, op) {
@@ -159,8 +162,10 @@ fn url_expression_to_suffix(url_expression: String) -> String {
 }
 
 /// Generate a router module that dispatches requests.
-fn generate_router(ctx: Context) -> String {
-  let operations = operations.collect_operations(ctx)
+fn generate_router(
+  ctx: Context,
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+) -> String {
   let has_deep_object =
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
@@ -319,15 +324,10 @@ fn generate_router(ctx: Context) -> String {
   let needs_uri_import = needs_cookie_lookup || has_form_urlencoded_body
 
   let needs_option =
-    list.any(operations, fn(op) {
+    import_analysis.operations_have_optional_params(operations)
+    || import_analysis.operations_have_optional_body(operations)
+    || list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
-      let has_optional_params =
-        list.any(operation.parameters, fn(ref_p) {
-          case ref_p {
-            Value(p) -> !p.required
-            _ -> False
-          }
-        })
       let has_optional_deep_object_fields =
         list.any(operation.parameters, fn(ref_p) {
           case ref_p {
@@ -346,15 +346,9 @@ fn generate_router(ctx: Context) -> String {
           decode_helpers.multipart_body_has_optional_fields(rb, ctx)
         _ -> False
       }
-      let has_optional_body = case operation.request_body {
-        Some(Value(rb)) -> !rb.required
-        _ -> False
-      }
-      has_optional_params
-      || has_optional_deep_object_fields
+      has_optional_deep_object_fields
       || has_optional_form_urlencoded_fields
       || has_optional_multipart_fields
-      || has_optional_body
     })
 
   let needs_json =

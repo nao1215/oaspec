@@ -3,6 +3,7 @@ import gleam/list
 import gleam/option.{None, Some}
 import oaspec/codegen/allof_merge
 import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
+import oaspec/codegen/import_analysis
 import oaspec/codegen/ir_build
 import oaspec/codegen/ir_render
 import oaspec/codegen/schema_dispatch
@@ -20,9 +21,10 @@ import oaspec/util/string_extra as se
 
 /// Generate type definitions from OpenAPI schemas.
 pub fn generate(ctx: Context) -> List(GeneratedFile) {
+  let operations = operations.collect_operations(ctx)
   let types_content = generate_types(ctx)
-  let request_types_content = generate_request_types(ctx)
-  let response_types_content = generate_response_types(ctx)
+  let request_types_content = generate_request_types(ctx, operations)
+  let response_types_content = generate_response_types(ctx, operations)
 
   [
     GeneratedFile(
@@ -142,57 +144,17 @@ pub fn schema_to_gleam_type(schema: SchemaObject, _ctx: Context) -> String {
 }
 
 /// Generate request types for all operations.
-fn generate_request_types(ctx: Context) -> String {
-  let operations = operations.collect_operations(ctx)
-
+fn generate_request_types(
+  ctx: Context,
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+) -> String {
   // Only import Option if any operation has optional parameters or optional body
   let needs_option =
-    list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
-      let has_optional_params =
-        list.any(operation.parameters, fn(ref_p) {
-          case ref_p {
-            Value(p) -> !p.required
-            _ -> False
-          }
-        })
-      let has_optional_body = case operation.request_body {
-        Some(Value(rb)) -> !rb.required
-        _ -> False
-      }
-      has_optional_params || has_optional_body
-    })
+    import_analysis.operations_have_optional_params(operations)
+    || import_analysis.operations_have_optional_body(operations)
 
   // Check if types module is needed ($ref params or non-primitive body)
-  let needs_types =
-    list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
-      let has_ref_params =
-        list.any(operation.parameters, fn(ref_p) {
-          case ref_p {
-            Value(p) ->
-              case p.payload {
-                spec.ParameterSchema(Reference(..)) -> True
-                _ -> False
-              }
-            _ -> False
-          }
-        })
-      let has_typed_body = case operation.request_body {
-        Some(Value(rb)) ->
-          list.any(dict.to_list(rb.content), fn(ce) {
-            let #(_, mt) = ce
-            case mt.schema {
-              Some(Reference(..)) -> True
-              Some(Inline(schema.ObjectSchema(..))) -> True
-              Some(Inline(schema.AllOfSchema(..))) -> True
-              _ -> False
-            }
-          })
-        _ -> False
-      }
-      has_ref_params || has_typed_body
-    })
+  let needs_types = import_analysis.operations_need_typed_schemas(operations)
 
   let base_imports = case needs_types {
     True -> [ctx.config.package <> "/types"]
@@ -340,8 +302,10 @@ fn responses_need_types_import(
 }
 
 /// Generate response types for all operations.
-fn generate_response_types(ctx: Context) -> String {
-  let operations = operations.collect_operations(ctx)
+fn generate_response_types(
+  ctx: Context,
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+) -> String {
   let needs_types = responses_need_types_import(operations, ctx)
   let imports = case needs_types {
     True -> [ctx.config.package <> "/types"]

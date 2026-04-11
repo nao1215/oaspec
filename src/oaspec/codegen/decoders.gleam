@@ -22,8 +22,9 @@ import oaspec/util/string_extra as se
 
 /// Generate decoder and encoder modules.
 pub fn generate(ctx: Context) -> List(GeneratedFile) {
-  let decode_content = generate_decoders(ctx)
-  let encode_content = generate_encoders(ctx)
+  let operations = operations.collect_operations(ctx)
+  let decode_content = generate_decoders(ctx, operations)
+  let encode_content = generate_encoders(ctx, operations)
 
   [
     GeneratedFile(
@@ -44,7 +45,10 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
 // ===================================================================
 
 /// Generate JSON decoders for all component schemas and anonymous types.
-fn generate_decoders(ctx: Context) -> String {
+fn generate_decoders(
+  ctx: Context,
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+) -> String {
   let schemas = case ctx.spec.components {
     Some(components) ->
       list.sort(dict.to_list(components.schemas), fn(a, b) {
@@ -122,7 +126,7 @@ fn generate_decoders(ctx: Context) -> String {
     })
 
   // Generate decoders for anonymous inline schemas from operations
-  let sb = generate_anonymous_decoders(sb, ctx)
+  let sb = generate_anonymous_decoders(sb, ctx, operations)
 
   se.to_string(sb)
 }
@@ -131,8 +135,8 @@ fn generate_decoders(ctx: Context) -> String {
 fn generate_anonymous_decoders(
   sb: se.StringBuilder,
   ctx: Context,
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
 ) -> se.StringBuilder {
-  let operations = operations.collect_operations(ctx)
   list.fold(operations, sb, fn(sb, op) {
     let #(op_id, operation, _path, _method) = op
     let sb = generate_anonymous_response_decoders(sb, op_id, operation, ctx)
@@ -1139,7 +1143,10 @@ fn schema_ref_is_nullable(ref: SchemaRef, ctx: Context) -> Bool {
 // ===================================================================
 
 /// Generate JSON encoders for all component schemas and anonymous types.
-fn generate_encoders(ctx: Context) -> String {
+fn generate_encoders(
+  ctx: Context,
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+) -> String {
   let schemas = case ctx.spec.components {
     Some(components) ->
       list.sort(dict.to_list(components.schemas), fn(a, b) {
@@ -1219,7 +1226,7 @@ fn generate_encoders(ctx: Context) -> String {
     })
 
   // Generate encoders for anonymous inline schemas from operations
-  let sb = generate_anonymous_encoders(sb, ctx)
+  let sb = generate_anonymous_encoders(sb, ctx, operations)
 
   // Generate encode_dynamic helper if needed for untyped additionalProperties
   let sb = case needs_dynamic {
@@ -1290,8 +1297,8 @@ fn generate_inline_enum_encoders(
 fn generate_anonymous_encoders(
   sb: se.StringBuilder,
   ctx: Context,
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
 ) -> se.StringBuilder {
-  let operations = operations.collect_operations(ctx)
   list.fold(operations, sb, fn(sb, op) {
     let #(op_id, operation, _path, _method) = op
     // Only requestBody inline schemas need encoders (for client body encoding)

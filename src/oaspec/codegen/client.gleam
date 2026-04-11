@@ -6,6 +6,7 @@ import oaspec/codegen/client_request
 import oaspec/codegen/client_response
 import oaspec/codegen/client_security
 import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
+import oaspec/codegen/import_analysis
 import oaspec/codegen/ir_build
 import oaspec/openapi/operations
 import oaspec/openapi/resolver
@@ -186,46 +187,10 @@ fn generate_client(ctx: Context) -> String {
 
   // Check which modules are actually needed
   let needs_typed_schemas =
-    list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
-      // Need types/encode when $ref body or $ref params exist
-      let has_ref_body = case operation.request_body {
-        Some(Value(rb)) ->
-          list.any(dict.to_list(rb.content), fn(ce) {
-            let #(_, mt) = ce
-            case mt.schema {
-              Some(Reference(..)) -> True
-              Some(Inline(schema.ObjectSchema(..))) -> True
-              Some(Inline(schema.AllOfSchema(..))) -> True
-              _ -> False
-            }
-          })
-        _ -> False
-      }
-      let has_ref_params =
-        list.any(operation.parameters, fn(ref_p) {
-          case ref_p {
-            Value(p) ->
-              case p.payload {
-                ParameterSchema(Reference(..)) -> True
-                _ -> False
-              }
-            _ -> False
-          }
-        })
-      has_ref_body || has_ref_params
-    })
+    import_analysis.operations_need_typed_schemas(operations)
 
   let needs_option =
-    list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
-      list.any(operation.parameters, fn(ref_p) {
-        case ref_p {
-          Value(p) -> !p.required
-          _ -> False
-        }
-      })
-    })
+    import_analysis.operations_have_optional_params(operations)
     || {
       let security_schemes = case ctx.spec.components {
         Some(c) -> dict.to_list(c.security_schemes)

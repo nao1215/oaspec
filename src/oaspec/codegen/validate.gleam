@@ -24,9 +24,10 @@ import oaspec/util/http
 /// Name collisions and duplicate operationIds are handled by the dedup pass
 /// before validation, so they are no longer checked here.
 pub fn validate(ctx: Context) -> List(Diagnostic) {
-  let op_errors = validate_operations(ctx)
+  let operations = operations.collect_operations(ctx)
+  let op_errors = validate_operations(ctx, operations)
   let schema_errors = validate_component_schemas(ctx)
-  let security_errors = validate_security_schemes(ctx)
+  let security_errors = validate_security_schemes(ctx, operations)
   list.flatten([op_errors, schema_errors, security_errors])
 }
 
@@ -54,8 +55,10 @@ pub fn error_to_string(error: Diagnostic) -> String {
 }
 
 /// Validate all operations for unsupported patterns.
-fn validate_operations(ctx: Context) -> List(Diagnostic) {
-  let operations = operations.collect_operations(ctx)
+fn validate_operations(
+  ctx: Context,
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+) -> List(Diagnostic) {
   list.flat_map(operations, fn(op) {
     let #(op_id, operation, path, _method) = op
     // All refs are guaranteed to be resolved by this point
@@ -980,7 +983,10 @@ fn validate_schema_recursive(
 
 /// Validate that all security scheme references in global and operation-level
 /// security requirements point to schemes defined in components.securitySchemes.
-fn validate_security_schemes(ctx: Context) -> List(Diagnostic) {
+fn validate_security_schemes(
+  ctx: Context,
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+) -> List(Diagnostic) {
   let scheme_names = case ctx.spec.components {
     Some(components) -> dict.keys(components.security_schemes)
     None -> []
@@ -1007,7 +1013,6 @@ fn validate_security_schemes(ctx: Context) -> List(Diagnostic) {
       })
     })
 
-  let operations = operations.collect_operations(ctx)
   let operation_errors =
     list.flat_map(operations, fn(op) {
       let #(op_id, operation, _path, _method) = op
