@@ -365,6 +365,9 @@ fn generate_client(ctx: Context) -> String {
     |> se.line("}")
     |> se.blank_line()
 
+  // Generate with_* helpers for security scheme configuration
+  let sb = generate_with_helpers(sb, security_schemes)
+
   // Generate default_base_url function from server template variables
   let sb = generate_default_base_url(sb, ctx)
 
@@ -907,4 +910,76 @@ fn generate_client_function(
   sb
   |> se.line("}")
   |> se.blank_line()
+}
+
+/// Generate with_* helper functions for security scheme configuration.
+fn generate_with_helpers(
+  sb: se.StringBuilder,
+  security_schemes: List(#(String, spec.RefOr(spec.SecurityScheme))),
+) -> se.StringBuilder {
+  list.fold(security_schemes, sb, fn(sb, entry) {
+    let #(scheme_name, scheme_ref) = entry
+    let field_name = naming.to_snake_case(scheme_name)
+    let doc = scheme_doc_comment(scheme_name, scheme_ref)
+    sb
+    |> se.doc_comment(doc)
+    |> se.line(
+      "pub fn with_"
+      <> field_name
+      <> "(config: ClientConfig, token: String) -> ClientConfig {",
+    )
+    |> se.indent(1, "ClientConfig(..config, " <> field_name <> ": Some(token))")
+    |> se.line("}")
+    |> se.blank_line()
+  })
+}
+
+/// Build a doc comment describing a security scheme helper.
+fn scheme_doc_comment(
+  scheme_name: String,
+  scheme_ref: spec.RefOr(spec.SecurityScheme),
+) -> String {
+  case scheme_ref {
+    spec.Value(spec.ApiKeyScheme(name: key_name, in_: spec.SchemeInHeader)) ->
+      "Set the API key for the "
+      <> scheme_name
+      <> " security scheme (header: "
+      <> key_name
+      <> ")."
+    spec.Value(spec.ApiKeyScheme(name: key_name, in_: spec.SchemeInQuery)) ->
+      "Set the API key for the "
+      <> scheme_name
+      <> " security scheme (query: "
+      <> key_name
+      <> ")."
+    spec.Value(spec.ApiKeyScheme(name: key_name, in_: spec.SchemeInCookie)) ->
+      "Set the API key for the "
+      <> scheme_name
+      <> " security scheme (cookie: "
+      <> key_name
+      <> ")."
+    spec.Value(spec.HttpScheme(scheme: "bearer", ..)) ->
+      "Set the bearer token for the " <> scheme_name <> " security scheme."
+    spec.Value(spec.HttpScheme(scheme: "basic", ..)) ->
+      "Set the basic auth credentials for the "
+      <> scheme_name
+      <> " security scheme."
+    spec.Value(spec.HttpScheme(scheme: "digest", ..)) ->
+      "Set the digest auth credentials for the "
+      <> scheme_name
+      <> " security scheme."
+    spec.Value(spec.HttpScheme(scheme: http_scheme, ..)) ->
+      "Set the token for the "
+      <> scheme_name
+      <> " security scheme ("
+      <> http_scheme
+      <> " auth)."
+    spec.Value(spec.OAuth2Scheme(..)) ->
+      "Set the OAuth2 token for the " <> scheme_name <> " security scheme."
+    spec.Value(spec.OpenIdConnectScheme(..)) ->
+      "Set the OpenID Connect token for the "
+      <> scheme_name
+      <> " security scheme."
+    _ -> "Set the credential for the " <> scheme_name <> " security scheme."
+  }
 }
