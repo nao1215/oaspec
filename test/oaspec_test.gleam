@@ -12888,3 +12888,266 @@ paths:
   )
   |> should.be_true()
 }
+
+// --- with_* auth configuration helper tests ---
+
+pub fn with_helpers_generated_for_api_key_and_bearer_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200': { description: ok }
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    BearerAuth:
+      type: http
+      scheme: bearer
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // with_api_key_auth helper must be generated
+  string.contains(
+    content,
+    "pub fn with_api_key_auth(config: ClientConfig, token: String) -> ClientConfig {",
+  )
+  |> should.be_true()
+  string.contains(content, "ClientConfig(..config, api_key_auth: Some(token))")
+  |> should.be_true()
+  // with_bearer_auth helper must be generated
+  string.contains(
+    content,
+    "pub fn with_bearer_auth(config: ClientConfig, token: String) -> ClientConfig {",
+  )
+  |> should.be_true()
+  string.contains(content, "ClientConfig(..config, bearer_auth: Some(token))")
+  |> should.be_true()
+}
+
+pub fn with_helpers_doc_comment_for_api_key_header_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+security:
+  - ApiKeyAuth: []
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  string.contains(
+    content,
+    "/// Set the API key for the ApiKeyAuth security scheme (header: X-API-Key).",
+  )
+  |> should.be_true()
+}
+
+pub fn with_helpers_doc_comment_for_api_key_query_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  securitySchemes:
+    QueryAuth:
+      type: apiKey
+      in: query
+      name: api_key
+security:
+  - QueryAuth: []
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  string.contains(
+    content,
+    "/// Set the API key for the QueryAuth security scheme (query: api_key).",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "pub fn with_query_auth(config: ClientConfig, token: String) -> ClientConfig {",
+  )
+  |> should.be_true()
+}
+
+pub fn with_helpers_doc_comment_for_cookie_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  securitySchemes:
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: session_id
+security:
+  - CookieAuth: []
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  string.contains(
+    content,
+    "/// Set the API key for the CookieAuth security scheme (cookie: session_id).",
+  )
+  |> should.be_true()
+}
+
+pub fn with_helpers_doc_comment_for_oauth2_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  securitySchemes:
+    OAuth2Auth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://example.com/auth
+          tokenUrl: https://example.com/token
+          scopes:
+            read: Read access
+security:
+  - OAuth2Auth: []
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  string.contains(
+    content,
+    "/// Set the OAuth2 token for the OAuth2Auth security scheme.",
+  )
+  |> should.be_true()
+}
+
+pub fn with_helpers_not_generated_when_no_security_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // No with_* helpers should be present
+  string.contains(content, "pub fn with_")
+  |> should.be_false()
+}
+
+pub fn with_helpers_appear_before_default_base_url_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+security:
+  - BearerAuth: []
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+  let content = client_file.content
+  // with_bearer_auth must come before default_base_url
+  let assert Ok(with_pos) =
+    find_substring_index(content, "pub fn with_bearer_auth(")
+  let assert Ok(base_url_pos) =
+    find_substring_index(content, "pub fn default_base_url(")
+  should.be_true(with_pos < base_url_pos)
+}
