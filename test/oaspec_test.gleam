@@ -1975,6 +1975,49 @@ components:
   |> should.be_true()
 }
 
+pub fn validate_object_property_count_still_collects_nested_string_constraints_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    User:
+      type: object
+      minProperties: 1
+      properties:
+        username:
+          type: string
+          minLength: 3
+          pattern: '^[a-zA-Z0-9_-]+$'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = guards.generate(ctx)
+  let assert [guard_file] = files
+
+  string.contains(guard_file.content, "import gleam/dict.{type Dict}")
+  |> should.be_true()
+  string.contains(guard_file.content, "import gleam/string")
+  |> should.be_true()
+  string.contains(guard_file.content, "import gleam/regexp")
+  |> should.be_true()
+  string.contains(guard_file.content, "validate_user_properties")
+  |> should.be_true()
+  string.contains(guard_file.content, "validate_user_username_length")
+  |> should.be_true()
+  string.contains(guard_file.content, "validate_user_username_pattern")
+  |> should.be_true()
+}
+
 // --- Feature: Callbacks are ignored during parsing (Phase 4-4) ---
 
 pub fn parse_ignores_callbacks_test() {

@@ -189,15 +189,17 @@ fn collect_schema_constraint_types(
     | Ok(ArraySchema(max_items: Some(_), ..))
     | Ok(ArraySchema(unique_items: True, ..)) ->
       ConstraintTypes(..acc, has_list: True)
-    Ok(ObjectSchema(min_properties: Some(_), ..))
-    | Ok(ObjectSchema(max_properties: Some(_), ..)) ->
-      ConstraintTypes(..acc, has_dict: True)
-    Ok(ObjectSchema(properties:, ..)) ->
+    Ok(ObjectSchema(properties:, min_properties:, max_properties:, ..)) -> {
+      let acc = case min_properties, max_properties {
+        None, None -> acc
+        _, _ -> ConstraintTypes(..acc, has_dict: True)
+      }
       dict.to_list(properties)
       |> list.fold(acc, fn(a, prop) {
         let #(_, prop_ref) = prop
         collect_schema_constraint_types(a, prop_ref, ctx)
       })
+    }
     Ok(AllOfSchema(schemas:, ..)) ->
       list.fold(schemas, acc, fn(a, s) {
         collect_schema_constraint_types(a, s, ctx)
