@@ -25,10 +25,31 @@ jobs:
           wget -q https://s3.amazonaws.com/rebar3/rebar3 -O /usr/local/bin/rebar3
           chmod +x /usr/local/bin/rebar3
 
-      - run: gleam deps download
-      - run: gleam format --check src/ test/
-      - run: gleam build --warnings-as-errors
-      - run: gleam test
+      - name: Install ShellSpec
+        run: |
+          curl -fsSL https://git.io/shellspec | sh -s -- --yes
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Download dependencies
+        run: gleam deps download
+
+      - name: Format check
+        run: gleam format --check src/ test/
+
+      - name: Type check
+        run: gleam check
+
+      - name: Build (warnings as errors)
+        run: gleam build --warnings-as-errors
+
+      - name: Unit tests
+        run: gleam test
+
+      - name: ShellSpec tests
+        run: shellspec
+
+      - name: Integration tests
+        run: bash integration_test/run.sh
 
       - name: Build escript binary
         run: gleam run -m gleescript
