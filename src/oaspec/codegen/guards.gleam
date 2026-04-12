@@ -23,7 +23,8 @@ pub fn schema_has_validator(name: String, ctx: Context) -> Bool {
     Some(components) ->
       case dict.get(components.schemas, name) {
         Ok(schema_ref) ->
-          !list.is_empty(collect_guard_calls(name, schema_ref, ctx))
+          !ir_build.is_internal_schema(schema_ref)
+          && !list.is_empty(collect_guard_calls(name, schema_ref, ctx))
         Error(_) -> False
       }
     None -> False

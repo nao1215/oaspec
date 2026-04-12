@@ -508,25 +508,7 @@ fn generate_router(
     ctx.config.validate
     && list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
-      case operation.request_body {
-        Some(Value(rb)) ->
-          rb.required
-          && list.any(dict.to_list(rb.content), fn(entry) {
-            content_type.is_json_compatible(entry.0)
-          })
-          && {
-            case dict.to_list(rb.content) {
-              [#(_, mt)] ->
-                case mt.schema {
-                  Some(schema.Reference(name:, ..)) ->
-                    guards.schema_has_validator(name, ctx)
-                  _ -> False
-                }
-              _ -> False
-            }
-          }
-        _ -> False
-      }
+      operation_needs_guard_validation(operation, ctx)
     })
   let std_imports = case needs_json || needs_json_for_guards {
     True -> list.append(std_imports, ["gleam/json"])
@@ -569,25 +551,7 @@ fn generate_router(
     ctx.config.validate
     && list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
-      case operation.request_body {
-        Some(Value(rb)) ->
-          rb.required
-          && list.any(dict.to_list(rb.content), fn(entry) {
-            content_type.is_json_compatible(entry.0)
-            && {
-              case { dict.to_list(rb.content) } {
-                [#(_, mt)] ->
-                  case mt.schema {
-                    Some(schema.Reference(name:, ..)) ->
-                      guards.schema_has_validator(name, ctx)
-                    _ -> False
-                  }
-                _ -> False
-              }
-            }
-          })
-        _ -> False
-      }
+      operation_needs_guard_validation(operation, ctx)
     })
   let pkg_imports = case needs_guards {
     True -> list.append(pkg_imports, [ctx.config.package <> "/guards"])
@@ -1213,6 +1177,35 @@ fn generate_safe_request_and_dispatch(
     })
 
   sb
+}
+
+/// Check if an operation's request body needs guard validation.
+/// True when the body is required, JSON-compatible, references a named schema,
+/// and that schema has constraint-based validators.
+fn operation_needs_guard_validation(
+  operation: spec.Operation(Resolved),
+  ctx: Context,
+) -> Bool {
+  case operation.request_body {
+    Some(Value(rb)) ->
+      rb.required
+      && {
+        let content_entries = dict.to_list(rb.content)
+        list.any(content_entries, fn(entry) {
+          content_type.is_json_compatible(entry.0)
+        })
+        && case content_entries {
+          [#(_, mt)] ->
+            case mt.schema {
+              Some(schema.Reference(name:, ..)) ->
+                guards.schema_has_validator(name, ctx)
+              _ -> False
+            }
+          _ -> False
+        }
+      }
+    _ -> False
+  }
 }
 
 // Parameter parsing, body decoding, and request construction helpers

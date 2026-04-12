@@ -115,11 +115,18 @@ pub fn load(path: String) -> Result(Config, ConfigError) {
     },
   )
 
-  let validate = case yay.select_sugar(from: root, selector: "validate") {
-    Ok(yay.NodeBool(True)) -> True
-    Ok(yay.NodeStr("true")) -> True
-    _ -> False
-  }
+  use validate <- result.try(
+    case yay.select_sugar(from: root, selector: "validate") {
+      Ok(yay.NodeBool(True)) | Ok(yay.NodeStr("true")) -> Ok(True)
+      Ok(yay.NodeBool(False)) | Ok(yay.NodeStr("false")) -> Ok(False)
+      Error(_) -> Ok(False)
+      Ok(_) ->
+        Error(InvalidValue(
+          field: "validate",
+          detail: "must be a boolean (true or false)",
+        ))
+    },
+  )
 
   Ok(Config(input:, output_server:, output_client:, package:, mode:, validate:))
 }

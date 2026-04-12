@@ -10641,6 +10641,10 @@ pub fn guard_integration_server_router_validates_body_test() {
   // Should include errors in JSON response body
   string.contains(router_file.content, "json.array(errors, json.string)")
   |> should.be_true()
+
+  // Decode error path should still return 400 (distinct from 422 validation)
+  string.contains(router_file.content, "status: 400")
+  |> should.be_true()
 }
 
 /// Server router should NOT include guard validation when validate=False.
@@ -10730,6 +10734,61 @@ pub fn guard_integration_client_no_validation_when_disabled_test() {
   // Should NOT call guards.validate
   string.contains(client_file.content, "guards.validate_")
   |> should.be_false()
+}
+
+/// Client should validate optional request bodies with Some/None handling.
+pub fn guard_integration_client_validates_optional_body_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Optional Body Test
+  version: 1.0.0
+servers:
+  - url: https://example.com
+paths:
+  /pets:
+    patch:
+      operationId: updatePet
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePetRequest'
+      responses:
+        '200':
+          description: OK
+components:
+  schemas:
+    UpdatePetRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+"
+  let ctx = make_validate_ctx_from_yaml(yaml)
+  let files = client_gen.generate(ctx)
+  let assert Ok(client_file) =
+    list.find(files, fn(f) { f.path == "client.gleam" })
+
+  // Should import guards module
+  string.contains(client_file.content, "api/guards")
+  |> should.be_true()
+
+  // Should include ValidationError variant
+  string.contains(client_file.content, "ValidationError")
+  |> should.be_true()
+
+  // Should call guards.validate for optional body with Some pattern
+  string.contains(client_file.content, "guards.validate_update_pet_request")
+  |> should.be_true()
+
+  // Should handle None case (no validation for absent body)
+  string.contains(client_file.content, "None -> []")
+  |> should.be_true()
 }
 
 /// Guard validation should only apply to schemas that actually have constraints.
