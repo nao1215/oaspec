@@ -11078,3 +11078,50 @@ pub fn server_override_no_capability_warnings_test() {
     Error(_) -> should.fail()
   }
 }
+
+/// Relative server URLs should be supported as overrides.
+pub fn server_override_relative_url_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Relative Server URL Test
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /admin:
+    servers:
+      - url: /admin-api
+    get:
+      operationId: listAdmin
+      responses:
+        '200':
+          description: OK
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let assert Ok(resolved) = resolve.resolve(spec)
+  let resolved = hoist.hoist(resolved)
+  let resolved = dedup.dedup(resolved)
+  let cfg =
+    config.Config(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Both,
+      validate: False,
+    )
+  let ctx = context.new(resolved, cfg)
+  let files = client_gen.generate(ctx)
+  let assert Ok(client_file) =
+    list.find(files, fn(f) { f.path == "client.gleam" })
+
+  // Should use the relative URL as override
+  string.contains(client_file.content, "\"/admin-api\"")
+  |> should.be_true()
+
+  // Should have server override comment
+  string.contains(client_file.content, "Server override")
+  |> should.be_true()
+}

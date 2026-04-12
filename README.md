@@ -11,7 +11,7 @@ Generate usable Gleam code from OpenAPI 3.x specifications.
 - Generate client and server-side modules from a single spec
 - Produce readable Gleam types, encoders, decoders, request types, and response types
 - Handle real-world OpenAPI patterns: unions, nullable fields, `additionalProperties`, form bodies, multipart, and security
-- Backed by 614 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 179 test fixtures (including 94 OSS-derived edge-case specs)
+- Backed by 615 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 179 test fixtures (including 94 OSS-derived edge-case specs)
 
 ## Why oaspec
 
@@ -220,7 +220,8 @@ These are the most important limitations today:
 
 - The following keywords are detected and rejected: `$defs`, `prefixItems`, `if/then/else`, `dependentSchemas`, `not`, `unevaluatedProperties`, `unevaluatedItems`, `contentEncoding`, `contentMediaType`, `contentSchema`, `mutualTLS`
 - `xml` annotations are not handled by the parser
-- Some fields are parsed and preserved but not yet used by codegen: webhooks, externalDocs, tags, examples, links, operation servers, path servers, response headers, encoding
+- Some fields are parsed and preserved but not yet used by codegen: webhooks, externalDocs, tags, examples, links, response headers, encoding
+- Operation-level and path-level server overrides are supported in generated clients (precedence: operation > path > top-level)
 - The following are normalized to supported equivalents:
 - `const`: String const normalized to single-value enum
 - `type: [T, null]`: Normalized to nullable
