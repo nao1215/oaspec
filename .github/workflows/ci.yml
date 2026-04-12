@@ -51,3 +51,6 @@ jobs:
 
       - name: Build escript
         run: gleam run -m gleescript
+
+      - name: Smoke-test built escript
+        run: bash scripts/smoke_escript.sh ./oaspec

@@ -27,6 +27,9 @@ docs:
 escript:
   gleam run -m gleescript
 
+smoke-escript:
+  bash scripts/smoke_escript.sh ./oaspec
+
 shellspec:
   shellspec
 
@@ -50,6 +53,7 @@ all: clean deps
   shellspec
   bash integration_test/run.sh
   gleam run -m gleescript
+  bash scripts/smoke_escript.sh ./oaspec
   @echo ""
   @echo "All checks passed."
 
