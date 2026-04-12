@@ -54,3 +54,6 @@ jobs:
 
       - name: Smoke-test built escript
         run: bash scripts/smoke_escript.sh ./oaspec
+
+      - name: Check version and count sync
+        run: bash scripts/check_sync.sh
