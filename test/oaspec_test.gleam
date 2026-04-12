@@ -1973,6 +1973,10 @@ components:
   |> should.be_true()
   string.contains(guard_file.content, "validate_username_pattern(value)")
   |> should.be_true()
+  string.contains(guard_file.content, "import gleam/regexp")
+  |> should.be_true()
+  string.contains(guard_file.content, "regexp.check(re, value)")
+  |> should.be_true()
 }
 
 pub fn validate_object_property_count_still_collects_nested_string_constraints_test() {

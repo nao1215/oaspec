@@ -165,13 +165,17 @@ fn collect_schema_constraint_types(
     Reference(..) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
   }
   case schema {
-    Ok(StringSchema(min_length:, max_length:, pattern:, ..)) ->
-      case min_length, max_length, pattern {
-        None, None, None -> acc
-        _, _, Some(_) ->
-          ConstraintTypes(..acc, has_string: True, has_regexp: True)
-        _, _, None -> ConstraintTypes(..acc, has_string: True)
+    Ok(StringSchema(min_length:, max_length:, pattern:, ..)) -> {
+      let acc = case min_length, max_length {
+        None, None -> acc
+        _, _ -> ConstraintTypes(..acc, has_string: True)
       }
+
+      case pattern {
+        Some(_) -> ConstraintTypes(..acc, has_regexp: True)
+        None -> acc
+      }
+    }
     Ok(IntegerSchema(minimum: Some(_), ..))
     | Ok(IntegerSchema(maximum: Some(_), ..))
     | Ok(IntegerSchema(exclusive_minimum: Some(_), ..))
@@ -402,8 +406,8 @@ fn generate_string_pattern_guard(
     Some(pattern) -> {
       let fn_name = guard_function_name(schema_name, prop_name, "pattern")
       let pattern_literal = gleam_string_literal(pattern)
-      let invalid_pattern_message =
-        gleam_string_literal("invalid pattern: " <> pattern)
+      let invalid_pattern_prefix =
+        gleam_string_literal("invalid pattern: " <> pattern <> ": ")
       let mismatch_message =
         gleam_string_literal("must match pattern: " <> pattern)
       sb
@@ -421,7 +425,12 @@ fn generate_string_pattern_guard(
       |> se.indent(3, "True -> Ok(value)")
       |> se.indent(3, "False -> Error(" <> mismatch_message <> ")")
       |> se.indent(2, "}")
-      |> se.indent(2, "Error(_) -> Error(" <> invalid_pattern_message <> ")")
+      |> se.indent(
+        2,
+        "Error(regexp.CompileError(error:, ..)) -> Error("
+          <> invalid_pattern_prefix
+          <> " <> error)",
+      )
       |> se.indent(1, "}")
       |> se.line("}")
       |> se.blank_line()
