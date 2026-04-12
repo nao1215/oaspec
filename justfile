@@ -57,6 +57,9 @@ all: clean deps
   @echo ""
   @echo "All checks passed."
 
+sync-check:
+  bash scripts/check_sync.sh
+
 # Regenerate golden test snapshot files
 update-golden:
   bash scripts/update_golden.sh
