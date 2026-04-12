@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-04-12
+
+### Added
+
+- **Guard integration in server/client flows**: generated routers validate decoded request bodies against schema constraints and return 422 on failure; generated clients validate request bodies before sending (#22)
+- `validate` config option and `--validate` CLI flag to enable guard validation in generated code
+- `ValidationError(errors: List(String))` variant in generated `ClientError` type (when validation enabled)
+- `guards.schema_has_validator/2` public function for checking if a schema has constraint-based validators
+- **Operation-level and path-level server overrides**: generated clients now respect OpenAPI server precedence (operation > path > top-level) (#96)
+- Server variable substitution applied to operation/path-level server URLs
+- **JSON/XML structured syntax suffix media types**: content types like `application/vnd.api+json` now treated as JSON-compatible (#108)
+- **Auth configuration helpers**: generated `with_*` functions for setting security credentials on `ClientConfig` (#106)
+- **Packaged escript smoke tests**: smoke test the built escript artifact, not just `gleam run` (#103)
+- **String pattern validation guards**: generate regex-based pattern validation for string schemas with `pattern` constraint (#95)
+- **Version and test count consistency check**: `scripts/check_sync.sh` detects drift between gleam.toml, context.gleam, CHANGELOG.md, and README test counts (#111)
+- 6 new server override tests, 11 guard integration tests, and additional unit tests (598 → 615)
+
+### Fixed
+
+- **Server router 400 on invalid input**: return 400 instead of crashing on invalid path params and request body decode failures (#110)
+- Guard generation correctly traverses constrained object properties and surfaces regex compile errors (#95)
+
+### Changed
+
+- Capability warnings for operation/path-level servers removed (now supported)
+- `Config` type includes `validate: Bool` field (default: `false`)
+- Operations collector inherits path-level servers to operations following OpenAPI server precedence
+- README: updated support boundaries and test counts
+- Split monolithic test file into focused modules (#109)
+- Release CI pipeline now matches main CI checks (#107)
+
 ## [0.11.0] - 2026-04-11
 
 ### Added
