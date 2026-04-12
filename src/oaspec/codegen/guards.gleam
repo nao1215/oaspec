@@ -52,6 +52,10 @@ fn generate_guards(ctx: Context) -> String {
     True -> ["gleam/string", ..imports]
     False -> imports
   }
+  let imports = case constraint_types.has_regexp {
+    True -> ["gleam/regexp", ..imports]
+    False -> imports
+  }
   let imports = case constraint_types.has_list {
     True -> ["gleam/list", ..imports]
     False -> imports
@@ -126,6 +130,7 @@ fn generate_guards(ctx: Context) -> String {
 type ConstraintTypes {
   ConstraintTypes(
     has_string: Bool,
+    has_regexp: Bool,
     has_integer: Bool,
     has_float: Bool,
     has_list: Bool,
@@ -141,7 +146,7 @@ fn collect_constraint_types(
 ) -> ConstraintTypes {
   list.fold(
     schemas,
-    ConstraintTypes(False, False, False, False, False, False),
+    ConstraintTypes(False, False, False, False, False, False, False),
     fn(acc, entry) {
       let #(_name, schema_ref) = entry
       collect_schema_constraint_types(acc, schema_ref, ctx)
@@ -160,9 +165,17 @@ fn collect_schema_constraint_types(
     Reference(..) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
   }
   case schema {
-    Ok(StringSchema(min_length: Some(_), ..))
-    | Ok(StringSchema(max_length: Some(_), ..)) ->
-      ConstraintTypes(..acc, has_string: True)
+    Ok(StringSchema(min_length:, max_length:, pattern:, ..)) -> {
+      let acc = case min_length, max_length {
+        None, None -> acc
+        _, _ -> ConstraintTypes(..acc, has_string: True)
+      }
+
+      case pattern {
+        Some(_) -> ConstraintTypes(..acc, has_regexp: True)
+        None -> acc
+      }
+    }
     Ok(IntegerSchema(minimum: Some(_), ..))
     | Ok(IntegerSchema(maximum: Some(_), ..))
     | Ok(IntegerSchema(exclusive_minimum: Some(_), ..))
@@ -180,15 +193,17 @@ fn collect_schema_constraint_types(
     | Ok(ArraySchema(max_items: Some(_), ..))
     | Ok(ArraySchema(unique_items: True, ..)) ->
       ConstraintTypes(..acc, has_list: True)
-    Ok(ObjectSchema(min_properties: Some(_), ..))
-    | Ok(ObjectSchema(max_properties: Some(_), ..)) ->
-      ConstraintTypes(..acc, has_dict: True)
-    Ok(ObjectSchema(properties:, ..)) ->
+    Ok(ObjectSchema(properties:, min_properties:, max_properties:, ..)) -> {
+      let acc = case min_properties, max_properties {
+        None, None -> acc
+        _, _ -> ConstraintTypes(..acc, has_dict: True)
+      }
       dict.to_list(properties)
       |> list.fold(acc, fn(a, prop) {
         let #(_, prop_ref) = prop
         collect_schema_constraint_types(a, prop_ref, ctx)
       })
+    }
     Ok(AllOfSchema(schemas:, ..)) ->
       list.fold(schemas, acc, fn(a, s) {
         collect_schema_constraint_types(a, s, ctx)
@@ -251,8 +266,10 @@ fn generate_guards_for_schema_object(
       })
     }
     // Top-level string/integer constraints (type aliases with constraints)
-    StringSchema(min_length:, max_length:, ..) ->
-      generate_string_guard(sb, name, "", min_length, max_length)
+    StringSchema(min_length:, max_length:, pattern:, ..) -> {
+      let sb = generate_string_guard(sb, name, "", min_length, max_length)
+      generate_string_pattern_guard(sb, name, "", pattern)
+    }
     IntegerSchema(
       minimum:,
       maximum:,
@@ -312,8 +329,17 @@ fn generate_field_guard(
     Reference(..) -> resolver.resolve_schema_ref(prop_ref, ctx.spec)
   }
   case resolved {
-    Ok(StringSchema(min_length:, max_length:, ..)) ->
-      generate_string_guard(sb, schema_name, prop_name, min_length, max_length)
+    Ok(StringSchema(min_length:, max_length:, pattern:, ..)) -> {
+      let sb =
+        generate_string_guard(
+          sb,
+          schema_name,
+          prop_name,
+          min_length,
+          max_length,
+        )
+      generate_string_pattern_guard(sb, schema_name, prop_name, pattern)
+    }
     Ok(IntegerSchema(
       minimum:,
       maximum:,
@@ -365,6 +391,50 @@ fn generate_field_guard(
       generate_unique_items_guard(sb, schema_name, prop_name, unique_items)
     }
     _ -> sb
+  }
+}
+
+/// Generate a string pattern validation guard.
+fn generate_string_pattern_guard(
+  sb: se.StringBuilder,
+  schema_name: String,
+  prop_name: String,
+  pattern: Option(String),
+) -> se.StringBuilder {
+  case pattern {
+    None -> sb
+    Some(pattern) -> {
+      let fn_name = guard_function_name(schema_name, prop_name, "pattern")
+      let pattern_literal = gleam_string_literal(pattern)
+      let invalid_pattern_prefix =
+        gleam_string_literal("invalid pattern: " <> pattern <> ": ")
+      let mismatch_message =
+        gleam_string_literal("must match pattern: " <> pattern)
+      sb
+      |> se.line(
+        "/// Validate string pattern for "
+        <> schema_name
+        <> field_label(prop_name)
+        <> ".",
+      )
+      |> se.line(
+        "pub fn " <> fn_name <> "(value: String) -> Result(String, String) {",
+      )
+      |> se.indent(1, "case regexp.from_string(" <> pattern_literal <> ") {")
+      |> se.indent(2, "Ok(re) -> case regexp.check(re, value) {")
+      |> se.indent(3, "True -> Ok(value)")
+      |> se.indent(3, "False -> Error(" <> mismatch_message <> ")")
+      |> se.indent(2, "}")
+      |> se.indent(
+        2,
+        "Error(regexp.CompileError(error:, ..)) -> Error("
+          <> invalid_pattern_prefix
+          <> " <> error)",
+      )
+      |> se.indent(1, "}")
+      |> se.line("}")
+      |> se.blank_line()
+    }
   }
 }
 
@@ -1032,6 +1102,18 @@ fn field_label(prop_name: String) -> String {
   }
 }
 
+/// Render a runtime string literal for generated Gleam source.
+fn gleam_string_literal(value: String) -> String {
+  let escaped =
+    value
+    |> string.replace("\\", "\\\\")
+    |> string.replace("\"", "\\\"")
+    |> string.replace("\n", "\\n")
+    |> string.replace("\r", "\\r")
+    |> string.replace("\t", "\\t")
+  "\"" <> escaped <> "\""
+}
+
 /// Generate a composite validate function for a schema that calls all
 /// individual field validators. This enables auto-validation by calling
 /// a single function rather than individual field guards.
@@ -1166,13 +1248,21 @@ fn collect_guard_calls(
         collect_field_guard_calls(name, prop_name, prop_ref, is_required, ctx)
       })
     }
-    Ok(StringSchema(min_length:, max_length:, ..)) ->
-      case min_length, max_length {
+    Ok(StringSchema(min_length:, max_length:, pattern:, ..)) -> {
+      let calls = case min_length, max_length {
         None, None -> []
         _, _ -> [
           #(guard_function_name(name, "", "length"), "value", True),
         ]
       }
+      case pattern {
+        None -> calls
+        Some(_) ->
+          list.append(calls, [
+            #(guard_function_name(name, "", "pattern"), "value", True),
+          ])
+      }
+    }
     Ok(IntegerSchema(
       minimum:,
       maximum:,
@@ -1264,8 +1354,8 @@ fn collect_field_guard_calls(
   }
   let accessor = "value." <> naming.to_snake_case(prop_name)
   case resolved {
-    Ok(StringSchema(min_length:, max_length:, ..)) ->
-      case min_length, max_length {
+    Ok(StringSchema(min_length:, max_length:, pattern:, ..)) -> {
+      let calls = case min_length, max_length {
         None, None -> []
         _, _ -> [
           #(
@@ -1275,6 +1365,18 @@ fn collect_field_guard_calls(
           ),
         ]
       }
+      case pattern {
+        None -> calls
+        Some(_) ->
+          list.append(calls, [
+            #(
+              guard_function_name(schema_name, prop_name, "pattern"),
+              accessor,
+              is_required,
+            ),
+          ])
+      }
+    }
     Ok(IntegerSchema(
       minimum:,
       maximum:,
