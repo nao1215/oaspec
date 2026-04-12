@@ -1890,7 +1890,7 @@ webhooks:
 // --- Feature: Validation constraints generate guards (Phase 4-3) ---
 
 pub fn validate_constraints_generate_guards_test() {
-  // Schemas with minLength/maxLength/minimum/maximum should produce guard functions.
+  // Schemas with string and numeric constraints should produce guard functions.
   let yaml =
     "
 openapi: 3.0.3
@@ -1913,6 +1913,7 @@ components:
           type: string
           minLength: 3
           maxLength: 50
+          pattern: '^[a-zA-Z0-9]+$'
         age:
           type: integer
           minimum: 0
@@ -1932,7 +1933,45 @@ components:
   // Should contain validation functions for constrained fields
   string.contains(guard_file.content, "validate_user_username_length")
   |> should.be_true()
+  string.contains(guard_file.content, "validate_user_username_pattern")
+  |> should.be_true()
   string.contains(guard_file.content, "validate_user_age_range")
+  |> should.be_true()
+  string.contains(guard_file.content, "import gleam/regexp")
+  |> should.be_true()
+  string.contains(guard_file.content, "regexp.check(re, value)")
+  |> should.be_true()
+}
+
+pub fn validate_top_level_string_pattern_generates_guard_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Username:
+      type: string
+      pattern: '^[a-zA-Z0-9_-]+$'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = guards.generate(ctx)
+  let assert [guard_file] = files
+
+  string.contains(guard_file.content, "validate_username_pattern")
+  |> should.be_true()
+  string.contains(guard_file.content, "validate_username(value: String)")
+  |> should.be_true()
+  string.contains(guard_file.content, "validate_username_pattern(value)")
   |> should.be_true()
 }
 
