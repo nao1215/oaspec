@@ -1,0 +1,57 @@
+openapi: "3.0.3"
+info:
+  title: Delimited Parameter Styles API
+  version: "1.0.0"
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: colors
+          in: query
+          description: Pipe-delimited, non-exploded
+          style: pipeDelimited
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+        - name: colors_exploded
+          in: query
+          description: Pipe-delimited, exploded (behaves like form exploded)
+          style: pipeDelimited
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+        - name: sizes
+          in: query
+          description: Space-delimited, non-exploded
+          style: spaceDelimited
+          explode: false
+          schema:
+            type: array
+            items:
+              type: integer
+        - name: sizes_exploded
+          in: query
+          description: Space-delimited, exploded (behaves like form exploded)
+          style: spaceDelimited
+          explode: true
+          schema:
+            type: array
+            items:
+              type: integer
+      responses:
+        "200":
+          description: Items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string

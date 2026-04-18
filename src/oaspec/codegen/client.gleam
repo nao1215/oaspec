@@ -686,43 +686,58 @@ fn generate_client_function(
                     ctx,
                   )
                 False ->
-                  case p.required {
-                    True -> {
-                      let to_str =
-                        client_request.to_str_for_required(p, param_name, ctx)
-                      let encoded =
-                        client_security.maybe_percent_encode(to_str, p)
-                      sb
-                      |> se.indent(
-                        1,
-                        "let query_parts = [\""
-                          <> p.name
-                          <> "=\" <> "
-                          <> encoded
-                          <> ", ..query_parts]",
+                  case client_request.is_delimited_array_param(p, ctx) {
+                    Some(joiner) ->
+                      client_request.generate_delimited_array_query_param(
+                        sb,
+                        p,
+                        param_name,
+                        joiner,
+                        ctx,
                       )
-                    }
-                    False -> {
-                      let to_str =
-                        client_request.to_str_for_optional_value(p, ctx)
-                      let encoded =
-                        client_security.maybe_percent_encode(to_str, p)
-                      sb
-                      |> se.indent(
-                        1,
-                        "let query_parts = case " <> param_name <> " {",
-                      )
-                      |> se.indent(
-                        2,
-                        "Some(v) -> [\""
-                          <> p.name
-                          <> "=\" <> "
-                          <> encoded
-                          <> ", ..query_parts]",
-                      )
-                      |> se.indent(2, "None -> query_parts")
-                      |> se.indent(1, "}")
-                    }
+                    None ->
+                      case p.required {
+                        True -> {
+                          let to_str =
+                            client_request.to_str_for_required(
+                              p,
+                              param_name,
+                              ctx,
+                            )
+                          let encoded =
+                            client_security.maybe_percent_encode(to_str, p)
+                          sb
+                          |> se.indent(
+                            1,
+                            "let query_parts = [\""
+                              <> p.name
+                              <> "=\" <> "
+                              <> encoded
+                              <> ", ..query_parts]",
+                          )
+                        }
+                        False -> {
+                          let to_str =
+                            client_request.to_str_for_optional_value(p, ctx)
+                          let encoded =
+                            client_security.maybe_percent_encode(to_str, p)
+                          sb
+                          |> se.indent(
+                            1,
+                            "let query_parts = case " <> param_name <> " {",
+                          )
+                          |> se.indent(
+                            2,
+                            "Some(v) -> [\""
+                              <> p.name
+                              <> "=\" <> "
+                              <> encoded
+                              <> ", ..query_parts]",
+                          )
+                          |> se.indent(2, "None -> query_parts")
+                          |> se.indent(1, "}")
+                        }
+                      }
                   }
               }
           }

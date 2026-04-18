@@ -1,0 +1,23 @@
+openapi: "3.0.3"
+info:
+  title: Space Delimited Non Array Rejects
+  version: "1.0.0"
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: label
+          in: query
+          description: spaceDelimited requires an array schema
+          style: spaceDelimited
+          explode: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Items
+          content:
+            application/json:
+              schema:
+                type: object

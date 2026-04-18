@@ -9822,6 +9822,42 @@ pub fn parse_array_param_styles_test() {
   list.length(op.parameters) |> should.not_equal(0)
 }
 
+pub fn parse_delimited_param_styles_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/delimited_param_styles.yaml")
+  spec.info.title |> should.equal("Delimited Parameter Styles API")
+  let assert Ok(spec.Value(path_item)) = dict.get(spec.paths, "/items")
+  let assert Some(op) = path_item.get
+  list.length(op.parameters) |> should.equal(4)
+}
+
+pub fn validate_accepts_delimited_param_styles_test() {
+  let ctx = make_ctx("test/fixtures/delimited_param_styles.yaml")
+  validate.validate(ctx) |> should.equal([])
+}
+
+pub fn pipe_delimited_in_header_rejects_test() {
+  let ctx = make_ctx("test/fixtures/pipe_delimited_in_header_rejects.yaml")
+  let errors = validate.validate(ctx)
+  let error_strings = list.map(errors, validate.error_to_string)
+  list.any(error_strings, fn(s) {
+    string.contains(s, "pipeDelimited")
+    && string.contains(s, "only supported for 'in: query'")
+  })
+  |> should.be_true()
+}
+
+pub fn space_delimited_non_array_rejects_test() {
+  let ctx = make_ctx("test/fixtures/space_delimited_non_array_rejects.yaml")
+  let errors = validate.validate(ctx)
+  let error_strings = list.map(errors, validate.error_to_string)
+  list.any(error_strings, fn(s) {
+    string.contains(s, "spaceDelimited")
+    && string.contains(s, "requires an array schema")
+  })
+  |> should.be_true()
+}
+
 pub fn parse_empty_response_body_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/empty_response_body.yaml")
@@ -10015,6 +10051,30 @@ pub fn generate_array_param_styles_server_test() {
   let ctx = make_ctx("test/fixtures/array_param_styles.yaml")
   let server_files = server_gen.generate(ctx)
   list.length(server_files) |> should.not_equal(0)
+}
+
+pub fn generate_delimited_param_styles_client_test() {
+  let ctx = make_ctx("test/fixtures/delimited_param_styles.yaml")
+  let client_files = client_gen.generate(ctx)
+  let combined = list.fold(client_files, "", fn(acc, f) { acc <> f.content })
+  // Non-exploded pipe/space paths should join array items with the style
+  // delimiter before percent-encoding the whole value.
+  string.contains(combined, "string.join(list.map(items,") |> should.be_true()
+  string.contains(combined, "\"colors=\" <> uri.percent_encode(joined)")
+  |> should.be_true()
+  string.contains(combined, "\"sizes=\" <> uri.percent_encode(joined)")
+  |> should.be_true()
+  string.contains(combined, "), \"|\")") |> should.be_true()
+  string.contains(combined, "), \" \")") |> should.be_true()
+}
+
+pub fn generate_delimited_param_styles_server_test() {
+  let ctx = make_ctx("test/fixtures/delimited_param_styles.yaml")
+  let server_files = server_gen.generate(ctx)
+  let combined = list.fold(server_files, "", fn(acc, f) { acc <> f.content })
+  // Non-exploded server decode should split on the style-specific delimiter.
+  string.contains(combined, "string.split(v, \"|\")") |> should.be_true()
+  string.contains(combined, "string.split(v, \" \")") |> should.be_true()
 }
 
 pub fn generate_empty_response_body_server_test() {

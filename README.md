@@ -11,7 +11,7 @@ Generate usable Gleam code from OpenAPI 3.x specifications.
 - Generate client and server-side modules from a single spec
 - Produce readable Gleam types, encoders, decoders, request types, and response types
 - Handle real-world OpenAPI patterns: unions, nullable fields, `additionalProperties`, form bodies, multipart, and security
-- Backed by 615 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 179 test fixtures (including 94 OSS-derived edge-case specs)
+- Backed by 621 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 182 test fixtures (including 94 OSS-derived edge-case specs)
 
 ## Why oaspec
 
@@ -205,7 +205,7 @@ Coverage is strongest in these areas:
 
 - Schemas: component schemas, primitive aliases, enums, nullable fields, arrays, objects, `allOf`, `oneOf`, `anyOf`, and typed `additionalProperties`
 - References: local `$ref` resolution for schemas, parameters, request bodies, responses, and path items, including circular-reference detection
-- Parameters: path, query, header, and cookie parameters, including array serialization and `style: deepObject`
+- Parameters: path, query, header, and cookie parameters, including array serialization (`style: form`, `style: pipeDelimited`, `style: spaceDelimited`) and objects via `style: deepObject`
 - Request bodies: `application/json`, `application/x-www-form-urlencoded`, and `multipart/form-data`
 - Responses: typed status-code variants, `$ref` responses, `default` responses, and text or binary passthrough cases
 - Security: `apiKey` (header, query, cookie), HTTP auth (bearer, basic, digest), OAuth2, and OpenID Connect. For OAuth2 and OpenID Connect, the generated client attaches a bearer token to requests; token acquisition, refresh, and flow execution are outside the generated code.
@@ -255,6 +255,7 @@ These are the most important limitations today:
 | Path / query / header / cookie parameters | yes | yes | |
 | `style: deepObject` parameters | restricted | yes | Server: only primitive scalars and primitive arrays |
 | Array query parameters | restricted | yes | Server: only inline primitive item schemas |
+| `style: pipeDelimited` / `style: spaceDelimited` query arrays | yes | yes | Query array parameters only; primitive item types. Non-exploded joins with `\|` / `%20`, exploded degenerates to form-style `name=a&name=b`. |
 | `application/x-www-form-urlencoded` | restricted | yes | Server: must be sole content type; only primitive fields and shallow nested objects |
 | `multipart/form-data` | restricted | yes | Server: must be sole content type; only primitive scalar fields |
 | Security (apiKey, HTTP, OAuth2, OpenID Connect) | yes | yes | Client attaches credentials via config; OAuth2/OpenID Connect: bearer token only |

@@ -755,17 +755,108 @@ pub fn is_exploded_array_param(
   case is_array {
     False -> False
     True -> {
-      // explode defaults to true for style: form (which is the default for query params)
+      // explode defaults to true for style: form (the default for query params).
+      // pipeDelimited / spaceDelimited also default to explode=true per OpenAPI.
       let effective_explode = case param.explode {
         option.Some(v) -> v
         option.None ->
           case param.style {
-            option.Some(spec.FormStyle) | option.None -> True
+            option.Some(spec.FormStyle)
+            | option.Some(spec.PipeDelimitedStyle)
+            | option.Some(spec.SpaceDelimitedStyle)
+            | option.None -> True
             _ -> False
           }
       }
       effective_explode
     }
+  }
+}
+
+/// Returns Some(joiner) if the parameter is a non-exploded delimited array
+/// (pipeDelimited or spaceDelimited). Returns None for everything else
+/// including form arrays — we keep that on the existing path.
+pub fn is_delimited_array_param(
+  param: spec.Parameter(Resolved),
+  ctx: Context,
+) -> option.Option(String) {
+  let is_array = case param.payload {
+    ParameterSchema(Inline(schema.ArraySchema(..))) -> True
+    ParameterSchema(Reference(..) as sr) ->
+      case resolver.resolve_schema_ref(sr, ctx.spec) {
+        Ok(schema.ArraySchema(..)) -> True
+        _ -> False
+      }
+    _ -> False
+  }
+  let is_non_exploded = param.explode == option.Some(False)
+  case is_array, is_non_exploded, param.style {
+    True, True, option.Some(spec.PipeDelimitedStyle) -> option.Some("|")
+    True, True, option.Some(spec.SpaceDelimitedStyle) -> option.Some(" ")
+    _, _, _ -> option.None
+  }
+}
+
+/// Generate non-exploded delimited array query parameter:
+/// tags=a|b|c (pipeDelimited) or tags=a%20b%20c (spaceDelimited).
+pub fn generate_delimited_array_query_param(
+  sb: se.StringBuilder,
+  param: spec.Parameter(Resolved),
+  param_name: String,
+  joiner: String,
+  ctx: Context,
+) -> se.StringBuilder {
+  let item_to_str = case param.payload {
+    ParameterSchema(Inline(schema.ArraySchema(items:, ..))) ->
+      array_item_to_string_fn(items, ctx)
+    ParameterSchema(Reference(..) as sr) ->
+      case resolver.resolve_schema_ref(sr, ctx.spec) {
+        Ok(schema.ArraySchema(items:, ..)) ->
+          array_item_to_string_fn(items, ctx)
+        _ -> "fn(x) { x }"
+      }
+    _ -> "fn(x) { x }"
+  }
+  case param.required {
+    True ->
+      sb
+      |> se.indent(
+        1,
+        "let joined = string.join(list.map("
+          <> param_name
+          <> ", "
+          <> item_to_str
+          <> "), \""
+          <> joiner
+          <> "\")",
+      )
+      |> se.indent(
+        1,
+        "let query_parts = [\""
+          <> param.name
+          <> "=\" <> uri.percent_encode(joined), ..query_parts]",
+      )
+    False ->
+      sb
+      |> se.indent(1, "let query_parts = case " <> param_name <> " {")
+      |> se.indent(2, "Some(items) -> {")
+      |> se.indent(
+        3,
+        "let joined = string.join(list.map(items, "
+          <> item_to_str
+          <> "), \""
+          <> joiner
+          <> "\")",
+      )
+      |> se.indent(
+        3,
+        "[\""
+          <> param.name
+          <> "=\" <> uri.percent_encode(joined), ..query_parts]",
+      )
+      |> se.indent(2, "}")
+      |> se.indent(2, "None -> query_parts")
+      |> se.indent(1, "}")
   }
 }
 

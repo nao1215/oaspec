@@ -160,8 +160,9 @@ fn extract_path_template_names(path: String) -> List(String) {
 }
 
 /// Validate parameters for unsupported serialization styles.
-/// Supported: form (default), deepObject (query+object), exploded array.
-/// Unsupported: matrix, label, simple, spaceDelimited, pipeDelimited.
+/// Supported: form (default), deepObject (query+object), exploded array,
+/// pipeDelimited / spaceDelimited (query+array only).
+/// Unsupported: matrix, label.
 fn validate_parameters(
   op_id: String,
   params: List(spec.Parameter(Resolved)),
@@ -170,18 +171,21 @@ fn validate_parameters(
   list.flat_map(params, fn(p) {
     let path = op_id <> ".parameters." <> p.name
     let style_errors = case p.style {
-      Some(spec.MatrixStyle)
-      | Some(spec.LabelStyle)
-      | Some(spec.SpaceDelimitedStyle)
-      | Some(spec.PipeDelimitedStyle) -> [
+      Some(spec.MatrixStyle) | Some(spec.LabelStyle) -> [
         diagnostic.validation(
           severity: SeverityError,
           target: TargetBoth,
           path: path,
-          detail: "Parameter style is not supported. Supported styles: form, deepObject, simple.",
-          hint: Some("Use style 'form', 'simple', or 'deepObject' instead."),
+          detail: "Parameter style is not supported. Supported styles: form, simple, deepObject, pipeDelimited, spaceDelimited.",
+          hint: Some(
+            "Use style 'form', 'simple', 'deepObject', 'pipeDelimited', or 'spaceDelimited' instead.",
+          ),
         ),
       ]
+      Some(spec.PipeDelimitedStyle) ->
+        validate_delimited_style(path, p, "pipeDelimited", ctx)
+      Some(spec.SpaceDelimitedStyle) ->
+        validate_delimited_style(path, p, "spaceDelimited", ctx)
       _ -> []
     }
     // Parameter.payload is ParameterContent when Parameter.content is used instead of schema.
@@ -215,6 +219,51 @@ fn validate_parameters(
       cookie_errors,
     ])
   })
+}
+
+/// Validate pipeDelimited / spaceDelimited parameter styles.
+/// Both are only meaningful for array-typed query parameters; reject elsewhere.
+fn validate_delimited_style(
+  path: String,
+  param: spec.Parameter(Resolved),
+  style_name: String,
+  ctx: Context,
+) -> List(Diagnostic) {
+  let location_errors = case param.in_ {
+    spec.InQuery -> []
+    _ -> [
+      diagnostic.validation(
+        severity: SeverityError,
+        target: TargetBoth,
+        path: path,
+        detail: "Parameter style '"
+          <> style_name
+          <> "' is only supported for 'in: query'.",
+        hint: Some(
+          "Move this parameter to 'in: query' or switch to a style valid for its location.",
+        ),
+      ),
+    ]
+  }
+  let schema_errors = case
+    resolve_schema_object(spec.parameter_schema(param), ctx)
+  {
+    Some(ArraySchema(..)) -> []
+    _ -> [
+      diagnostic.validation(
+        severity: SeverityError,
+        target: TargetBoth,
+        path: path,
+        detail: "Parameter style '"
+          <> style_name
+          <> "' requires an array schema.",
+        hint: Some(
+          "Change the schema to 'type: array' or switch to style 'form'.",
+        ),
+      ),
+    ]
+  }
+  list.flatten([location_errors, schema_errors])
 }
 
 fn validate_server_structured_param(

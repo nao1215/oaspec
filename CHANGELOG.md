@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`style: pipeDelimited` / `style: spaceDelimited` query array parameters**: generated clients encode non-exploded arrays as `name=a|b|c` or `name=a%20b%20c`; generated servers split on the matching delimiter (#97)
+- 5 new tests and 3 fixtures covering delimited styles and their rejection cases (615 → 621 unit tests, 179 → 182 fixtures)
+
+### Changed
+
+- Validator now rejects `pipeDelimited` / `spaceDelimited` only when applied outside `in: query` or to non-array schemas; previous outright rejection is removed
+- README: delimited array styles added to parameter support list and mode-specific support matrix
+
 ## [0.12.0] - 2026-04-12
 
 ### Added
