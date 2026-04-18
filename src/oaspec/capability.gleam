@@ -178,18 +178,9 @@ pub fn registry() -> List(Capability) {
     Capability("examples", "scope", ParsedNotUsed, "Parsed but no codegen"),
     Capability("links", "scope", ParsedNotUsed, "Parsed but no codegen"),
     Capability("xml", "scope", NotHandled, "XML annotations ignored"),
-    Capability(
-      "operation servers",
-      "scope",
-      ParsedNotUsed,
-      "Client uses top-level only",
-    ),
-    Capability(
-      "path servers",
-      "scope",
-      ParsedNotUsed,
-      "Client uses top-level only",
-    ),
+    // operation-level and path-level server overrides are supported as of #96
+    // (generated clients resolve operation > path > top-level). They are no
+    // longer listed here — absence from the registry means Supported.
     Capability(
       "response headers",
       "scope",

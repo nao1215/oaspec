@@ -3337,6 +3337,33 @@ components:
   |> should.be_true()
 }
 
+// --- drift detection between capability registry and README ---
+pub fn capability_registry_names_appear_in_readme_boundaries_test() {
+  // Every keyword the capability registry declares as Unsupported / NotHandled
+  // / ParsedNotUsed must be mentioned by name inside the README's
+  // `<!-- BEGIN GENERATED:BOUNDARIES -->` / `<!-- END GENERATED:BOUNDARIES -->`
+  // block. This catches the common drift case where someone adds a new
+  // unsupported keyword to the registry but forgets to update the README.
+  let assert Ok(readme) = simplifile.read("README.md")
+  let assert Ok(#(_before, after_begin)) =
+    string.split_once(readme, "<!-- BEGIN GENERATED:BOUNDARIES -->")
+  let assert Ok(#(boundaries_block, _after)) =
+    string.split_once(after_begin, "<!-- END GENERATED:BOUNDARIES -->")
+  list.each(capability.registry(), fn(c) {
+    case c.level {
+      capability.Unsupported | capability.NotHandled | capability.ParsedNotUsed ->
+        case string.contains(boundaries_block, c.name) {
+          True -> Nil
+          False -> {
+            // Surface which name is missing in the failure output.
+            c.name |> should.equal("<should appear in README>")
+          }
+        }
+      _ -> Nil
+    }
+  })
+}
+
 // --- Finding 3: README says optional path params supported but parser rejects ---
 pub fn readme_no_optional_path_param_claim_test() {
   let assert Ok(readme) = simplifile.read("README.md")
