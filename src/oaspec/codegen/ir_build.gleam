@@ -10,8 +10,8 @@ import oaspec/codegen/allof_merge
 import oaspec/codegen/context.{type Context}
 import oaspec/codegen/import_analysis
 import oaspec/codegen/ir.{
-  type Declaration, type Field, type Module, EnumType, Field, RecordType,
-  TypeAlias, UnionType, VariantWithType,
+  type Declaration, type Field, type Module, type Variant, EnumType, Field,
+  RecordType, TypeAlias, UnionType, VariantEmpty, VariantWithType,
 }
 import oaspec/codegen/schema_dispatch
 import oaspec/codegen/schema_utils
@@ -24,6 +24,7 @@ import oaspec/openapi/schema.{
   OneOfSchema, Reference, StringSchema, Typed, Untyped,
 }
 import oaspec/openapi/spec.{type Resolved, Value}
+import oaspec/util/content_type
 import oaspec/util/http
 import oaspec/util/naming
 
@@ -187,6 +188,194 @@ fn request_body_type(
         _ -> "String"
       }
     [] -> "String"
+  }
+}
+
+/// Build an IR Module for the response_types.gleam file from operations.
+/// Each operation with at least one response yields a `UnionType`
+/// declaration whose variants correspond to HTTP status codes. Variant
+/// payloads follow the same rules the former string-builder applied:
+/// empty responses become `VariantEmpty`; text/XML/octet-stream bodies
+/// become `VariantWithType("String")`; JSON (and other structured) bodies
+/// become `VariantWithType(<qualified schema type>)`.
+pub fn build_response_types_module(ctx: Context) -> Module {
+  let operations = operations.collect_operations(ctx)
+  let imports = case responses_need_types_import(operations) {
+    True -> [config.package(context.config(ctx)) <> "/types"]
+    False -> []
+  }
+  let declarations =
+    list.filter_map(operations, fn(op) {
+      let #(op_id, operation, _path, _method) = op
+      response_type_decl(op_id, operation)
+    })
+  ir.module(header: "", imports: imports, declarations: declarations)
+}
+
+fn responses_need_types_import(
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+) -> Bool {
+  list.any(operations, fn(op) {
+    let #(_op_id, operation, _path, _method) = op
+    let responses = dict.to_list(operation.responses)
+    list.any(responses, fn(entry) {
+      let #(_status_code, ref_or) = entry
+      case ref_or {
+        Value(response) -> {
+          let content_entries = dict.to_list(response.content)
+          case content_entries {
+            [] -> False
+            [_, _, ..] -> False
+            [#(media_type_name, media_type)] ->
+              case content_type.from_string(media_type_name) {
+                content_type.TextPlain
+                | content_type.ApplicationXml
+                | content_type.TextXml
+                | content_type.ApplicationOctetStream -> False
+                _ ->
+                  case media_type.schema {
+                    Some(Reference(..)) -> True
+                    Some(Inline(ArraySchema(items: Reference(..), ..))) -> True
+                    Some(Inline(ObjectSchema(..))) -> True
+                    Some(Inline(OneOfSchema(..))) -> True
+                    Some(Inline(AnyOfSchema(..))) -> True
+                    Some(Inline(AllOfSchema(..))) -> True
+                    _ -> False
+                  }
+              }
+          }
+        }
+        _ -> False
+      }
+    })
+  })
+}
+
+fn response_type_decl(
+  op_id: String,
+  operation: spec.Operation(Resolved),
+) -> Result(Declaration, Nil) {
+  let type_name = naming.schema_to_type_name(op_id) <> "Response"
+  let responses = http.sort_response_entries(dict.to_list(operation.responses))
+  case responses {
+    [] -> Error(Nil)
+    _ -> {
+      let variants =
+        list.filter_map(responses, fn(entry) {
+          let #(status_code, ref_or) = entry
+          case ref_or {
+            Value(response) ->
+              Ok(response_variant(type_name, op_id, status_code, response))
+            _ -> Error(Nil)
+          }
+        })
+      Ok(ir.declaration(
+        doc: None,
+        type_def: UnionType(name: type_name, variants: variants),
+      ))
+    }
+  }
+}
+
+fn response_variant(
+  type_name: String,
+  op_id: String,
+  status_code: http.HttpStatusCode,
+  response: spec.Response(Resolved),
+) -> Variant {
+  let variant_name = type_name <> http.status_code_suffix(status_code)
+  let content_entries = sorted_entries(response.content)
+  case content_entries {
+    [] -> VariantEmpty(name: variant_name)
+    [_, _, ..] -> VariantWithType(name: variant_name, inner_type: "String")
+    [#(media_type_name, media_type)] ->
+      case content_type.from_string(media_type_name) {
+        content_type.TextPlain
+        | content_type.ApplicationXml
+        | content_type.TextXml
+        | content_type.ApplicationOctetStream ->
+          case media_type.schema {
+            Some(_) -> VariantWithType(name: variant_name, inner_type: "String")
+            None -> VariantEmpty(name: variant_name)
+          }
+        _ ->
+          case media_type.schema {
+            Some(ref) -> {
+              let suffix = "Response" <> http.status_code_suffix(status_code)
+              let inner_type = schema_ref_to_type_qualified(ref, op_id, suffix)
+              VariantWithType(name: variant_name, inner_type: inner_type)
+            }
+            None -> VariantEmpty(name: variant_name)
+          }
+      }
+  }
+}
+
+fn schema_ref_to_type_qualified(
+  ref: SchemaRef,
+  op_id: String,
+  suffix: String,
+) -> String {
+  case ref {
+    Inline(schema_obj) ->
+      schema_to_gleam_type_qualified(schema_obj, op_id, suffix)
+    Reference(name:, ..) -> "types." <> naming.schema_to_type_name(name)
+  }
+}
+
+fn schema_to_gleam_type_qualified(
+  schema_obj: SchemaObject,
+  op_id: String,
+  suffix: String,
+) -> String {
+  case schema_obj {
+    ArraySchema(items:, ..) ->
+      case items {
+        Reference(name:, ..) ->
+          "List(types." <> naming.schema_to_type_name(name) <> ")"
+        _ -> schema_dispatch.schema_type(schema_obj)
+      }
+    ObjectSchema(..) -> {
+      let type_name = naming.schema_to_type_name(op_id) <> suffix
+      "types." <> type_name
+    }
+    OneOfSchema(schemas:, ..) -> {
+      let all_refs =
+        list.all(schemas, fn(s) {
+          case s {
+            Reference(..) -> True
+            _ -> False
+          }
+        })
+      case all_refs {
+        True -> {
+          let type_name = naming.schema_to_type_name(op_id) <> suffix
+          "types." <> type_name
+        }
+        False -> schema_dispatch.schema_type(schema_obj)
+      }
+    }
+    AnyOfSchema(schemas:, ..) -> {
+      let all_refs =
+        list.all(schemas, fn(s) {
+          case s {
+            Reference(..) -> True
+            _ -> False
+          }
+        })
+      case all_refs {
+        True -> {
+          let type_name = naming.schema_to_type_name(op_id) <> suffix
+          "types." <> type_name
+        }
+        False -> schema_dispatch.schema_type(schema_obj)
+      }
+    }
+    AllOfSchema(..) -> {
+      let type_name = naming.schema_to_type_name(op_id) <> suffix
+      "types." <> type_name
+    }
+    _ -> schema_dispatch.schema_type(schema_obj)
   }
 }
 
