@@ -3818,6 +3818,35 @@ pub fn external_ref_nested_in_object_property_test() {
     dict.get(envelope_props, "note")
 }
 
+pub fn capability_registry_covers_content_type_response_helpers_test() {
+  // Every MIME string that `content_type.is_supported_response` accepts
+  // as directly-supported must have a Supported entry in the capability
+  // registry under the "response" category. This keeps the registry as
+  // the single source of truth and catches drift the first time
+  // somebody toggles support for a MIME without updating the registry.
+  let mimes_we_flag_supported = [
+    "application/json",
+    "text/plain",
+    "application/octet-stream",
+    "application/xml",
+    "text/xml",
+  ]
+  let registry_response_names =
+    capability.registry()
+    |> list.filter(fn(c) {
+      c.category == "response" && c.level == capability.Supported
+    })
+    |> list.map(fn(c) { c.name })
+  list.each(mimes_we_flag_supported, fn(mime) {
+    let parsed = content_type.from_string(mime)
+    content_type.is_supported_response(parsed) |> should.be_true()
+    case list.contains(registry_response_names, mime) {
+      True -> Nil
+      False -> mime |> should.equal("<expected in capability registry>")
+    }
+  })
+}
+
 pub fn capability_registry_names_appear_in_readme_boundaries_test() {
   // Every keyword the capability registry declares as Unsupported / NotHandled
   // / ParsedNotUsed must be mentioned by name inside the README's

@@ -171,6 +171,18 @@ pub fn registry() -> List(Capability) {
       Supported,
       "Binary passthrough",
     ),
+    Capability(
+      "application/xml",
+      "response",
+      Supported,
+      "XML passthrough; no structural decoding yet",
+    ),
+    Capability(
+      "text/xml",
+      "response",
+      Supported,
+      "XML passthrough; no structural decoding yet",
+    ),
     // Codegen scope
     Capability("webhooks", "scope", ParsedNotUsed, "Parsed but no codegen"),
     Capability("externalDocs", "scope", ParsedNotUsed, "Parsed but no codegen"),
