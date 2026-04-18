@@ -135,6 +135,12 @@ oaspec generate --config=oaspec.yaml
 
 You can also run `gleam run -- generate --config=oaspec.yaml`.
 
+### Runnable examples
+
+A working example lives under [`examples/`](./examples). The current entry is:
+
+- [`examples/petstore_client`](./examples/petstore_client) — minimal client usage against a canned HTTP transport. Run it from the repo root with `just example-petstore`.
+
 ## Configuration
 
 Generated server code is written to `<dir>/<package>`. Generated client code is written to `<dir>_client/<package>`. The basename of each output directory must match `package` so imports such as `import my_api/types` resolve correctly.

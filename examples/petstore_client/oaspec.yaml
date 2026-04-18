@@ -1,0 +1,5 @@
+input: test/fixtures/petstore.yaml
+output:
+  client: ./examples/petstore_client/src/api
+package: api
+mode: client

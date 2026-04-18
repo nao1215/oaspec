@@ -60,6 +60,11 @@ all: clean deps
 sync-check:
   bash scripts/check_sync.sh
 
+# Regenerate and run the petstore client example.
+example-petstore:
+  gleam run -- generate --config=examples/petstore_client/oaspec.yaml
+  cd examples/petstore_client && gleam deps download && gleam build --warnings-as-errors && gleam run
+
 # Regenerate golden test snapshot files
 update-golden:
   bash scripts/update_golden.sh
