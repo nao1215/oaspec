@@ -1052,6 +1052,7 @@ pub fn parse_schema_object(
       raw_type: None,
       unsupported_keywords:,
       internal: False,
+      provenance: schema.UserAuthored,
     )
 
   // Check for composition keywords first

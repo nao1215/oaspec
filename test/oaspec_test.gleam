@@ -23,6 +23,7 @@ import oaspec/openapi/diagnostic.{Diagnostic}
 import oaspec/openapi/hoist
 import oaspec/openapi/normalize
 import oaspec/openapi/parser
+import oaspec/openapi/provenance
 import oaspec/openapi/resolve
 import oaspec/openapi/resolver
 import oaspec/openapi/schema
@@ -972,6 +973,107 @@ components:
   // Hoisted schemas should exist (naming: PetType0, PetType1 or similar)
   // At minimum, components.schemas should have more than just PetType
   dict.size(components.schemas) |> should.equal(3)
+}
+
+pub fn hoist_property_provenance_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        address:
+          type: object
+          properties:
+            street: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let hoisted = hoist.hoist(spec)
+  let assert Some(components) = hoisted.components
+  let assert Ok(schema.Inline(pet)) = dict.get(components.schemas, "Pet")
+  schema.get_provenance(pet) |> should.equal(schema.UserAuthored)
+  let assert Ok(schema.Inline(pet_address)) =
+    dict.get(components.schemas, "PetAddress")
+  schema.get_provenance(pet_address)
+  |> should.equal(schema.HoistedProperty(parent: "Pet", property: "address"))
+}
+
+pub fn hoist_oneof_variant_provenance_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    PetType:
+      oneOf:
+        - type: object
+          properties:
+            bark_volume: { type: integer }
+        - type: object
+          properties:
+            purr_frequency: { type: number }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let hoisted = hoist.hoist(spec)
+  let assert Some(components) = hoisted.components
+  let assert Ok(schema.Inline(variant0)) =
+    dict.get(components.schemas, "PetTypeVariant0")
+  schema.get_provenance(variant0)
+  |> should.equal(schema.HoistedOneOfVariant(parent: "PetType", index: 0))
+  let assert Ok(schema.Inline(variant1)) =
+    dict.get(components.schemas, "PetTypeVariant1")
+  schema.get_provenance(variant1)
+  |> should.equal(schema.HoistedOneOfVariant(parent: "PetType", index: 1))
+}
+
+pub fn hoisted_schema_summary_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        address:
+          type: object
+          properties:
+            street: { type: string }
+    PetList:
+      type: array
+      items:
+        type: object
+        properties:
+          name: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let hoisted = hoist.hoist(spec)
+  let summary = provenance.hoisted_schema_summary(hoisted)
+  // User-authored: Pet, PetList
+  list.length(summary.user_authored) |> should.equal(2)
+  // Hoisted: PetAddress (property), PetListItem (array item)
+  list.length(summary.hoisted_properties) |> should.equal(1)
+  list.length(summary.hoisted_array_items) |> should.equal(1)
+  provenance.total_hoisted(summary) |> should.equal(2)
+  // Parent tracking is preserved through hoist metadata
+  let assert [#(prop_name, parent, property)] = summary.hoisted_properties
+  prop_name |> should.equal("PetAddress")
+  parent |> should.equal("Pet")
+  property |> should.equal("address")
 }
 
 pub fn hoist_inline_array_items_test() {

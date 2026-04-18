@@ -4,8 +4,11 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/openapi/schema.{
-  type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
-  Inline, ObjectSchema, OneOfSchema, Reference, Typed,
+  type OriginKind, type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema,
+  ArraySchema, HoistedAdditionalProperties, HoistedAllOfPart,
+  HoistedAnyOfVariant, HoistedArrayItem, HoistedOneOfVariant, HoistedParameter,
+  HoistedProperty, HoistedRequestBody, HoistedResponse, Inline, ObjectSchema,
+  OneOfSchema, Reference, Typed,
 }
 import oaspec/openapi/spec.{
   type OpenApiSpec, type PathItem, type RefOr, Components, OpenApiSpec, PathItem,
@@ -152,10 +155,14 @@ fn find_unique_name(
 
 /// Hoist a single SchemaRef if it is inline and complex.
 /// Returns the (possibly replaced) SchemaRef and updated state.
+/// The `origin` argument records where the hoisted schema came from so
+/// downstream tooling can distinguish synthetic schemas from user-authored
+/// components.
 fn hoist_schema_ref(
   schema_ref: SchemaRef,
   name_prefix: String,
   name_suffix: String,
+  origin: OriginKind,
   state: HoistState,
 ) -> #(SchemaRef, HoistState) {
   case schema_ref {
@@ -170,6 +177,7 @@ fn hoist_schema_ref(
             <> naming.to_pascal_case(name_suffix)
           let #(hoisted_obj, state) =
             hoist_within_schema(schema_obj, base_name, state)
+          let hoisted_obj = schema.set_provenance(hoisted_obj, origin)
 
           // Generate unique name and insert into new_schemas
           let #(unique_name, state) = make_unique_name(base_name, state)
@@ -197,6 +205,7 @@ fn hoist_schema_ref_always(
   schema_ref: SchemaRef,
   name_prefix: String,
   name_suffix: String,
+  origin: OriginKind,
   state: HoistState,
 ) -> #(SchemaRef, HoistState) {
   case schema_ref {
@@ -206,6 +215,7 @@ fn hoist_schema_ref_always(
         naming.to_pascal_case(name_prefix) <> naming.to_pascal_case(name_suffix)
       let #(hoisted_obj, state) =
         hoist_within_schema(schema_obj, base_name, state)
+      let hoisted_obj = schema.set_provenance(hoisted_obj, origin)
       let #(unique_name, state) = make_unique_name(base_name, state)
       let state =
         HoistState(
@@ -236,8 +246,9 @@ fn hoist_within_schema(
         |> list.fold(#(dict.new(), state), fn(acc, entry) {
           let #(props_acc, state) = acc
           let #(prop_name, prop_ref) = entry
+          let origin = HoistedProperty(parent: name_prefix, property: prop_name)
           let #(hoisted_ref, state) =
-            hoist_schema_ref(prop_ref, name_prefix, prop_name, state)
+            hoist_schema_ref(prop_ref, name_prefix, prop_name, origin, state)
           #(dict.insert(props_acc, prop_name, hoisted_ref), state)
         })
 
@@ -245,7 +256,13 @@ fn hoist_within_schema(
       let #(new_ap, state) = case additional_properties {
         Typed(ap_ref) -> {
           let #(hoisted, state) =
-            hoist_schema_ref(ap_ref, name_prefix, "Value", state)
+            hoist_schema_ref(
+              ap_ref,
+              name_prefix,
+              "Value",
+              HoistedAdditionalProperties(parent: name_prefix),
+              state,
+            )
           #(Typed(hoisted), state)
         }
         other -> #(other, state)
@@ -262,7 +279,13 @@ fn hoist_within_schema(
 
     ArraySchema(items:, ..) as arr -> {
       let #(hoisted_items, state) =
-        hoist_schema_ref(items, name_prefix, "Item", state)
+        hoist_schema_ref(
+          items,
+          name_prefix,
+          "Item",
+          HoistedArrayItem(parent: name_prefix),
+          state,
+        )
       #(ArraySchema(..arr, items: hoisted_items), state)
     }
 
@@ -272,7 +295,13 @@ fn hoist_within_schema(
           let #(schemas_acc, state) = acc
           let suffix = "Variant" <> int.to_string(idx)
           let #(hoisted, state) =
-            hoist_schema_ref_always(s_ref, name_prefix, suffix, state)
+            hoist_schema_ref_always(
+              s_ref,
+              name_prefix,
+              suffix,
+              HoistedOneOfVariant(parent: name_prefix, index: idx),
+              state,
+            )
           #([hoisted, ..schemas_acc], state)
         })
       #(
@@ -291,7 +320,13 @@ fn hoist_within_schema(
           let #(schemas_acc, state) = acc
           let suffix = "Variant" <> int.to_string(idx)
           let #(hoisted, state) =
-            hoist_schema_ref_always(s_ref, name_prefix, suffix, state)
+            hoist_schema_ref_always(
+              s_ref,
+              name_prefix,
+              suffix,
+              HoistedAnyOfVariant(parent: name_prefix, index: idx),
+              state,
+            )
           #([hoisted, ..schemas_acc], state)
         })
       #(
@@ -310,7 +345,13 @@ fn hoist_within_schema(
           let #(schemas_acc, state) = acc
           let suffix = "Part" <> int.to_string(idx)
           let #(hoisted, state) =
-            hoist_schema_ref(s_ref, name_prefix, suffix, state)
+            hoist_schema_ref(
+              s_ref,
+              name_prefix,
+              suffix,
+              HoistedAllOfPart(parent: name_prefix, index: idx),
+              state,
+            )
           // Mark hoisted allOf parts as internal so they don't appear
           // in the public generated API (types, decoders, encoders).
           let state = case hoisted {
@@ -483,7 +524,13 @@ fn hoist_parameters(
           spec.ParameterSchema(schema_ref) -> {
             let suffix = "Param" <> naming.to_pascal_case(param.name)
             let #(hoisted, state) =
-              hoist_schema_ref(schema_ref, op_id, suffix, state)
+              hoist_schema_ref(
+                schema_ref,
+                op_id,
+                suffix,
+                HoistedParameter(operation_id: op_id, name: param.name),
+                state,
+              )
             let new_param =
               spec.Parameter(..param, payload: spec.ParameterSchema(hoisted))
             #(list.append(params_acc, [Value(new_param)]), state)
@@ -512,7 +559,13 @@ fn hoist_request_body(
       case media_type.schema {
         Some(schema_ref) -> {
           let #(hoisted, state) =
-            hoist_schema_ref(schema_ref, op_id, "Request", state)
+            hoist_schema_ref(
+              schema_ref,
+              op_id,
+              "Request",
+              HoistedRequestBody(operation_id: op_id),
+              state,
+            )
           let mt = spec.MediaType(..media_type, schema: Some(hoisted))
           #(dict.insert(result, media_type_name, mt), state)
         }
@@ -544,7 +597,16 @@ fn hoist_responses(
               Some(schema_ref) -> {
                 let suffix = "Response" <> http.status_code_suffix(status_code)
                 let #(hoisted, state) =
-                  hoist_schema_ref(schema_ref, op_id, suffix, state)
+                  hoist_schema_ref(
+                    schema_ref,
+                    op_id,
+                    suffix,
+                    HoistedResponse(
+                      operation_id: op_id,
+                      status: http.status_code_suffix(status_code),
+                    ),
+                    state,
+                  )
                 let mt = spec.MediaType(..media_type, schema: Some(hoisted))
                 #(dict.insert(ct_result, media_type_name, mt), state)
               }

@@ -4,6 +4,22 @@ import gleam/option.{type Option}
 import gleam/string
 import oaspec/openapi/value.{type JsonValue}
 
+/// Origin of a schema — user-authored or hoisted during codegen.
+/// Hoisted variants carry the call-site context so tooling can explain
+/// where synthetic component schemas came from.
+pub type OriginKind {
+  UserAuthored
+  HoistedProperty(parent: String, property: String)
+  HoistedArrayItem(parent: String)
+  HoistedOneOfVariant(parent: String, index: Int)
+  HoistedAnyOfVariant(parent: String, index: Int)
+  HoistedAllOfPart(parent: String, index: Int)
+  HoistedRequestBody(operation_id: String)
+  HoistedResponse(operation_id: String, status: String)
+  HoistedParameter(operation_id: String, name: String)
+  HoistedAdditionalProperties(parent: String)
+}
+
 /// Shared metadata for all schema types.
 /// Extracted from variants to avoid duplication and ensure composition
 /// schemas (allOf/oneOf/anyOf) don't lose these fields.
@@ -21,6 +37,7 @@ pub type SchemaMetadata {
     raw_type: Option(List(String)),
     unsupported_keywords: List(String),
     internal: Bool,
+    provenance: OriginKind,
   )
 }
 
@@ -39,6 +56,7 @@ pub fn default_metadata() -> SchemaMetadata {
     raw_type: option.None,
     unsupported_keywords: [],
     internal: False,
+    provenance: UserAuthored,
   )
 }
 
@@ -179,6 +197,20 @@ pub fn set_internal(schema: SchemaObject) -> SchemaObject {
   let meta = get_metadata(schema)
   let meta = SchemaMetadata(..meta, internal: True)
   set_metadata(schema, meta)
+}
+
+/// Stamp the origin of a hoisted schema onto its metadata so downstream
+/// consumers (diagnostics, tooling) can distinguish user-authored schemas
+/// from synthetic ones created during the hoist pass.
+pub fn set_provenance(schema: SchemaObject, origin: OriginKind) -> SchemaObject {
+  let meta = get_metadata(schema)
+  let meta = SchemaMetadata(..meta, provenance: origin)
+  set_metadata(schema, meta)
+}
+
+/// Read the provenance of a schema. Unhoisted schemas return `UserAuthored`.
+pub fn get_provenance(schema: SchemaObject) -> OriginKind {
+  get_metadata(schema).provenance
 }
 
 /// Replace the metadata on a schema object.
