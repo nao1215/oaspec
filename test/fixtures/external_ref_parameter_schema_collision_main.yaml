@@ -1,0 +1,21 @@
+openapi: "3.0.3"
+info:
+  title: External Ref Parameter Schema Collision Main
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Widget:
+      type: object
+      required:
+        - color
+      properties:
+        color:
+          type: string
+  parameters:
+    WidgetHeader:
+      name: X-Widget
+      in: header
+      required: true
+      schema:
+        $ref: "./external_ref_nested_shared.yaml#/components/schemas/Widget"

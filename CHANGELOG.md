@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Nested external `$ref` inside `ArraySchema.items`: top-level array schemas whose `items` value is a relative-file fragment ref are hoisted under the same mechanism as property refs, sharing the cross-file collision tracker. Refs inside `additionalProperties` and composition branches remain unsupported (#151, subset of #98)
 - Nested external `$ref` inside `ObjectSchema.additionalProperties`: `Typed(SchemaRef)` values whose ref is relative-file are hoisted alongside property and items refs, reusing the same collision diagnostics. Refs inside composition branches remain unsupported (#153, subset of #98)
 - Nested external `$ref` inside composition branches (`allOf`, `oneOf`, `anyOf`): each variant in the schemas list is run through the same hoisting step as property and items refs. Collision diagnostics continue to fire across the shared imports tracker, so a composition branch that conflicts with a property ref in another schema still surfaces an error (#155, subset of #98)
+- External `$ref` inside `components.parameters.*.schema`: parameter schemas that point at a relative-file fragment ref are now hoisted into `components.schemas` and the inner ref is rewritten to local form, reusing the same collision diagnostics. Parameter objects referenced via `$ref` and `content` media-type payloads remain out of scope (#157, subset of #98)
 
 ## [0.12.0] - 2026-04-12
 

@@ -9,9 +9,12 @@
 ////   - ArraySchema item values (`items: $ref: ...`)
 ////   - ObjectSchema additionalProperties values (`additionalProperties: $ref: ...`)
 ////   - composition branches (`oneOf`, `anyOf`, `allOf` variant refs)
+////   - `components.parameters.*.schema: $ref: ...` (parameter schema only)
 ////
 //// Out of scope (see issue #98 parent):
-////   - external refs in parameters / request bodies / responses / path items
+////   - external `$ref` pointing at a parameter object itself
+////   - external refs in `components.parameters.*.content` media maps
+////   - external refs in request bodies / responses / path items
 ////   - HTTP/HTTPS URLs
 ////
 //// Name collisions — when an external ref would overwrite an existing local
@@ -55,14 +58,23 @@ pub fn resolve_external_component_refs(
         parse_file,
         original_local_names,
       ))
-      use nested_resolved <- result.try(process_nested_property_refs(
-        top_resolved,
+      use #(nested_resolved, nested_imports) <- result.try(
+        process_nested_property_refs(
+          top_resolved,
+          dir,
+          parse_file,
+          original_local_names,
+          top_imported,
+        ),
+      )
+      use param_resolved <- result.try(process_parameter_schemas(
+        nested_resolved,
         dir,
         parse_file,
         original_local_names,
-        top_imported,
+        nested_imports,
       ))
-      Ok(OpenApiSpec(..spec, components: Some(nested_resolved)))
+      Ok(OpenApiSpec(..spec, components: Some(param_resolved)))
     }
     _, _ -> Ok(spec)
   }
@@ -155,7 +167,10 @@ fn process_nested_property_refs(
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   original_local_names: List(String),
   top_imported: dict.Dict(String, String),
-) -> Result(Components(Unresolved), Diagnostic) {
+) -> Result(
+  #(Components(Unresolved), dict.Dict(String, #(String, SchemaRef))),
+  Diagnostic,
+) {
   let entries = dict.to_list(components.schemas)
   // Seed the nested-import tracker with every top-level external import so
   // a nested property that re-imports the same fragment from a different
@@ -286,7 +301,7 @@ fn process_nested_property_refs(
         False, _ -> d
       }
     })
-  Ok(Components(..components, schemas: merged))
+  Ok(#(Components(..components, schemas: merged), imports))
 }
 
 /// Placeholder target used to seed the nested-import tracker with top-level
@@ -295,6 +310,64 @@ fn process_nested_property_refs(
 /// on `Inline(_)` targets.
 fn no_target() -> SchemaRef {
   Reference(ref: "", name: "")
+}
+
+/// Walk `components.parameters`: for each inline `Parameter` whose payload is
+/// a `ParameterSchema(SchemaRef)` pointing at a relative-file external ref,
+/// hoist the target schema into `components.schemas` and rewrite the inner
+/// ref. Parameters expressed via `content` media type maps, `Ref` placeholders
+/// pointing at other parameter objects, and local refs all pass through.
+fn process_parameter_schemas(
+  components: Components(Unresolved),
+  base_dir: String,
+  parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
+  original_local_names: List(String),
+  seeded_imports: dict.Dict(String, #(String, SchemaRef)),
+) -> Result(Components(Unresolved), Diagnostic) {
+  let entries = dict.to_list(components.parameters)
+  use #(rewritten, imports) <- result.try(
+    list.try_fold(entries, #([], seeded_imports), fn(acc, entry) {
+      let #(collected, imports) = acc
+      let #(name, ref_or_param) = entry
+      case ref_or_param {
+        spec.Value(p) ->
+          case p.payload {
+            spec.ParameterSchema(schema_ref) -> {
+              use #(new_ref, new_imports) <- result.try(maybe_hoist_ref(
+                schema_ref,
+                base_dir,
+                parse_file,
+                imports,
+                original_local_names,
+              ))
+              let new_param =
+                spec.Parameter(..p, payload: spec.ParameterSchema(new_ref))
+              Ok(#([#(name, spec.Value(new_param)), ..collected], new_imports))
+            }
+            spec.ParameterContent(_) ->
+              Ok(#([#(name, ref_or_param), ..collected], imports))
+          }
+        spec.Ref(_) -> Ok(#([#(name, ref_or_param), ..collected], imports))
+      }
+    }),
+  )
+  let new_parameters =
+    list.fold(rewritten, dict.new(), fn(d, pair) {
+      dict.insert(d, pair.0, pair.1)
+    })
+  // Merge any newly-imported schemas into components.schemas that were not
+  // already present. Seeded entries carry a placeholder target and are
+  // filtered out by matching on `Inline(_)`.
+  let new_schemas =
+    dict.fold(imports, components.schemas, fn(d, frag_name, pair) {
+      let #(_source_path, target_schema) = pair
+      case dict.has_key(d, frag_name), target_schema {
+        True, _ -> d
+        False, Inline(_) -> dict.insert(d, frag_name, target_schema)
+        False, _ -> d
+      }
+    })
+  Ok(Components(..components, parameters: new_parameters, schemas: new_schemas))
 }
 
 /// Walk the properties dict of an ObjectSchema; for each property that is a

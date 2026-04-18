@@ -3410,6 +3410,36 @@ pub fn external_ref_nested_collision_across_files_rejected_test() {
   string.contains(msg, "already imported") |> should.be_true()
 }
 
+pub fn external_ref_in_parameter_schema_test() {
+  // A parameter defined under components.parameters whose schema is a
+  // relative-file $ref must hoist the target into components.schemas
+  // and rewrite the inner schema ref to local form.
+  let assert Ok(loaded) =
+    parser.parse_file("test/fixtures/external_ref_parameter_schema_main.yaml")
+  let assert Some(components) = loaded.components
+  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
+    dict.get(components.schemas, "Widget")
+  dict.has_key(widget_props, "sku") |> should.be_true()
+  let assert Ok(spec.Value(param)) =
+    dict.get(components.parameters, "WidgetHeader")
+  let assert spec.ParameterSchema(schema.Reference(ref: schema_ref, ..)) =
+    param.payload
+  schema_ref |> should.equal("#/components/schemas/Widget")
+}
+
+pub fn external_ref_parameter_schema_collision_with_local_schema_rejected_test() {
+  // A local Widget plus a parameter whose schema imports a different
+  // Widget from an external file — silent-shadowing must fire.
+  let result =
+    parser.parse_file(
+      "test/fixtures/external_ref_parameter_schema_collision_main.yaml",
+    )
+  let assert Error(err) = result
+  let msg = parser.parse_error_to_string(err)
+  string.contains(msg, "Widget") |> should.be_true()
+  string.contains(msg, "local schema") |> should.be_true()
+}
+
 pub fn external_ref_in_composition_branch_test() {
   // A composition schema (oneOf here) whose branch is a relative-file
   // $ref must hoist the target schema into components.schemas and
