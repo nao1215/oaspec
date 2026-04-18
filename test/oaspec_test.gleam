@@ -2042,6 +2042,37 @@ components:
   |> should.be_true()
 }
 
+pub fn encode_dynamic_fallback_emits_null_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /u:
+    get:
+      operationId: u
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Bag:
+      type: object
+      additionalProperties: true
+      properties:
+        name: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = decoders.generate(ctx)
+  let combined = list.fold(files, "", fn(acc, f) { acc <> f.content })
+  // Fallback branch must emit json.null(), never the classified type name.
+  string.contains(combined, "_ -> json.null()") |> should.be_true()
+  string.contains(combined, "json.string(dynamic.classify(value))")
+  |> should.be_false()
+}
+
 pub fn client_emits_unexpected_status_variant_test() {
   let yaml =
     "
