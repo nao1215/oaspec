@@ -229,6 +229,9 @@ fn generate_client(ctx: Context) -> String {
   let base_imports = [
     "gleam/http/request",
     "gleam/http",
+    // `gleam/result` is needed by the `use req <- result.try(...)` pattern
+    // that every generated operation emits for URL parsing.
+    "gleam/result",
     ctx.config.package <> "/decode",
     ctx.config.package <> "/response_types",
   ]
@@ -299,12 +302,12 @@ fn generate_client(ctx: Context) -> String {
   }
   let imports = case has_cookie_api_key {
     True -> {
-      // Need gleam/list for list.key_find and gleam/result for result.unwrap
-      let imports = case needs_list {
+      // Need gleam/list for list.key_find; gleam/result is already in
+      // base_imports unconditionally (used by every generated operation).
+      case needs_list {
         True -> imports
         False -> ["gleam/list", ..imports]
       }
-      ["gleam/result", ..imports]
     }
     False -> imports
   }
@@ -390,6 +393,7 @@ fn generate_client(ctx: Context) -> String {
     |> se.indent(1, "ConnectionError(detail: String)")
     |> se.indent(1, "TimeoutError")
     |> se.indent(1, "DecodeError(detail: String)")
+    |> se.indent(1, "InvalidUrl(detail: String)")
     |> se.indent(1, "UnexpectedStatus(status: Int, body: String)")
   let sb = case ctx.config.validate {
     True -> sb |> se.indent(1, "ValidationError(errors: List(String))")
@@ -802,12 +806,19 @@ fn generate_client_function(
     Some(url) -> "\"" <> url <> "\""
     None -> "config.base_url"
   }
+  // Fail with InvalidUrl instead of panicking on malformed base_url or path.
+  // `gleam/result` is included in base_imports unconditionally, so the `use`
+  // form below always compiles.
   let sb =
     sb
+    |> se.indent(1, "let full_url = " <> base_url_expr <> " <> path")
+    |> se.indent(1, "use req <- result.try(")
+    |> se.indent(2, "request.to(full_url)")
     |> se.indent(
-      1,
-      "let assert Ok(req) = request.to(" <> base_url_expr <> " <> path)",
+      2,
+      "|> result.map_error(fn(_) { InvalidUrl(detail: full_url) }),",
     )
+    |> se.indent(1, ")")
     |> se.indent(1, "let req = request.set_method(req, " <> http_method <> ")")
 
   // Only set content-type for requests with body

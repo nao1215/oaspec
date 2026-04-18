@@ -9,6 +9,7 @@ import gleam/http/request
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleam/string
 import gleam/uri
 
@@ -30,6 +31,7 @@ pub type ClientError {
   ConnectionError(detail: String)
   TimeoutError
   DecodeError(detail: String)
+  InvalidUrl(detail: String)
   UnexpectedStatus(status: Int, body: String)
 }
 
@@ -71,7 +73,11 @@ pub fn list_pets(
     "" -> path
     _ -> path <> "?" <> query_string
   }
-  let assert Ok(req) = request.to(config.base_url <> path)
+  let full_url = config.base_url <> path
+  use req <- result.try(
+    request.to(full_url)
+    |> result.map_error(fn(_) { InvalidUrl(detail: full_url) }),
+  )
   let req = request.set_method(req, http.Get)
   case config.send(req) {
     Error(e) -> Error(e)
@@ -98,7 +104,11 @@ pub fn create_pet(
   body: types.CreatePetRequest,
 ) -> Result(response_types.CreatePetResponse, ClientError) {
   let path = "/pets"
-  let assert Ok(req) = request.to(config.base_url <> path)
+  let full_url = config.base_url <> path
+  use req <- result.try(
+    request.to(full_url)
+    |> result.map_error(fn(_) { InvalidUrl(detail: full_url) }),
+  )
   let req = request.set_method(req, http.Post)
   let req = request.set_header(req, "content-type", "application/json")
   let req = request.set_body(req, encode.encode_create_pet_request(body))
@@ -130,7 +140,11 @@ pub fn get_pet(
   let path = "/pets/{petId}"
   let path =
     string.replace(path, "{petId}", uri.percent_encode(int.to_string(pet_id)))
-  let assert Ok(req) = request.to(config.base_url <> path)
+  let full_url = config.base_url <> path
+  use req <- result.try(
+    request.to(full_url)
+    |> result.map_error(fn(_) { InvalidUrl(detail: full_url) }),
+  )
   let req = request.set_method(req, http.Get)
   case config.send(req) {
     Error(e) -> Error(e)
@@ -160,7 +174,11 @@ pub fn delete_pet(
   let path = "/pets/{petId}"
   let path =
     string.replace(path, "{petId}", uri.percent_encode(int.to_string(pet_id)))
-  let assert Ok(req) = request.to(config.base_url <> path)
+  let full_url = config.base_url <> path
+  use req <- result.try(
+    request.to(full_url)
+    |> result.map_error(fn(_) { InvalidUrl(detail: full_url) }),
+  )
   let req = request.set_method(req, http.Delete)
   case config.send(req) {
     Error(e) -> Error(e)

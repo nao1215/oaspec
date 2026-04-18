@@ -6,6 +6,7 @@ import api/response_types
 import api/types
 import gleam/http
 import gleam/http/request
+import gleam/result
 import gleam/string
 import gleam/uri
 
@@ -27,6 +28,7 @@ pub type ClientError {
   ConnectionError(detail: String)
   TimeoutError
   DecodeError(detail: String)
+  InvalidUrl(detail: String)
   UnexpectedStatus(status: Int, body: String)
 }
 
@@ -49,7 +51,11 @@ pub fn post_search(
   body: Option(types.PostSearchRequest),
 ) -> Result(response_types.PostSearchResponse, ClientError) {
   let path = "/search"
-  let assert Ok(req) = request.to(config.base_url <> path)
+  let full_url = config.base_url <> path
+  use req <- result.try(
+    request.to(full_url)
+    |> result.map_error(fn(_) { InvalidUrl(detail: full_url) }),
+  )
   let req = request.set_method(req, http.Post)
   let req = case body {
     Some(body) -> {
@@ -83,7 +89,11 @@ pub fn get_user(
 ) -> Result(response_types.GetUserResponse, ClientError) {
   let path = "/users/{userId}"
   let path = string.replace(path, "{userId}", uri.percent_encode(user_id))
-  let assert Ok(req) = request.to(config.base_url <> path)
+  let full_url = config.base_url <> path
+  use req <- result.try(
+    request.to(full_url)
+    |> result.map_error(fn(_) { InvalidUrl(detail: full_url) }),
+  )
   let req = request.set_method(req, http.Get)
   case config.send(req) {
     Error(e) -> Error(e)
@@ -115,7 +125,11 @@ pub fn post_webhook(
   body: Option(types.WebhookEvent),
 ) -> Result(response_types.PostWebhookResponse, ClientError) {
   let path = "/webhook"
-  let assert Ok(req) = request.to(config.base_url <> path)
+  let full_url = config.base_url <> path
+  use req <- result.try(
+    request.to(full_url)
+    |> result.map_error(fn(_) { InvalidUrl(detail: full_url) }),
+  )
   let req = request.set_method(req, http.Post)
   let req = case body {
     Some(body) -> {

@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Generated enum decoders now include the rejected string in their failure message (e.g. `"PetStatus: unknown variant adopted"`) instead of dropping it (#125)
 - Generated clients distinguish unexpected HTTP statuses from decode failures via a new `UnexpectedStatus(status: Int, body: String)` variant on `ClientError`; previously an unknown status was reported as `DecodeError` and indistinguishable from JSON decode failures (#127)
 - `encode_dynamic` fallback now emits `json.null()` for unsupported classifications instead of the classified type name (e.g. `"Dict"`), which silently corrupted outgoing payloads (#129)
+- Generated clients no longer panic on malformed `base_url` or path: URL parse failures are reported via a new `ClientError.InvalidUrl(detail)` variant instead of crashing the caller (#131)
 
 ## [0.12.0] - 2026-04-12
 

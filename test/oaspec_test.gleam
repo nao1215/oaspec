@@ -2042,6 +2042,38 @@ components:
   |> should.be_true()
 }
 
+pub fn client_emits_invalid_url_variant_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let combined = list.fold(files, "", fn(acc, f) { acc <> f.content })
+  // InvalidUrl is declared on ClientError.
+  string.contains(combined, "InvalidUrl(detail: String)") |> should.be_true()
+  // Operations no longer panic on request.to failures.
+  string.contains(combined, "use req <- result.try(") |> should.be_true()
+  string.contains(
+    combined,
+    "result.map_error(fn(_) { InvalidUrl(detail: full_url) })",
+  )
+  |> should.be_true()
+  // The old assert-pattern is gone.
+  string.contains(combined, "let assert Ok(req) = request.to")
+  |> should.be_false()
+}
+
 pub fn encode_dynamic_fallback_emits_null_test() {
   let yaml =
     "
