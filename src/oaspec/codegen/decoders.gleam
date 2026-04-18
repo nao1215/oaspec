@@ -49,7 +49,7 @@ fn generate_decoders(
   ctx: Context,
   operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
 ) -> String {
-  let schemas = case ctx.spec.components {
+  let schemas = case context.spec(ctx).components {
     Some(components) ->
       list.sort(dict.to_list(components.schemas), fn(a, b) {
         string.compare(a.0, b.0)
@@ -90,7 +90,7 @@ fn generate_decoders(
     False -> ["gleam/dynamic/decode", "gleam/json"]
   }
   let base_imports = case needs_types {
-    True -> list.append(base_imports, [ctx.config.package <> "/types"])
+    True -> list.append(base_imports, [context.config(ctx).package <> "/types"])
     False -> base_imports
   }
   let imports = case needs_option {
@@ -102,7 +102,7 @@ fn generate_decoders(
     se.file_header(context.version)
     |> se.imports(imports)
 
-  let schemas = case ctx.spec.components {
+  let schemas = case context.spec(ctx).components {
     Some(components) ->
       list.sort(dict.to_list(components.schemas), fn(a, b) {
         string.compare(a.0, b.0)
@@ -1131,7 +1131,7 @@ fn schema_ref_is_nullable(ref: SchemaRef, ctx: Context) -> Bool {
   case ref {
     Inline(schema) -> schema.is_nullable(schema)
     Reference(..) ->
-      case resolver.resolve_schema_ref(ref, ctx.spec) {
+      case resolver.resolve_schema_ref(ref, context.spec(ctx)) {
         Ok(s) -> schema.is_nullable(s)
         Error(_) -> False
       }
@@ -1147,7 +1147,7 @@ fn generate_encoders(
   ctx: Context,
   operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
 ) -> String {
-  let schemas = case ctx.spec.components {
+  let schemas = case context.spec(ctx).components {
     Some(components) ->
       list.sort(dict.to_list(components.schemas), fn(a, b) {
         string.compare(a.0, b.0)
@@ -1203,7 +1203,7 @@ fn generate_encoders(
     _, _ -> ["gleam/json"]
   }
   let imports = case needs_types {
-    True -> list.append(base_imports, [ctx.config.package <> "/types"])
+    True -> list.append(base_imports, [context.config(ctx).package <> "/types"])
     False -> base_imports
   }
 

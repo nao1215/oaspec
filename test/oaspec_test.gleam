@@ -718,7 +718,7 @@ pub fn parse_missing_responses_succeeds_with_empty_dict_test() {
 pub fn validate_missing_responses_rejects_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/missing_responses.yaml")
-  let result = generate.generate(spec, make_ctx_from_spec(spec).config)
+  let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
       let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
@@ -8433,7 +8433,7 @@ pub fn oss_libopenapi_burgershop_rejects_not_keyword_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_libopenapi_burgershop.yaml")
   // Generate fails via capability_check due to "not" keyword
-  let result = generate.generate(spec, make_ctx_from_spec(spec).config)
+  let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
       let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
@@ -8496,7 +8496,7 @@ pub fn oss_oapi_codegen_nullable_generates_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_oapi_codegen_nullable.yaml")
   let ctx = make_ctx_from_spec(spec)
-  let result = generate.generate(spec, ctx.config)
+  let result = generate.generate(spec, context.config(ctx))
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
@@ -8525,7 +8525,7 @@ pub fn oss_oapi_codegen_allof_additional_generates_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_oapi_codegen_allof_additional.yaml")
   let ctx = make_ctx_from_spec(spec)
-  let result = generate.generate(spec, ctx.config)
+  let result = generate.generate(spec, context.config(ctx))
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
@@ -8577,7 +8577,7 @@ pub fn oss_oapi_codegen_issue_312_generates_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_oapi_codegen_issue_312.yaml")
   let ctx = make_ctx_from_spec(spec)
-  let result = generate.generate(spec, ctx.config)
+  let result = generate.generate(spec, context.config(ctx))
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
@@ -8607,7 +8607,7 @@ pub fn oss_oapi_codegen_issue_52_generates_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_oapi_codegen_issue_52.yaml")
   let ctx = make_ctx_from_spec(spec)
-  let result = generate.generate(spec, ctx.config)
+  let result = generate.generate(spec, context.config(ctx))
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
@@ -8629,7 +8629,7 @@ pub fn oss_oapi_codegen_issue_1168_problem_json_generates_test() {
   // The full generate pipeline should succeed without validation errors.
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_oapi_codegen_issue_1168.yaml")
-  let result = generate.generate(spec, make_ctx_from_spec(spec).config)
+  let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Ok(_summary) -> should.be_true(True)
     Error(_) -> should.be_true(False)
@@ -8656,7 +8656,7 @@ pub fn oss_oapi_codegen_issue_579_generates_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_oapi_codegen_issue_579.yaml")
   let ctx = make_ctx_from_spec(spec)
-  let result = generate.generate(spec, ctx.config)
+  let result = generate.generate(spec, context.config(ctx))
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
@@ -8677,7 +8677,7 @@ pub fn oss_oapi_codegen_issue_2185_generates_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_oapi_codegen_issue_2185.yaml")
   let ctx = make_ctx_from_spec(spec)
-  let result = generate.generate(spec, ctx.config)
+  let result = generate.generate(spec, context.config(ctx))
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
@@ -8708,7 +8708,7 @@ pub fn oss_openapi_gen_issue_9719_generates_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_openapi_gen_issue_9719.yaml")
   let ctx = make_ctx_from_spec(spec)
-  let result = generate.generate(spec, ctx.config)
+  let result = generate.generate(spec, context.config(ctx))
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
@@ -8781,7 +8781,7 @@ pub fn oss_kiota_discriminator_generates_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_kiota_discriminator.yaml")
   let ctx = make_ctx_from_spec(spec)
-  let result = generate.generate(spec, ctx.config)
+  let result = generate.generate(spec, context.config(ctx))
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
@@ -8801,7 +8801,7 @@ pub fn oss_kiota_derived_types_generates_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_kiota_derived_types.yaml")
   let ctx = make_ctx_from_spec(spec)
-  let result = generate.generate(spec, ctx.config)
+  let result = generate.generate(spec, context.config(ctx))
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
@@ -8822,7 +8822,7 @@ pub fn oss_kiota_multi_security_generates_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_kiota_multi_security.yaml")
   let ctx = make_ctx_from_spec(spec)
-  let result = generate.generate(spec, ctx.config)
+  let result = generate.generate(spec, context.config(ctx))
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
@@ -8975,7 +8975,7 @@ pub fn oss_openapi_gen_issue_11897_generates_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_openapi_gen_issue_11897.yaml")
   let ctx = make_ctx_from_spec(spec)
-  let result = generate.generate(spec, ctx.config)
+  let result = generate.generate(spec, context.config(ctx))
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) ->
@@ -9001,7 +9001,7 @@ pub fn oss_openapi_gen_issue_1666_generates_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_openapi_gen_issue_1666.yaml")
   let ctx = make_ctx_from_spec(spec)
-  let result = generate.generate(spec, ctx.config)
+  let result = generate.generate(spec, context.config(ctx))
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) ->
@@ -9027,7 +9027,7 @@ pub fn oss_openapi_gen_issue_18516_generates_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_openapi_gen_issue_18516.yaml")
   let ctx = make_ctx_from_spec(spec)
-  let result = generate.generate(spec, ctx.config)
+  let result = generate.generate(spec, context.config(ctx))
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) ->
@@ -9691,7 +9691,7 @@ pub fn oss_swagger_parser_java_31_schema_siblings_rejects_test() {
       "test/fixtures/oss_swagger_parser_java_31_schema_siblings.yaml",
     )
   // Generate fails via capability_check due to dependentSchemas, if/then/else
-  let result = generate.generate(spec, make_ctx_from_spec(spec).config)
+  let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
       let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
@@ -9749,7 +9749,7 @@ pub fn unsupported_if_then_else_capability_check_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/unsupported_if_then_else.yaml")
   // Generate fails via capability_check
-  let result = generate.generate(spec, make_ctx_from_spec(spec).config)
+  let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
       let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
@@ -9767,7 +9767,7 @@ pub fn unsupported_prefix_items_capability_check_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/unsupported_prefix_items.yaml")
   // Generate fails via capability_check
-  let result = generate.generate(spec, make_ctx_from_spec(spec).config)
+  let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
       let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
@@ -9785,7 +9785,7 @@ pub fn unsupported_not_capability_check_test() {
   // Parse succeeds — lossless parser stores unsupported keywords
   let assert Ok(spec) = parser.parse_file("test/fixtures/unsupported_not.yaml")
   // Generate fails via capability_check
-  let result = generate.generate(spec, make_ctx_from_spec(spec).config)
+  let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
       let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
@@ -9802,7 +9802,7 @@ pub fn unsupported_defs_capability_check_test() {
   // Parse succeeds — lossless parser stores unsupported keywords
   let assert Ok(spec) = parser.parse_file("test/fixtures/unsupported_defs.yaml")
   // Generate fails via capability_check
-  let result = generate.generate(spec, make_ctx_from_spec(spec).config)
+  let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
       let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
@@ -9864,7 +9864,7 @@ pub fn schema_no_type_with_properties_parses_test() {
 pub fn validate_invalid_security_ref_rejects_test() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/invalid_security_ref.yaml")
-  let result = generate.generate(spec, make_ctx_from_spec(spec).config)
+  let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
       let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
@@ -10045,7 +10045,7 @@ pub fn resolve_component_alias_test() {
   let assert Ok(spec.Ref(_)) = dict.get(components.parameters, "AliasedLimit")
 
   // After resolve (via generate pipeline): AliasEntry becomes ConcreteEntry
-  let result = generate.generate(spec, make_ctx_from_spec(spec).config)
+  let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Ok(_) -> should.be_true(True)
     Error(generate.ValidationErrors(errors:)) -> {
@@ -10069,7 +10069,7 @@ pub fn capability_check_uses_registry_test() {
   let assert Some(components) = spec.components
   dict.size(components.schemas) |> should.not_equal(0)
   // Generate fails via capability_check (not parser)
-  let result = generate.generate(spec, make_ctx_from_spec(spec).config)
+  let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
       let details = list.map(errors, fn(e) { diagnostic.to_string(e) })
@@ -10126,7 +10126,7 @@ pub fn yaml_error_has_source_location_test() {
 pub fn pipeline_end_to_end_test() {
   let assert Ok(spec) = parser.parse_file("test/fixtures/petstore.yaml")
   let ctx = make_ctx_from_spec(spec)
-  let result = generate.generate(spec, ctx.config)
+  let result = generate.generate(spec, context.config(ctx))
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {

@@ -17,7 +17,7 @@ pub fn generate_all(
   on_write: fn(String) -> Nil,
 ) -> Result(List(String), WriteError) {
   let files = gen.generate_all_files(ctx)
-  write_all(files, ctx.config, on_write)
+  write_all(files, context.config(ctx), on_write)
 }
 
 /// Write pre-generated files to disk based on configuration.

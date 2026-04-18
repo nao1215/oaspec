@@ -271,7 +271,7 @@ fn validate_server_structured_param(
   param: spec.Parameter(Resolved),
   ctx: Context,
 ) -> List(Diagnostic) {
-  case ctx.config.mode {
+  case context.config(ctx).mode {
     config.Client -> []
     _ -> {
       let schema_obj = resolve_schema_object(spec.parameter_schema(param), ctx)
@@ -414,7 +414,7 @@ fn validate_complex_param_schema(
         | Some(AnyOfSchema(..)) ->
           case param.in_ {
             spec.InPath ->
-              case ctx.config.mode {
+              case context.config(ctx).mode {
                 config.Client -> []
                 _ -> [
                   diagnostic.validation(
@@ -485,7 +485,7 @@ fn resolve_schema_object(
   case schema_ref {
     Some(Inline(schema_obj)) -> Some(schema_obj)
     Some(schema_ref) ->
-      case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
+      case resolver.resolve_schema_ref(schema_ref, context.spec(ctx)) {
         Ok(schema_obj) -> Some(schema_obj)
         Error(_) -> None
       }
@@ -658,7 +658,7 @@ fn validate_server_form_urlencoded_request_body(
   content_keys: List(String),
   ctx: Context,
 ) -> List(Diagnostic) {
-  case ctx.config.mode {
+  case context.config(ctx).mode {
     config.Client -> []
     _ ->
       case dict.get(content, "application/x-www-form-urlencoded") {
@@ -715,7 +715,7 @@ fn validate_server_request_body_content_types(
   content_keys: List(String),
   ctx: Context,
 ) -> List(Diagnostic) {
-  case ctx.config.mode {
+  case context.config(ctx).mode {
     config.Client -> []
     _ -> {
       let non_json_but_supported =
@@ -748,7 +748,7 @@ fn validate_server_multipart_request_body(
   content_keys: List(String),
   ctx: Context,
 ) -> List(Diagnostic) {
-  case ctx.config.mode {
+  case context.config(ctx).mode {
     config.Client -> []
     _ ->
       case dict.get(content, "multipart/form-data") {
@@ -913,7 +913,7 @@ fn validate_responses(
 
 /// Validate component schemas recursively.
 fn validate_component_schemas(ctx: Context) -> List(Diagnostic) {
-  let schemas = case ctx.spec.components {
+  let schemas = case context.spec(ctx).components {
     Some(components) -> dict.to_list(components.schemas)
     None -> []
   }
@@ -952,7 +952,7 @@ fn validate_schema_ref_recursive(
           ),
         ]
         True ->
-          case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
+          case resolver.resolve_schema_ref(schema_ref, context.spec(ctx)) {
             Ok(_) -> []
             Error(_) -> [
               diagnostic.validation(
@@ -1036,13 +1036,13 @@ fn validate_security_schemes(
   ctx: Context,
   operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
 ) -> List(Diagnostic) {
-  let scheme_names = case ctx.spec.components {
+  let scheme_names = case context.spec(ctx).components {
     Some(components) -> dict.keys(components.security_schemes)
     None -> []
   }
 
   let global_errors =
-    list.flat_map(ctx.spec.security, fn(req) {
+    list.flat_map(context.spec(ctx).security, fn(req) {
       list.filter_map(req.schemes, fn(scheme_ref) {
         case list.contains(scheme_names, scheme_ref.scheme_name) {
           True -> Error(Nil)

@@ -150,7 +150,7 @@ pub fn inline_schema_to_decoder(s: schema.SchemaObject) -> String {
 /// Return a function expression that converts an array item to String.
 /// Used in generated code: `list.map(param, <fn>)`.
 pub fn array_item_to_string_fn(items: schema.SchemaRef, ctx: Context) -> String {
-  schema_dispatch.to_string_fn(items, ctx.spec)
+  schema_dispatch.to_string_fn(items, context.spec(ctx))
 }
 
 /// Convert a deepObject array item to a string expression.
@@ -160,7 +160,11 @@ pub fn deep_object_array_item_to_string(
 ) -> String {
   case prop_ref {
     Inline(schema.ArraySchema(items:, ..)) ->
-      schema_dispatch.schema_ref_to_string_expr(items, "item", ctx.spec)
+      schema_dispatch.schema_ref_to_string_expr(
+        items,
+        "item",
+        context.spec(ctx),
+      )
     _ -> "item"
   }
 }

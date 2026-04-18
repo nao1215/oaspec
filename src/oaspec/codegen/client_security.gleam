@@ -186,7 +186,7 @@ fn generate_scheme_some_branch(
   scheme_ref: spec.SecuritySchemeRef,
   indent: Int,
 ) -> se.StringBuilder {
-  case ctx.spec.components {
+  case context.spec(ctx).components {
     Some(components) ->
       case dict.get(components.security_schemes, scheme_ref.scheme_name) {
         Ok(spec.Value(spec.ApiKeyScheme(
@@ -285,7 +285,7 @@ fn generate_scheme_apply(
   val_var: String,
   indent: Int,
 ) -> se.StringBuilder {
-  case ctx.spec.components {
+  case context.spec(ctx).components {
     Some(components) ->
       case dict.get(components.security_schemes, scheme_ref.scheme_name) {
         Ok(spec.Value(spec.ApiKeyScheme(

@@ -34,7 +34,7 @@ pub fn merge_allof_schemas(
     fn(acc, s_ref, idx) {
       let resolved = case s_ref {
         Inline(obj) -> Ok(obj)
-        Reference(..) -> resolver.resolve_schema_ref(s_ref, ctx.spec)
+        Reference(..) -> resolver.resolve_schema_ref(s_ref, context.spec(ctx))
       }
       case resolved {
         Ok(ObjectSchema(properties:, required:, additional_properties:, ..)) -> {

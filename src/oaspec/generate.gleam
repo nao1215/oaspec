@@ -131,11 +131,11 @@ pub fn validate_only(
 /// Pure file generation: produce all GeneratedFile values without any IO.
 pub fn generate_all_files(ctx: Context) -> List(GeneratedFile) {
   let shared = generate_shared(ctx)
-  let server_files = case ctx.config.mode {
+  let server_files = case context.config(ctx).mode {
     Server | Both -> server.generate(ctx)
     Client -> []
   }
-  let client_files = case ctx.config.mode {
+  let client_files = case context.config(ctx).mode {
     Client | Both -> client.generate(ctx)
     Server -> []
   }

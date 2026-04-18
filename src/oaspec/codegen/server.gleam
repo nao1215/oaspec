@@ -42,8 +42,8 @@ fn generate_handlers(
   let sb =
     se.file_header(context.version)
     |> se.imports([
-      ctx.config.package <> "/request_types",
-      ctx.config.package <> "/response_types",
+      context.config(ctx).package <> "/request_types",
+      context.config(ctx).package <> "/response_types",
     ])
 
   let sb =
@@ -456,7 +456,7 @@ fn generate_router(
   }
   // json is also needed when guard validation is enabled (for 422 error responses)
   let needs_json_for_guards =
-    ctx.config.validate
+    context.config(ctx).validate
     && list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       operation_needs_guard_validation(operation, ctx)
@@ -474,38 +474,41 @@ fn generate_router(
     False -> std_imports
   }
 
-  let pkg_imports = [ctx.config.package <> "/handlers"]
+  let pkg_imports = [context.config(ctx).package <> "/handlers"]
   let pkg_imports = case
     has_deep_object || has_form_urlencoded_body || has_multipart_body
   {
-    True -> list.append(pkg_imports, [ctx.config.package <> "/types"])
+    True -> list.append(pkg_imports, [context.config(ctx).package <> "/types"])
     False -> pkg_imports
   }
   let pkg_imports = case needs_decode {
-    True -> list.append(pkg_imports, [ctx.config.package <> "/decode"])
+    True -> list.append(pkg_imports, [context.config(ctx).package <> "/decode"])
     False -> pkg_imports
   }
   let pkg_imports = case needs_encode {
-    True -> list.append(pkg_imports, [ctx.config.package <> "/encode"])
+    True -> list.append(pkg_imports, [context.config(ctx).package <> "/encode"])
     False -> pkg_imports
   }
   let pkg_imports = case has_params_ops {
     True ->
       list.append(pkg_imports, [
-        ctx.config.package <> "/request_types",
-        ctx.config.package <> "/response_types",
+        context.config(ctx).package <> "/request_types",
+        context.config(ctx).package <> "/response_types",
       ])
-    False -> list.append(pkg_imports, [ctx.config.package <> "/response_types"])
+    False ->
+      list.append(pkg_imports, [
+        context.config(ctx).package <> "/response_types",
+      ])
   }
   // Import guards module when validation is enabled and any operation body has validators
   let needs_guards =
-    ctx.config.validate
+    context.config(ctx).validate
     && list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       operation_needs_guard_validation(operation, ctx)
     })
   let pkg_imports = case needs_guards {
-    True -> list.append(pkg_imports, [ctx.config.package <> "/guards"])
+    True -> list.append(pkg_imports, [context.config(ctx).package <> "/guards"])
     False -> pkg_imports
   }
 
@@ -948,7 +951,7 @@ fn generate_safe_request_and_dispatch(
 
   // Check if guard validation should be emitted for this body
   let needs_guard_validation =
-    ctx.config.validate
+    context.config(ctx).validate
     && needs_body_guard
     && {
       case body_schema_ref_name {

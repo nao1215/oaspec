@@ -12,7 +12,7 @@ pub fn collect_operations(
   ctx: Context,
 ) -> List(#(String, Operation(Resolved), String, HttpMethod)) {
   let paths =
-    list.sort(dict.to_list(ctx.spec.paths), fn(a, b) {
+    list.sort(dict.to_list(context.spec(ctx).paths), fn(a, b) {
       string.compare(a.0, b.0)
     })
   list.flat_map(paths, fn(entry) {
@@ -53,7 +53,7 @@ pub fn collect_operations(
             // Some([...]) → use operation-level.
             let effective_security = case operation.security {
               Some(sec) -> sec
-              None -> ctx.spec.security
+              None -> context.spec(ctx).security
             }
             // Inherit path-level servers when operation doesn't define its own.
             // OpenAPI precedence: operation.servers > path_item.servers > spec.servers

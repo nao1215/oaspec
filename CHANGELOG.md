@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Callback handler stubs (`fn <op>_callback_<name>_<suffix>() -> String`) are no longer emitted. They carried no request type, no response type, and no execution path, so they were more misleading than useful. Callbacks are still parsed and resolved; treat them as parsed-but-not-codegen until typed support is added (#117)
 - `middleware.gleam` is no longer part of the default generated surface. Its `Handler(req, res) = fn(req) -> Result(res, _)` shape did not compose with the generated client or server APIs, so it was a standalone demo module rather than a reusable artifact. The `oaspec/codegen/middleware` source module stays in the tree as a library-level helper for anyone assembling their own chain (#116)
 
+### Changed
+
+- `oaspec/codegen/context.Context` is now declared `pub opaque type`. External callers must use `context.new/2` to construct and `context.spec/1` / `context.config/1` to read fields instead of pattern-matching on the record. First step of parent issue #41; Config / Module / Declaration to follow (#136)
+
 ## [0.12.0] - 2026-04-12
 
 ### Added

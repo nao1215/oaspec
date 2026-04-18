@@ -95,7 +95,7 @@ fn generate_client(ctx: Context) -> String {
       case p.payload {
         ParameterSchema(Inline(schema.ArraySchema(..))) -> True
         ParameterSchema(Reference(..) as sr) ->
-          case resolver.resolve_schema_ref(sr, ctx.spec) {
+          case resolver.resolve_schema_ref(sr, context.spec(ctx)) {
             Ok(schema.ArraySchema(..)) -> True
             _ -> False
           }
@@ -176,7 +176,7 @@ fn generate_client(ctx: Context) -> String {
       }
     })
     || {
-      let security_schemes = case ctx.spec.components {
+      let security_schemes = case context.spec(ctx).components {
         Some(c) -> dict.to_list(c.security_schemes)
         _ -> []
       }
@@ -196,7 +196,7 @@ fn generate_client(ctx: Context) -> String {
   let needs_option =
     import_analysis.operations_have_optional_params(operations)
     || {
-      let security_schemes = case ctx.spec.components {
+      let security_schemes = case context.spec(ctx).components {
         Some(c) -> dict.to_list(c.security_schemes)
         _ -> []
       }
@@ -216,7 +216,7 @@ fn generate_client(ctx: Context) -> String {
           ..,
         ))) -> True
         ParameterSchema(Reference(..) as sr) ->
-          case resolver.resolve_schema_ref(sr, ctx.spec) {
+          case resolver.resolve_schema_ref(sr, context.spec(ctx)) {
             Ok(schema.IntegerSchema(..)) -> True
             Ok(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..)) ->
               True
@@ -232,8 +232,8 @@ fn generate_client(ctx: Context) -> String {
     // `gleam/result` is needed by the `use req <- result.try(...)` pattern
     // that every generated operation emits for URL parsing.
     "gleam/result",
-    ctx.config.package <> "/decode",
-    ctx.config.package <> "/response_types",
+    context.config(ctx).package <> "/decode",
+    context.config(ctx).package <> "/response_types",
   ]
   let base_imports = case needs_int {
     True -> ["gleam/int", ..base_imports]
@@ -246,7 +246,10 @@ fn generate_client(ctx: Context) -> String {
   let base_imports = case needs_typed_schemas {
     True ->
       list.append(
-        [ctx.config.package <> "/types", ctx.config.package <> "/encode"],
+        [
+          context.config(ctx).package <> "/types",
+          context.config(ctx).package <> "/encode",
+        ],
         base_imports,
       )
     False -> base_imports
@@ -289,7 +292,7 @@ fn generate_client(ctx: Context) -> String {
   }
 
   // result module needed for cookie-based apiKey security (reading existing cookie header)
-  let has_cookie_api_key = case ctx.spec.components {
+  let has_cookie_api_key = case context.spec(ctx).components {
     Some(c) ->
       list.any(dict.to_list(c.security_schemes), fn(entry) {
         case entry {
@@ -313,7 +316,7 @@ fn generate_client(ctx: Context) -> String {
   }
   // Import guards module when validation is enabled and any operation body has validators
   let needs_guards =
-    ctx.config.validate
+    context.config(ctx).validate
     && list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       case operation.request_body {
@@ -333,7 +336,7 @@ fn generate_client(ctx: Context) -> String {
       }
     })
   let imports = case needs_guards {
-    True -> [ctx.config.package <> "/guards", ..imports]
+    True -> [context.config(ctx).package <> "/guards", ..imports]
     False -> imports
   }
 
@@ -342,7 +345,7 @@ fn generate_client(ctx: Context) -> String {
     |> se.imports(imports)
 
   // Collect security schemes
-  let security_schemes = case ctx.spec.components {
+  let security_schemes = case context.spec(ctx).components {
     Some(components) -> ir_build.sorted_entries(components.security_schemes)
     _ -> []
   }
@@ -395,7 +398,7 @@ fn generate_client(ctx: Context) -> String {
     |> se.indent(1, "DecodeError(detail: String)")
     |> se.indent(1, "InvalidUrl(detail: String)")
     |> se.indent(1, "UnexpectedStatus(status: Int, body: String)")
-  let sb = case ctx.config.validate {
+  let sb = case context.config(ctx).validate {
     True -> sb |> se.indent(1, "ValidationError(errors: List(String))")
     False -> sb
   }
@@ -463,7 +466,7 @@ fn generate_default_base_url(
   sb: se.StringBuilder,
   ctx: Context,
 ) -> se.StringBuilder {
-  case ctx.spec.servers {
+  case context.spec(ctx).servers {
     [first_server, ..] -> {
       let variables = ir_build.sorted_entries(first_server.variables)
       let resolved_url =
@@ -606,7 +609,7 @@ fn generate_client_function(
 
   // Determine if client-side guard validation is needed for the body
   let client_guard_schema_name = case
-    ctx.config.validate,
+    context.config(ctx).validate,
     operation.request_body
   {
     True, Some(Value(rb)) -> {
@@ -974,7 +977,7 @@ fn generate_client_function(
   // applies only the first one whose credentials are all present.
   let effective_security = case operation.security {
     Some(sec) -> sec
-    None -> ctx.spec.security
+    None -> context.spec(ctx).security
   }
   let sb = case effective_security {
     [] -> sb

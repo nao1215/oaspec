@@ -19,7 +19,7 @@ import oaspec/util/string_extra as se
 /// Check whether a named component schema has a composite validator.
 /// Used by server/client generators to decide whether to emit guard calls.
 pub fn schema_has_validator(name: String, ctx: Context) -> Bool {
-  case ctx.spec.components {
+  case context.spec(ctx).components {
     Some(components) ->
       case dict.get(components.schemas, name) {
         Ok(schema_ref) ->
@@ -48,7 +48,7 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
 
 /// Generate validation guard functions for schemas with constraints.
 fn generate_guards(ctx: Context) -> String {
-  let schemas = case ctx.spec.components {
+  let schemas = case context.spec(ctx).components {
     Some(components) ->
       list.sort(dict.to_list(components.schemas), fn(a, b) {
         string.compare(a.0, b.0)
@@ -93,7 +93,8 @@ fn generate_guards(ctx: Context) -> String {
         False -> {
           let resolved = case schema_ref {
             Inline(s) -> Ok(s)
-            Reference(..) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
+            Reference(..) ->
+              resolver.resolve_schema_ref(schema_ref, context.spec(ctx))
           }
           case resolved {
             Ok(ObjectSchema(..)) | Ok(AllOfSchema(..)) -> True
@@ -103,7 +104,7 @@ fn generate_guards(ctx: Context) -> String {
       }
     })
   let imports = case needs_types {
-    True -> [ctx.config.package <> "/types", ..imports]
+    True -> [context.config(ctx).package <> "/types", ..imports]
     False -> imports
   }
   // Import option module when composite validators handle optional fields
@@ -177,7 +178,7 @@ fn collect_schema_constraint_types(
 ) -> ConstraintTypes {
   let schema = case schema_ref {
     Inline(s) -> Ok(s)
-    Reference(..) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
+    Reference(..) -> resolver.resolve_schema_ref(schema_ref, context.spec(ctx))
   }
   case schema {
     Ok(StringSchema(min_length:, max_length:, pattern:, ..)) -> {
@@ -238,7 +239,7 @@ fn generate_guards_for_schema(
     Inline(schema) -> generate_guards_for_schema_object(sb, name, schema, ctx)
     Reference(name:, ..) -> {
       let resolved_name = name
-      case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
+      case resolver.resolve_schema_ref(schema_ref, context.spec(ctx)) {
         Ok(schema) ->
           generate_guards_for_schema_object(sb, resolved_name, schema, ctx)
         _ -> sb
@@ -341,7 +342,7 @@ fn generate_field_guard(
 ) -> se.StringBuilder {
   let resolved = case prop_ref {
     Inline(schema) -> Ok(schema)
-    Reference(..) -> resolver.resolve_schema_ref(prop_ref, ctx.spec)
+    Reference(..) -> resolver.resolve_schema_ref(prop_ref, context.spec(ctx))
   }
   case resolved {
     Ok(StringSchema(min_length:, max_length:, pattern:, ..)) -> {
@@ -1221,7 +1222,7 @@ fn composite_validator_type(
 ) -> String {
   let schema = case schema_ref {
     Inline(s) -> Ok(s)
-    Reference(..) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
+    Reference(..) -> resolver.resolve_schema_ref(schema_ref, context.spec(ctx))
   }
   case schema {
     Ok(ObjectSchema(..)) | Ok(AllOfSchema(..)) ->
@@ -1246,7 +1247,7 @@ fn collect_guard_calls(
 ) -> List(GuardCall) {
   let schema = case schema_ref {
     Inline(s) -> Ok(s)
-    Reference(..) -> resolver.resolve_schema_ref(schema_ref, ctx.spec)
+    Reference(..) -> resolver.resolve_schema_ref(schema_ref, context.spec(ctx))
   }
   case schema {
     Ok(ObjectSchema(
@@ -1382,7 +1383,7 @@ fn collect_field_guard_calls(
 ) -> List(GuardCall) {
   let resolved = case prop_ref {
     Inline(schema) -> Ok(schema)
-    Reference(..) -> resolver.resolve_schema_ref(prop_ref, ctx.spec)
+    Reference(..) -> resolver.resolve_schema_ref(prop_ref, context.spec(ctx))
   }
   let accessor = "value." <> naming.to_snake_case(prop_name)
   case resolved {

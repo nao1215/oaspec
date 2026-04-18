@@ -218,7 +218,7 @@ fn check_security_schemes(spec: OpenApiSpec(Resolved)) -> List(Diagnostic) {
 /// This is the single source of truth for "parsed but not generated" diagnostics.
 /// Requires Context because some checks iterate over resolved operations.
 pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
-  let webhook_warnings = case dict.is_empty(ctx.spec.webhooks) {
+  let webhook_warnings = case dict.is_empty(context.spec(ctx).webhooks) {
     True -> []
     False -> [
       diagnostic.capability(
@@ -244,7 +244,7 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
             let base_path =
               op_id <> ".responses." <> http.status_code_to_string(status_code)
             let multi_content_warnings = case
-              ctx.config.mode,
+              context.config(ctx).mode,
               list.length(dict.to_list(response.content))
             {
               config.Client, _ -> []
@@ -319,7 +319,7 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
         }
       })
     })
-  let external_docs_warnings = case ctx.spec.external_docs {
+  let external_docs_warnings = case context.spec(ctx).external_docs {
     Some(_) -> [
       diagnostic.capability(
         severity: SeverityWarning,
@@ -333,7 +333,7 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
     ]
     None -> []
   }
-  let tag_warnings = case list.is_empty(ctx.spec.tags) {
+  let tag_warnings = case list.is_empty(context.spec(ctx).tags) {
     True -> []
     False -> [
       diagnostic.capability(
@@ -349,7 +349,7 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
   // code generation (server precedence: operation > path > top-level).
   let operation_server_warnings = []
   let path_server_warnings = []
-  let component_warnings = case ctx.spec.components {
+  let component_warnings = case context.spec(ctx).components {
     Some(components) -> {
       let header_w = case dict.is_empty(components.headers) {
         True -> []

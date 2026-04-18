@@ -158,7 +158,7 @@ fn generate_request_types(
   let needs_types = import_analysis.operations_need_typed_schemas(operations)
 
   let base_imports = case needs_types {
-    True -> [ctx.config.package <> "/types"]
+    True -> [context.config(ctx).package <> "/types"]
     False -> []
   }
   let imports = case needs_option {
@@ -309,7 +309,7 @@ fn generate_response_types(
 ) -> String {
   let needs_types = responses_need_types_import(operations, ctx)
   let imports = case needs_types {
-    True -> [ctx.config.package <> "/types"]
+    True -> [context.config(ctx).package <> "/types"]
     False -> []
   }
   let sb =

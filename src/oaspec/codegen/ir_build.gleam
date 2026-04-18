@@ -26,7 +26,7 @@ import oaspec/util/naming
 
 /// Build an IR Module for the types.gleam file from component schemas.
 pub fn build_types_module(ctx: Context) -> Module {
-  let schemas = case ctx.spec.components {
+  let schemas = case context.spec(ctx).components {
     Some(components) ->
       list.sort(dict.to_list(components.schemas), fn(a, b) {
         string.compare(a.0, b.0)

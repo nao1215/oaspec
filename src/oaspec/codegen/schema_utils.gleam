@@ -21,7 +21,7 @@ pub fn schema_has_additional_properties(
     Inline(AllOfSchema(schemas:, ..)) ->
       list.any(schemas, fn(s) { schema_has_additional_properties(s, ctx) })
     Reference(..) ->
-      case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
+      case resolver.resolve_schema_ref(schema_ref, context.spec(ctx)) {
         Ok(schema_obj) ->
           schema_has_additional_properties(Inline(schema_obj), ctx)
         Error(_) -> False
@@ -42,7 +42,7 @@ pub fn schema_has_untyped_additional_properties(
         schema_has_untyped_additional_properties(s, ctx)
       })
     Reference(..) ->
-      case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
+      case resolver.resolve_schema_ref(schema_ref, context.spec(ctx)) {
         Ok(schema_obj) ->
           schema_has_untyped_additional_properties(Inline(schema_obj), ctx)
         Error(_) -> False
@@ -65,7 +65,7 @@ pub fn schema_has_optional_fields(schema_ref: SchemaRef, ctx: Context) -> Bool {
     Inline(AllOfSchema(schemas:, ..)) ->
       list.any(schemas, fn(s) { schema_has_optional_fields(s, ctx) })
     Reference(..) ->
-      case resolver.resolve_schema_ref(schema_ref, ctx.spec) {
+      case resolver.resolve_schema_ref(schema_ref, context.spec(ctx)) {
         Ok(schema_obj) -> schema_has_optional_fields(Inline(schema_obj), ctx)
         Error(_) -> False
       }
@@ -78,7 +78,7 @@ pub fn schema_ref_is_nullable(ref: SchemaRef, ctx: Context) -> Bool {
   case ref {
     Inline(s) -> schema.is_nullable(s)
     Reference(..) ->
-      case resolver.resolve_schema_ref(ref, ctx.spec) {
+      case resolver.resolve_schema_ref(ref, context.spec(ctx)) {
         Ok(s) -> schema.is_nullable(s)
         Error(_) -> False
       }
@@ -90,7 +90,7 @@ pub fn schema_ref_is_read_only(ref: SchemaRef, ctx: Context) -> Bool {
   case ref {
     Inline(s) -> schema.get_metadata(s).read_only
     Reference(..) ->
-      case resolver.resolve_schema_ref(ref, ctx.spec) {
+      case resolver.resolve_schema_ref(ref, context.spec(ctx)) {
         Ok(s) -> schema.get_metadata(s).read_only
         Error(_) -> False
       }
@@ -102,7 +102,7 @@ pub fn schema_ref_is_write_only(ref: SchemaRef, ctx: Context) -> Bool {
   case ref {
     Inline(s) -> schema.get_metadata(s).write_only
     Reference(..) ->
-      case resolver.resolve_schema_ref(ref, ctx.spec) {
+      case resolver.resolve_schema_ref(ref, context.spec(ctx)) {
         Ok(s) -> schema.get_metadata(s).write_only
         Error(_) -> False
       }
