@@ -2042,6 +2042,36 @@ components:
   |> should.be_true()
 }
 
+pub fn client_query_params_preserve_declared_order_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer }
+        - name: offset
+          in: query
+          schema: { type: integer }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let combined = list.fold(files, "", fn(acc, f) { acc <> f.content })
+  // The emitted joiner should reverse before joining to match declared order.
+  string.contains(combined, "string.join(list.reverse(query_parts), \"&\")")
+  |> should.be_true()
+}
+
 pub fn guards_minlength_one_uses_singular_character_test() {
   let yaml =
     "

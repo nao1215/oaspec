@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Generated `minLength` / `maxLength` guard messages now pluralize correctly — `1 character` (singular) vs. `N characters` (plural) (#121)
+- Generated client query strings now preserve the declared OpenAPI parameter order; previously the prepending loop reversed it (#123)
 
 ## [0.12.0] - 2026-04-12
 

@@ -7,6 +7,7 @@ import api/types
 import gleam/http
 import gleam/http/request
 import gleam/int
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import gleam/uri
@@ -64,7 +65,7 @@ pub fn list_pets(
     ]
     None -> query_parts
   }
-  let query_string = string.join(query_parts, "&")
+  let query_string = string.join(list.reverse(query_parts), "&")
   let path = case query_string {
     "" -> path
     _ -> path <> "?" <> query_string

@@ -88,6 +88,9 @@ fn generate_client(ctx: Context) -> String {
   let needs_list =
     has_form_urlencoded
     || has_multi_content_response
+    // Every operation with query parameters uses `list.reverse` before
+    // joining, so we need `gleam/list` whenever any query parameter exists.
+    || list.any(all_params, fn(p) { p.in_ == spec.InQuery })
     || list.any(all_params, fn(p) {
       case p.payload {
         ParameterSchema(Inline(schema.ArraySchema(..))) -> True
@@ -744,7 +747,10 @@ fn generate_client_function(
         })
       let sb =
         sb
-        |> se.indent(1, "let query_string = string.join(query_parts, \"&\")")
+        |> se.indent(
+          1,
+          "let query_string = string.join(list.reverse(query_parts), \"&\")",
+        )
         |> se.indent(1, "let path = case query_string {")
         |> se.indent(2, "\"\" -> path")
         |> se.indent(2, "_ -> path <> \"?\" <> query_string")
