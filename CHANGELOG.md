@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Generated clients now emit a `<operation>_with_request` wrapper for every operation. The wrapper accepts the matching `request_types.*Request` record and delegates to the existing flat function — either API is valid. Operations that take a multi-content request body skip the wrapper because the flat API needs an extra `content_type` argument the request type does not carry (#31)
+- Drift-detection test between the capability registry and the README `## Current Boundaries` block: fails the suite if an `Unsupported`, `NotHandled`, or `ParsedNotUsed` entry is added to the registry without being mentioned in the README (#143). Fixes stale `operation servers` / `path servers` entries the registry had carried since #96 promoted them to Supported.
 
 ## [0.12.0] - 2026-04-12
 
