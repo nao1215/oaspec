@@ -2042,6 +2042,38 @@ components:
   |> should.be_true()
 }
 
+pub fn client_emits_unexpected_status_variant_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let combined = list.fold(files, "", fn(acc, f) { acc <> f.content })
+  // Type declares the new variant.
+  string.contains(combined, "UnexpectedStatus(status: Int, body: String)")
+  |> should.be_true()
+  // Catch-all arms emit the new variant instead of DecodeError.
+  string.contains(
+    combined,
+    "_ -> Error(UnexpectedStatus(status: resp.status, body: resp.body))",
+  )
+  |> should.be_true()
+  // The old DecodeError-as-status-wrapper form should not appear anymore.
+  string.contains(combined, "DecodeError(detail: \"Unexpected status:")
+  |> should.be_false()
+}
+
 pub fn enum_decoder_failure_includes_rejected_value_test() {
   let yaml =
     "
