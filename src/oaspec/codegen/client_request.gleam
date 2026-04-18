@@ -1,5 +1,5 @@
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/codegen/context.{type Context}
 import oaspec/codegen/ir_build
@@ -9,6 +9,47 @@ import oaspec/openapi/schema.{Inline, Reference}
 import oaspec/openapi/spec.{type Resolved, ParameterSchema, Value}
 import oaspec/util/naming
 import oaspec/util/string_extra as se
+
+/// Build the call-site argument list for the `_with_request` wrapper that
+/// unpacks a `request_types.*Request` record into the flat client function
+/// it delegates to. Returns `None` if the operation uses a multi-content
+/// body (where the flat API also takes a `content_type` argument that the
+/// request type does not carry).
+pub fn build_request_object_call_args(
+  path_params: List(spec.Parameter(Resolved)),
+  query_params: List(spec.Parameter(Resolved)),
+  header_params: List(spec.Parameter(Resolved)),
+  cookie_params: List(spec.Parameter(Resolved)),
+  operation: spec.Operation(Resolved),
+) -> Option(String) {
+  let all_params =
+    list.append(path_params, query_params)
+    |> list.append(header_params)
+    |> list.append(cookie_params)
+  let has_body = case operation.request_body {
+    Some(_) -> True
+    None -> False
+  }
+  // Operations with no parameters and no body produce no `<Op>Request` type,
+  // so there is nothing for the wrapper to accept. Skip the wrapper.
+  case list.is_empty(all_params), has_body {
+    True, False -> None
+    _, _ -> {
+      let param_refs =
+        list.map(all_params, fn(p) { "req." <> naming.to_snake_case(p.name) })
+      case operation.request_body {
+        Some(Value(rb)) -> {
+          let content_entries = ir_build.sorted_entries(rb.content)
+          case content_entries {
+            [_, _, ..] -> None
+            _ -> Some(string.join(list.append(param_refs, ["req.body"]), ", "))
+          }
+        }
+        _ -> Some(string.join(param_refs, ", "))
+      }
+    }
+  }
+}
 
 /// Build parameter list for function signature.
 pub fn build_param_list(

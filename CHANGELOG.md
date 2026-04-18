@@ -42,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `oaspec/config.Config` is now declared `pub opaque type`. Construct via `config.new/6` or `config.load/1`; read fields via `config.input/1`, `config.package/1`, `config.mode/1`, `config.output_server/1`, `config.output_client/1`, `config.validate/1`. Second step of parent issue #41 (#138)
 - `oaspec/codegen/ir.Module` and `oaspec/codegen/ir.Declaration` are now declared `pub opaque type`. Construct via `ir.module/3` / `ir.declaration/2`; read via `ir.module_header/1`, `ir.module_imports/1`, `ir.module_declarations/1`, `ir.declaration_doc/1`, `ir.declaration_type_def/1`. Third step of parent issue #41 (#140)
 
+### Added
+
+- Generated clients now emit a `<operation>_with_request` wrapper for every operation. The wrapper accepts the matching `request_types.*Request` record and delegates to the existing flat function — either API is valid. Operations that take a multi-content request body skip the wrapper because the flat API needs an extra `content_type` argument the request type does not carry (#31)
+
 ## [0.12.0] - 2026-04-12
 
 ### Added

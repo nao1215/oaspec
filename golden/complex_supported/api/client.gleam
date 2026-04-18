@@ -2,6 +2,7 @@
 
 import api/decode
 import api/encode
+import api/request_types
 import api/response_types
 import api/types
 import gleam/http
@@ -82,6 +83,14 @@ pub fn post_search(
   }
 }
 
+/// Request-object wrapper. Delegates to post_search/N with fields unpacked from the request record.
+pub fn post_search_with_request(
+  config: ClientConfig,
+  req: request_types.PostSearchRequest,
+) -> Result(response_types.PostSearchResponse, ClientError) {
+  post_search(config, req.body)
+}
+
 /// Get user with polymorphic response
 pub fn get_user(
   config: ClientConfig,
@@ -119,6 +128,14 @@ pub fn get_user(
   }
 }
 
+/// Request-object wrapper. Delegates to get_user/N with fields unpacked from the request record.
+pub fn get_user_with_request(
+  config: ClientConfig,
+  req: request_types.GetUserRequest,
+) -> Result(response_types.GetUserResponse, ClientError) {
+  get_user(config, req.user_id)
+}
+
 /// Receive webhook
 pub fn post_webhook(
   config: ClientConfig,
@@ -148,4 +165,12 @@ pub fn post_webhook(
       }
     }
   }
+}
+
+/// Request-object wrapper. Delegates to post_webhook/N with fields unpacked from the request record.
+pub fn post_webhook_with_request(
+  config: ClientConfig,
+  req: request_types.PostWebhookRequest,
+) -> Result(response_types.PostWebhookResponse, ClientError) {
+  post_webhook(config, req.body)
 }

@@ -2,6 +2,7 @@
 
 import api/decode
 import api/encode
+import api/request_types
 import api/response_types
 import api/types
 import gleam/http
@@ -97,6 +98,14 @@ pub fn list_pets(
   }
 }
 
+/// Request-object wrapper. Delegates to list_pets/N with fields unpacked from the request record.
+pub fn list_pets_with_request(
+  config: ClientConfig,
+  req: request_types.ListPetsRequest,
+) -> Result(response_types.ListPetsResponse, ClientError) {
+  list_pets(config, req.limit, req.offset)
+}
+
 /// Create a pet
 /// Creates a new pet in the store
 pub fn create_pet(
@@ -129,6 +138,14 @@ pub fn create_pet(
       }
     }
   }
+}
+
+/// Request-object wrapper. Delegates to create_pet/N with fields unpacked from the request record.
+pub fn create_pet_with_request(
+  config: ClientConfig,
+  req: request_types.CreatePetRequest,
+) -> Result(response_types.CreatePetResponse, ClientError) {
+  create_pet(config, req.body)
 }
 
 /// Get a pet by ID
@@ -165,6 +182,14 @@ pub fn get_pet(
   }
 }
 
+/// Request-object wrapper. Delegates to get_pet/N with fields unpacked from the request record.
+pub fn get_pet_with_request(
+  config: ClientConfig,
+  req: request_types.GetPetRequest,
+) -> Result(response_types.GetPetResponse, ClientError) {
+  get_pet(config, req.pet_id)
+}
+
 /// Delete a pet
 /// Deletes a pet by its ID
 pub fn delete_pet(
@@ -191,4 +216,12 @@ pub fn delete_pet(
       }
     }
   }
+}
+
+/// Request-object wrapper. Delegates to delete_pet/N with fields unpacked from the request record.
+pub fn delete_pet_with_request(
+  config: ClientConfig,
+  req: request_types.DeletePetRequest,
+) -> Result(response_types.DeletePetResponse, ClientError) {
+  delete_pet(config, req.pet_id)
 }

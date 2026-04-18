@@ -255,6 +255,12 @@ fn generate_client(ctx: Context) -> String {
       )
     False -> base_imports
   }
+  // `request_types` is always needed now because every operation emits a
+  // `_with_request` wrapper that references `request_types.*Request`.
+  let base_imports = [
+    config.package(context.config(ctx)) <> "/request_types",
+    ..base_imports
+  ]
   let base_imports = case needs_string {
     True -> ["gleam/string", ..base_imports]
     False -> base_imports
@@ -1089,9 +1095,51 @@ fn generate_client_function(
     None -> sb
   }
 
-  sb
-  |> se.line("}")
-  |> se.blank_line()
+  let sb =
+    sb
+    |> se.line("}")
+    |> se.blank_line()
+
+  // Emit a request-object wrapper that accepts a request_types.*Request
+  // value and delegates to the flat function above. Skipped for operations
+  // that take a multi-content body (they need an extra `content_type`
+  // argument the request type does not carry).
+  case
+    client_request.build_request_object_call_args(
+      path_params,
+      query_params,
+      header_params,
+      cookie_params,
+      operation,
+    )
+  {
+    Some(call_args) -> {
+      let request_type = naming.schema_to_type_name(op_id) <> "Request"
+      let extra = case call_args {
+        "" -> ""
+        _ -> ", " <> call_args
+      }
+      sb
+      |> se.doc_comment(
+        "Request-object wrapper. Delegates to "
+        <> fn_name
+        <> "/N with fields unpacked from the request record.",
+      )
+      |> se.line(
+        "pub fn "
+        <> fn_name
+        <> "_with_request(config: ClientConfig, req: request_types."
+        <> request_type
+        <> ") -> Result(response_types."
+        <> response_type
+        <> ", ClientError) {",
+      )
+      |> se.indent(1, fn_name <> "(config" <> extra <> ")")
+      |> se.line("}")
+      |> se.blank_line()
+    }
+    None -> sb
+  }
 }
 
 /// Generate with_* helper functions for security scheme configuration.

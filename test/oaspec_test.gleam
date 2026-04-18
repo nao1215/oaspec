@@ -2042,6 +2042,42 @@ components:
   |> should.be_true()
 }
 
+pub fn client_emits_with_request_wrappers_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items/{id}:
+    get:
+      operationId: getItem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: expand
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let combined = list.fold(files, "", fn(acc, f) { acc <> f.content })
+  string.contains(
+    combined,
+    "pub fn get_item_with_request(config: ClientConfig, req: request_types.GetItemRequest)",
+  )
+  |> should.be_true()
+  string.contains(combined, "get_item(config, req.id, req.expand)")
+  |> should.be_true()
+  string.contains(combined, "/request_types") |> should.be_true()
+}
+
 pub fn middleware_gleam_is_not_emitted_test() {
   let yaml =
     "
