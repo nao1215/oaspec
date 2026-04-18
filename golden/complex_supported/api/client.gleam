@@ -6,7 +6,6 @@ import api/response_types
 import api/types
 import gleam/http
 import gleam/http/request
-import gleam/int
 import gleam/string
 import gleam/uri
 
@@ -28,6 +27,7 @@ pub type ClientError {
   ConnectionError(detail: String)
   TimeoutError
   DecodeError(detail: String)
+  UnexpectedStatus(status: Int, body: String)
 }
 
 /// Create a new client configuration.
@@ -70,10 +70,7 @@ pub fn post_search(
               Error(DecodeError(detail: "Failed to decode response body"))
           }
         }
-        _ ->
-          Error(DecodeError(
-            detail: "Unexpected status: " <> int.to_string(resp.status),
-          ))
+        _ -> Error(UnexpectedStatus(status: resp.status, body: resp.body))
       }
     }
   }
@@ -106,10 +103,7 @@ pub fn get_user(
               Error(DecodeError(detail: "Failed to decode response body"))
           }
         }
-        _ ->
-          Error(DecodeError(
-            detail: "Unexpected status: " <> int.to_string(resp.status),
-          ))
+        _ -> Error(UnexpectedStatus(status: resp.status, body: resp.body))
       }
     }
   }
@@ -136,10 +130,7 @@ pub fn post_webhook(
     Ok(resp) -> {
       case resp.status {
         200 -> Ok(response_types.PostWebhookResponseOk)
-        _ ->
-          Error(DecodeError(
-            detail: "Unexpected status: " <> int.to_string(resp.status),
-          ))
+        _ -> Error(UnexpectedStatus(status: resp.status, body: resp.body))
       }
     }
   }

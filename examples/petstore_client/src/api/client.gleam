@@ -30,6 +30,7 @@ pub type ClientError {
   ConnectionError(detail: String)
   TimeoutError
   DecodeError(detail: String)
+  UnexpectedStatus(status: Int, body: String)
 }
 
 /// Create a new client configuration.
@@ -84,10 +85,7 @@ pub fn list_pets(
           }
         }
         401 -> Ok(response_types.ListPetsResponseUnauthorized)
-        _ ->
-          Error(DecodeError(
-            detail: "Unexpected status: " <> int.to_string(resp.status),
-          ))
+        _ -> Error(UnexpectedStatus(status: resp.status, body: resp.body))
       }
     }
   }
@@ -117,10 +115,7 @@ pub fn create_pet(
         }
         400 -> Ok(response_types.CreatePetResponseBadRequest)
         401 -> Ok(response_types.CreatePetResponseUnauthorized)
-        _ ->
-          Error(DecodeError(
-            detail: "Unexpected status: " <> int.to_string(resp.status),
-          ))
+        _ -> Error(UnexpectedStatus(status: resp.status, body: resp.body))
       }
     }
   }
@@ -150,10 +145,7 @@ pub fn get_pet(
         }
         401 -> Ok(response_types.GetPetResponseUnauthorized)
         404 -> Ok(response_types.GetPetResponseNotFound)
-        _ ->
-          Error(DecodeError(
-            detail: "Unexpected status: " <> int.to_string(resp.status),
-          ))
+        _ -> Error(UnexpectedStatus(status: resp.status, body: resp.body))
       }
     }
   }
@@ -177,10 +169,7 @@ pub fn delete_pet(
         204 -> Ok(response_types.DeletePetResponseNoContent)
         401 -> Ok(response_types.DeletePetResponseUnauthorized)
         404 -> Ok(response_types.DeletePetResponseNotFound)
-        _ ->
-          Error(DecodeError(
-            detail: "Unexpected status: " <> int.to_string(resp.status),
-          ))
+        _ -> Error(UnexpectedStatus(status: resp.status, body: resp.body))
       }
     }
   }

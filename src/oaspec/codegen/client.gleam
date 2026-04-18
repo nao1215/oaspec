@@ -203,13 +203,39 @@ fn generate_client(ctx: Context) -> String {
       !list.is_empty(security_schemes)
     }
 
+  // `gleam/int` is only needed when the generated client actually stringifies
+  // integers — integer path, query, header, or cookie parameters. Form /
+  // multipart bodies and responses handle integer encoding via the encoder
+  // / decoder modules, not directly in client.gleam.
+  let needs_int =
+    list.any(all_params, fn(p) {
+      case p.payload {
+        ParameterSchema(Inline(schema.IntegerSchema(..))) -> True
+        ParameterSchema(Inline(schema.ArraySchema(
+          items: Inline(schema.IntegerSchema(..)),
+          ..,
+        ))) -> True
+        ParameterSchema(Reference(..) as sr) ->
+          case resolver.resolve_schema_ref(sr, ctx.spec) {
+            Ok(schema.IntegerSchema(..)) -> True
+            Ok(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..)) ->
+              True
+            _ -> False
+          }
+        _ -> False
+      }
+    })
+
   let base_imports = [
     "gleam/http/request",
     "gleam/http",
-    "gleam/int",
     ctx.config.package <> "/decode",
     ctx.config.package <> "/response_types",
   ]
+  let base_imports = case needs_int {
+    True -> ["gleam/int", ..base_imports]
+    False -> base_imports
+  }
   let base_imports = case needs_option {
     True -> ["gleam/option.{type Option, None, Some}", ..base_imports]
     False -> base_imports
@@ -364,6 +390,7 @@ fn generate_client(ctx: Context) -> String {
     |> se.indent(1, "ConnectionError(detail: String)")
     |> se.indent(1, "TimeoutError")
     |> se.indent(1, "DecodeError(detail: String)")
+    |> se.indent(1, "UnexpectedStatus(status: Int, body: String)")
   let sb = case ctx.config.validate {
     True -> sb |> se.indent(1, "ValidationError(errors: List(String))")
     False -> sb
@@ -1029,7 +1056,7 @@ fn generate_client_function(
       sb
       |> se.indent(
         4,
-        "_ -> Error(DecodeError(detail: \"Unexpected status: \" <> int.to_string(resp.status)))",
+        "_ -> Error(UnexpectedStatus(status: resp.status, body: resp.body))",
       )
   }
   let sb =
