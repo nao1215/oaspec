@@ -1,7 +1,6 @@
 import api/decode
 import api/encode
 import api/handlers
-import api/middleware
 import api/request_types
 import api/response_types
 import api/types
@@ -326,57 +325,6 @@ pub fn handler_delete_pet_not_found_test() {
 }
 
 // ===================================================================
-// Middleware Tests
-// ===================================================================
-
-pub fn middleware_identity_test() {
-  let handler = fn(req: Int) -> Result(Int, middleware.MiddlewareError) {
-    Ok(req * 2)
-  }
-  let wrapped = middleware.identity()(handler)
-  wrapped(5) |> should.equal(Ok(10))
-}
-
-pub fn middleware_compose_test() {
-  // Two identity middlewares composed should still be identity
-  let handler = fn(req: Int) -> Result(Int, middleware.MiddlewareError) {
-    Ok(req + 1)
-  }
-  let composed =
-    middleware.compose(middleware.identity(), middleware.identity())
-  let wrapped = composed(handler)
-  wrapped(5) |> should.equal(Ok(6))
-}
-
-pub fn middleware_apply_empty_test() {
-  let handler = fn(req: String) -> Result(String, middleware.MiddlewareError) {
-    Ok("hello " <> req)
-  }
-  let wrapped = middleware.apply([], handler)
-  wrapped("world") |> should.equal(Ok("hello world"))
-}
-
-pub fn middleware_retry_success_test() {
-  let handler = fn(_req: Int) -> Result(Int, middleware.MiddlewareError) {
-    Ok(42)
-  }
-  let retry_mw = middleware.retry(3)
-  let wrapped = retry_mw(handler)
-  wrapped(0) |> should.equal(Ok(42))
-}
-
-pub fn middleware_retry_failure_test() {
-  // Handler always fails - retry should exhaust retries and return error
-  let handler = fn(_req: Int) -> Result(Int, middleware.MiddlewareError) {
-    Error(middleware.InternalError(detail: "always fails"))
-  }
-  let retry_mw = middleware.retry(2)
-  let wrapped = retry_mw(handler)
-  let result = wrapped(0)
-  should.be_error(result)
-}
-
-// ===================================================================
 // End-to-End: Simulated Server/Client Communication
 // ===================================================================
 
@@ -400,30 +348,6 @@ pub fn e2e_request_response_cycle_test() {
       decoded_pet.id |> should.equal(1)
       decoded_pet.name |> should.equal("Fido")
     }
-    _ -> should.fail()
-  }
-}
-
-pub fn e2e_middleware_handler_chain_test() {
-  // Wrap a handler with middleware and verify the full chain works
-  let handler = fn(req: request_types.GetPetRequest) -> Result(
-    response_types.GetPetResponse,
-    middleware.MiddlewareError,
-  ) {
-    Ok(handlers.get_pet(req))
-  }
-
-  // Apply identity + logging middleware
-  let mw_chain = [middleware.identity(), middleware.logging()]
-  let wrapped = middleware.apply(mw_chain, handler)
-
-  // Call through the middleware chain
-  let req = request_types.GetPetRequest(pet_id: 1)
-  let result = wrapped(req)
-  should.be_ok(result)
-  let assert Ok(resp) = result
-  case resp {
-    response_types.GetPetResponseOk(pet) -> pet.name |> should.equal("Fido")
     _ -> should.fail()
   }
 }

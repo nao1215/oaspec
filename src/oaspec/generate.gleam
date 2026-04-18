@@ -4,7 +4,6 @@ import oaspec/codegen/client
 import oaspec/codegen/context.{type Context, type GeneratedFile}
 import oaspec/codegen/decoders
 import oaspec/codegen/guards
-import oaspec/codegen/middleware
 import oaspec/codegen/server
 import oaspec/codegen/types
 import oaspec/codegen/validate
@@ -143,11 +142,16 @@ pub fn generate_all_files(ctx: Context) -> List(GeneratedFile) {
   list.flatten([shared, server_files, client_files])
 }
 
-/// Generate shared files (types, decoders, encoders, middleware, guards).
+/// Generate shared files (types, decoders, encoders, guards).
+///
+/// `middleware.gleam` used to be emitted here too, but its `Handler` shape
+/// did not actually compose with the generated client or server APIs (see
+/// issue #116). It is no longer part of the default generated surface;
+/// the `oaspec/codegen/middleware` module is kept only as a library-level
+/// helper for consumers who want to assemble their own middleware chain.
 fn generate_shared(ctx: Context) -> List(GeneratedFile) {
   let type_files = types.generate(ctx)
   let decoder_files = decoders.generate(ctx)
-  let middleware_files = middleware.generate(ctx)
   let guard_files = guards.generate(ctx)
-  list.flatten([type_files, decoder_files, middleware_files, guard_files])
+  list.flatten([type_files, decoder_files, guard_files])
 }

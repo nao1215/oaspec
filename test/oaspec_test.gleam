@@ -2042,6 +2042,28 @@ components:
   |> should.be_true()
 }
 
+pub fn middleware_gleam_is_not_emitted_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = generate.generate_all_files(ctx)
+  // No generated file should be named middleware.gleam after #116.
+  list.any(files, fn(f) { f.path == "middleware.gleam" })
+  |> should.be_false()
+}
+
 pub fn callbacks_do_not_emit_handler_stubs_test() {
   // Callbacks must parse successfully but must not produce the old
   // misleading `fn(...) -> String` handler stubs (see issue #117).

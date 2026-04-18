@@ -34,7 +34,7 @@ Describe 'oaspec generate'
       When run generate --config=test/fixtures/oaspec.yaml
       The status should be success
       The output should include 'Successfully generated'
-      The output should include '17 files'
+      The output should include '15 files'
     End
   End
 
@@ -69,10 +69,6 @@ Describe 'oaspec generate'
       The path "$TEST_OUTPUT_DIR/api/encode.gleam" should be file
     End
 
-    It 'creates server/middleware.gleam'
-      The path "$TEST_OUTPUT_DIR/api/middleware.gleam" should be file
-    End
-
     It 'creates server/handlers.gleam'
       The path "$TEST_OUTPUT_DIR/api/handlers.gleam" should be file
     End
@@ -89,10 +85,6 @@ Describe 'oaspec generate'
 
     It 'creates client/client.gleam'
       The path "$TEST_OUTPUT_DIR_CLIENT/api/client.gleam" should be file
-    End
-
-    It 'creates client/middleware.gleam'
-      The path "$TEST_OUTPUT_DIR_CLIENT/api/middleware.gleam" should be file
     End
   End
 
@@ -258,17 +250,7 @@ Describe 'oaspec generate'
 
     # --- Middleware ---
 
-    It 'generates composable middleware types'
-      The contents of file "$TEST_OUTPUT_DIR/api/middleware.gleam" should include 'pub type Handler(req, res)'
-      The contents of file "$TEST_OUTPUT_DIR/api/middleware.gleam" should include 'pub type Middleware(req, res)'
-      The contents of file "$TEST_OUTPUT_DIR/api/middleware.gleam" should include 'pub fn compose'
-      The contents of file "$TEST_OUTPUT_DIR/api/middleware.gleam" should include 'pub fn apply'
-    End
-
-    It 'generates retry middleware for client'
-      The contents of file "$TEST_OUTPUT_DIR_CLIENT/api/middleware.gleam" should include 'pub fn retry'
-      The contents of file "$TEST_OUTPUT_DIR_CLIENT/api/middleware.gleam" should include 'max_retries'
-    End
+    # middleware.gleam is intentionally no longer emitted (see issue #116).
   End
 
   # -------------------------------------------------------------------
