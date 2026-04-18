@@ -682,7 +682,7 @@ fn generate_enum_decoder(
       <> first_variant_suffix
       <> ", \""
       <> type_name
-      <> "\")",
+      <> ": unknown variant \" <> value)",
   )
   |> se.indent(1, "}")
   |> se.line("}")

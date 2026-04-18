@@ -2042,6 +2042,34 @@ components:
   |> should.be_true()
 }
 
+pub fn enum_decoder_failure_includes_rejected_value_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /u:
+    get:
+      operationId: u
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Status:
+      type: string
+      enum: [active, inactive]
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = decoders.generate(ctx)
+  let combined = list.fold(files, "", fn(acc, f) { acc <> f.content })
+  // Failure branch must interpolate `value` so callers can see the bad string.
+  string.contains(combined, "\"Status: unknown variant \" <> value")
+  |> should.be_true()
+}
+
 pub fn client_query_params_preserve_declared_order_test() {
   let yaml =
     "

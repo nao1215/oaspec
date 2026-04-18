@@ -128,7 +128,11 @@ pub fn pet_status_decoder() -> decode.Decoder(types.PetStatus) {
     "available" -> decode.success(types.PetStatusAvailable)
     "pending" -> decode.success(types.PetStatusPending)
     "sold" -> decode.success(types.PetStatusSold)
-    _ -> decode.failure(types.PetStatusAvailable, "PetStatus")
+    _ ->
+      decode.failure(
+        types.PetStatusAvailable,
+        "PetStatus: unknown variant " <> value,
+      )
   }
 }
 

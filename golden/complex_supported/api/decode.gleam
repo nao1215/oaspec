@@ -11,7 +11,11 @@ pub fn admin_user_type_decoder() -> decode.Decoder(types.AdminUserType) {
   case value {
     "admin" -> decode.success(types.AdminUserTypeAdmin)
     "regular" -> decode.success(types.AdminUserTypeRegular)
-    _ -> decode.failure(types.AdminUserTypeAdmin, "AdminUserType")
+    _ ->
+      decode.failure(
+        types.AdminUserTypeAdmin,
+        "AdminUserType: unknown variant " <> value,
+      )
   }
 }
 
@@ -28,7 +32,7 @@ pub fn filter_op_decoder() -> decode.Decoder(types.FilterOp) {
     "ne" -> decode.success(types.FilterOpNe)
     "gt" -> decode.success(types.FilterOpGt)
     "lt" -> decode.success(types.FilterOpLt)
-    _ -> decode.failure(types.FilterOpEq, "FilterOp")
+    _ -> decode.failure(types.FilterOpEq, "FilterOp: unknown variant " <> value)
   }
 }
 
@@ -43,7 +47,11 @@ pub fn regular_user_type_decoder() -> decode.Decoder(types.RegularUserType) {
   case value {
     "admin" -> decode.success(types.RegularUserTypeAdmin)
     "regular" -> decode.success(types.RegularUserTypeRegular)
-    _ -> decode.failure(types.RegularUserTypeAdmin, "RegularUserType")
+    _ ->
+      decode.failure(
+        types.RegularUserTypeAdmin,
+        "RegularUserType: unknown variant " <> value,
+      )
   }
 }
 
@@ -58,7 +66,8 @@ pub fn user_type_decoder() -> decode.Decoder(types.UserType) {
   case value {
     "admin" -> decode.success(types.UserTypeAdmin)
     "regular" -> decode.success(types.UserTypeRegular)
-    _ -> decode.failure(types.UserTypeAdmin, "UserType")
+    _ ->
+      decode.failure(types.UserTypeAdmin, "UserType: unknown variant " <> value)
   }
 }
 
