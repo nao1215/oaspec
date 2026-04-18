@@ -3410,6 +3410,42 @@ pub fn external_ref_nested_collision_across_files_rejected_test() {
   string.contains(msg, "already imported") |> should.be_true()
 }
 
+pub fn external_ref_in_callback_path_item_test() {
+  // An operation's callbacks dict maps to PathItems whose own
+  // operations may carry external schema refs. Those refs must hoist
+  // into components.schemas just like top-level operations.
+  let assert Ok(loaded) =
+    parser.parse_file("test/fixtures/external_ref_callback_main.yaml")
+  let assert Some(components) = loaded.components
+  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
+    dict.get(components.schemas, "Widget")
+  dict.has_key(widget_props, "sku") |> should.be_true()
+  // Drill into the callback's PathItem and confirm the request body
+  // schema ref is rewritten to local form.
+  let assert Ok(spec.Value(path_item)) = dict.get(loaded.paths, "/subscribe")
+  let assert Some(post_op) = path_item.post
+  let assert Ok(callback) = dict.get(post_op.callbacks, "widgetEvent")
+  let assert Ok(spec.Value(cb_path_item)) =
+    dict.get(callback.entries, "{$request.body#/callbackUrl}")
+  let assert Some(cb_post) = cb_path_item.post
+  let assert Some(spec.Value(cb_body)) = cb_post.request_body
+  let assert Ok(media) = dict.get(cb_body.content, "application/json")
+  let assert Some(schema.Reference(ref: cb_ref, ..)) = media.schema
+  cb_ref |> should.equal("#/components/schemas/Widget")
+}
+
+pub fn external_ref_callback_collision_with_local_schema_rejected_test() {
+  // A callback's response pulls `Widget` from an external file while
+  // the main spec already defines a local `Widget`. The silent-
+  // shadowing guard must fire through the shared imports tracker.
+  let result =
+    parser.parse_file("test/fixtures/external_ref_callback_collision_main.yaml")
+  let assert Error(err) = result
+  let msg = parser.parse_error_to_string(err)
+  string.contains(msg, "Widget") |> should.be_true()
+  string.contains(msg, "local schema") |> should.be_true()
+}
+
 pub fn external_ref_in_operation_schemas_test() {
   // An operation whose path-level parameters, operation-level
   // parameters, request body, and responses all carry external $ref

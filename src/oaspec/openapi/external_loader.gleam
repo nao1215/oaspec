@@ -17,11 +17,11 @@
 ////     on both `paths.<path>.parameters` and `paths.<path>.<method>.parameters`
 ////   - operation-level `requestBody.content.*.schema`
 ////   - operation-level `responses.<code>.content.*.schema`
+////   - refs inside `operation.callbacks.*.entries.*` PathItems (recursive)
 ////
 //// Out of scope (see issue #98 parent):
 ////   - external `$ref` pointing at a parameter / request-body / response
 ////     / path-item object itself (the whole entry rather than its schema)
-////   - external refs inside callbacks (operation.callbacks holds PathItems)
 ////   - HTTP/HTTPS URLs
 ////
 //// Name collisions — when an external ref would overwrite an existing local
@@ -373,27 +373,16 @@ fn process_operation_schemas(
       let #(path_key, ref_or_item) = entry
       case ref_or_item {
         spec.Value(path_item) -> {
-          use #(new_parameters, imports_after_params) <- result.try(
-            rewrite_parameter_list(
-              path_item.parameters,
-              base_dir,
-              parse_file,
-              imports,
-              original_local_names,
-            ),
-          )
-          use #(new_path_item, imports_after_methods) <- result.try(
-            rewrite_path_item_methods(
-              spec.PathItem(..path_item, parameters: new_parameters),
-              base_dir,
-              parse_file,
-              imports_after_params,
-              original_local_names,
-            ),
-          )
+          use #(new_path_item, new_imports) <- result.try(rewrite_path_item(
+            path_item,
+            base_dir,
+            parse_file,
+            imports,
+            original_local_names,
+          ))
           Ok(#(
             [#(path_key, spec.Value(new_path_item)), ..collected],
-            imports_after_methods,
+            new_imports,
           ))
         }
         spec.Ref(_) -> Ok(#([#(path_key, ref_or_item), ..collected], imports))
@@ -446,6 +435,37 @@ fn rewrite_parameter_list(
     }),
   )
   Ok(#(list.reverse(collected), new_imports))
+}
+
+/// Rewrite both the path-level `parameters` list and every populated
+/// method slot on a `PathItem`. Shared by the top-level paths walker
+/// and the callback walker so callbacks recurse into the same helper.
+fn rewrite_path_item(
+  path_item: spec.PathItem(Unresolved),
+  base_dir: String,
+  parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
+  imports: dict.Dict(String, #(String, SchemaRef)),
+  original_local_names: List(String),
+) -> Result(
+  #(spec.PathItem(Unresolved), dict.Dict(String, #(String, SchemaRef))),
+  Diagnostic,
+) {
+  use #(new_parameters, imports_after_params) <- result.try(
+    rewrite_parameter_list(
+      path_item.parameters,
+      base_dir,
+      parse_file,
+      imports,
+      original_local_names,
+    ),
+  )
+  rewrite_path_item_methods(
+    spec.PathItem(..path_item, parameters: new_parameters),
+    base_dir,
+    parse_file,
+    imports_after_params,
+    original_local_names,
+  )
 }
 
 /// Rewrite every populated HTTP-method slot on a `PathItem`. Each inline
@@ -587,22 +607,118 @@ fn rewrite_operation(
       original_local_names,
     ),
   )
-  use #(new_responses, final_imports) <- result.try(rewrite_response_map(
-    operation.responses,
+  use #(new_responses, imports_after_responses) <- result.try(
+    rewrite_response_map(
+      operation.responses,
+      base_dir,
+      parse_file,
+      imports_after_body,
+      original_local_names,
+    ),
+  )
+  use #(new_callbacks, final_imports) <- result.try(rewrite_callback_map(
+    operation.callbacks,
     base_dir,
     parse_file,
-    imports_after_body,
+    imports_after_responses,
     original_local_names,
   ))
   Ok(#(
     spec.Operation(
       ..operation,
+      callbacks: new_callbacks,
       parameters: new_params,
       request_body: new_body,
       responses: new_responses,
     ),
     final_imports,
   ))
+}
+
+/// Walk `operation.callbacks`: for each callback, rewrite every inline
+/// PathItem in its `entries` dict via the same `rewrite_path_item`
+/// helper used at the top level. `Ref` entries pointing at external
+/// PathItem objects pass through unchanged.
+fn rewrite_callback_map(
+  callbacks: dict.Dict(String, spec.Callback(Unresolved)),
+  base_dir: String,
+  parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
+  imports: dict.Dict(String, #(String, SchemaRef)),
+  original_local_names: List(String),
+) -> Result(
+  #(
+    dict.Dict(String, spec.Callback(Unresolved)),
+    dict.Dict(String, #(String, SchemaRef)),
+  ),
+  Diagnostic,
+) {
+  let entries = dict.to_list(callbacks)
+  use #(rewritten, new_imports) <- result.try(
+    list.try_fold(entries, #([], imports), fn(acc, entry) {
+      let #(collected, imports) = acc
+      let #(name, callback) = entry
+      use #(new_entries, new_imports) <- result.try(rewrite_callback_entries(
+        callback.entries,
+        base_dir,
+        parse_file,
+        imports,
+        original_local_names,
+      ))
+      let new_callback = spec.Callback(entries: new_entries)
+      Ok(#([#(name, new_callback), ..collected], new_imports))
+    }),
+  )
+  let new_callbacks =
+    list.fold(rewritten, dict.new(), fn(d, pair) {
+      dict.insert(d, pair.0, pair.1)
+    })
+  Ok(#(new_callbacks, new_imports))
+}
+
+/// Rewrite each PathItem inside a Callback.entries dict. The entries
+/// map URL-expression strings to `RefOr(PathItem)`; inline PathItems
+/// recurse via `rewrite_path_item`, Ref entries pass through.
+fn rewrite_callback_entries(
+  entries: dict.Dict(String, spec.RefOr(spec.PathItem(Unresolved))),
+  base_dir: String,
+  parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
+  imports: dict.Dict(String, #(String, SchemaRef)),
+  original_local_names: List(String),
+) -> Result(
+  #(
+    dict.Dict(String, spec.RefOr(spec.PathItem(Unresolved))),
+    dict.Dict(String, #(String, SchemaRef)),
+  ),
+  Diagnostic,
+) {
+  let pairs = dict.to_list(entries)
+  use #(rewritten, new_imports) <- result.try(
+    list.try_fold(pairs, #([], imports), fn(acc, entry) {
+      let #(collected, imports) = acc
+      let #(url_expr, ref_or_item) = entry
+      case ref_or_item {
+        spec.Value(path_item) -> {
+          use #(new_path_item, new_imports) <- result.try(rewrite_path_item(
+            path_item,
+            base_dir,
+            parse_file,
+            imports,
+            original_local_names,
+          ))
+          Ok(#(
+            [#(url_expr, spec.Value(new_path_item)), ..collected],
+            new_imports,
+          ))
+        }
+        spec.Ref(_) -> Ok(#([#(url_expr, ref_or_item), ..collected], imports))
+      }
+    }),
+  )
+  let new_map =
+    list.fold(rewritten, dict.new(), fn(d, pair) {
+      dict.insert(d, pair.0, pair.1)
+    })
+  Ok(#(new_map, new_imports))
 }
 
 fn rewrite_optional_request_body(

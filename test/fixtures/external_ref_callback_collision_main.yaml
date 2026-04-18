@@ -1,0 +1,32 @@
+openapi: "3.0.3"
+info:
+  title: External Ref Callback Collision Main
+  version: "1.0.0"
+paths:
+  /subscribe:
+    post:
+      operationId: subscribe
+      responses:
+        "202":
+          description: Accepted
+      callbacks:
+        widgetEvent:
+          "{$request.body#/callbackUrl}":
+            post:
+              operationId: onWidget
+              responses:
+                "200":
+                  description: OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: "./external_ref_nested_shared.yaml#/components/schemas/Widget"
+components:
+  schemas:
+    Widget:
+      type: object
+      required:
+        - color
+      properties:
+        color:
+          type: string
