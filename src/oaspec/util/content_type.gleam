@@ -1,4 +1,6 @@
+import gleam/list
 import gleam/string
+import oaspec/capability
 
 /// Supported content types for code generation.
 pub type ContentType {
@@ -77,23 +79,28 @@ pub fn is_supported(content_type: ContentType) -> Bool {
 }
 
 /// Check if a content type is supported for request bodies.
+/// Driven by the capability registry: looks up the MIME string under
+/// category `"request"` at level Supported. UnsupportedContentType
+/// never matches the registry and always returns False.
 pub fn is_supported_request(content_type: ContentType) -> Bool {
   case content_type {
-    ApplicationJson -> True
-    MultipartFormData -> True
-    FormUrlEncoded -> True
-    _ -> False
+    UnsupportedContentType(_) -> False
+    ct -> registry_has_supported(to_string(ct), "request")
   }
 }
 
-/// Check if a content type is supported for responses.
+/// Check if a content type is supported for responses. Same mechanism
+/// as `is_supported_request`, just targeting the `"response"` category.
 pub fn is_supported_response(content_type: ContentType) -> Bool {
   case content_type {
-    ApplicationJson -> True
-    TextPlain -> True
-    ApplicationOctetStream -> True
-    ApplicationXml -> True
-    TextXml -> True
-    _ -> False
+    UnsupportedContentType(_) -> False
+    ct -> registry_has_supported(to_string(ct), "response")
   }
+}
+
+fn registry_has_supported(name: String, category: String) -> Bool {
+  capability.registry()
+  |> list.any(fn(c) {
+    c.name == name && c.category == category && c.level == capability.Supported
+  })
 }

@@ -3847,6 +3847,47 @@ pub fn capability_registry_covers_content_type_response_helpers_test() {
   })
 }
 
+pub fn capability_registry_covers_content_type_request_helpers_test() {
+  // Mirror of the response drift test for the request side — every
+  // MIME `is_supported_request` accepts must have a `"request"`-
+  // category Supported entry in the registry.
+  let mimes_we_flag_supported = [
+    "application/json",
+    "application/x-www-form-urlencoded",
+    "multipart/form-data",
+  ]
+  let registry_request_names =
+    capability.registry()
+    |> list.filter(fn(c) {
+      c.category == "request" && c.level == capability.Supported
+    })
+    |> list.map(fn(c) { c.name })
+  list.each(mimes_we_flag_supported, fn(mime) {
+    let parsed = content_type.from_string(mime)
+    content_type.is_supported_request(parsed) |> should.be_true()
+    case list.contains(registry_request_names, mime) {
+      True -> Nil
+      False -> mime |> should.equal("<expected in capability registry>")
+    }
+  })
+}
+
+pub fn is_supported_request_rejects_unsupported_content_type_test() {
+  // Sanity check that the UnsupportedContentType fallback still short-
+  // circuits to False without touching the registry (the registry
+  // naturally lacks entries for arbitrary strings, but keeping this
+  // branch explicit prevents a future refactor from accidentally
+  // turning unknown MIMEs into Supported via a lookup miss).
+  content_type.is_supported_request(content_type.UnsupportedContentType(
+    "application/whatever",
+  ))
+  |> should.be_false()
+  content_type.is_supported_response(content_type.UnsupportedContentType(
+    "application/whatever",
+  ))
+  |> should.be_false()
+}
+
 pub fn capability_registry_names_appear_in_readme_boundaries_test() {
   // Every keyword the capability registry declares as Unsupported / NotHandled
   // / ParsedNotUsed must be mentioned by name inside the README's
