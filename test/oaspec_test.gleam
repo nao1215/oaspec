@@ -5177,8 +5177,8 @@ pub fn schema_dispatch_to_string_expr_test() {
 /// IR renderer produces correct type alias.
 pub fn ir_render_type_alias_test() {
   let module =
-    ir.Module(header: "test", imports: [], declarations: [
-      ir.Declaration(
+    ir.module(header: "test", imports: [], declarations: [
+      ir.declaration(
         doc: None,
         type_def: ir.TypeAlias(name: "UserId", target: "String"),
       ),
@@ -5191,8 +5191,8 @@ pub fn ir_render_type_alias_test() {
 /// IR renderer produces correct union type.
 pub fn ir_render_union_type_test() {
   let module =
-    ir.Module(header: "test", imports: [], declarations: [
-      ir.Declaration(
+    ir.module(header: "test", imports: [], declarations: [
+      ir.declaration(
         doc: None,
         type_def: ir.UnionType(name: "Shape", variants: [
           ir.VariantWithType(name: "ShapeCircle", inner_type: "Circle"),
@@ -5212,8 +5212,8 @@ pub fn ir_render_union_type_test() {
 /// IR renderer produces correct record type.
 pub fn ir_render_record_type_test() {
   let module =
-    ir.Module(header: "test", imports: [], declarations: [
-      ir.Declaration(
+    ir.module(header: "test", imports: [], declarations: [
+      ir.declaration(
         doc: None,
         type_def: ir.RecordType(name: "User", fields: [
           ir.Field(name: "name", type_expr: "String"),

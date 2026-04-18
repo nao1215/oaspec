@@ -9,8 +9,8 @@ import gleam/string
 import oaspec/codegen/allof_merge
 import oaspec/codegen/context.{type Context}
 import oaspec/codegen/ir.{
-  type Declaration, type Module, Declaration, EnumType, Field, Module,
-  RecordType, TypeAlias, UnionType, VariantWithType,
+  type Declaration, type Module, EnumType, Field, RecordType, TypeAlias,
+  UnionType, VariantWithType,
 }
 import oaspec/codegen/schema_dispatch
 import oaspec/codegen/schema_utils
@@ -54,7 +54,7 @@ pub fn build_types_module(ctx: Context) -> Module {
   // Anonymous types from operations
   let anon_decls = anonymous_type_decls(ctx)
 
-  Module(
+  ir.module(
     header: "",
     imports: imports,
     declarations: list.flatten([inline_enum_decls, main_decls, anon_decls]),
@@ -150,7 +150,7 @@ fn inline_enums_from_properties(
             let #(_, variant_suffix) = pair
             naming.schema_to_type_name(type_name) <> variant_suffix
           })
-        Ok(Declaration(
+        Ok(ir.declaration(
           doc: metadata.description,
           type_def: EnumType(name: type_name, variants: variants),
         ))
@@ -175,7 +175,7 @@ fn type_def_decls(
     Reference(name: ref_name, ..) -> {
       let resolved_type = naming.schema_to_type_name(ref_name)
       [
-        Declaration(
+        ir.declaration(
           doc: None,
           type_def: TypeAlias(name: type_name, target: resolved_type),
         ),
@@ -242,7 +242,7 @@ fn schema_type_decls(
       }
 
       [
-        Declaration(
+        ir.declaration(
           doc: metadata.description,
           type_def: RecordType(name: type_name, fields: fields),
         ),
@@ -258,7 +258,7 @@ fn schema_type_decls(
           naming.schema_to_type_name(type_name) <> variant_suffix
         })
       [
-        Declaration(
+        ir.declaration(
           doc: metadata.description,
           type_def: EnumType(name: type_name, variants: variants),
         ),
@@ -273,7 +273,7 @@ fn schema_type_decls(
           VariantWithType(name: variant_name, inner_type: variant_type)
         })
       [
-        Declaration(
+        ir.declaration(
           doc: metadata.description,
           type_def: UnionType(name: type_name, variants: variants),
         ),
@@ -288,7 +288,7 @@ fn schema_type_decls(
           Field(name: field_name, type_expr: "Option(" <> variant_type <> ")")
         })
       [
-        Declaration(
+        ir.declaration(
           doc: metadata.description,
           type_def: RecordType(name: type_name, fields: fields),
         ),
@@ -312,7 +312,7 @@ fn schema_type_decls(
     _ -> {
       let gleam_type = schema_dispatch.schema_type(schema)
       [
-        Declaration(
+        ir.declaration(
           doc: None,
           type_def: TypeAlias(name: type_name, target: gleam_type),
         ),
@@ -432,7 +432,7 @@ fn anonymous_type_for_schema(
               VariantWithType(name: variant_name, inner_type: variant_type)
             })
           [
-            Declaration(
+            ir.declaration(
               doc: None,
               type_def: UnionType(name: type_name, variants: variants),
             ),

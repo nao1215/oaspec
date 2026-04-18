@@ -14,10 +14,10 @@ import oaspec/util/string_extra as se
 pub fn render(module: Module) -> String {
   let sb =
     se.file_header(context.version)
-    |> se.imports(module.imports)
+    |> se.imports(ir.module_imports(module))
 
   let sb =
-    list.fold(module.declarations, sb, fn(sb, decl) {
+    list.fold(ir.module_declarations(module), sb, fn(sb, decl) {
       render_declaration(sb, decl)
     })
 
@@ -29,11 +29,11 @@ fn render_declaration(
   sb: se.StringBuilder,
   decl: Declaration,
 ) -> se.StringBuilder {
-  let sb = case decl.doc {
+  let sb = case ir.declaration_doc(decl) {
     Some(doc) -> sb |> se.doc_comment(doc)
     None -> sb
   }
-  render_type_def(sb, decl.type_def)
+  render_type_def(sb, ir.declaration_type_def(decl))
 }
 
 /// Render a type definition to Gleam source.
