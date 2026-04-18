@@ -227,6 +227,7 @@ These are the most important limitations today:
 - `xml` annotations are not handled by the parser
 - Some fields are parsed and preserved but not yet used by codegen: callbacks, webhooks, externalDocs, tags, examples, links, response headers, encoding
 - Operation-level and path-level server overrides are supported in generated clients (precedence: operation > path > top-level)
+- Server-mode code generation rejects the following spec configurations (supported in client mode): `server: complex path parameters`, `server: non-primitive query array items`, `server: non-primitive header array items`, `server: complex deepObject properties`, `server: mixed form-urlencoded request`, `server: complex form-urlencoded fields`, `server: mixed multipart request`, `server: complex multipart fields`, `server: unsupported request content type`
 - The following are normalized to supported equivalents:
 - `const`: String const normalized to single-value enum
 - `type: [T, null]`: Normalized to nullable
