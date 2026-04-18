@@ -3410,6 +3410,37 @@ pub fn external_ref_nested_collision_across_files_rejected_test() {
   string.contains(msg, "already imported") |> should.be_true()
 }
 
+pub fn external_ref_in_array_items_test() {
+  // A top-level array schema whose items value is a relative-file $ref
+  // must be hoisted: the referenced schema is merged into
+  // `components.schemas` and items is rewritten to a local ref.
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/external_ref_array_items_main.yaml")
+  let assert Some(components) = spec.components
+  // Widget must have been pulled in from the shared file.
+  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
+    dict.get(components.schemas, "Widget")
+  dict.has_key(widget_props, "sku") |> should.be_true()
+  // Widgets.items must now be a local reference.
+  let assert Ok(schema.Inline(schema.ArraySchema(items: items_ref, ..))) =
+    dict.get(components.schemas, "Widgets")
+  let assert schema.Reference(ref: items_ref_str, ..) = items_ref
+  items_ref_str |> should.equal("#/components/schemas/Widget")
+}
+
+pub fn external_ref_array_items_collision_with_local_schema_rejected_test() {
+  // An array whose items ref targets a fragment name that already exists
+  // as a local schema must surface the silent-shadowing diagnostic.
+  let result =
+    parser.parse_file(
+      "test/fixtures/external_ref_array_items_local_collision_main.yaml",
+    )
+  let assert Error(err) = result
+  let msg = parser.parse_error_to_string(err)
+  string.contains(msg, "Widget") |> should.be_true()
+  string.contains(msg, "local schema") |> should.be_true()
+}
+
 pub fn external_ref_nested_in_object_property_test() {
   // A property whose value is a relative-file $ref must be hoisted: the
   // referenced schema is merged into `components.schemas` under its

@@ -1,0 +1,18 @@
+openapi: "3.0.3"
+info:
+  title: External Ref Array Items Local Collision Main
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Widget:
+      type: object
+      required:
+        - color
+      properties:
+        color:
+          type: string
+    Widgets:
+      type: array
+      items:
+        $ref: "./external_ref_nested_shared.yaml#/components/schemas/Widget"

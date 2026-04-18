@@ -6,9 +6,10 @@
 //// Supported shapes:
 ////   - top-level component schema entries (`components.schemas.Foo: $ref: ...`)
 ////   - ObjectSchema property values (`properties.field: $ref: ...`)
+////   - ArraySchema item values (`items: $ref: ...`)
 ////
 //// Out of scope (see issue #98 parent):
-////   - refs inside `array.items`, `additionalProperties`, or composition
+////   - refs inside `additionalProperties` or composition
 ////     (oneOf/anyOf/allOf) branches
 ////   - external refs in parameters / request bodies / responses / path items
 ////   - HTTP/HTTPS URLs
@@ -196,6 +197,30 @@ fn process_nested_property_refs(
             )
           Ok(#([#(name, Inline(new_obj)), ..rewritten_acc], new_imports))
         }
+        Inline(schema.ArraySchema(
+          metadata:,
+          items:,
+          min_items:,
+          max_items:,
+          unique_items:,
+        )) -> {
+          use #(new_items, new_imports) <- result.try(maybe_hoist_ref(
+            items,
+            base_dir,
+            parse_file,
+            imports,
+            original_local_names,
+          ))
+          let new_arr =
+            schema.ArraySchema(
+              metadata:,
+              items: new_items,
+              min_items:,
+              max_items:,
+              unique_items:,
+            )
+          Ok(#([#(name, Inline(new_arr)), ..rewritten_acc], new_imports))
+        }
         _ -> Ok(#([#(name, schema_ref), ..rewritten_acc], imports))
       }
     }),
@@ -247,36 +272,14 @@ fn rewrite_object_properties(
     list.try_fold(entries, #([], imports), fn(acc, entry) {
       let #(prop_acc, imports) = acc
       let #(prop_name, prop_ref) = entry
-      case extract_external_ref(prop_ref) {
-        Some(#(rel_path, fragment_name)) -> {
-          let resolved_path = filepath.join(base_dir, rel_path)
-          use _ <- result.try(check_nested_local_collision(
-            fragment_name,
-            resolved_path,
-            original_local_names,
-          ))
-          use _ <- result.try(check_nested_cross_file_collision(
-            fragment_name,
-            resolved_path,
-            imports,
-          ))
-          use loaded <- result.try(parse_file(resolved_path))
-          use target <- result.try(find_external_schema(
-            loaded,
-            fragment_name,
-            resolved_path,
-          ))
-          let local_ref =
-            Reference(
-              ref: "#/components/schemas/" <> fragment_name,
-              name: fragment_name,
-            )
-          let new_imports =
-            dict.insert(imports, fragment_name, #(resolved_path, target))
-          Ok(#([#(prop_name, local_ref), ..prop_acc], new_imports))
-        }
-        None -> Ok(#([#(prop_name, prop_ref), ..prop_acc], imports))
-      }
+      use #(new_ref, new_imports) <- result.try(maybe_hoist_ref(
+        prop_ref,
+        base_dir,
+        parse_file,
+        imports,
+        original_local_names,
+      ))
+      Ok(#([#(prop_name, new_ref), ..prop_acc], new_imports))
     }),
   )
   let new_properties =
@@ -284,6 +287,50 @@ fn rewrite_object_properties(
       dict.insert(d, pair.0, pair.1)
     })
   Ok(#(new_properties, new_imports))
+}
+
+/// Core external-ref hoisting step shared by the property-value and
+/// array-items resolvers. If `schema_ref` is a relative-file external ref,
+/// the referenced schema is staged for merging and the ref is rewritten to
+/// a local `#/components/schemas/<fragment>` ref. Otherwise the ref passes
+/// through unchanged.
+fn maybe_hoist_ref(
+  schema_ref: SchemaRef,
+  base_dir: String,
+  parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
+  imports: dict.Dict(String, #(String, SchemaRef)),
+  original_local_names: List(String),
+) -> Result(#(SchemaRef, dict.Dict(String, #(String, SchemaRef))), Diagnostic) {
+  case extract_external_ref(schema_ref) {
+    Some(#(rel_path, fragment_name)) -> {
+      let resolved_path = filepath.join(base_dir, rel_path)
+      use _ <- result.try(check_nested_local_collision(
+        fragment_name,
+        resolved_path,
+        original_local_names,
+      ))
+      use _ <- result.try(check_nested_cross_file_collision(
+        fragment_name,
+        resolved_path,
+        imports,
+      ))
+      use loaded <- result.try(parse_file(resolved_path))
+      use target <- result.try(find_external_schema(
+        loaded,
+        fragment_name,
+        resolved_path,
+      ))
+      let local_ref =
+        Reference(
+          ref: "#/components/schemas/" <> fragment_name,
+          name: fragment_name,
+        )
+      let new_imports =
+        dict.insert(imports, fragment_name, #(resolved_path, target))
+      Ok(#(local_ref, new_imports))
+    }
+    None -> Ok(#(schema_ref, imports))
+  }
 }
 
 /// Reject a nested property ref whose fragment name collides with a schema
