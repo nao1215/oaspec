@@ -3410,6 +3410,34 @@ pub fn external_ref_nested_collision_across_files_rejected_test() {
   string.contains(msg, "already imported") |> should.be_true()
 }
 
+pub fn external_ref_in_parameter_content_schema_test() {
+  // A parameter declared via ParameterContent (content media-type map)
+  // whose inner schema is a relative-file $ref must hoist the target
+  // into components.schemas and rewrite the inner ref.
+  let assert Ok(loaded) =
+    parser.parse_file("test/fixtures/external_ref_parameter_content_main.yaml")
+  let assert Some(components) = loaded.components
+  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
+    dict.get(components.schemas, "Widget")
+  dict.has_key(widget_props, "sku") |> should.be_true()
+  let assert Ok(spec.Value(param)) = dict.get(components.parameters, "Filter")
+  let assert spec.ParameterContent(media_map) = param.payload
+  let assert Ok(media) = dict.get(media_map, "application/json")
+  let assert Some(schema.Reference(ref: schema_ref, ..)) = media.schema
+  schema_ref |> should.equal("#/components/schemas/Widget")
+}
+
+pub fn external_ref_parameter_content_collision_with_local_schema_rejected_test() {
+  let result =
+    parser.parse_file(
+      "test/fixtures/external_ref_parameter_content_collision_main.yaml",
+    )
+  let assert Error(err) = result
+  let msg = parser.parse_error_to_string(err)
+  string.contains(msg, "Widget") |> should.be_true()
+  string.contains(msg, "local schema") |> should.be_true()
+}
+
 pub fn external_ref_in_request_body_schema_test() {
   // A request body defined under components.requestBodies whose media
   // type schema is a relative-file $ref must hoist the target into

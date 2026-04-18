@@ -10,13 +10,13 @@
 ////   - ObjectSchema additionalProperties values (`additionalProperties: $ref: ...`)
 ////   - composition branches (`oneOf`, `anyOf`, `allOf` variant refs)
 ////   - `components.parameters.*.schema: $ref: ...` (parameter schema only)
+////   - `components.parameters.*.content.*.schema: $ref: ...`
 ////   - `components.request_bodies.*.content.*.schema: $ref: ...`
 ////   - `components.responses.*.content.*.schema: $ref: ...`
 ////
 //// Out of scope (see issue #98 parent):
 ////   - external `$ref` pointing at a parameter / request-body / response
 ////     object itself (the whole entry rather than its schema)
-////   - external refs in `components.parameters.*.content` media maps
 ////   - external refs in operation-level parameters / bodies / responses
 ////   - HTTP/HTTPS URLs
 ////
@@ -359,8 +359,20 @@ fn process_parameter_schemas(
                 spec.Parameter(..p, payload: spec.ParameterSchema(new_ref))
               Ok(#([#(name, spec.Value(new_param)), ..collected], new_imports))
             }
-            spec.ParameterContent(_) ->
-              Ok(#([#(name, ref_or_param), ..collected], imports))
+            spec.ParameterContent(content) -> {
+              use #(new_content, new_imports) <- result.try(
+                rewrite_media_type_map(
+                  content,
+                  base_dir,
+                  parse_file,
+                  imports,
+                  original_local_names,
+                ),
+              )
+              let new_param =
+                spec.Parameter(..p, payload: spec.ParameterContent(new_content))
+              Ok(#([#(name, spec.Value(new_param)), ..collected], new_imports))
+            }
           }
         spec.Ref(_) -> Ok(#([#(name, ref_or_param), ..collected], imports))
       }

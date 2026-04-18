@@ -1,0 +1,14 @@
+openapi: "3.0.3"
+info:
+  title: External Ref Parameter Content Main
+  version: "1.0.0"
+paths: {}
+components:
+  parameters:
+    Filter:
+      name: filter
+      in: query
+      content:
+        application/json:
+          schema:
+            $ref: "./external_ref_nested_shared.yaml#/components/schemas/Widget"
