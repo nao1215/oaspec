@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Narrow external `$ref` support: `components.schemas` entries can now reference schemas in a sibling YAML/JSON file via relative-path fragment refs (`./other.yaml#/components/schemas/Foo`). `parse_file` resolves the ref by loading the target file, merging the referenced schema into the main spec, and rewriting the entry to a local ref. HTTP URLs, parameter/body/response external refs, and nested refs inside schemas remain unsupported — see `src/oaspec/openapi/external_loader.gleam` for the documented boundary (#145, subset of #98)
+- External `$ref` name-collision diagnostics: when an external component-schema ref would overwrite an existing local schema, or when two external refs pull the same fragment name from different source files, the parser now emits a clear `Diagnostic` instead of silently dropping one side. Re-importing the same name from the same file remains idempotent (#147, subset of #98)
 
 ## [0.12.0] - 2026-04-12
 

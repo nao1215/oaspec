@@ -8,7 +8,11 @@
 ////   - nested external refs inside ObjectSchema properties (only top-level
 ////     component-schema entries are handled today)
 ////   - HTTP/HTTPS URLs
-////   - name collisions across files (first writer wins; TODO: diagnose)
+////
+//// Name collisions — when an external ref would overwrite an existing local
+//// schema, or when two external refs pull in the same fragment name from
+//// different files — are surfaced as `Diagnostic` errors rather than
+//// silently dropping one side.
 
 import filepath
 import gleam/dict
@@ -52,12 +56,25 @@ fn process_components(
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
 ) -> Result(Components(Unresolved), Diagnostic) {
   let entries = dict.to_list(components.schemas)
-  use new_entries <- result.try(
-    list.try_fold(entries, [], fn(acc, entry) {
+  let original_local_names = local_schema_names(entries)
+  use #(new_entries, _imported) <- result.try(
+    list.try_fold(entries, #([], dict.new()), fn(acc, entry) {
+      let #(pending, imported) = acc
       let #(name, schema_ref) = entry
       case extract_external_ref(schema_ref) {
         Some(#(rel_path, fragment_name)) -> {
           let resolved_path = filepath.join(base_dir, rel_path)
+          use _ <- result.try(check_local_collision(
+            name,
+            fragment_name,
+            resolved_path,
+            original_local_names,
+          ))
+          use _ <- result.try(check_cross_file_collision(
+            fragment_name,
+            resolved_path,
+            imported,
+          ))
           use loaded <- result.try(parse_file(resolved_path))
           use target <- result.try(find_external_schema(
             loaded,
@@ -72,9 +89,15 @@ fn process_components(
               ref: "#/components/schemas/" <> fragment_name,
               name: fragment_name,
             )
-          Ok([#(name, local_ref), #(fragment_name, target), ..acc])
+          let pending = [
+            #(name, local_ref),
+            #(fragment_name, target),
+            ..pending
+          ]
+          let imported = dict.insert(imported, fragment_name, resolved_path)
+          Ok(#(pending, imported))
         }
-        None -> Ok([#(name, schema_ref), ..acc])
+        None -> Ok(#([#(name, schema_ref), ..pending], imported))
       }
     }),
   )
@@ -83,6 +106,84 @@ fn process_components(
       dict.insert(d, pair.0, pair.1)
     })
   Ok(Components(..components, schemas: merged))
+}
+
+/// Names in the current spec that are *not themselves* external refs.
+/// These are the schemas the external loader must not silently overwrite.
+fn local_schema_names(entries: List(#(String, SchemaRef))) -> List(String) {
+  list.filter_map(entries, fn(entry) {
+    case extract_external_ref(entry.1) {
+      Some(_) -> Error(Nil)
+      None -> Ok(entry.0)
+    }
+  })
+}
+
+/// Reject an external ref whose fragment name would collide with a schema
+/// already defined locally in the same spec. The case where the entry name
+/// equals the fragment name (`Widget: $ref: './other.yaml#/.../Widget'`) is
+/// intentionally allowed — we treat it as the user asking for that slot to
+/// hold the imported schema.
+fn check_local_collision(
+  entry_name: String,
+  fragment_name: String,
+  source_path: String,
+  original_local_names: List(String),
+) -> Result(Nil, Diagnostic) {
+  case entry_name == fragment_name {
+    True -> Ok(Nil)
+    False ->
+      case list.contains(original_local_names, fragment_name) {
+        False -> Ok(Nil)
+        True ->
+          Error(diagnostic.validation(
+            severity: diagnostic.SeverityError,
+            target: diagnostic.TargetBoth,
+            path: source_path,
+            detail: "External $ref imports schema '"
+              <> fragment_name
+              <> "' from '"
+              <> source_path
+              <> "', but a local schema with the same name is already defined.",
+            hint: Some(
+              "Rename one of the colliding schemas, or point the external ref at a file whose fragment name is unique.",
+            ),
+          ))
+      }
+  }
+}
+
+/// Reject two external refs that both pull the same fragment name from
+/// different source files. Re-importing the same name from the same path is
+/// allowed (idempotent) to keep error messages narrow.
+fn check_cross_file_collision(
+  fragment_name: String,
+  resolved_path: String,
+  imported: dict.Dict(String, String),
+) -> Result(Nil, Diagnostic) {
+  case dict.get(imported, fragment_name) {
+    Error(_) -> Ok(Nil)
+    Ok(prev_path) ->
+      case prev_path == resolved_path {
+        True -> Ok(Nil)
+        False ->
+          Error(diagnostic.validation(
+            severity: diagnostic.SeverityError,
+            target: diagnostic.TargetBoth,
+            path: resolved_path,
+            detail: "External $ref imports schema '"
+              <> fragment_name
+              <> "' from '"
+              <> resolved_path
+              <> "', but the same name was already imported from '"
+              <> prev_path
+              <> "'.",
+            hint: Some(
+              "Rename one of the schemas in the source files so imports do not collide.",
+            ),
+          ))
+      }
+  }
 }
 
 /// Detect a `./...#/components/schemas/Name` or `../...#/components/schemas/Name`

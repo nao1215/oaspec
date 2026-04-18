@@ -1,0 +1,14 @@
+openapi: "3.0.3"
+info:
+  title: External Ref Collision Shared
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Widget:
+      type: object
+      required:
+        - shared_field
+      properties:
+        shared_field:
+          type: string

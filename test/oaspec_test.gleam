@@ -3357,6 +3357,31 @@ pub fn external_file_ref_for_component_schema_test() {
   item_ref |> should.equal("#/components/schemas/Widget")
 }
 
+pub fn external_ref_collision_with_local_schema_rejected_test() {
+  // Main spec defines a local `Widget` AND another entry (`Item`) that
+  // imports a different `Widget` from a sibling file. Silently merging
+  // would overwrite the local Widget — parse_file must surface a
+  // diagnostic instead.
+  let result =
+    parser.parse_file("test/fixtures/external_ref_collision_main.yaml")
+  let assert Error(err) = result
+  let msg = parser.parse_error_to_string(err)
+  string.contains(msg, "Widget") |> should.be_true()
+  string.contains(msg, "local schema") |> should.be_true()
+}
+
+pub fn external_ref_collision_across_files_rejected_test() {
+  // Two external refs import the same fragment name `Widget` from two
+  // distinct sibling files. The second import collides with the first
+  // and must surface a diagnostic.
+  let result =
+    parser.parse_file("test/fixtures/external_ref_collision_cross_main.yaml")
+  let assert Error(err) = result
+  let msg = parser.parse_error_to_string(err)
+  string.contains(msg, "Widget") |> should.be_true()
+  string.contains(msg, "already imported") |> should.be_true()
+}
+
 pub fn capability_registry_names_appear_in_readme_boundaries_test() {
   // Every keyword the capability registry declares as Unsupported / NotHandled
   // / ParsedNotUsed must be mentioned by name inside the README's

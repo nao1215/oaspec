@@ -1,0 +1,14 @@
+openapi: "3.0.3"
+info:
+  title: Collision File B
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Widget:
+      type: object
+      required:
+        - from_b
+      properties:
+        from_b:
+          type: string

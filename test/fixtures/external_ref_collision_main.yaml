@@ -1,0 +1,16 @@
+openapi: "3.0.3"
+info:
+  title: External Ref Collision Main
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Widget:
+      type: object
+      required:
+        - local_field
+      properties:
+        local_field:
+          type: string
+    Item:
+      $ref: "./external_ref_collision_shared.yaml#/components/schemas/Widget"
