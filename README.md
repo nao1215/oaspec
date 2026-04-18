@@ -137,9 +137,10 @@ You can also run `gleam run -- generate --config=oaspec.yaml`.
 
 ### Runnable examples
 
-A working example lives under [`examples/`](./examples). The current entry is:
+Working examples live under [`examples/`](./examples):
 
 - [`examples/petstore_client`](./examples/petstore_client) — minimal client usage against a canned HTTP transport. Run it from the repo root with `just example-petstore`.
+- [`examples/server_adapter`](./examples/server_adapter) — wires the generated `router.route/5` to a framework-free adapter. Run it from the repo root with `just example-server-adapter`.
 
 ## Configuration
 

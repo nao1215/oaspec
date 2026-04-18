@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`style: pipeDelimited` / `style: spaceDelimited` query array parameters**: generated clients encode non-exploded arrays as `name=a|b|c` or `name=a%20b%20c`; generated servers split on the matching delimiter (#97)
 - **Provenance metadata on hoisted schemas**: every hoisted component schema carries an `OriginKind` explaining whether it came from a property, array item, oneOf/anyOf/allOf position, parameter, request body, response, or additional-properties context. New `oaspec/openapi/provenance` module exposes `hoisted_schema_summary/1` so tooling and diagnostics can distinguish user-authored from synthetic schemas (#30)
 - `examples/petstore_client`: first runnable example of an oaspec-generated client, driven by a stub `send` function; wired to `just example-petstore` (#26)
+- `examples/server_adapter`: framework-free runnable example that bridges `router.route/5` to a canned request/response pair; wired to `just example-server-adapter` (#35)
 - 10 new tests covering delimited styles, provenance tracking, summary grouping, and guard pluralization (615 → 626 unit tests)
 - 3 fixtures covering delimited styles and their rejection cases (179 → 182 fixtures)
 

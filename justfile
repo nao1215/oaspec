@@ -65,6 +65,11 @@ example-petstore:
   gleam run -- generate --config=examples/petstore_client/oaspec.yaml
   cd examples/petstore_client && gleam deps download && gleam build --warnings-as-errors && gleam run
 
+# Run the server_adapter example. `handlers.gleam` is hand-written and
+# committed, so we do NOT regenerate here (generation would overwrite it).
+example-server-adapter:
+  cd examples/server_adapter && gleam deps download && gleam build --warnings-as-errors && gleam run
+
 # Regenerate golden test snapshot files
 update-golden:
   bash scripts/update_golden.sh

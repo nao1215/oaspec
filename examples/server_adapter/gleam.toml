@@ -1,0 +1,11 @@
+name = "server_adapter_example"
+version = "0.1.0"
+target = "erlang"
+description = "Runnable example: wiring an oaspec-generated server router into a minimal adapter"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
