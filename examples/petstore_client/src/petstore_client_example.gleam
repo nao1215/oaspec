@@ -43,6 +43,7 @@ fn describe(err: client.ClientError) -> String {
     client.ConnectionError(detail) -> "connection: " <> detail
     client.TimeoutError -> "timeout"
     client.DecodeError(detail) -> "decode: " <> detail
+    client.InvalidUrl(detail) -> "invalid URL: " <> detail
     client.UnexpectedStatus(status:, body: _) ->
       "unexpected status: " <> int.to_string(status)
   }
