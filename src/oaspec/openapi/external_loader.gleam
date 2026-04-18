@@ -13,11 +13,15 @@
 ////   - `components.parameters.*.content.*.schema: $ref: ...`
 ////   - `components.request_bodies.*.content.*.schema: $ref: ...`
 ////   - `components.responses.*.content.*.schema: $ref: ...`
+////   - operation-level `parameters[*].schema` / `parameters[*].content.*.schema`
+////     on both `paths.<path>.parameters` and `paths.<path>.<method>.parameters`
+////   - operation-level `requestBody.content.*.schema`
+////   - operation-level `responses.<code>.content.*.schema`
 ////
 //// Out of scope (see issue #98 parent):
 ////   - external `$ref` pointing at a parameter / request-body / response
-////     object itself (the whole entry rather than its schema)
-////   - external refs in operation-level parameters / bodies / responses
+////     / path-item object itself (the whole entry rather than its schema)
+////   - external refs inside callbacks (operation.callbacks holds PathItems)
 ////   - HTTP/HTTPS URLs
 ////
 //// Name collisions — when an external ref would overwrite an existing local
@@ -36,6 +40,7 @@ import oaspec/openapi/schema.{type SchemaRef, Inline, Reference}
 import oaspec/openapi/spec.{
   type Components, type OpenApiSpec, type Unresolved, Components, OpenApiSpec,
 }
+import oaspec/util/http
 import simplifile
 
 /// Load every `components.schemas` entry whose value is an external
@@ -79,14 +84,32 @@ pub fn resolve_external_component_refs(
           nested_imports,
         ),
       )
-      use body_resolved <- result.try(process_body_response_schemas(
-        param_resolved,
-        dir,
-        parse_file,
-        original_local_names,
-        param_imports,
-      ))
-      Ok(OpenApiSpec(..spec, components: Some(body_resolved)))
+      use #(body_resolved, body_imports) <- result.try(
+        process_body_response_schemas(
+          param_resolved,
+          dir,
+          parse_file,
+          original_local_names,
+          param_imports,
+        ),
+      )
+      use #(new_paths, op_final_components) <- result.try(
+        process_operation_schemas(
+          spec.paths,
+          body_resolved,
+          dir,
+          parse_file,
+          original_local_names,
+          body_imports,
+        ),
+      )
+      Ok(
+        OpenApiSpec(
+          ..spec,
+          paths: new_paths,
+          components: Some(op_final_components),
+        ),
+      )
     }
     _, _ -> Ok(spec)
   }
@@ -324,6 +347,338 @@ fn no_target() -> SchemaRef {
   Reference(ref: "", name: "")
 }
 
+/// Walk `spec.paths`: for each inline `PathItem`, rewrite its path-level
+/// `parameters` list, every populated HTTP method `Operation` (via
+/// `rewrite_operation`), and feed any newly imported schemas into
+/// `components.schemas`. `RefOr.Ref` path items passing pointers to
+/// external files are left untouched.
+fn process_operation_schemas(
+  paths: dict.Dict(String, spec.RefOr(spec.PathItem(Unresolved))),
+  components: Components(Unresolved),
+  base_dir: String,
+  parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
+  original_local_names: List(String),
+  seeded_imports: dict.Dict(String, #(String, SchemaRef)),
+) -> Result(
+  #(
+    dict.Dict(String, spec.RefOr(spec.PathItem(Unresolved))),
+    Components(Unresolved),
+  ),
+  Diagnostic,
+) {
+  let entries = dict.to_list(paths)
+  use #(rewritten, final_imports) <- result.try(
+    list.try_fold(entries, #([], seeded_imports), fn(acc, entry) {
+      let #(collected, imports) = acc
+      let #(path_key, ref_or_item) = entry
+      case ref_or_item {
+        spec.Value(path_item) -> {
+          use #(new_parameters, imports_after_params) <- result.try(
+            rewrite_parameter_list(
+              path_item.parameters,
+              base_dir,
+              parse_file,
+              imports,
+              original_local_names,
+            ),
+          )
+          use #(new_path_item, imports_after_methods) <- result.try(
+            rewrite_path_item_methods(
+              spec.PathItem(..path_item, parameters: new_parameters),
+              base_dir,
+              parse_file,
+              imports_after_params,
+              original_local_names,
+            ),
+          )
+          Ok(#(
+            [#(path_key, spec.Value(new_path_item)), ..collected],
+            imports_after_methods,
+          ))
+        }
+        spec.Ref(_) -> Ok(#([#(path_key, ref_or_item), ..collected], imports))
+      }
+    }),
+  )
+  let new_paths =
+    list.fold(rewritten, dict.new(), fn(d, pair) {
+      dict.insert(d, pair.0, pair.1)
+    })
+  let new_schemas =
+    dict.fold(final_imports, components.schemas, fn(d, frag_name, pair) {
+      let #(_source_path, target_schema) = pair
+      case dict.has_key(d, frag_name), target_schema {
+        True, _ -> d
+        False, Inline(_) -> dict.insert(d, frag_name, target_schema)
+        False, _ -> d
+      }
+    })
+  Ok(#(new_paths, Components(..components, schemas: new_schemas)))
+}
+
+/// Rewrite each `RefOr(Parameter)` in a parameter list, threading the
+/// imports tracker so collisions across operation-level and components
+/// refs remain visible.
+fn rewrite_parameter_list(
+  parameters: List(spec.RefOr(spec.Parameter(Unresolved))),
+  base_dir: String,
+  parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
+  imports: dict.Dict(String, #(String, SchemaRef)),
+  original_local_names: List(String),
+) -> Result(
+  #(
+    List(spec.RefOr(spec.Parameter(Unresolved))),
+    dict.Dict(String, #(String, SchemaRef)),
+  ),
+  Diagnostic,
+) {
+  use #(collected, new_imports) <- result.try(
+    list.try_fold(parameters, #([], imports), fn(acc, item) {
+      let #(done, imports) = acc
+      use #(new_item, new_imports) <- result.try(rewrite_ref_or_parameter(
+        item,
+        base_dir,
+        parse_file,
+        imports,
+        original_local_names,
+      ))
+      Ok(#([new_item, ..done], new_imports))
+    }),
+  )
+  Ok(#(list.reverse(collected), new_imports))
+}
+
+/// Rewrite every populated HTTP-method slot on a `PathItem`. Each inline
+/// `Operation` has its own `parameters`, `request_body`, and `responses`
+/// dicts rewritten.
+fn rewrite_path_item_methods(
+  path_item: spec.PathItem(Unresolved),
+  base_dir: String,
+  parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
+  imports: dict.Dict(String, #(String, SchemaRef)),
+  original_local_names: List(String),
+) -> Result(
+  #(spec.PathItem(Unresolved), dict.Dict(String, #(String, SchemaRef))),
+  Diagnostic,
+) {
+  use #(get_op, imports1) <- result.try(rewrite_optional_operation(
+    path_item.get,
+    base_dir,
+    parse_file,
+    imports,
+    original_local_names,
+  ))
+  use #(post_op, imports2) <- result.try(rewrite_optional_operation(
+    path_item.post,
+    base_dir,
+    parse_file,
+    imports1,
+    original_local_names,
+  ))
+  use #(put_op, imports3) <- result.try(rewrite_optional_operation(
+    path_item.put,
+    base_dir,
+    parse_file,
+    imports2,
+    original_local_names,
+  ))
+  use #(delete_op, imports4) <- result.try(rewrite_optional_operation(
+    path_item.delete,
+    base_dir,
+    parse_file,
+    imports3,
+    original_local_names,
+  ))
+  use #(patch_op, imports5) <- result.try(rewrite_optional_operation(
+    path_item.patch,
+    base_dir,
+    parse_file,
+    imports4,
+    original_local_names,
+  ))
+  use #(head_op, imports6) <- result.try(rewrite_optional_operation(
+    path_item.head,
+    base_dir,
+    parse_file,
+    imports5,
+    original_local_names,
+  ))
+  use #(options_op, imports7) <- result.try(rewrite_optional_operation(
+    path_item.options,
+    base_dir,
+    parse_file,
+    imports6,
+    original_local_names,
+  ))
+  use #(trace_op, final_imports) <- result.try(rewrite_optional_operation(
+    path_item.trace,
+    base_dir,
+    parse_file,
+    imports7,
+    original_local_names,
+  ))
+  Ok(#(
+    spec.PathItem(
+      ..path_item,
+      get: get_op,
+      post: post_op,
+      put: put_op,
+      delete: delete_op,
+      patch: patch_op,
+      head: head_op,
+      options: options_op,
+      trace: trace_op,
+    ),
+    final_imports,
+  ))
+}
+
+fn rewrite_optional_operation(
+  op: option.Option(spec.Operation(Unresolved)),
+  base_dir: String,
+  parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
+  imports: dict.Dict(String, #(String, SchemaRef)),
+  original_local_names: List(String),
+) -> Result(
+  #(
+    option.Option(spec.Operation(Unresolved)),
+    dict.Dict(String, #(String, SchemaRef)),
+  ),
+  Diagnostic,
+) {
+  case op {
+    Some(operation) -> {
+      use #(new_op, new_imports) <- result.try(rewrite_operation(
+        operation,
+        base_dir,
+        parse_file,
+        imports,
+        original_local_names,
+      ))
+      Ok(#(Some(new_op), new_imports))
+    }
+    None -> Ok(#(None, imports))
+  }
+}
+
+fn rewrite_operation(
+  operation: spec.Operation(Unresolved),
+  base_dir: String,
+  parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
+  imports: dict.Dict(String, #(String, SchemaRef)),
+  original_local_names: List(String),
+) -> Result(
+  #(spec.Operation(Unresolved), dict.Dict(String, #(String, SchemaRef))),
+  Diagnostic,
+) {
+  use #(new_params, imports_after_params) <- result.try(rewrite_parameter_list(
+    operation.parameters,
+    base_dir,
+    parse_file,
+    imports,
+    original_local_names,
+  ))
+  use #(new_body, imports_after_body) <- result.try(
+    rewrite_optional_request_body(
+      operation.request_body,
+      base_dir,
+      parse_file,
+      imports_after_params,
+      original_local_names,
+    ),
+  )
+  use #(new_responses, final_imports) <- result.try(rewrite_response_map(
+    operation.responses,
+    base_dir,
+    parse_file,
+    imports_after_body,
+    original_local_names,
+  ))
+  Ok(#(
+    spec.Operation(
+      ..operation,
+      parameters: new_params,
+      request_body: new_body,
+      responses: new_responses,
+    ),
+    final_imports,
+  ))
+}
+
+fn rewrite_optional_request_body(
+  body: option.Option(spec.RefOr(spec.RequestBody(Unresolved))),
+  base_dir: String,
+  parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
+  imports: dict.Dict(String, #(String, SchemaRef)),
+  original_local_names: List(String),
+) -> Result(
+  #(
+    option.Option(spec.RefOr(spec.RequestBody(Unresolved))),
+    dict.Dict(String, #(String, SchemaRef)),
+  ),
+  Diagnostic,
+) {
+  case body {
+    Some(spec.Value(rb)) -> {
+      use #(new_content, new_imports) <- result.try(rewrite_media_type_map(
+        rb.content,
+        base_dir,
+        parse_file,
+        imports,
+        original_local_names,
+      ))
+      let new_rb = spec.RequestBody(..rb, content: new_content)
+      Ok(#(Some(spec.Value(new_rb)), new_imports))
+    }
+    Some(spec.Ref(_)) -> Ok(#(body, imports))
+    None -> Ok(#(None, imports))
+  }
+}
+
+fn rewrite_response_map(
+  responses: dict.Dict(
+    http.HttpStatusCode,
+    spec.RefOr(spec.Response(Unresolved)),
+  ),
+  base_dir: String,
+  parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
+  imports: dict.Dict(String, #(String, SchemaRef)),
+  original_local_names: List(String),
+) -> Result(
+  #(
+    dict.Dict(http.HttpStatusCode, spec.RefOr(spec.Response(Unresolved))),
+    dict.Dict(String, #(String, SchemaRef)),
+  ),
+  Diagnostic,
+) {
+  let entries = dict.to_list(responses)
+  use #(rewritten, new_imports) <- result.try(
+    list.try_fold(entries, #([], imports), fn(acc, entry) {
+      let #(collected, imports) = acc
+      let #(status, ref_or_resp) = entry
+      case ref_or_resp {
+        spec.Value(resp) -> {
+          use #(new_content, new_imports) <- result.try(rewrite_media_type_map(
+            resp.content,
+            base_dir,
+            parse_file,
+            imports,
+            original_local_names,
+          ))
+          let new_resp = spec.Response(..resp, content: new_content)
+          Ok(#([#(status, spec.Value(new_resp)), ..collected], new_imports))
+        }
+        spec.Ref(_) -> Ok(#([#(status, ref_or_resp), ..collected], imports))
+      }
+    }),
+  )
+  let new_map =
+    list.fold(rewritten, dict.new(), fn(d, pair) {
+      dict.insert(d, pair.0, pair.1)
+    })
+  Ok(#(new_map, new_imports))
+}
+
 /// Walk `components.parameters`: for each inline `Parameter` whose payload is
 /// a `ParameterSchema(SchemaRef)` pointing at a relative-file external ref,
 /// hoist the target schema into `components.schemas` and rewrite the inner
@@ -344,38 +699,14 @@ fn process_parameter_schemas(
     list.try_fold(entries, #([], seeded_imports), fn(acc, entry) {
       let #(collected, imports) = acc
       let #(name, ref_or_param) = entry
-      case ref_or_param {
-        spec.Value(p) ->
-          case p.payload {
-            spec.ParameterSchema(schema_ref) -> {
-              use #(new_ref, new_imports) <- result.try(maybe_hoist_ref(
-                schema_ref,
-                base_dir,
-                parse_file,
-                imports,
-                original_local_names,
-              ))
-              let new_param =
-                spec.Parameter(..p, payload: spec.ParameterSchema(new_ref))
-              Ok(#([#(name, spec.Value(new_param)), ..collected], new_imports))
-            }
-            spec.ParameterContent(content) -> {
-              use #(new_content, new_imports) <- result.try(
-                rewrite_media_type_map(
-                  content,
-                  base_dir,
-                  parse_file,
-                  imports,
-                  original_local_names,
-                ),
-              )
-              let new_param =
-                spec.Parameter(..p, payload: spec.ParameterContent(new_content))
-              Ok(#([#(name, spec.Value(new_param)), ..collected], new_imports))
-            }
-          }
-        spec.Ref(_) -> Ok(#([#(name, ref_or_param), ..collected], imports))
-      }
+      use #(new_param, new_imports) <- result.try(rewrite_ref_or_parameter(
+        ref_or_param,
+        base_dir,
+        parse_file,
+        imports,
+        original_local_names,
+      ))
+      Ok(#([#(name, new_param), ..collected], new_imports))
     }),
   )
   let new_parameters =
@@ -413,7 +744,10 @@ fn process_body_response_schemas(
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   original_local_names: List(String),
   seeded_imports: dict.Dict(String, #(String, SchemaRef)),
-) -> Result(Components(Unresolved), Diagnostic) {
+) -> Result(
+  #(Components(Unresolved), dict.Dict(String, #(String, SchemaRef))),
+  Diagnostic,
+) {
   let body_entries = dict.to_list(components.request_bodies)
   use #(new_bodies, imports_after_bodies) <- result.try(
     list.try_fold(body_entries, #([], seeded_imports), fn(acc, entry) {
@@ -473,14 +807,63 @@ fn process_body_response_schemas(
         False, _ -> d
       }
     })
-  Ok(
+  Ok(#(
     Components(
       ..components,
       request_bodies: new_request_bodies,
       responses: new_responses_dict,
       schemas: new_schemas,
     ),
-  )
+    final_imports,
+  ))
+}
+
+/// Rewrite a single `RefOr(Parameter)` by hoisting external refs inside
+/// either a `ParameterSchema` or a `ParameterContent` payload. `Ref`
+/// entries (external parameter-object refs) pass through unchanged.
+fn rewrite_ref_or_parameter(
+  ref_or_param: spec.RefOr(spec.Parameter(spec.Unresolved)),
+  base_dir: String,
+  parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
+  imports: dict.Dict(String, #(String, SchemaRef)),
+  original_local_names: List(String),
+) -> Result(
+  #(
+    spec.RefOr(spec.Parameter(spec.Unresolved)),
+    dict.Dict(String, #(String, SchemaRef)),
+  ),
+  Diagnostic,
+) {
+  case ref_or_param {
+    spec.Value(p) ->
+      case p.payload {
+        spec.ParameterSchema(schema_ref) -> {
+          use #(new_ref, new_imports) <- result.try(maybe_hoist_ref(
+            schema_ref,
+            base_dir,
+            parse_file,
+            imports,
+            original_local_names,
+          ))
+          let new_param =
+            spec.Parameter(..p, payload: spec.ParameterSchema(new_ref))
+          Ok(#(spec.Value(new_param), new_imports))
+        }
+        spec.ParameterContent(content) -> {
+          use #(new_content, new_imports) <- result.try(rewrite_media_type_map(
+            content,
+            base_dir,
+            parse_file,
+            imports,
+            original_local_names,
+          ))
+          let new_param =
+            spec.Parameter(..p, payload: spec.ParameterContent(new_content))
+          Ok(#(spec.Value(new_param), new_imports))
+        }
+      }
+    spec.Ref(_) -> Ok(#(ref_or_param, imports))
+  }
 }
 
 /// Walk every MediaType in a content-type dict and hoist any external ref

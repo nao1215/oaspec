@@ -3410,6 +3410,58 @@ pub fn external_ref_nested_collision_across_files_rejected_test() {
   string.contains(msg, "already imported") |> should.be_true()
 }
 
+pub fn external_ref_in_operation_schemas_test() {
+  // An operation whose path-level parameters, operation-level
+  // parameters, request body, and responses all carry external $ref
+  // values must have every such ref hoisted into components.schemas
+  // and rewritten to a local ref.
+  let assert Ok(loaded) =
+    parser.parse_file("test/fixtures/external_ref_operation_main.yaml")
+  let assert Some(components) = loaded.components
+  // Widget must have been pulled into components.schemas by the
+  // operation walker, even though the source spec had an empty
+  // components block.
+  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
+    dict.get(components.schemas, "Widget")
+  dict.has_key(widget_props, "sku") |> should.be_true()
+  // Path-level parameter schema rewritten.
+  let assert Ok(spec.Value(path_item)) = dict.get(loaded.paths, "/widgets")
+  let assert [spec.Value(path_param)] = path_item.parameters
+  let assert spec.ParameterSchema(schema.Reference(ref: path_param_ref, ..)) =
+    path_param.payload
+  path_param_ref |> should.equal("#/components/schemas/Widget")
+  // Operation-level parameter schema rewritten.
+  let assert Some(post_op) = path_item.post
+  let assert [spec.Value(op_param)] = post_op.parameters
+  let assert spec.ParameterSchema(schema.Reference(ref: op_param_ref, ..)) =
+    op_param.payload
+  op_param_ref |> should.equal("#/components/schemas/Widget")
+  // Request body media schema rewritten.
+  let assert Some(spec.Value(req_body)) = post_op.request_body
+  let assert Ok(body_media) = dict.get(req_body.content, "application/json")
+  let assert Some(schema.Reference(ref: body_ref, ..)) = body_media.schema
+  body_ref |> should.equal("#/components/schemas/Widget")
+  // Response media schema rewritten.
+  let assert [#(_, spec.Value(response))] = dict.to_list(post_op.responses)
+  let assert Ok(resp_media) = dict.get(response.content, "application/json")
+  let assert Some(schema.Reference(ref: resp_ref, ..)) = resp_media.schema
+  resp_ref |> should.equal("#/components/schemas/Widget")
+}
+
+pub fn external_ref_operation_collision_with_local_schema_rejected_test() {
+  // An operation response that imports `Widget` while the main spec
+  // already defines a local Widget must surface the silent-shadowing
+  // diagnostic via the shared imports tracker.
+  let result =
+    parser.parse_file(
+      "test/fixtures/external_ref_operation_collision_main.yaml",
+    )
+  let assert Error(err) = result
+  let msg = parser.parse_error_to_string(err)
+  string.contains(msg, "Widget") |> should.be_true()
+  string.contains(msg, "local schema") |> should.be_true()
+}
+
 pub fn external_ref_in_parameter_content_schema_test() {
   // A parameter declared via ParameterContent (content media-type map)
   // whose inner schema is a relative-file $ref must hoist the target
