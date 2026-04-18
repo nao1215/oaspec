@@ -316,6 +316,6 @@ fn encode_dynamic(value: dynamic.Dynamic) -> json.Json {
       json.bool(b)
     }
     "Nil" -> json.null()
-    _ -> json.string(dynamic.classify(value))
+    _ -> json.null()
   }
 }

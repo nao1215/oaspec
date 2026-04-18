@@ -1254,7 +1254,11 @@ fn generate_encoders(
       |> se.indent(3, "json.bool(b)")
       |> se.indent(2, "}")
       |> se.indent(2, "\"Nil\" -> json.null()")
-      |> se.indent(2, "_ -> json.string(dynamic.classify(value))")
+      // Fallback: unsupported dynamic classifications (List, Dict, Tuple,
+      // etc.) emit `json.null()` rather than the type name as a string.
+      // Emitting the type name silently corrupts payloads; null at least
+      // fails loud when the receiving end doesn't tolerate it.
+      |> se.indent(2, "_ -> json.null()")
       |> se.indent(1, "}")
       |> se.line("}")
       |> se.blank_line()
