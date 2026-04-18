@@ -3410,6 +3410,49 @@ pub fn external_ref_nested_collision_across_files_rejected_test() {
   string.contains(msg, "already imported") |> should.be_true()
 }
 
+pub fn external_ref_in_request_body_schema_test() {
+  // A request body defined under components.requestBodies whose media
+  // type schema is a relative-file $ref must hoist the target into
+  // components.schemas and rewrite the inner schema ref.
+  let assert Ok(loaded) =
+    parser.parse_file("test/fixtures/external_ref_request_body_main.yaml")
+  let assert Some(components) = loaded.components
+  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
+    dict.get(components.schemas, "Widget")
+  dict.has_key(widget_props, "sku") |> should.be_true()
+  let assert Ok(spec.Value(body)) =
+    dict.get(components.request_bodies, "CreateWidget")
+  let assert Ok(media) = dict.get(body.content, "application/json")
+  let assert Some(schema.Reference(ref: schema_ref, ..)) = media.schema
+  schema_ref |> should.equal("#/components/schemas/Widget")
+}
+
+pub fn external_ref_in_response_schema_test() {
+  // Same as request body, but targeting components.responses.
+  let assert Ok(loaded) =
+    parser.parse_file("test/fixtures/external_ref_response_main.yaml")
+  let assert Some(components) = loaded.components
+  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
+    dict.get(components.schemas, "Widget")
+  dict.has_key(widget_props, "sku") |> should.be_true()
+  let assert Ok(spec.Value(resp)) =
+    dict.get(components.responses, "WidgetPayload")
+  let assert Ok(media) = dict.get(resp.content, "application/json")
+  let assert Some(schema.Reference(ref: schema_ref, ..)) = media.schema
+  schema_ref |> should.equal("#/components/schemas/Widget")
+}
+
+pub fn external_ref_request_body_collision_with_local_schema_rejected_test() {
+  let result =
+    parser.parse_file(
+      "test/fixtures/external_ref_request_body_collision_main.yaml",
+    )
+  let assert Error(err) = result
+  let msg = parser.parse_error_to_string(err)
+  string.contains(msg, "Widget") |> should.be_true()
+  string.contains(msg, "local schema") |> should.be_true()
+}
+
 pub fn external_ref_in_parameter_schema_test() {
   // A parameter defined under components.parameters whose schema is a
   // relative-file $ref must hoist the target into components.schemas

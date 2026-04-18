@@ -1,0 +1,13 @@
+openapi: "3.0.3"
+info:
+  title: External Ref Response Main
+  version: "1.0.0"
+paths: {}
+components:
+  responses:
+    WidgetPayload:
+      description: Returns a widget
+      content:
+        application/json:
+          schema:
+            $ref: "./external_ref_nested_shared.yaml#/components/schemas/Widget"

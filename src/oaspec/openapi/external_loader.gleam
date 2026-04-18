@@ -10,11 +10,14 @@
 ////   - ObjectSchema additionalProperties values (`additionalProperties: $ref: ...`)
 ////   - composition branches (`oneOf`, `anyOf`, `allOf` variant refs)
 ////   - `components.parameters.*.schema: $ref: ...` (parameter schema only)
+////   - `components.request_bodies.*.content.*.schema: $ref: ...`
+////   - `components.responses.*.content.*.schema: $ref: ...`
 ////
 //// Out of scope (see issue #98 parent):
-////   - external `$ref` pointing at a parameter object itself
+////   - external `$ref` pointing at a parameter / request-body / response
+////     object itself (the whole entry rather than its schema)
 ////   - external refs in `components.parameters.*.content` media maps
-////   - external refs in request bodies / responses / path items
+////   - external refs in operation-level parameters / bodies / responses
 ////   - HTTP/HTTPS URLs
 ////
 //// Name collisions — when an external ref would overwrite an existing local
@@ -67,14 +70,23 @@ pub fn resolve_external_component_refs(
           top_imported,
         ),
       )
-      use param_resolved <- result.try(process_parameter_schemas(
-        nested_resolved,
+      use #(param_resolved, param_imports) <- result.try(
+        process_parameter_schemas(
+          nested_resolved,
+          dir,
+          parse_file,
+          original_local_names,
+          nested_imports,
+        ),
+      )
+      use body_resolved <- result.try(process_body_response_schemas(
+        param_resolved,
         dir,
         parse_file,
         original_local_names,
-        nested_imports,
+        param_imports,
       ))
-      Ok(OpenApiSpec(..spec, components: Some(param_resolved)))
+      Ok(OpenApiSpec(..spec, components: Some(body_resolved)))
     }
     _, _ -> Ok(spec)
   }
@@ -323,7 +335,10 @@ fn process_parameter_schemas(
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   original_local_names: List(String),
   seeded_imports: dict.Dict(String, #(String, SchemaRef)),
-) -> Result(Components(Unresolved), Diagnostic) {
+) -> Result(
+  #(Components(Unresolved), dict.Dict(String, #(String, SchemaRef))),
+  Diagnostic,
+) {
   let entries = dict.to_list(components.parameters)
   use #(rewritten, imports) <- result.try(
     list.try_fold(entries, #([], seeded_imports), fn(acc, entry) {
@@ -367,7 +382,134 @@ fn process_parameter_schemas(
         False, _ -> d
       }
     })
-  Ok(Components(..components, parameters: new_parameters, schemas: new_schemas))
+  Ok(#(
+    Components(..components, parameters: new_parameters, schemas: new_schemas),
+    imports,
+  ))
+}
+
+/// Walk `components.request_bodies` and `components.responses`, hoisting
+/// any external `$ref` found on a `MediaType.schema` field inside the
+/// `content` dict. The imports tracker is shared with earlier passes so
+/// cross-file collisions across every component kind stay honest.
+/// Entries whose top-level value is a `Ref(...)` (reference to an
+/// external body/response object) pass through untouched — handling those
+/// requires hoisting the body/response itself, not just its schema.
+fn process_body_response_schemas(
+  components: Components(Unresolved),
+  base_dir: String,
+  parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
+  original_local_names: List(String),
+  seeded_imports: dict.Dict(String, #(String, SchemaRef)),
+) -> Result(Components(Unresolved), Diagnostic) {
+  let body_entries = dict.to_list(components.request_bodies)
+  use #(new_bodies, imports_after_bodies) <- result.try(
+    list.try_fold(body_entries, #([], seeded_imports), fn(acc, entry) {
+      let #(collected, imports) = acc
+      let #(name, ref_or_body) = entry
+      case ref_or_body {
+        spec.Value(body) -> {
+          use #(new_content, new_imports) <- result.try(rewrite_media_type_map(
+            body.content,
+            base_dir,
+            parse_file,
+            imports,
+            original_local_names,
+          ))
+          let new_body = spec.RequestBody(..body, content: new_content)
+          Ok(#([#(name, spec.Value(new_body)), ..collected], new_imports))
+        }
+        spec.Ref(_) -> Ok(#([#(name, ref_or_body), ..collected], imports))
+      }
+    }),
+  )
+  let response_entries = dict.to_list(components.responses)
+  use #(new_responses, final_imports) <- result.try(
+    list.try_fold(response_entries, #([], imports_after_bodies), fn(acc, entry) {
+      let #(collected, imports) = acc
+      let #(name, ref_or_resp) = entry
+      case ref_or_resp {
+        spec.Value(resp) -> {
+          use #(new_content, new_imports) <- result.try(rewrite_media_type_map(
+            resp.content,
+            base_dir,
+            parse_file,
+            imports,
+            original_local_names,
+          ))
+          let new_resp = spec.Response(..resp, content: new_content)
+          Ok(#([#(name, spec.Value(new_resp)), ..collected], new_imports))
+        }
+        spec.Ref(_) -> Ok(#([#(name, ref_or_resp), ..collected], imports))
+      }
+    }),
+  )
+  let new_request_bodies =
+    list.fold(new_bodies, dict.new(), fn(d, pair) {
+      dict.insert(d, pair.0, pair.1)
+    })
+  let new_responses_dict =
+    list.fold(new_responses, dict.new(), fn(d, pair) {
+      dict.insert(d, pair.0, pair.1)
+    })
+  let new_schemas =
+    dict.fold(final_imports, components.schemas, fn(d, frag_name, pair) {
+      let #(_source_path, target_schema) = pair
+      case dict.has_key(d, frag_name), target_schema {
+        True, _ -> d
+        False, Inline(_) -> dict.insert(d, frag_name, target_schema)
+        False, _ -> d
+      }
+    })
+  Ok(
+    Components(
+      ..components,
+      request_bodies: new_request_bodies,
+      responses: new_responses_dict,
+      schemas: new_schemas,
+    ),
+  )
+}
+
+/// Walk every MediaType in a content-type dict and hoist any external ref
+/// found on `MediaType.schema`. MediaType values with no schema pass
+/// through unchanged.
+fn rewrite_media_type_map(
+  content: dict.Dict(String, spec.MediaType),
+  base_dir: String,
+  parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
+  imports: dict.Dict(String, #(String, SchemaRef)),
+  original_local_names: List(String),
+) -> Result(
+  #(dict.Dict(String, spec.MediaType), dict.Dict(String, #(String, SchemaRef))),
+  Diagnostic,
+) {
+  let entries = dict.to_list(content)
+  use #(rewritten, new_imports) <- result.try(
+    list.try_fold(entries, #([], imports), fn(acc, entry) {
+      let #(collected, imports) = acc
+      let #(media_key, media) = entry
+      case media.schema {
+        Some(ref) -> {
+          use #(new_ref, new_imports) <- result.try(maybe_hoist_ref(
+            ref,
+            base_dir,
+            parse_file,
+            imports,
+            original_local_names,
+          ))
+          let new_media = spec.MediaType(..media, schema: Some(new_ref))
+          Ok(#([#(media_key, new_media), ..collected], new_imports))
+        }
+        None -> Ok(#([#(media_key, media), ..collected], imports))
+      }
+    }),
+  )
+  let new_content =
+    list.fold(rewritten, dict.new(), fn(d, pair) {
+      dict.insert(d, pair.0, pair.1)
+    })
+  Ok(#(new_content, new_imports))
 }
 
 /// Walk the properties dict of an ObjectSchema; for each property that is a
