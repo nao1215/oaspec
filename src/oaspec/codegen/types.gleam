@@ -3,7 +3,6 @@ import gleam/list
 import gleam/option.{None, Some}
 import oaspec/codegen/allof_merge
 import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
-import oaspec/codegen/import_analysis
 import oaspec/codegen/ir_build
 import oaspec/codegen/ir_render
 import oaspec/codegen/schema_dispatch
@@ -12,8 +11,7 @@ import oaspec/config
 import oaspec/openapi/operations
 import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
-  BooleanSchema, Inline, IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema,
-  Reference, StringSchema,
+  Inline, ObjectSchema, OneOfSchema, Reference,
 }
 import oaspec/openapi/spec.{type Resolved, Value}
 import oaspec/util/content_type
@@ -145,121 +143,18 @@ pub fn schema_to_gleam_type(schema: SchemaObject, _ctx: Context) -> String {
   schema_dispatch.schema_type(schema)
 }
 
-/// Generate request types for all operations.
+/// Generate request types for all operations via the IR pipeline.
+/// Shape of each RecordType matches the former string-builder output;
+/// `gleam format` normalizes whitespace either way so the final on-disk
+/// content is unchanged.
 fn generate_request_types(
   ctx: Context,
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  _operations: List(
+    #(String, spec.Operation(Resolved), String, spec.HttpMethod),
+  ),
 ) -> String {
-  // Only import Option if any operation has optional parameters or optional body
-  let needs_option =
-    import_analysis.operations_have_optional_params(operations)
-    || import_analysis.operations_have_optional_body(operations)
-
-  // Check if types module is needed ($ref params or non-primitive body)
-  let needs_types = import_analysis.operations_need_typed_schemas(operations)
-
-  let base_imports = case needs_types {
-    True -> [config.package(context.config(ctx)) <> "/types"]
-    False -> []
-  }
-  let imports = case needs_option {
-    True -> ["gleam/option.{type Option}", ..base_imports]
-    False -> base_imports
-  }
-
-  let sb =
-    se.file_header(context.version)
-    |> se.imports(imports)
-
-  let sb =
-    list.fold(operations, sb, fn(sb, op) {
-      let #(op_id, operation, _path, _method) = op
-      generate_request_type(sb, op_id, operation, ctx)
-    })
-
-  se.to_string(sb)
-}
-
-/// Generate a single request type for an operation.
-fn generate_request_type(
-  sb: se.StringBuilder,
-  op_id: String,
-  operation: spec.Operation(Resolved),
-  ctx: Context,
-) -> se.StringBuilder {
-  let type_name = naming.schema_to_type_name(op_id) <> "Request"
-
-  let params = operation.parameters
-  case list.is_empty(params) && option.is_none(operation.request_body) {
-    True -> sb
-    False -> {
-      let sb = case operation.description {
-        Some(desc) -> sb |> se.doc_comment(desc)
-        None -> sb
-      }
-      let sb = sb |> se.line("pub type " <> type_name <> " {")
-      let sb = sb |> se.indent(1, type_name <> "(")
-
-      let param_count = list.length(params)
-      let sb =
-        list.index_fold(params, sb, fn(sb, ref_p, idx) {
-          case ref_p {
-            Value(param) -> {
-              let field_name = naming.to_snake_case(param.name)
-              let field_type = case param.payload {
-                spec.ParameterSchema(Inline(StringSchema(..))) -> "String"
-                spec.ParameterSchema(Inline(IntegerSchema(..))) -> "Int"
-                spec.ParameterSchema(Inline(NumberSchema(..))) -> "Float"
-                spec.ParameterSchema(Inline(BooleanSchema(..))) -> "Bool"
-                spec.ParameterSchema(Inline(ArraySchema(items:, ..))) -> {
-                  let item_type = case items {
-                    Inline(StringSchema(..)) -> "String"
-                    Inline(IntegerSchema(..)) -> "Int"
-                    Inline(NumberSchema(..)) -> "Float"
-                    Inline(BooleanSchema(..)) -> "Bool"
-                    Reference(name:, ..) -> naming.schema_to_type_name(name)
-                    _ -> "String"
-                  }
-                  "List(" <> item_type <> ")"
-                }
-                spec.ParameterSchema(Reference(name:, ..)) ->
-                  "types." <> naming.schema_to_type_name(name)
-                _ -> "String"
-              }
-              let final_type = case param.required {
-                True -> field_type
-                False -> "Option(" <> field_type <> ")"
-              }
-              let has_more = idx < param_count - 1
-              let has_body = option.is_some(operation.request_body)
-              let trailing = case has_more || has_body {
-                True -> ","
-                False -> ""
-              }
-              sb |> se.indent(2, field_name <> ": " <> final_type <> trailing)
-            }
-            _ -> sb
-          }
-        })
-
-      let sb = case operation.request_body {
-        Some(Value(rb)) -> {
-          let body_type = extract_request_body_type(rb, op_id, ctx)
-          let wrapped = case rb.required {
-            True -> body_type
-            False -> "Option(" <> body_type <> ")"
-          }
-          sb |> se.indent(2, "body: " <> wrapped)
-        }
-        _ -> sb
-      }
-
-      sb
-      |> se.indent(1, ")")
-      |> se.line("}")
-      |> se.blank_line()
-    }
-  }
+  ir_build.build_request_types_module(ctx)
+  |> ir_render.render()
 }
 
 /// Check if any response variant references the types module.
@@ -471,48 +366,4 @@ pub fn filter_write_only_properties(
   ctx: Context,
 ) -> SchemaObject {
   schema_utils.filter_write_only_properties(schema_obj, ctx)
-}
-
-/// Extract the Gleam type for a request body from its content media types.
-/// Uses types. prefix since request body schemas live in the types module.
-fn extract_request_body_type(
-  rb: spec.RequestBody(Resolved),
-  op_id: String,
-  ctx: Context,
-) -> String {
-  let content_entries = ir_build.sorted_entries(rb.content)
-  case content_entries {
-    [#(_media_type, media_type), ..] ->
-      case media_type.schema {
-        Some(Reference(name:, ..)) ->
-          "types." <> naming.schema_to_type_name(name)
-        Some(Inline(schema_obj)) ->
-          extract_inline_request_body_type(schema_obj, op_id, ctx)
-        _ -> "String"
-      }
-    [] -> "String"
-  }
-}
-
-/// Extract the type for an inline request body schema.
-fn extract_inline_request_body_type(
-  schema_obj: SchemaObject,
-  op_id: String,
-  ctx: Context,
-) -> String {
-  case schema_obj {
-    ObjectSchema(..) -> {
-      let type_name = naming.schema_to_type_name(op_id) <> "RequestBody"
-      "types." <> type_name
-    }
-    AllOfSchema(..) -> {
-      let type_name = naming.schema_to_type_name(op_id) <> "RequestBody"
-      "types." <> type_name
-    }
-    StringSchema(..) -> "String"
-    IntegerSchema(..) -> "Int"
-    NumberSchema(..) -> "Float"
-    BooleanSchema(..) -> "Bool"
-    _ -> schema_to_gleam_type(schema_obj, ctx)
-  }
 }

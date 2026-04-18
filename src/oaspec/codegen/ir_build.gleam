@@ -8,17 +8,20 @@ import gleam/option.{None, Some}
 import gleam/string
 import oaspec/codegen/allof_merge
 import oaspec/codegen/context.{type Context}
+import oaspec/codegen/import_analysis
 import oaspec/codegen/ir.{
-  type Declaration, type Module, EnumType, Field, RecordType, TypeAlias,
-  UnionType, VariantWithType,
+  type Declaration, type Field, type Module, EnumType, Field, RecordType,
+  TypeAlias, UnionType, VariantWithType,
 }
 import oaspec/codegen/schema_dispatch
 import oaspec/codegen/schema_utils
+import oaspec/config
 import oaspec/openapi/dedup
 import oaspec/openapi/operations
 import oaspec/openapi/schema.{
-  type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, Forbidden, Inline,
-  ObjectSchema, OneOfSchema, Reference, StringSchema, Typed, Untyped,
+  type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
+  BooleanSchema, Forbidden, Inline, IntegerSchema, NumberSchema, ObjectSchema,
+  OneOfSchema, Reference, StringSchema, Typed, Untyped,
 }
 import oaspec/openapi/spec.{type Resolved, Value}
 import oaspec/util/http
@@ -59,6 +62,150 @@ pub fn build_types_module(ctx: Context) -> Module {
     imports: imports,
     declarations: list.flatten([inline_enum_decls, main_decls, anon_decls]),
   )
+}
+
+/// Build an IR Module for the request_types.gleam file from operations.
+/// Each operation with at least one parameter or a request body yields a
+/// single `RecordType` declaration. Operations with neither parameters nor
+/// body produce no declaration — matching the former string-builder
+/// behavior that simply skipped them.
+pub fn build_request_types_module(ctx: Context) -> Module {
+  let operations = operations.collect_operations(ctx)
+  let imports = compute_request_type_imports(operations, ctx)
+  let declarations =
+    list.filter_map(operations, fn(op) {
+      let #(op_id, operation, _path, _method) = op
+      request_type_decl(op_id, operation, ctx)
+    })
+  ir.module(header: "", imports: imports, declarations: declarations)
+}
+
+fn compute_request_type_imports(
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  ctx: Context,
+) -> List(String) {
+  let needs_option =
+    import_analysis.operations_have_optional_params(operations)
+    || import_analysis.operations_have_optional_body(operations)
+  let needs_types = import_analysis.operations_need_typed_schemas(operations)
+  let base_imports = case needs_types {
+    True -> [config.package(context.config(ctx)) <> "/types"]
+    False -> []
+  }
+  case needs_option {
+    True -> ["gleam/option.{type Option}", ..base_imports]
+    False -> base_imports
+  }
+}
+
+fn request_type_decl(
+  op_id: String,
+  operation: spec.Operation(Resolved),
+  ctx: Context,
+) -> Result(Declaration, Nil) {
+  let params = operation.parameters
+  case list.is_empty(params) && option.is_none(operation.request_body) {
+    True -> Error(Nil)
+    False -> {
+      let type_name = naming.schema_to_type_name(op_id) <> "Request"
+      let param_fields =
+        list.filter_map(params, fn(ref_p) {
+          case ref_p {
+            Value(param) -> Ok(request_param_field(param))
+            _ -> Error(Nil)
+          }
+        })
+      let body_field = case operation.request_body {
+        Some(Value(rb)) -> [request_body_field(rb, op_id, ctx)]
+        _ -> []
+      }
+      Ok(ir.declaration(
+        doc: operation.description,
+        type_def: RecordType(
+          name: type_name,
+          fields: list.append(param_fields, body_field),
+        ),
+      ))
+    }
+  }
+}
+
+fn request_param_field(param: spec.Parameter(Resolved)) -> Field {
+  let field_name = naming.to_snake_case(param.name)
+  let field_type = case param.payload {
+    spec.ParameterSchema(Inline(StringSchema(..))) -> "String"
+    spec.ParameterSchema(Inline(IntegerSchema(..))) -> "Int"
+    spec.ParameterSchema(Inline(NumberSchema(..))) -> "Float"
+    spec.ParameterSchema(Inline(BooleanSchema(..))) -> "Bool"
+    spec.ParameterSchema(Inline(ArraySchema(items:, ..))) -> {
+      let item_type = case items {
+        Inline(StringSchema(..)) -> "String"
+        Inline(IntegerSchema(..)) -> "Int"
+        Inline(NumberSchema(..)) -> "Float"
+        Inline(BooleanSchema(..)) -> "Bool"
+        Reference(name:, ..) -> naming.schema_to_type_name(name)
+        _ -> "String"
+      }
+      "List(" <> item_type <> ")"
+    }
+    spec.ParameterSchema(Reference(name:, ..)) ->
+      "types." <> naming.schema_to_type_name(name)
+    _ -> "String"
+  }
+  let final_type = case param.required {
+    True -> field_type
+    False -> "Option(" <> field_type <> ")"
+  }
+  Field(name: field_name, type_expr: final_type)
+}
+
+fn request_body_field(
+  rb: spec.RequestBody(Resolved),
+  op_id: String,
+  ctx: Context,
+) -> Field {
+  let body_type = request_body_type(rb, op_id, ctx)
+  let final_type = case rb.required {
+    True -> body_type
+    False -> "Option(" <> body_type <> ")"
+  }
+  Field(name: "body", type_expr: final_type)
+}
+
+fn request_body_type(
+  rb: spec.RequestBody(Resolved),
+  op_id: String,
+  _ctx: Context,
+) -> String {
+  let content_entries = sorted_entries(rb.content)
+  case content_entries {
+    [#(_media_type, media_type), ..] ->
+      case media_type.schema {
+        Some(Reference(name:, ..)) ->
+          "types." <> naming.schema_to_type_name(name)
+        Some(Inline(schema_obj)) -> inline_request_body_type(schema_obj, op_id)
+        _ -> "String"
+      }
+    [] -> "String"
+  }
+}
+
+fn inline_request_body_type(schema_obj: SchemaObject, op_id: String) -> String {
+  case schema_obj {
+    ObjectSchema(..) -> {
+      let type_name = naming.schema_to_type_name(op_id) <> "RequestBody"
+      "types." <> type_name
+    }
+    AllOfSchema(..) -> {
+      let type_name = naming.schema_to_type_name(op_id) <> "RequestBody"
+      "types." <> type_name
+    }
+    StringSchema(..) -> "String"
+    IntegerSchema(..) -> "Int"
+    NumberSchema(..) -> "Float"
+    BooleanSchema(..) -> "Bool"
+    _ -> schema_dispatch.schema_type(schema_obj)
+  }
 }
 
 // ---------------------------------------------------------------------------
