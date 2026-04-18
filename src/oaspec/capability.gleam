@@ -183,6 +183,64 @@ pub fn registry() -> List(Capability) {
       Supported,
       "XML passthrough; no structural decoding yet",
     ),
+    // Server-mode validation restrictions — features the parser accepts
+    // but the server-code generator rejects. Names match the phrasing
+    // used in the corresponding `validate.gleam` diagnostic details so
+    // the README drift test keeps docs honest.
+    Capability(
+      "server: complex path parameters",
+      "server-validation",
+      Unsupported,
+      "Path parameters must be scalar (string, integer, number, boolean)",
+    ),
+    Capability(
+      "server: non-primitive query array items",
+      "server-validation",
+      Unsupported,
+      "Query array parameters require inline primitive items",
+    ),
+    Capability(
+      "server: non-primitive header array items",
+      "server-validation",
+      Unsupported,
+      "Header array parameters require inline primitive items",
+    ),
+    Capability(
+      "server: complex deepObject properties",
+      "server-validation",
+      Unsupported,
+      "deepObject properties must be primitive scalars or primitive array leaves",
+    ),
+    Capability(
+      "server: mixed form-urlencoded request",
+      "server-validation",
+      Unsupported,
+      "application/x-www-form-urlencoded must be the sole request content type",
+    ),
+    Capability(
+      "server: complex form-urlencoded fields",
+      "server-validation",
+      Unsupported,
+      "Form fields must be primitive scalars, primitive arrays, or shallow nested objects (max 5 levels)",
+    ),
+    Capability(
+      "server: mixed multipart request",
+      "server-validation",
+      Unsupported,
+      "multipart/form-data must be the sole request content type",
+    ),
+    Capability(
+      "server: complex multipart fields",
+      "server-validation",
+      Unsupported,
+      "Multipart fields must be primitive scalars (or arrays of them)",
+    ),
+    Capability(
+      "server: unsupported request content type",
+      "server-validation",
+      Unsupported,
+      "Server router only supports application/json, application/x-www-form-urlencoded, and multipart/form-data",
+    ),
     // Codegen scope
     Capability("webhooks", "scope", ParsedNotUsed, "Parsed but no codegen"),
     Capability("externalDocs", "scope", ParsedNotUsed, "Parsed but no codegen"),
