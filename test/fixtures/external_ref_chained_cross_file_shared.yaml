@@ -1,0 +1,9 @@
+openapi: "3.0.3"
+info:
+  title: External Ref Chained Cross-File Shared
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Indirect:
+      $ref: "./external_ref_nested_shared.yaml#/components/schemas/Widget"

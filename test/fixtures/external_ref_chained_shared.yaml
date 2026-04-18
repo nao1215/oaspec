@@ -1,0 +1,16 @@
+openapi: "3.0.3"
+info:
+  title: External Ref Chained Shared
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    LegacyWidget:
+      $ref: "#/components/schemas/Widget"
+    Widget:
+      type: object
+      required:
+        - sku
+      properties:
+        sku:
+          type: string

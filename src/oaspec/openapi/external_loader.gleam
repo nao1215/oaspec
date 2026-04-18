@@ -18,11 +18,21 @@
 ////   - operation-level `requestBody.content.*.schema`
 ////   - operation-level `responses.<code>.content.*.schema`
 ////   - refs inside `operation.callbacks.*.entries.*` PathItems (recursive)
+////   - one level of alias chaining inside the same external file
+////     (`LegacyX: $ref: "#/components/schemas/X"` in the external file).
+////     Cross-file chains collapse naturally because parse_file runs
+////     the resolver on every loaded file before handing it back, so a
+////     target that is itself an external ref is already inline by the
+////     time we look it up.
 ////
 //// Out of scope (see issue #98 parent):
 ////   - external `$ref` pointing at a parameter / request-body / response
 ////     / path-item object itself (the whole entry rather than its schema)
+////   - alias chains longer than one hop inside the same file
 ////   - HTTP/HTTPS URLs
+////   - cyclic external refs (e.g., `A.yaml` → `B.yaml` → `A.yaml`)
+////     would loop forever; callers are expected to maintain acyclic
+////     file graphs.
 ////
 //// Name collisions — when an external ref would overwrite an existing local
 //// schema, or when two external refs pull in the same fragment name from
@@ -1328,37 +1338,7 @@ fn find_external_schema(
   source_path: String,
 ) -> Result(SchemaRef, Diagnostic) {
   case loaded.components {
-    Some(components) ->
-      case dict.get(components.schemas, name) {
-        Ok(Inline(_) as s) -> Ok(s)
-        Ok(Reference(..)) ->
-          Error(diagnostic.validation(
-            severity: diagnostic.SeverityError,
-            target: diagnostic.TargetBoth,
-            path: source_path,
-            detail: "External schema '"
-              <> name
-              <> "' in '"
-              <> source_path
-              <> "' is itself a $ref; chained external refs are not supported yet.",
-            hint: Some(
-              "Inline the external schema or flatten one level of indirection.",
-            ),
-          ))
-        Error(Nil) ->
-          Error(diagnostic.validation(
-            severity: diagnostic.SeverityError,
-            target: diagnostic.TargetBoth,
-            path: source_path,
-            detail: "External file '"
-              <> source_path
-              <> "' has no components.schemas."
-              <> name,
-            hint: Some(
-              "Verify the ref path and that the referenced file defines the schema.",
-            ),
-          ))
-      }
+    Some(components) -> find_schema_follow_alias(components, name, source_path)
     None ->
       Error(diagnostic.validation(
         severity: diagnostic.SeverityError,
@@ -1369,6 +1349,89 @@ fn find_external_schema(
           "Add a components.schemas section to the referenced file or inline the schema.",
         ),
       ))
+  }
+}
+
+/// Look up `name` in the external file's `components.schemas`. If the
+/// value is inline, return it directly. If it is a local alias
+/// (`#/components/schemas/Other`) pointing at another schema *in the
+/// same file*, follow the alias one level. Cross-file chained refs and
+/// longer alias chains still surface a diagnostic.
+fn find_schema_follow_alias(
+  components: spec.Components(Unresolved),
+  name: String,
+  source_path: String,
+) -> Result(SchemaRef, Diagnostic) {
+  case dict.get(components.schemas, name) {
+    Ok(Inline(_) as s) -> Ok(s)
+    Ok(Reference(ref:, ..)) ->
+      case local_schema_name_from_ref(ref) {
+        Some(aliased) ->
+          case dict.get(components.schemas, aliased) {
+            Ok(Inline(_) as s) -> Ok(s)
+            _ ->
+              Error(diagnostic.validation(
+                severity: diagnostic.SeverityError,
+                target: diagnostic.TargetBoth,
+                path: source_path,
+                detail: "External schema '"
+                  <> name
+                  <> "' in '"
+                  <> source_path
+                  <> "' aliases '"
+                  <> aliased
+                  <> "', but the target is itself a $ref or missing; only a single level of aliasing inside the same file is supported.",
+                hint: Some(
+                  "Flatten the alias chain in the external file so the target resolves to an inline schema.",
+                ),
+              ))
+          }
+        None ->
+          Error(diagnostic.validation(
+            severity: diagnostic.SeverityError,
+            target: diagnostic.TargetBoth,
+            path: source_path,
+            detail: "External schema '"
+              <> name
+              <> "' in '"
+              <> source_path
+              <> "' is itself a $ref pointing outside this file; chained external refs are not supported yet.",
+            hint: Some(
+              "Inline the external schema or flatten the ref to live inside the same file.",
+            ),
+          ))
+      }
+    Error(Nil) ->
+      Error(diagnostic.validation(
+        severity: diagnostic.SeverityError,
+        target: diagnostic.TargetBoth,
+        path: source_path,
+        detail: "External file '"
+          <> source_path
+          <> "' has no components.schemas."
+          <> name,
+        hint: Some(
+          "Verify the ref path and that the referenced file defines the schema.",
+        ),
+      ))
+  }
+}
+
+/// If `ref` is a local component-schemas ref inside the same file (no
+/// leading file part), return the schema name. Otherwise return None
+/// so the caller can surface a cross-file diagnostic.
+fn local_schema_name_from_ref(ref: String) -> option.Option(String) {
+  let prefix = "#/components/schemas/"
+  case string.starts_with(ref, prefix) {
+    True -> {
+      let name = string.replace(ref, prefix, "")
+      case string.contains(name, "/"), name {
+        False, "" -> None
+        False, _ -> Some(name)
+        True, _ -> None
+      }
+    }
+    False -> None
   }
 }
 

@@ -3410,6 +3410,36 @@ pub fn external_ref_nested_collision_across_files_rejected_test() {
   string.contains(msg, "already imported") |> should.be_true()
 }
 
+pub fn external_ref_chained_local_alias_in_shared_file_test() {
+  // The external file defines `LegacyWidget` as a local alias for
+  // `Widget`. A consumer that imports `LegacyWidget` must resolve
+  // through the alias and get Widget's inline schema under the
+  // LegacyWidget slot in the main spec's components.schemas.
+  let assert Ok(loaded) =
+    parser.parse_file("test/fixtures/external_ref_chained_main.yaml")
+  let assert Some(components) = loaded.components
+  let assert Ok(schema.Inline(schema.ObjectSchema(properties: legacy_props, ..))) =
+    dict.get(components.schemas, "LegacyWidget")
+  dict.has_key(legacy_props, "sku") |> should.be_true()
+  let assert Ok(schema.Reference(ref: item_ref, ..)) =
+    dict.get(components.schemas, "Item")
+  item_ref |> should.equal("#/components/schemas/LegacyWidget")
+}
+
+pub fn external_ref_chained_across_files_resolves_transitively_test() {
+  // The external file's `Indirect` entry is itself an external ref to
+  // yet another file (Widget in `external_ref_nested_shared.yaml`).
+  // Because parse_file recursively resolves external refs in each
+  // loaded file, the chain collapses naturally and `Indirect` ends up
+  // inline in the main spec's components.schemas.
+  let assert Ok(loaded) =
+    parser.parse_file("test/fixtures/external_ref_chained_cross_file_main.yaml")
+  let assert Some(components) = loaded.components
+  let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
+    dict.get(components.schemas, "Indirect")
+  dict.has_key(props, "sku") |> should.be_true()
+}
+
 pub fn external_ref_in_callback_path_item_test() {
   // An operation's callbacks dict maps to PathItems whose own
   // operations may carry external schema refs. Those refs must hoist
