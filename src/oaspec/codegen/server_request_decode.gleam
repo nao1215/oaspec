@@ -4,6 +4,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/codegen/context.{type Context}
 import oaspec/codegen/ir_build
+import oaspec/codegen/operation_ir
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{
   type AdditionalProperties, type SchemaRef, Forbidden, Inline, ObjectSchema,
@@ -17,16 +18,6 @@ import oaspec/util/naming
 /// Accepts "true"/"True"/"TRUE" etc. as True, everything else as False.
 /// This is compatible with Gleam's bool.to_string which produces "True"/"False".
 pub const bool_parse_expr = "case string.lowercase(v) { \"true\" -> True _ -> False }"
-
-/// Delimiter literal for splitting non-exploded array query values.
-/// Percent decoding is assumed to have already happened upstream (wisp/mist).
-fn split_delimiter_literal(style: Option(spec.ParameterStyle)) -> String {
-  case style {
-    Some(spec.PipeDelimitedStyle) -> "|"
-    Some(spec.SpaceDelimitedStyle) -> " "
-    _ -> ","
-  }
-}
 
 pub type DeepObjectProperty {
   DeepObjectProperty(
@@ -154,7 +145,7 @@ pub fn query_required_expr(
   query_required_expr_with_schema(
     key,
     spec.parameter_schema(param),
-    Some(effective_explode_for_query(param)),
+    Some(operation_ir.effective_explode(param)),
     param.style,
   )
 }
@@ -165,7 +156,7 @@ pub fn query_required_expr_with_schema(
   explode: Option(Bool),
   style: Option(spec.ParameterStyle),
 ) -> String {
-  let delim = split_delimiter_literal(style)
+  let delim = operation_ir.delimiter_for_style(style)
   let base = "{ let assert Ok([v, ..]) = dict.get(query, \"" <> key <> "\") v }"
   case schema_ref {
     Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
@@ -250,22 +241,9 @@ pub fn query_optional_expr(
   query_optional_expr_with_schema(
     key,
     spec.parameter_schema(param),
-    Some(effective_explode_for_query(param)),
+    Some(operation_ir.effective_explode(param)),
     param.style,
   )
-}
-
-/// Per OpenAPI 3.x: explode defaults to true only for `form` (and
-/// `deepObject`); for all other styles the default is false.
-fn effective_explode_for_query(param: spec.Parameter(Resolved)) -> Bool {
-  case param.explode {
-    Some(v) -> v
-    None ->
-      case param.style {
-        Some(spec.FormStyle) | Some(spec.DeepObjectStyle) | None -> True
-        _ -> False
-      }
-  }
 }
 
 pub fn query_optional_expr_with_schema(
@@ -274,7 +252,7 @@ pub fn query_optional_expr_with_schema(
   explode: Option(Bool),
   style: Option(spec.ParameterStyle),
 ) -> String {
-  let delim = split_delimiter_literal(style)
+  let delim = operation_ir.delimiter_for_style(style)
   case schema_ref {
     Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
       case explode {
@@ -357,16 +335,7 @@ pub fn is_deep_object_param(
   param: spec.Parameter(Resolved),
   ctx: Context,
 ) -> Bool {
-  case param.in_, param.style, spec.parameter_schema(param) {
-    spec.InQuery, Some(spec.DeepObjectStyle), Some(Reference(..) as schema_ref) ->
-      case resolver.resolve_schema_ref(schema_ref, context.spec(ctx)) {
-        Ok(ObjectSchema(..)) -> True
-        _ -> False
-      }
-    spec.InQuery, Some(spec.DeepObjectStyle), Some(Inline(ObjectSchema(..))) ->
-      True
-    _, _, _ -> False
-  }
+  operation_ir.is_deep_object_param(param, ctx)
 }
 
 fn deep_object_properties(

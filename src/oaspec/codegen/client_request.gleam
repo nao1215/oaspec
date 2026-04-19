@@ -3,6 +3,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/codegen/context.{type Context}
 import oaspec/codegen/ir_build
+import oaspec/codegen/operation_ir
 import oaspec/codegen/schema_dispatch
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{Inline, Reference}
@@ -810,24 +811,7 @@ pub fn is_exploded_array_param(
   }
   case is_array {
     False -> False
-    True -> effective_explode(param)
-  }
-}
-
-/// Per OpenAPI 3.x: explode defaults to true only for `form` (and
-/// `deepObject`); for all other styles — including simple, pipeDelimited,
-/// and spaceDelimited — the default is false. None style on a query
-/// parameter is equivalent to form.
-fn effective_explode(param: spec.Parameter(Resolved)) -> Bool {
-  case param.explode {
-    option.Some(v) -> v
-    option.None ->
-      case param.style {
-        option.Some(spec.FormStyle)
-        | option.Some(spec.DeepObjectStyle)
-        | option.None -> True
-        _ -> False
-      }
+    True -> operation_ir.effective_explode(param)
   }
 }
 
@@ -849,10 +833,11 @@ pub fn is_delimited_array_param(
   }
   // Use spec-default explode rules (false for pipe/space) so that omitting
   // `explode` yields the delimited path, matching OpenAPI semantics.
-  let is_non_exploded = !effective_explode(param)
+  let is_non_exploded = !operation_ir.effective_explode(param)
   case is_array, is_non_exploded, param.style {
-    True, True, option.Some(spec.PipeDelimitedStyle) -> option.Some("|")
-    True, True, option.Some(spec.SpaceDelimitedStyle) -> option.Some(" ")
+    True, True, option.Some(spec.PipeDelimitedStyle)
+    | True, True, option.Some(spec.SpaceDelimitedStyle)
+    -> option.Some(operation_ir.delimiter_for_style(param.style))
     _, _, _ -> option.None
   }
 }
@@ -987,15 +972,7 @@ pub fn is_deep_object_param(
   param: spec.Parameter(Resolved),
   ctx: Context,
 ) -> Bool {
-  case param.payload {
-    ParameterSchema(Reference(..) as schema_ref) ->
-      case resolver.resolve_schema_ref(schema_ref, context.spec(ctx)) {
-        Ok(schema.ObjectSchema(..)) -> True
-        _ -> False
-      }
-    ParameterSchema(Inline(schema.ObjectSchema(..))) -> True
-    _ -> False
-  }
+  operation_ir.is_deep_object_param(param, ctx)
 }
 
 /// Generate deepObject-style query parameters: key[prop]=value for each property.

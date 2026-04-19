@@ -608,7 +608,7 @@ pub fn client_request_is_deep_object_param_object_test() {
       spec.InQuery,
       True,
       spec.ParameterSchema(schema.Inline(obj)),
-      None,
+      Some(spec.DeepObjectStyle),
       None,
       False,
     )
