@@ -12349,3 +12349,30 @@ pub fn external_whole_object_response_ref_test() {
     spec.Ref(_) -> should.fail()
   }
 }
+
+// ============================================================================
+// Request-body encoding warning tests (Issue #191)
+// ============================================================================
+
+pub fn request_body_encoding_warning_is_surfaced_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/request_body_encoding.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/request_body_encoding.yaml",
+      output_server: "./gen/api",
+      output_client: "./gen_client/api",
+      package: "api",
+      mode: config.Both,
+      validate: False,
+    )
+  let assert Ok(result) = generate.generate(spec, cfg)
+  let has_encoding_warning =
+    list.any(result.warnings, fn(w) {
+      string.contains(
+        diagnostic.to_string(w),
+        "Request-body encoding is parsed but not used",
+      )
+    })
+  has_encoding_warning |> should.be_true()
+}

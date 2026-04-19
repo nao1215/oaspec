@@ -319,6 +319,37 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
         }
       })
     })
+  let request_body_encoding_warnings =
+    list.flat_map(ops, fn(op) {
+      let #(op_id, operation, _path, _method) = op
+      case operation.request_body {
+        Some(Value(rb)) -> {
+          let base_path = op_id <> ".requestBody"
+          let content_entries = dict.to_list(rb.content)
+          list.flat_map(content_entries, fn(ce) {
+            let #(media_type_name, media_type) = ce
+            case dict.is_empty(media_type.encoding) {
+              True -> []
+              False -> [
+                diagnostic.capability(
+                  severity: SeverityWarning,
+                  target: TargetBoth,
+                  path: base_path
+                    <> ".content."
+                    <> media_type_name
+                    <> ".encoding",
+                  detail: "Request-body encoding is parsed but not used by code generation.",
+                  hint: Some(
+                    "Encoding settings (contentType, style, explode) will not affect generated code. No action needed.",
+                  ),
+                ),
+              ]
+            }
+          })
+        }
+        _ -> []
+      }
+    })
   let external_docs_warnings = case context.spec(ctx).external_docs {
     Some(_) -> [
       diagnostic.capability(
@@ -400,6 +431,7 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
   list.flatten([
     webhook_warnings,
     response_warnings,
+    request_body_encoding_warnings,
     external_docs_warnings,
     tag_warnings,
     operation_server_warnings,
