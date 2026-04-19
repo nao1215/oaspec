@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-04-19
+
+### Added
+
+- **Typed response headers (#192)**: declared response headers are now generated as typed record types in `response_types.gleam` (e.g., `ListPetsResponseOkHeaders(x_rate_limit: Option(Int))`). Header schemas map to Gleam types (String/Int/Float/Bool), and optional headers are wrapped in `Option(Type)`. Capability registry upgraded from ParsedNotUsed to Supported.
+- **Whole-object external `$ref` support (#189)**: relative-file external refs now work for `components.parameters`, `components.requestBodies`, `components.responses`, and `components.pathItems` — not just schemas. A generic `resolve_ref_or_dict` helper handles all four component kinds through a shared finder pattern.
+- **Source locations for semantic parse diagnostics (#188)**: missing-field and invalid-value parse errors now report line/column positions via a new `LocationIndex` backed by a yamerl FFI that preserves node locations. Diagnostic constructors accept a `SourceLoc` parameter instead of hardcoding `NoSourceLoc`.
+- **Shared operation IR (#190)**: extracted `effective_explode`, `delimiter_for_style`, and `is_deep_object_param` into a shared `operation_ir` module consumed by both `client_request` and `server_request_decode`, eliminating duplicated transport-rule logic.
+- **Request-body encoding warnings (#191)**: `capability_check` now surfaces warnings when `MediaType.encoding` metadata is present on request bodies, matching the existing response-side encoding warnings.
+- **CI: example projects in CI (#186)**: both README-promoted examples (petstore client, server adapter) are now exercised in CI, with petstore client code regenerated to match v0.13.0 output.
+- **CI: README library example compile check (#185)**: a new `scripts/check_readme_examples.sh` generates a temporary Gleam file mirroring the README's Library API examples and type-checks it against the public API.
+- **README: validate documentation (#184)**: added `validate` config field to the configuration table, `--validate` flag to the generate flag table, and a new "Guard validation" subsection.
+- 9 new unit tests and 3 new test fixtures (667 → 677 unit tests, 218 → 221 test fixtures)
+
+### Fixed
+
+- **Sync-check messaging (#187)**: `scripts/check_sync.sh` header, success, and failure messages now accurately reflect what the script validates (version + test counts only). Removed broken reference to nonexistent `scripts/update_sync.sh`. Added ShellSpec regression tests for both success and failure paths.
+- **README library example (#185)**: replaced `config.Config(...)` direct construction with `config.new(...)` public constructor and added missing `validate` parameter.
+
+### Changed
+
+- `diagnostic.missing_field`, `diagnostic.invalid_value`, and `diagnostic.resolve_error` constructors now require a `loc: SourceLoc` parameter
+- `response headers` capability upgraded from `ParsedNotUsed` to `Supported`
+- Response header "parsed but not used" capability warning removed
+
 ## [0.13.0] - 2026-04-18
 
 ### Added
