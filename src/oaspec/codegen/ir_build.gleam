@@ -200,16 +200,89 @@ fn request_body_type(
 /// become `VariantWithType(<qualified schema type>)`.
 pub fn build_response_types_module(ctx: Context) -> Module {
   let operations = operations.collect_operations(ctx)
-  let imports = case responses_need_types_import(operations) {
-    True -> [config.package(context.config(ctx)) <> "/types"]
-    False -> []
+  let header_records = build_response_header_records(operations)
+  let needs_option_for_headers = response_headers_need_option(header_records)
+  let imports = case
+    responses_need_types_import(operations),
+    needs_option_for_headers
+  {
+    True, True -> [
+      "gleam/option.{type Option}",
+      config.package(context.config(ctx)) <> "/types",
+    ]
+    True, False -> [config.package(context.config(ctx)) <> "/types"]
+    False, True -> ["gleam/option.{type Option}"]
+    False, False -> []
   }
   let declarations =
     list.filter_map(operations, fn(op) {
       let #(op_id, operation, _path, _method) = op
       response_type_decl(op_id, operation)
     })
-  ir.module(header: "", imports: imports, declarations: declarations)
+  ir.module_with_header_records(
+    header: "",
+    imports: imports,
+    declarations: declarations,
+    header_records: header_records,
+  )
+}
+
+/// Build ResponseHeaderRecord list from all operations.
+fn build_response_header_records(
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+) -> List(ir.ResponseHeaderRecord) {
+  list.flat_map(operations, fn(op) {
+    let #(op_id, operation, _path, _method) = op
+    let type_name = naming.schema_to_type_name(op_id) <> "Response"
+    let responses =
+      http.sort_response_entries(dict.to_list(operation.responses))
+    list.filter_map(responses, fn(entry) {
+      let #(status_code, ref_or) = entry
+      case ref_or {
+        Value(response) -> {
+          let headers = sorted_entries(response.headers)
+          case headers {
+            [] -> Error(Nil)
+            _ -> {
+              let record_name =
+                type_name <> http.status_code_suffix(status_code) <> "Headers"
+              let fields =
+                list.map(headers, fn(h_entry) {
+                  let #(header_name, header) = h_entry
+                  let field_name = naming.to_snake_case(header_name)
+                  let field_type = header_schema_to_type(header.schema)
+                  let final_type = case header.required {
+                    True -> field_type
+                    False -> "Option(" <> field_type <> ")"
+                  }
+                  Field(name: field_name, type_expr: final_type)
+                })
+              Ok(ir.ResponseHeaderRecord(name: record_name, fields: fields))
+            }
+          }
+        }
+        _ -> Error(Nil)
+      }
+    })
+  })
+}
+
+/// Convert a header schema to a Gleam type string.
+fn header_schema_to_type(schema_opt: option.Option(schema.SchemaRef)) -> String {
+  case schema_opt {
+    Some(Inline(IntegerSchema(..))) -> "Int"
+    Some(Inline(NumberSchema(..))) -> "Float"
+    Some(Inline(BooleanSchema(..))) -> "Bool"
+    Some(Inline(StringSchema(..))) -> "String"
+    _ -> "String"
+  }
+}
+
+/// Check if any response header record has optional fields.
+fn response_headers_need_option(records: List(ir.ResponseHeaderRecord)) -> Bool {
+  list.any(records, fn(rec) {
+    list.any(rec.fields, fn(f) { string.starts_with(f.type_expr, "Option(") })
+  })
 }
 
 fn responses_need_types_import(

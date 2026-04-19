@@ -261,20 +261,7 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
               ]
               _, _ -> []
             }
-            let header_warnings = case dict.is_empty(response.headers) {
-              True -> []
-              False -> [
-                diagnostic.capability(
-                  severity: SeverityWarning,
-                  target: TargetBoth,
-                  path: base_path <> ".headers",
-                  detail: "Response headers are parsed but not used by code generation.",
-                  hint: Some(
-                    "Response headers will not appear in generated code. No action needed.",
-                  ),
-                ),
-              ]
-            }
+            let header_warnings = []
             let link_warnings = case dict.is_empty(response.links) {
               True -> []
               False -> [

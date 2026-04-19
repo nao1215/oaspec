@@ -7613,6 +7613,9 @@ pub fn generation_summary_includes_warnings_test() {
     "
 openapi: 3.0.3
 info: { title: T, version: 1.0.0 }
+tags:
+  - name: items
+    description: Item operations
 paths:
   /items:
     get:
@@ -7620,10 +7623,6 @@ paths:
       responses:
         '200':
           description: ok
-          headers:
-            X-Rate-Limit:
-              description: Rate limit
-              schema: { type: integer }
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let cfg =

@@ -254,8 +254,8 @@ pub fn registry() -> List(Capability) {
     Capability(
       "response headers",
       "scope",
-      ParsedNotUsed,
-      "Parsed but no codegen",
+      Supported,
+      "Response header types generated",
     ),
     Capability("encoding", "scope", ParsedNotUsed, "Parsed but no codegen"),
   ]

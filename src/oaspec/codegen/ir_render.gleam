@@ -21,6 +21,11 @@ pub fn render(module: Module) -> String {
       render_declaration(sb, decl)
     })
 
+  let sb =
+    list.fold(ir.module_header_records(module), sb, fn(sb, rec) {
+      render_header_record(sb, rec)
+    })
+
   se.to_string(sb)
 }
 
@@ -81,4 +86,18 @@ fn render_type_def(sb: se.StringBuilder, type_def: TypeDef) -> se.StringBuilder 
       |> se.blank_line()
     }
   }
+}
+
+/// Render a response header record type.
+fn render_header_record(
+  sb: se.StringBuilder,
+  rec: ir.ResponseHeaderRecord,
+) -> se.StringBuilder {
+  let name = rec.name
+  let field_strs = list.map(rec.fields, fn(f) { f.name <> ": " <> f.type_expr })
+  sb
+  |> se.line("pub type " <> name <> " {")
+  |> se.indent(1, name <> "(" <> string.join(field_strs, ", ") <> ")")
+  |> se.line("}")
+  |> se.blank_line()
 }
