@@ -1,5 +1,6 @@
 import gleam/dict.{type Dict}
 import gleam/list
+import gleam/result
 import oaspec/openapi/diagnostic.{type SourceLoc, NoSourceLoc, SourceLoc}
 
 /// An index mapping dotted JSON-pointer paths to source locations.
@@ -12,17 +13,16 @@ pub opaque type LocationIndex {
 /// Build a location index from raw YAML/JSON content.
 /// On failure (e.g. invalid YAML), returns an empty index.
 pub fn build(content: String) -> LocationIndex {
-  case do_build(content) {
-    Ok(pairs) -> {
-      let entries =
-        list.fold(pairs, dict.new(), fn(acc, pair) {
-          let #(path, #(line, col)) = pair
-          dict.insert(acc, path, SourceLoc(line:, column: col))
-        })
-      LocationIndex(entries:)
-    }
-    Error(_) -> empty()
-  }
+  do_build(content)
+  |> result.map(fn(pairs) {
+    let entries =
+      list.fold(pairs, dict.new(), fn(acc, pair) {
+        let #(path, #(line, col)) = pair
+        dict.insert(acc, path, SourceLoc(line:, column: col))
+      })
+    LocationIndex(entries:)
+  })
+  |> result.unwrap(empty())
 }
 
 /// An empty index (no location information available).
@@ -33,10 +33,8 @@ pub fn empty() -> LocationIndex {
 /// Look up the source location for a given path.
 /// Returns `NoSourceLoc` if the path is not in the index.
 pub fn lookup(index: LocationIndex, path: String) -> SourceLoc {
-  case dict.get(index.entries, path) {
-    Ok(loc) -> loc
-    Error(_) -> NoSourceLoc
-  }
+  dict.get(index.entries, path)
+  |> result.unwrap(NoSourceLoc)
 }
 
 /// Look up the source location for a field within a parent path.
@@ -50,14 +48,9 @@ pub fn lookup_field(
     "" -> field
     _ -> parent <> "." <> field
   }
-  case dict.get(index.entries, field_path) {
-    Ok(loc) -> loc
-    Error(_) ->
-      case dict.get(index.entries, parent) {
-        Ok(loc) -> loc
-        Error(_) -> NoSourceLoc
-      }
-  }
+  dict.get(index.entries, field_path)
+  |> result.lazy_or(fn() { dict.get(index.entries, parent) })
+  |> result.unwrap(NoSourceLoc)
 }
 
 @external(erlang, "yaml_loc_ffi", "build_location_index")

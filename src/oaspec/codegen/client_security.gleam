@@ -1,3 +1,4 @@
+import gleam/bool
 import gleam/dict
 import gleam/list
 import gleam/option.{Some}
@@ -8,10 +9,11 @@ import oaspec/util/naming
 import oaspec/util/string_extra as se
 
 /// Capitalize the first letter of a string (for HTTP scheme prefix).
-pub fn capitalize_first(s: String) -> String {
-  case string.pop_grapheme(s) {
+pub fn capitalize_first(value: String) -> String {
+  case string.pop_grapheme(value) {
     Ok(#(first, rest)) -> string.uppercase(first) <> rest
-    Error(_) -> s
+    // nolint: thrown_away_error -- empty string has no first grapheme; fall back to the original value
+    Error(_) -> value
   }
 }
 
@@ -390,8 +392,6 @@ pub fn maybe_percent_encode(
   value_expr: String,
   param: spec.Parameter(Resolved),
 ) -> String {
-  case param.allow_reserved {
-    True -> value_expr
-    False -> "uri.percent_encode(" <> value_expr <> ")"
-  }
+  use <- bool.guard(param.allow_reserved, value_expr)
+  "uri.percent_encode(" <> value_expr <> ")"
 }

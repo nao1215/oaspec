@@ -1,23 +1,13 @@
 import gleam/list
 import gleam/result
-import oaspec/codegen/context.{type Context, type GeneratedFile}
+import oaspec/codegen/context.{type GeneratedFile}
 import oaspec/config.{Both, Client, Server}
-import oaspec/generate as gen
 import simplifile
 
 /// Errors that can occur during file writing.
 pub type WriteError {
   DirectoryCreateError(path: String, detail: String)
   FileWriteError(path: String, detail: String)
-}
-
-/// Generate and write all files based on configuration.
-pub fn generate_all(
-  ctx: Context,
-  on_write: fn(String) -> Nil,
-) -> Result(List(String), WriteError) {
-  let files = gen.generate_all_files(ctx)
-  write_all(files, context.config(ctx), on_write)
 }
 
 /// Write pre-generated files to disk based on configuration.
@@ -66,8 +56,11 @@ pub fn write_all(
 /// Ensure a directory exists, creating it if necessary.
 fn ensure_directory(path: String) -> Result(Nil, WriteError) {
   simplifile.create_directory_all(path)
-  |> result.map_error(fn(_) {
-    DirectoryCreateError(path:, detail: "Failed to create directory")
+  |> result.map_error(fn(err) {
+    DirectoryCreateError(
+      path:,
+      detail: "Failed to create directory: " <> simplifile.describe_error(err),
+    )
   })
 }
 
@@ -82,8 +75,11 @@ fn write_files(
     let full_path = base_path <> "/" <> file.path
     use _ <- result.try(
       simplifile.write(full_path, file.content)
-      |> result.map_error(fn(_) {
-        FileWriteError(path: full_path, detail: "Failed to write file")
+      |> result.map_error(fn(err) {
+        FileWriteError(
+          path: full_path,
+          detail: "Failed to write file: " <> simplifile.describe_error(err),
+        )
       }),
     )
     on_write(full_path)

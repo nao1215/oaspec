@@ -128,6 +128,7 @@ pub fn load(path: String) -> Result(Config, ConfigError) {
 
   use input <- result.try(
     yay.extract_string(root, "input")
+    // nolint: error_context_lost -- yay ExtractionError details (KeyMissing vs KeyTypeMismatch) are internal; surfacing MissingField is the user-facing contract
     |> result.map_error(fn(_) { MissingField(field: "input") }),
   )
 
@@ -168,6 +169,7 @@ pub fn load(path: String) -> Result(Config, ConfigError) {
     case yay.select_sugar(from: root, selector: "validate") {
       Ok(yay.NodeBool(True)) | Ok(yay.NodeStr("true")) -> Ok(True)
       Ok(yay.NodeBool(False)) | Ok(yay.NodeStr("false")) -> Ok(False)
+      // nolint: thrown_away_error -- missing optional 'validate' key defaults to False
       Error(_) -> Ok(False)
       Ok(_) ->
         Error(InvalidValue(

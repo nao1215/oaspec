@@ -15,9 +15,12 @@ type Regexes {
 }
 
 fn compile_regexes() -> Regexes {
+  // nolint: assert_ok_pattern -- regex literal cannot fail
   let assert Ok(word_separator) = regexp.from_string("[_\\-\\s./]+")
+  // nolint: assert_ok_pattern -- regex literal cannot fail
   let assert Ok(camel_case) =
     regexp.from_string("([A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+)")
+  // nolint: assert_ok_pattern -- regex literal cannot fail
   let assert Ok(underscore_before_caps) =
     regexp.from_string("([a-z0-9])([A-Z])")
   Regexes(word_separator:, camel_case:, underscore_before_caps:)
@@ -83,16 +86,11 @@ pub fn schema_to_type_name(schema_name: String) -> String {
   |> to_pascal_case
 }
 
-/// Convert an OpenAPI schema name to a valid Gleam module name.
-pub fn to_module_name(name: String) -> String {
-  name
-  |> to_snake_case
-}
-
 /// Capitalize the first letter of a string.
 pub fn capitalize(input: String) -> String {
   case string.pop_grapheme(input) {
     Ok(#(first, rest)) -> string.uppercase(first) <> rest
+    // nolint: thrown_away_error -- pop_grapheme only fails on empty strings, in which case the input is already the correct result
     Error(_) -> input
   }
 }
@@ -130,6 +128,7 @@ pub fn deduplicate_names(names: List(String)) -> List(String) {
     list.fold(names, #([], dict.new()), fn(acc, name) {
       let #(result, counts) = acc
       case dict.get(counts, name) {
+        // nolint: thrown_away_error -- dict.get Error simply means first occurrence; we register count 1 and keep the original name
         Error(_) -> {
           let counts = dict.insert(counts, name, 1)
           #([name, ..result], counts)

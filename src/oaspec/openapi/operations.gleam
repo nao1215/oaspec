@@ -38,13 +38,13 @@ pub fn collect_operations(
             // Operation params take precedence by (name, in) key per OpenAPI spec.
             let op_param_keys =
               list.map(operation.parameters, fn(ref_p) {
-                let p = spec.unwrap_ref(ref_p)
-                #(p.name, p.in_)
+                let parameter = spec.unwrap_ref(ref_p)
+                #(parameter.name, parameter.in_)
               })
             let inherited_params =
               list.filter(path_item.parameters, fn(ref_p) {
-                let p = spec.unwrap_ref(ref_p)
-                !list.contains(op_param_keys, #(p.name, p.in_))
+                let parameter = spec.unwrap_ref(ref_p)
+                !list.contains(op_param_keys, #(parameter.name, parameter.in_))
               })
             let merged_params =
               list.append(inherited_params, operation.parameters)

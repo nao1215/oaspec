@@ -1,3 +1,4 @@
+import gleam/bool
 import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
@@ -198,26 +199,9 @@ fn generate_router(
       }
     })
 
-  // Determine which imports are needed based on operations
-  let needs_dict =
-    list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
-      let has_query =
-        list.any(operation.parameters, fn(ref_p) {
-          case ref_p {
-            Value(p) -> p.in_ == spec.InQuery
-            _ -> False
-          }
-        })
-      let has_header =
-        list.any(operation.parameters, fn(ref_p) {
-          case ref_p {
-            Value(p) -> p.in_ == spec.InHeader
-            _ -> False
-          }
-        })
-      has_query || has_header
-    })
+  // Determine which imports are needed based on operations.
+  // Dict is always needed for the route signature, so we skip a conditional
+  // check here.
 
   let needs_int =
     list.any(operations, fn(op) {
@@ -433,7 +417,6 @@ fn generate_router(
     })
 
   // Build imports list (Dict always needed for route signature)
-  let _ = needs_dict
   let std_imports = ["gleam/dict.{type Dict}"]
   let std_imports = case needs_list_import {
     True -> list.append(std_imports, ["gleam/list"])
@@ -828,10 +811,8 @@ fn generate_router(
 }
 
 fn route_arg_name(name: String, used: Bool) -> String {
-  case used {
-    True -> name
-    False -> "_" <> name
-  }
+  use <- bool.guard(used, name)
+  "_" <> name
 }
 
 fn generate_cookie_lookup(sb: se.StringBuilder) -> se.StringBuilder {
@@ -1130,18 +1111,15 @@ fn generate_safe_request_and_dispatch(
   }
 
   // Close path param case expressions (in reverse order)
-  let sb =
-    list.fold(path_params_needing_parse, sb, fn(sb, _p) {
-      sb
-      |> se.indent(4, "}")
-      |> se.indent(
-        4,
-        "Error(_) -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
-      )
-      |> se.indent(3, "}")
-    })
-
-  sb
+  list.fold(path_params_needing_parse, sb, fn(sb, _p) {
+    sb
+    |> se.indent(4, "}")
+    |> se.indent(
+      4,
+      "Error(_) -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
+    )
+    |> se.indent(3, "}")
+  })
 }
 
 /// Check if an operation's request body needs guard validation.

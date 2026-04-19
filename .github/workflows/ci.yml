@@ -37,6 +37,9 @@ jobs:
       - name: Type check
         run: gleam check
 
+      - name: Lint (glinter, strict)
+        run: gleam run -m glinter -- --stats
+
       - name: Build (warnings as errors)
         run: gleam build --warnings-as-errors
 

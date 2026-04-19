@@ -149,6 +149,7 @@ fn validate_path_template_params(
 
 /// Extract parameter names from path template, e.g. "/items/{id}" -> ["id"].
 fn extract_path_template_names(path: String) -> List(String) {
+  // nolint: assert_ok_pattern -- compile-time constant regex literal cannot fail to parse
   let assert Ok(re) = regexp.from_string("\\{([^}]+)\\}")
   regexp.scan(re, path)
   |> list.filter_map(fn(match) {
@@ -383,13 +384,10 @@ fn deep_object_server_leaf_supported(
 }
 
 fn validate_server_cookie_param(
-  path: String,
-  param: spec.Parameter(Resolved),
-  ctx: Context,
+  _path: String,
+  _param: spec.Parameter(Resolved),
+  _ctx: Context,
 ) -> List(Diagnostic) {
-  let _ = path
-  let _ = param
-  let _ = ctx
   []
 }
 
@@ -487,6 +485,7 @@ fn resolve_schema_object(
     Some(schema_ref) ->
       case resolver.resolve_schema_ref(schema_ref, context.spec(ctx)) {
         Ok(schema_obj) -> Some(schema_obj)
+        // nolint: thrown_away_error -- unresolved refs surface as absent; the ref error is reported elsewhere in the validator
         Error(_) -> None
       }
     None -> None
@@ -615,6 +614,7 @@ fn validate_multipart_request_body_fields(
         ]
         None -> []
       }
+    // nolint: thrown_away_error -- absence of the content type means there is nothing to validate here
     Error(_) -> []
   }
 }
@@ -643,6 +643,7 @@ fn validate_form_urlencoded_schema(
         ]
         None -> []
       }
+    // nolint: thrown_away_error -- absence of the content type means there is nothing to validate here
     Error(_) -> []
   }
 }
@@ -705,6 +706,7 @@ fn validate_server_form_urlencoded_request_body(
           }
           list.append(content_type_errors, field_errors)
         }
+        // nolint: thrown_away_error -- absence of the content type means there is nothing to validate here
         Error(_) -> []
       }
   }
@@ -793,6 +795,7 @@ fn validate_server_multipart_request_body(
           }
           list.append(content_type_errors, field_errors)
         }
+        // nolint: thrown_away_error -- absence of the content type means there is nothing to validate here
         Error(_) -> []
       }
   }
@@ -954,6 +957,7 @@ fn validate_schema_ref_recursive(
         True ->
           case resolver.resolve_schema_ref(schema_ref, context.spec(ctx)) {
             Ok(_) -> []
+            // nolint: thrown_away_error -- resolver error is replaced with a user-facing diagnostic that conveys the same failure
             Error(_) -> [
               diagnostic.validation(
                 severity: SeverityError,

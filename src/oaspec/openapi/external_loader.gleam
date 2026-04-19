@@ -46,6 +46,7 @@
 //// silently dropping one side.
 
 import filepath
+import gleam/bool
 import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
@@ -58,7 +59,6 @@ import oaspec/openapi/spec.{
   type RequestBody, type Response, type Unresolved, Components, OpenApiSpec,
 }
 import oaspec/util/http
-import simplifile
 
 /// Load every `components.schemas` entry whose value is an external
 /// filesystem ref, merge the referenced schema into the main spec, and
@@ -230,19 +230,18 @@ fn local_schema_names(entries: List(#(String, SchemaRef))) -> List(String) {
 fn extract_external_component_ref(
   ref_str: String,
 ) -> option.Option(#(String, String, String)) {
-  case string.starts_with(ref_str, "./") || string.starts_with(ref_str, "../") {
-    True ->
-      case string.split_once(ref_str, "#") {
-        Ok(#(file_path, fragment)) ->
-          try_component_prefix(file_path, fragment, [
-            "/components/parameters/",
-            "/components/requestBodies/",
-            "/components/responses/",
-            "/components/pathItems/",
-          ])
-        _ -> None
-      }
-    False -> None
+  let is_relative =
+    string.starts_with(ref_str, "./") || string.starts_with(ref_str, "../")
+  use <- bool.guard(!is_relative, None)
+  case string.split_once(ref_str, "#") {
+    Ok(#(file_path, fragment)) ->
+      try_component_prefix(file_path, fragment, [
+        "/components/parameters/",
+        "/components/requestBodies/",
+        "/components/responses/",
+        "/components/pathItems/",
+      ])
+    _ -> None
   }
 }
 
@@ -1711,23 +1710,23 @@ fn check_nested_local_collision(
   source_path: String,
   original_local_names: List(String),
 ) -> Result(Nil, Diagnostic) {
-  case list.contains(original_local_names, fragment_name) {
-    False -> Ok(Nil)
-    True ->
-      Error(diagnostic.validation(
-        severity: diagnostic.SeverityError,
-        target: diagnostic.TargetBoth,
-        path: source_path,
-        detail: "Nested property $ref imports schema '"
-          <> fragment_name
-          <> "' from '"
-          <> source_path
-          <> "', but a local schema with the same name is already defined.",
-        hint: Some(
-          "Rename one of the colliding schemas, or point the external ref at a file whose fragment name is unique.",
-        ),
-      ))
-  }
+  use <- bool.guard(
+    !list.contains(original_local_names, fragment_name),
+    Ok(Nil),
+  )
+  Error(diagnostic.validation(
+    severity: diagnostic.SeverityError,
+    target: diagnostic.TargetBoth,
+    path: source_path,
+    detail: "Nested property $ref imports schema '"
+      <> fragment_name
+      <> "' from '"
+      <> source_path
+      <> "', but a local schema with the same name is already defined.",
+    hint: Some(
+      "Rename one of the colliding schemas, or point the external ref at a file whose fragment name is unique.",
+    ),
+  ))
 }
 
 /// Same shape as `check_cross_file_collision` but reads from the
@@ -1739,6 +1738,7 @@ fn check_nested_cross_file_collision(
   imports: dict.Dict(String, #(String, SchemaRef)),
 ) -> Result(Nil, Diagnostic) {
   case dict.get(imports, fragment_name) {
+    // nolint: thrown_away_error -- dict.get Error only signals absent key; no diagnostic to propagate
     Error(_) -> Ok(Nil)
     Ok(#(prev_path, _)) ->
       case prev_path == resolved_path {
@@ -1774,27 +1774,24 @@ fn check_local_collision(
   source_path: String,
   original_local_names: List(String),
 ) -> Result(Nil, Diagnostic) {
-  case entry_name == fragment_name {
-    True -> Ok(Nil)
-    False ->
-      case list.contains(original_local_names, fragment_name) {
-        False -> Ok(Nil)
-        True ->
-          Error(diagnostic.validation(
-            severity: diagnostic.SeverityError,
-            target: diagnostic.TargetBoth,
-            path: source_path,
-            detail: "External $ref imports schema '"
-              <> fragment_name
-              <> "' from '"
-              <> source_path
-              <> "', but a local schema with the same name is already defined.",
-            hint: Some(
-              "Rename one of the colliding schemas, or point the external ref at a file whose fragment name is unique.",
-            ),
-          ))
-      }
-  }
+  use <- bool.guard(entry_name == fragment_name, Ok(Nil))
+  use <- bool.guard(
+    !list.contains(original_local_names, fragment_name),
+    Ok(Nil),
+  )
+  Error(diagnostic.validation(
+    severity: diagnostic.SeverityError,
+    target: diagnostic.TargetBoth,
+    path: source_path,
+    detail: "External $ref imports schema '"
+      <> fragment_name
+      <> "' from '"
+      <> source_path
+      <> "', but a local schema with the same name is already defined.",
+    hint: Some(
+      "Rename one of the colliding schemas, or point the external ref at a file whose fragment name is unique.",
+    ),
+  ))
 }
 
 /// Reject two external refs that both pull the same fragment name from
@@ -1806,6 +1803,7 @@ fn check_cross_file_collision(
   imported: dict.Dict(String, String),
 ) -> Result(Nil, Diagnostic) {
   case dict.get(imported, fragment_name) {
+    // nolint: thrown_away_error -- dict.get Error only signals absent key; no diagnostic to propagate
     Error(_) -> Ok(Nil)
     Ok(prev_path) ->
       case prev_path == resolved_path {
@@ -1974,13 +1972,4 @@ pub fn base_dir_of(path: String) -> option.Option(String) {
     "" -> Some(".")
     dir -> Some(dir)
   }
-}
-
-/// Read a file from disk. Extracted so tests can stub file I/O by passing
-/// their own `parse_file` callback.
-pub fn read_file(path: String) -> Result(String, Diagnostic) {
-  simplifile.read(path)
-  |> result.map_error(fn(_) {
-    diagnostic.file_error(detail: "Cannot read external file: " <> path)
-  })
 }

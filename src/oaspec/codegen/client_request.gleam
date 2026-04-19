@@ -74,7 +74,6 @@ pub fn build_param_list(
       ", " <> param_name <> ": " <> param_type
     })
 
-  let _ = ctx
   let body_param = case operation.request_body {
     Some(Value(rb)) -> {
       let body_type = get_body_type(rb, op_id)
@@ -96,7 +95,7 @@ pub fn build_param_list(
 }
 
 /// Convert a parameter to its Gleam type string.
-pub fn param_to_type(param: spec.Parameter(Resolved), ctx: Context) -> String {
+fn param_to_type(param: spec.Parameter(Resolved), ctx: Context) -> String {
   let base =
     schema_dispatch.resolve_param_type(
       spec.parameter_schema(param),
@@ -364,7 +363,7 @@ pub fn multipart_field_is_binary(
   }
 }
 
-pub fn multipart_field_to_string_fn(
+fn multipart_field_to_string_fn(
   field_schema: schema.SchemaRef,
   ctx: Context,
 ) -> String {
@@ -378,7 +377,7 @@ pub fn multipart_field_to_string_fn(
 
 /// Convert an array field's items to a string expression for form-urlencoded encoding.
 /// Returns an expression that converts `item` to a String.
-pub fn form_array_item_to_string(
+fn form_array_item_to_string(
   field_schema: schema.SchemaRef,
   ctx: Context,
 ) -> String {
@@ -395,7 +394,7 @@ pub fn form_array_item_to_string(
 
 /// Generate form encoding for a nested object property.
 /// Serializes as field[subkey]=value for each sub-property.
-pub fn generate_form_nested_object(
+fn generate_form_nested_object(
   sb: se.StringBuilder,
   field_name: String,
   gleam_field: String,
@@ -532,7 +531,7 @@ pub fn generate_form_nested_object(
 
 /// Recursively generate bracket-encoded form fields for nested objects.
 /// Produces key[sub]=value for leaf fields and recurses for object children.
-pub fn generate_form_bracket_fields(
+fn generate_form_bracket_fields(
   sb: se.StringBuilder,
   key_prefix: String,
   accessor_prefix: String,
@@ -1176,7 +1175,7 @@ pub fn generate_deep_object_query_param(
 }
 
 /// Convert a SchemaRef to a string expression for a given accessor.
-pub fn schema_ref_to_string_expr(
+fn schema_ref_to_string_expr(
   schema_ref: schema.SchemaRef,
   accessor: String,
   ctx: Context,
@@ -1190,12 +1189,12 @@ pub fn schema_ref_to_string_expr(
 
 /// Return a function expression that converts an array item to String.
 /// Used in generated code: `list.map(param, <fn>)`.
-pub fn array_item_to_string_fn(items: schema.SchemaRef, ctx: Context) -> String {
+fn array_item_to_string_fn(items: schema.SchemaRef, ctx: Context) -> String {
   schema_dispatch.to_string_fn(items, context.spec(ctx))
 }
 
 /// Convert a deepObject array item to a string expression.
-pub fn deep_object_array_item_to_string(
+fn deep_object_array_item_to_string(
   prop_ref: schema.SchemaRef,
   ctx: Context,
 ) -> String {

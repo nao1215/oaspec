@@ -1,4 +1,5 @@
 import gleam/dict
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
@@ -51,6 +52,7 @@ fn assert_matches_golden(file: context.GeneratedFile, golden_dir: String) -> Nil
       let gen_lines = string.split(file.content, "\n")
       let exp_lines = string.split(expected, "\n")
       let diff_info = find_first_diff(gen_lines, exp_lines, 1)
+      // nolint: avoid_panic -- test setup failure should abort
       panic as {
         "Golden file mismatch: "
         <> file.path
@@ -69,26 +71,26 @@ fn find_first_diff(
 ) -> String {
   case gen, exp {
     [], [] -> "Files differ in length"
-    [], [e, ..] ->
+    [], [expected_line, ..] ->
       "Line "
-      <> string.inspect(line_num)
+      <> int.to_string(line_num)
       <> ": generated file ends, expected: "
-      <> e
-    [g, ..], [] ->
+      <> expected_line
+    [generated_line, ..], [] ->
       "Line "
-      <> string.inspect(line_num)
+      <> int.to_string(line_num)
       <> ": golden file ends, generated has: "
-      <> g
-    [g, ..g_rest], [e, ..e_rest] ->
-      case g == e {
-        True -> find_first_diff(g_rest, e_rest, line_num + 1)
+      <> generated_line
+    [generated_line, ..gen_rest], [expected_line, ..exp_rest] ->
+      case generated_line == expected_line {
+        True -> find_first_diff(gen_rest, exp_rest, line_num + 1)
         False ->
           "Line "
-          <> string.inspect(line_num)
+          <> int.to_string(line_num)
           <> ":\n  expected: "
-          <> e
+          <> expected_line
           <> "\n  got:      "
-          <> g
+          <> generated_line
       }
   }
 }
@@ -109,13 +111,14 @@ fn format_generated_files(
   files: List(context.GeneratedFile),
 ) -> List(context.GeneratedFile) {
   let temp_dir = "/tmp/oaspec_golden_test"
-  let _ = simplifile.delete(temp_dir)
+  // best-effort cleanup of any stale temp dir from previous runs
+  let _ignored_delete = simplifile.delete(temp_dir)
   let assert Ok(Nil) = simplifile.create_directory_all(temp_dir)
 
   // Write each file to temp with indexed names
   let entries =
     list.index_map(files, fn(file, idx) {
-      let temp_path = temp_dir <> "/" <> string.inspect(idx) <> ".gleam"
+      let temp_path = temp_dir <> "/" <> int.to_string(idx) <> ".gleam"
       let assert Ok(Nil) = simplifile.write(temp_path, file.content)
       #(file, temp_path)
     })
@@ -132,8 +135,8 @@ fn format_generated_files(
       context.GeneratedFile(..file, content: content)
     })
 
-  // Clean up
-  let _ = simplifile.delete(temp_dir)
+  // best-effort temp dir cleanup; leaked temp dirs are not fatal
+  let _ignored_cleanup = simplifile.delete(temp_dir)
   formatted
 }
 

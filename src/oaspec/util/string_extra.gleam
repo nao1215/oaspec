@@ -1,4 +1,3 @@
-import gleam/int
 import gleam/list
 import gleam/string
 import gleam/string_tree.{type StringTree}
@@ -67,24 +66,4 @@ pub fn doc_comment(sb: StringTree, text: String) -> StringTree {
       list.fold(lines, sb, fn(sb, l) { sb |> line("/// " <> l) })
     }
   }
-}
-
-/// Wrap a string in Gleam doc comment style with indentation.
-pub fn doc_comment_indented(
-  sb: StringTree,
-  level: Int,
-  text: String,
-) -> StringTree {
-  case text {
-    "" -> sb
-    _ -> {
-      let lines = string.split(text, "\n")
-      list.fold(lines, sb, fn(sb, l) { sb |> indent(level, "/// " <> l) })
-    }
-  }
-}
-
-/// Repeat a character n times
-pub fn repeat_char(char: String, n: Int) -> String {
-  string.repeat(char, int.max(0, n))
 }

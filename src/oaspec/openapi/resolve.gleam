@@ -1,3 +1,4 @@
+import gleam/bool
 import gleam/dict.{type Dict}
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -150,37 +151,35 @@ fn resolve_alias(
   context: String,
   seen: set.Set(String),
 ) -> Result(a, Diagnostic) {
-  case set.contains(seen, ref) {
-    True ->
+  use <- bool.guard(
+    set.contains(seen, ref),
+    Error(diagnostic.resolve_error(
+      path: context,
+      detail: "Circular component alias detected: " <> ref,
+      hint: Some(
+        "Check that component $ref chains don't form a cycle. Each $ref must eventually point to a concrete definition.",
+      ),
+      loc: NoSourceLoc,
+    )),
+  )
+  let new_seen = set.insert(seen, ref)
+  let ref_name = extract_ref_name(ref)
+  case dict.get(entries, ref_name) {
+    Ok(Value(value)) -> Ok(value)
+    Ok(Ref(next_ref)) -> resolve_alias(entries, next_ref, context, new_seen)
+    Error(_) ->
       Error(diagnostic.resolve_error(
         path: context,
-        detail: "Circular component alias detected: " <> ref,
+        detail: "Unresolved component alias: "
+          <> ref
+          <> " — target '"
+          <> ref_name
+          <> "' not found.",
         hint: Some(
-          "Check that component $ref chains don't form a cycle. Each $ref must eventually point to a concrete definition.",
+          "Verify the target component exists and the $ref path is spelled correctly.",
         ),
         loc: NoSourceLoc,
       ))
-    False -> {
-      let new_seen = set.insert(seen, ref)
-      let ref_name = extract_ref_name(ref)
-      case dict.get(entries, ref_name) {
-        Ok(Value(value)) -> Ok(value)
-        Ok(Ref(next_ref)) -> resolve_alias(entries, next_ref, context, new_seen)
-        Error(_) ->
-          Error(diagnostic.resolve_error(
-            path: context,
-            detail: "Unresolved component alias: "
-              <> ref
-              <> " — target '"
-              <> ref_name
-              <> "' not found.",
-            hint: Some(
-              "Verify the target component exists and the $ref path is spelled correctly.",
-            ),
-            loc: NoSourceLoc,
-          ))
-      }
-    }
   }
 }
 
@@ -199,22 +198,22 @@ fn validate_ref_kind(
   expected_prefix: String,
   context_path: String,
 ) -> Result(String, Diagnostic) {
-  case string.starts_with(ref_str, expected_prefix) {
-    True -> Ok(extract_ref_name(ref_str))
-    False ->
-      Error(diagnostic.resolve_error(
-        path: context_path,
-        detail: "$ref '"
-          <> ref_str
-          <> "' points to wrong component kind; expected prefix '"
-          <> expected_prefix
-          <> "'",
-        hint: Some(
-          "Use the correct $ref prefix for the component type (e.g., #/components/schemas/ for schemas).",
-        ),
-        loc: NoSourceLoc,
-      ))
-  }
+  use <- bool.guard(
+    string.starts_with(ref_str, expected_prefix),
+    Ok(extract_ref_name(ref_str)),
+  )
+  Error(diagnostic.resolve_error(
+    path: context_path,
+    detail: "$ref '"
+      <> ref_str
+      <> "' points to wrong component kind; expected prefix '"
+      <> expected_prefix
+      <> "'",
+    hint: Some(
+      "Use the correct $ref prefix for the component type (e.g., #/components/schemas/ for schemas).",
+    ),
+    loc: NoSourceLoc,
+  ))
 }
 
 // ============================================================================

@@ -1,3 +1,4 @@
+import gleam/bool
 import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -17,9 +18,9 @@ import oaspec/util/naming
 /// Expression that case-insensitively parses a string to Bool.
 /// Accepts "true"/"True"/"TRUE" etc. as True, everything else as False.
 /// This is compatible with Gleam's bool.to_string which produces "True"/"False".
-pub const bool_parse_expr = "case string.lowercase(v) { \"true\" -> True _ -> False }"
+const bool_parse_expr = "case string.lowercase(v) { \"true\" -> True _ -> False }"
 
-pub type DeepObjectProperty {
+type DeepObjectProperty {
   DeepObjectProperty(
     name: String,
     field_name: String,
@@ -67,13 +68,17 @@ pub fn body_field_kind(schema_ref: SchemaRef, ctx: Context) -> BodyFieldKind {
     Reference(..) as schema_ref ->
       case resolver.resolve_schema_ref(schema_ref, context.spec(ctx)) {
         Ok(schema_obj) -> body_field_kind_from_object(schema_obj, ctx)
+        // nolint: thrown_away_error -- unresolved refs map to Unknown; the resolver reports the ref error separately
         Error(_) -> BodyFieldUnknown
       }
     _ -> BodyFieldUnknown
   }
 }
 
-fn body_field_kind_from_object(schema_obj, ctx: Context) -> BodyFieldKind {
+fn body_field_kind_from_object(
+  schema_obj: schema.SchemaObject,
+  ctx: Context,
+) -> BodyFieldKind {
   case schema_obj {
     schema.StringSchema(..) -> BodyFieldString
     schema.IntegerSchema(..) -> BodyFieldInt
@@ -150,7 +155,7 @@ pub fn query_required_expr(
   )
 }
 
-pub fn query_required_expr_with_schema(
+fn query_required_expr_with_schema(
   key: String,
   schema_ref: Option(SchemaRef),
   explode: Option(Bool),
@@ -246,7 +251,7 @@ pub fn query_optional_expr(
   )
 }
 
-pub fn query_optional_expr_with_schema(
+fn query_optional_expr_with_schema(
   key: String,
   schema_ref: Option(SchemaRef),
   explode: Option(Bool),
@@ -511,11 +516,8 @@ pub fn deep_object_param_has_optional_fields(
   param: spec.Parameter(Resolved),
   ctx: Context,
 ) -> Bool {
-  case is_deep_object_param(param, ctx) {
-    True ->
-      list.any(deep_object_properties(param, ctx), fn(prop) { !prop.required })
-    False -> False
-  }
+  use <- bool.guard(!is_deep_object_param(param, ctx), False)
+  list.any(deep_object_properties(param, ctx), fn(prop) { !prop.required })
 }
 
 pub fn deep_object_param_needs_string(
@@ -550,10 +552,8 @@ fn deep_object_param_needs(
   ctx: Context,
   predicate: fn(DeepObjectProperty) -> Bool,
 ) -> Bool {
-  case is_deep_object_param(param, ctx) {
-    True -> list.any(deep_object_properties(param, ctx), predicate)
-    False -> False
-  }
+  use <- bool.guard(!is_deep_object_param(param, ctx), False)
+  list.any(deep_object_properties(param, ctx), predicate)
 }
 
 pub fn request_body_uses_form_urlencoded(rb: spec.RequestBody(Resolved)) -> Bool {
@@ -582,7 +582,7 @@ pub fn operation_uses_multipart_body(
   }
 }
 
-pub fn object_properties_from_schema_ref(
+fn object_properties_from_schema_ref(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> List(DeepObjectProperty) {
@@ -619,6 +619,7 @@ fn form_urlencoded_body_properties(
         None -> []
       }
     }
+    // nolint: thrown_away_error -- absence of the content type means no properties to enumerate
     Error(_) -> []
   }
 }
@@ -633,6 +634,7 @@ fn multipart_body_properties(
         Some(schema_ref) -> object_properties_from_schema_ref(schema_ref, ctx)
         None -> []
       }
+    // nolint: thrown_away_error -- absence of the content type means no properties to enumerate
     Error(_) -> []
   }
 }
@@ -675,6 +677,7 @@ fn body_additional_properties(
         Some(schema_ref) -> schema_ref_additional_properties(schema_ref, ctx)
         None -> Forbidden
       }
+    // nolint: thrown_away_error -- absence of the content type means no additionalProperties
     Error(_) -> Forbidden
   }
 }
@@ -699,6 +702,7 @@ fn form_urlencoded_body_type_name(
           "types." <> naming.schema_to_type_name(op_id) <> "Request"
         _ -> "String"
       }
+    // nolint: thrown_away_error -- absence of the content type falls back to the raw body type
     Error(_) -> "String"
   }
 }
@@ -716,6 +720,7 @@ fn multipart_body_type_name(
           "types." <> naming.schema_to_type_name(op_id) <> "Request"
         _ -> "String"
       }
+    // nolint: thrown_away_error -- absence of the content type falls back to the raw body type
     Error(_) -> "String"
   }
 }
@@ -815,7 +820,7 @@ fn form_urlencoded_object_optional_expr(
   <> ") False -> None }"
 }
 
-pub fn form_urlencoded_body_constructor_expr(
+fn form_urlencoded_body_constructor_expr(
   rb: spec.RequestBody(Resolved),
   op_id: String,
   ctx: Context,
@@ -883,7 +888,7 @@ pub fn form_urlencoded_body_has_nested_object(
   })
 }
 
-pub fn multipart_body_constructor_expr(
+fn multipart_body_constructor_expr(
   rb: spec.RequestBody(Resolved),
   op_id: String,
   ctx: Context,
@@ -1219,20 +1224,14 @@ fn body_optional_expr(
 
 /// Parse expression for array items: int, with optional trimming.
 fn array_item_int_parse(trim: Bool) -> String {
-  case trim {
-    True ->
-      "let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n"
-    False -> "let assert Ok(n) = int.parse(item) n"
-  }
+  use <- bool.guard(!trim, "let assert Ok(n) = int.parse(item) n")
+  "let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n"
 }
 
 /// Parse expression for array items: float, with optional trimming.
 fn array_item_float_parse(trim: Bool) -> String {
-  case trim {
-    True ->
-      "let trimmed = string.trim(item) let assert Ok(n) = float.parse(trimmed) n"
-    False -> "let assert Ok(n) = float.parse(item) n"
-  }
+  use <- bool.guard(!trim, "let assert Ok(n) = float.parse(item) n")
+  "let trimmed = string.trim(item) let assert Ok(n) = float.parse(trimmed) n"
 }
 
 /// Parse expression for array items: bool, with optional trimming.

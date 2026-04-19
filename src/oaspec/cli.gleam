@@ -148,10 +148,7 @@ fn init_command() -> glint.Command(Nil) {
 
     glint.command_help("Create a oaspec.yaml config file", fn() {
       glint.command(fn(_named_args, _args, flags) {
-        let path = case output_path(flags) {
-          Ok(p) -> p
-          Error(_) -> "./oaspec.yaml"
-        }
+        let path = output_path(flags) |> result.unwrap("./oaspec.yaml")
         run_init(path)
       })
     })
@@ -195,8 +192,13 @@ package: api
     _ -> {
       case simplifile.write(path, template) {
         Ok(_) -> io.println("Created " <> path)
-        Error(_) -> {
-          io.println("Error: failed to write " <> path)
+        Error(write_err) -> {
+          io.println(
+            "Error: failed to write "
+            <> path
+            <> ": "
+            <> simplifile.describe_error(write_err),
+          )
           halt(1)
         }
       }
@@ -218,9 +220,10 @@ fn run_generate(
   io.println("oaspec v" <> context.version)
   io.println("Loading config from: " <> config_path)
 
-  use cfg <- require(load_config(config_path, mode_opt, output_opt), fn(msg) {
-    "Error: " <> msg
-  })
+  use cfg <- require(
+    load_config(config_path, mode_opt, output_opt),
+    load_config_error_to_string,
+  )
   let cfg = case validate_mode {
     True -> config.with_validate(cfg, True)
     False -> cfg
@@ -283,6 +286,7 @@ fn run_check(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
     list.filter_map(resolved, fn(entry) {
       let #(path, content) = entry
       case simplifile.read(path) {
+        // nolint: thrown_away_error -- read failure means file is missing on disk, which is the reported diagnostic
         Error(_) -> Ok(path <> " (missing)")
         Ok(existing) ->
           case string.compare(existing, content) {
@@ -297,6 +301,7 @@ fn run_check(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
   let orphans =
     list.flat_map(output_dirs, fn(dir) {
       case simplifile.read_directory(dir) {
+        // nolint: thrown_away_error -- unreadable output dir simply has no orphans to report
         Error(_) -> []
         Ok(entries) ->
           list.filter_map(entries, fn(name) {
@@ -340,6 +345,7 @@ fn format_resolved_content(
 ) -> List(#(String, String)) {
   let temp_dir = "/tmp/oaspec_check_" <> unique_id()
   case simplifile.create_directory_all(temp_dir) {
+    // nolint: thrown_away_error -- if temp dir cannot be created we fall back to unformatted content
     Error(_) -> resolved
     Ok(Nil) -> {
       // Write each file to the temp directory with unique indexed names
@@ -347,18 +353,20 @@ fn format_resolved_content(
         list.index_map(resolved, fn(entry, idx) {
           let #(original_path, content) = entry
           let temp_path = temp_dir <> "/" <> int.to_string(idx) <> ".gleam"
-          let _ = simplifile.write(temp_path, content)
+          // Best-effort temp write; formatter step falls back if anything failed
+          let _ignored_write = simplifile.write(temp_path, content)
           #(original_path, temp_path)
         })
 
       // Format all temp files
-      let temp_paths = list.map(temp_entries, fn(e) { e.1 })
+      let temp_paths = list.map(temp_entries, fn(entry) { entry.1 })
       let formatted_resolved = case formatter.format_files(temp_paths) {
         Ok(Nil) -> {
           list.map(temp_entries, fn(entry) {
             let #(original_path, temp_path) = entry
             case simplifile.read(temp_path) {
               Ok(formatted) -> #(original_path, formatted)
+              // nolint: thrown_away_error -- unreadable temp file falls back to unformatted original content
               Error(_) -> {
                 let content =
                   list.find(resolved, fn(r) { r.0 == original_path })
@@ -369,11 +377,12 @@ fn format_resolved_content(
             }
           })
         }
+        // nolint: thrown_away_error -- formatter failure falls back to unformatted content
         Error(_) -> resolved
       }
 
-      // Clean up temp directory
-      let _ = simplifile.delete(temp_dir)
+      // Clean up temp directory; leaked temp dirs are not fatal
+      let _ignored_delete = simplifile.delete(temp_dir)
       formatted_resolved
     }
   }
@@ -384,10 +393,10 @@ fn format_resolved_content(
 fn unique_integer() -> Int
 
 fn unique_id() -> String {
-  let n = unique_integer()
-  case n < 0 {
-    True -> "n" <> int.to_string(-n)
-    False -> int.to_string(n)
+  let integer_value = unique_integer()
+  case integer_value < 0 {
+    True -> "n" <> int.to_string(-integer_value)
+    False -> int.to_string(integer_value)
   }
 }
 
@@ -396,9 +405,10 @@ fn run_validate(config_path: String, mode_opt: Option(String)) -> Nil {
   io.println("oaspec v" <> context.version)
   io.println("Loading config from: " <> config_path)
 
-  use cfg <- require(load_config(config_path, mode_opt, None), fn(msg) {
-    "Error: " <> msg
-  })
+  use cfg <- require(
+    load_config(config_path, mode_opt, None),
+    load_config_error_to_string,
+  )
 
   io.println("Parsing OpenAPI spec: " <> config.input(cfg))
   use spec <- require(parser.parse_file(config.input(cfg)), fn(e) {
@@ -416,22 +426,41 @@ fn run_validate(config_path: String, mode_opt: Option(String)) -> Nil {
   io.println("Validation passed.")
 }
 
+/// Errors surfaced while loading and validating the oaspec config.
+/// Wraps the underlying `config.ConfigError` so `load_config` can return a
+/// structured error type rather than a plain string.
+type LoadConfigError {
+  ConfigLoadError(error: config.ConfigError)
+  ModeParseError(error: config.ConfigError)
+  OutputValidationError(error: config.ConfigError)
+}
+
+/// Format a `LoadConfigError` into a user-facing message.
+fn load_config_error_to_string(error: LoadConfigError) -> String {
+  let detail = case error {
+    ConfigLoadError(error:) -> config.error_to_string(error)
+    ModeParseError(error:) -> config.error_to_string(error)
+    OutputValidationError(error:) -> config.error_to_string(error)
+  }
+  "Error: " <> detail
+}
+
 /// Pure config loading and validation pipeline.
 fn load_config(
   config_path: String,
   mode_opt: Option(String),
   output_opt: Option(String),
-) -> Result(config.Config, String) {
+) -> Result(config.Config, LoadConfigError) {
   use cfg <- result.try(
     config.load(config_path)
-    |> result.map_error(config.error_to_string),
+    |> result.map_error(ConfigLoadError),
   )
   use cfg <- result.try(case mode_opt {
     None -> Ok(cfg)
     Some(mode_str) ->
       config.parse_mode(mode_str)
-      |> result.map(fn(m) { config.with_mode(cfg, m) })
-      |> result.map_error(config.error_to_string)
+      |> result.map(fn(parsed) { config.with_mode(cfg, parsed) })
+      |> result.map_error(ModeParseError)
   })
   let cfg = case output_opt {
     None -> cfg
@@ -439,7 +468,7 @@ fn load_config(
   }
   config.validate_output_package_match(cfg)
   |> result.map(fn(_) { cfg })
-  |> result.map_error(config.error_to_string)
+  |> result.map_error(OutputValidationError)
 }
 
 /// Unwrap a Result or print the error message and exit.
@@ -460,14 +489,14 @@ fn require(
 
 /// Format a GenerateError into a printable error message.
 fn format_generate_error(err: generate.GenerateError) -> String {
-  case err {
-    generate.ValidationErrors(errors:) ->
-      "Error: OpenAPI spec contains unsupported features:\n"
-      <> string.join(
-        list.map(errors, fn(e) { "  - " <> diagnostic.to_short_string(e) }),
-        "\n",
-      )
-  }
+  let generate.ValidationErrors(errors:) = err
+  "Error: OpenAPI spec contains unsupported features:\n"
+  <> string.join(
+    list.map(errors, fn(validation_error) {
+      "  - " <> diagnostic.to_short_string(validation_error)
+    }),
+    "\n",
+  )
 }
 
 /// Print warnings if any exist.

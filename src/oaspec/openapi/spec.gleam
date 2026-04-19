@@ -29,9 +29,15 @@ pub type RefOr(a) {
 }
 
 /// Unwrap a RefOr assuming it has been resolved. Panics on Ref.
+///
+/// Callers are expected to hold a `RefOr(a)` from an `OpenApiSpec(Resolved)`
+/// subtree; the resolve phase statically eliminates `Ref(_)` before this
+/// runs, so reaching the `Ref` branch would indicate an internal invariant
+/// violation rather than a user-facing error.
 pub fn unwrap_ref(ref_or: RefOr(a)) -> a {
   case ref_or {
     Value(v) -> v
+    // nolint: avoid_panic -- invariant: resolve phase eliminates Ref(_) in Resolved subtrees; reaching this branch is a compiler/internal bug
     Ref(r) -> panic as { "unwrap_ref on unresolved $ref: " <> r }
   }
 }

@@ -180,54 +180,54 @@ fn normalize_schema_ref(ref: SchemaRef) -> SchemaRef {
   }
 }
 
-fn normalize_schema(s: SchemaObject) -> SchemaObject {
+fn normalize_schema(schema_obj: SchemaObject) -> SchemaObject {
   // 1. const_value -> single-value enum (string const only)
   // Non-string const (bool, int, float, object, array, null) is preserved
   // as-is in metadata — codegen doesn't support const for these types yet,
   // and capability_check will warn about it.
-  let s = case s {
-    StringSchema(metadata: m, ..) ->
-      case m.const_value {
+  let schema_obj = case schema_obj {
+    StringSchema(metadata: meta, ..) ->
+      case meta.const_value {
         Some(value.JsonString(str_val)) ->
           StringSchema(
-            ..s,
+            ..schema_obj,
             enum_values: [str_val],
-            metadata: SchemaMetadata(..m, const_value: None),
+            metadata: SchemaMetadata(..meta, const_value: None),
           )
-        _ -> s
+        _ -> schema_obj
       }
-    _ -> s
+    _ -> schema_obj
   }
 
   // 2. raw_type with multiple types -> oneOf
-  let s = case schema.get_metadata(s).raw_type {
+  let schema_obj = case schema.get_metadata(schema_obj).raw_type {
     Some(types) ->
       case list.length(types) > 1 {
         True -> {
-          let m = schema.get_metadata(s)
+          let meta = schema.get_metadata(schema_obj)
           let type_schemas =
             list.map(types, fn(t) {
               Inline(make_typed_schema(
                 t,
                 SchemaMetadata(
                   ..schema.default_metadata(),
-                  nullable: m.nullable,
+                  nullable: meta.nullable,
                 ),
               ))
             })
           OneOfSchema(
-            metadata: SchemaMetadata(..m, raw_type: None),
+            metadata: SchemaMetadata(..meta, raw_type: None),
             schemas: type_schemas,
             discriminator: None,
           )
         }
-        False -> s
+        False -> schema_obj
       }
-    None -> s
+    None -> schema_obj
   }
 
   // 3. Recurse into sub-schemas
-  normalize_schema_children(s)
+  normalize_schema_children(schema_obj)
 }
 
 fn make_typed_schema(type_str: String, metadata: SchemaMetadata) -> SchemaObject {

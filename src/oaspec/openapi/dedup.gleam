@@ -21,9 +21,9 @@ import oaspec/util/naming
 /// Property name and enum variant deduplication is done at codegen time via
 /// dedup_property_names/1 and dedup_enum_variants/1 to preserve JSON wire names.
 pub fn dedup(spec: OpenApiSpec(stage)) -> OpenApiSpec(stage) {
-  let spec = dedup_operation_ids(spec)
-  let spec = dedup_schemas(spec)
   spec
+  |> dedup_operation_ids
+  |> dedup_schemas
 }
 
 /// Deduplicate operationIds across all operations.
@@ -250,6 +250,7 @@ fn deduplicate_strings(names: List(String)) -> List(String) {
     list.fold(names, #([], dict.new()), fn(acc, name) {
       let #(result, counts) = acc
       case dict.get(counts, name) {
+        // nolint: thrown_away_error -- dict.get's Error signals absence of key; no diagnostic info to propagate
         Error(_) -> {
           let counts = dict.insert(counts, name, 1)
           #([name, ..result], counts)

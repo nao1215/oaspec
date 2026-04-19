@@ -1,6 +1,4 @@
 import gleam/dict.{type Dict}
-import gleam/float
-import gleam/int
 import gleam/list
 import gleam/option
 import yay
@@ -18,7 +16,7 @@ pub type JsonValue {
 }
 
 /// Convert a yay.Node to a JsonValue.
-pub fn from_node(node: yay.Node) -> JsonValue {
+fn from_node(node: yay.Node) -> JsonValue {
   case node {
     yay.NodeNil -> JsonNull
     yay.NodeStr(s) -> JsonString(s)
@@ -46,6 +44,7 @@ pub fn extract_optional(node: yay.Node, key: String) -> option.Option(JsonValue)
   case yay.select_sugar(from: node, selector: key) {
     Ok(yay.NodeNil) -> option.None
     Ok(child) -> option.Some(from_node(child))
+    // nolint: thrown_away_error -- yay.SelectorError here only signals absent/mismatched key; absence is represented as None
     Error(_) -> option.None
   }
 }
@@ -64,19 +63,5 @@ pub fn extract_map(node: yay.Node, key: String) -> Dict(String, JsonValue) {
       })
       |> dict.from_list
     _ -> dict.new()
-  }
-}
-
-/// Convert a JsonValue to a display string (for error messages, not serialization).
-pub fn to_display_string(value: JsonValue) -> String {
-  case value {
-    JsonNull -> "null"
-    JsonBool(True) -> "true"
-    JsonBool(False) -> "false"
-    JsonInt(i) -> int.to_string(i)
-    JsonFloat(f) -> float.to_string(f)
-    JsonString(s) -> s
-    JsonArray(_) -> "[...]"
-    JsonObject(_) -> "{...}"
   }
 }

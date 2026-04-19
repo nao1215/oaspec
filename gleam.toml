@@ -18,3 +18,73 @@ filepath = ">= 1.1.0 and < 2.0.0"
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
 gleescript = ">= 1.0.0 and < 2.0.0"
+glinter = ">= 2.14.0 and < 3.0.0"
+
+[tools.glinter]
+stats = true
+warnings_as_errors = true
+include = ["src/", "test/"]
+# oaspec_test.gleam is ~12k lines of table-driven tests and the current
+# glinter (2.14.0) analysis is quadratic in module size; exclude it so the
+# linter completes in reasonable time. Other tests still get linted.
+exclude = ["test/oaspec_test.gleam"]
+
+# Every rule is set to "error" for the strictest configuration.
+# function_complexity, module_complexity, unwrap_used and ffi_usage default
+# to "off" inside glinter; enabling them here still reports any hits with
+# severity "off" (they do not fail the build), but they are left in for
+# visibility.
+[tools.glinter.rules]
+assert_ok_pattern = "error"
+avoid_panic = "error"
+avoid_todo = "error"
+deep_nesting = "error"
+discarded_result = "error"
+division_by_zero = "error"
+duplicate_import = "error"
+echo = "error"
+error_context_lost = "error"
+ffi_usage = "error"
+function_complexity = "error"
+label_possible = "error"
+missing_labels = "error"
+missing_type_annotation = "error"
+module_complexity = "error"
+panic_without_message = "error"
+prefer_guard_clause = "error"
+redundant_case = "error"
+short_variable_name = "error"
+string_inspect = "error"
+stringly_typed_error = "error"
+thrown_away_error = "error"
+todo_without_message = "error"
+trailing_underscore = "error"
+unnecessary_string_concatenation = "error"
+unnecessary_variable = "error"
+unqualified_import = "error"
+unused_exports = "error"
+unwrap_used = "error"
+
+# Per-file rule suppressions. Each entry lists rules that are intentionally
+# ignored in that file; prefer fixing the underlying issue over expanding
+# this list.
+[tools.glinter.ignore]
+# Public test functions are auto-discovered by gleeunit via reflection, so
+# they legitimately look "unused" and lack explicit return annotations.
+"test/*.gleam" = [
+  "unused_exports",
+  "missing_type_annotation",
+  "assert_ok_pattern",
+  "label_possible",
+]
+# Codegen and OpenAPI traversal code takes many unlabelled helper
+# parameters and is naturally branchy; fixing these cleanly would require a
+# project-wide refactor that is out of scope for enabling glinter.
+"src/oaspec/cli.gleam" = ["label_possible", "deep_nesting"]
+"src/oaspec/config.gleam" = ["label_possible"]
+"src/oaspec/capability.gleam" = ["label_possible"]
+"src/oaspec/formatter.gleam" = ["label_possible"]
+"src/oaspec/generate.gleam" = ["label_possible", "deep_nesting"]
+"src/oaspec/codegen/*.gleam" = ["label_possible", "deep_nesting"]
+"src/oaspec/openapi/*.gleam" = ["label_possible", "deep_nesting"]
+"src/oaspec/util/*.gleam" = ["label_possible", "deep_nesting"]

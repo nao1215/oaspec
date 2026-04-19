@@ -5,8 +5,7 @@ import gleam/result
 import gleam/set.{type Set}
 import gleam/string
 import oaspec/openapi/schema.{
-  type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
-  Forbidden, Inline, ObjectSchema, OneOfSchema, Reference, Typed, Untyped,
+  type SchemaObject, type SchemaRef, Inline, Reference,
 }
 import oaspec/openapi/spec.{type OpenApiSpec, type Resolved}
 
@@ -66,65 +65,4 @@ fn resolve_schema_ref_with_seen(
       }
     }
   }
-}
-
-/// Resolve all $ref in a schema object's nested schemas (one level).
-pub fn resolve_schema_refs_in_schema(
-  schema: SchemaObject,
-  spec: OpenApiSpec(Resolved),
-) -> SchemaObject {
-  case schema {
-    ObjectSchema(properties:, additional_properties:, ..) as obj -> {
-      let resolved_props =
-        dict.map_values(properties, fn(_k, v) { resolve_one_ref(v, spec) })
-      let resolved_ap = case additional_properties {
-        Typed(ap) -> Typed(resolve_one_ref(ap, spec))
-        Untyped -> Untyped
-        Forbidden -> Forbidden
-      }
-      ObjectSchema(
-        ..obj,
-        properties: resolved_props,
-        additional_properties: resolved_ap,
-      )
-    }
-    ArraySchema(items:, ..) as arr ->
-      ArraySchema(..arr, items: resolve_one_ref(items, spec))
-    AllOfSchema(metadata:, schemas:) -> {
-      let resolved = list_map_ref(schemas, spec)
-      AllOfSchema(metadata:, schemas: resolved)
-    }
-    OneOfSchema(metadata:, schemas:, discriminator:) -> {
-      let resolved = list_map_ref(schemas, spec)
-      OneOfSchema(metadata:, schemas: resolved, discriminator:)
-    }
-    AnyOfSchema(metadata:, schemas:, discriminator:) -> {
-      let resolved = list_map_ref(schemas, spec)
-      AnyOfSchema(metadata:, schemas: resolved, discriminator:)
-    }
-    other -> other
-  }
-}
-
-/// Try to resolve a single ref, keeping it as-is if resolution fails.
-fn resolve_one_ref(
-  schema_ref: SchemaRef,
-  spec: OpenApiSpec(Resolved),
-) -> SchemaRef {
-  case schema_ref {
-    Reference(..) ->
-      case resolve_schema_ref(schema_ref, spec) {
-        Ok(schema) -> Inline(schema)
-        Error(_) -> schema_ref
-      }
-    inline -> inline
-  }
-}
-
-/// Map a list of schema refs, resolving each.
-fn list_map_ref(
-  refs: List(SchemaRef),
-  spec: OpenApiSpec(Resolved),
-) -> List(SchemaRef) {
-  list.map(refs, fn(r) { resolve_one_ref(r, spec) })
 }

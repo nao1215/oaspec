@@ -1,3 +1,4 @@
+import gleam/bool
 import gleam/dict
 import gleam/float
 import gleam/int
@@ -26,6 +27,7 @@ pub fn schema_has_validator(name: String, ctx: Context) -> Bool {
         Ok(schema_ref) ->
           !ir_build.is_internal_schema(schema_ref)
           && !list.is_empty(collect_guard_calls(name, schema_ref, ctx))
+        // nolint: thrown_away_error -- unknown schema name simply has no validator
         Error(_) -> False
       }
     None -> False
@@ -1004,31 +1006,27 @@ fn generate_unique_items_guard(
   prop_name: String,
   unique_items: Bool,
 ) -> se.StringBuilder {
-  case unique_items {
-    False -> sb
-    True -> {
-      let fn_name = guard_function_name(schema_name, prop_name, "unique")
-      sb
-      |> se.line(
-        "/// Validate unique items for "
-        <> schema_name
-        <> field_label(prop_name)
-        <> ".",
-      )
-      |> se.line(
-        "pub fn " <> fn_name <> "(value: List(a)) -> Result(List(a), String) {",
-      )
-      |> se.indent(
-        1,
-        "case list.length(value) == list.length(list.unique(value)) {",
-      )
-      |> se.indent(2, "True -> Ok(value)")
-      |> se.indent(2, "False -> Error(\"items must be unique\")")
-      |> se.indent(1, "}")
-      |> se.line("}")
-      |> se.blank_line()
-    }
-  }
+  use <- bool.guard(!unique_items, sb)
+  let fn_name = guard_function_name(schema_name, prop_name, "unique")
+  sb
+  |> se.line(
+    "/// Validate unique items for "
+    <> schema_name
+    <> field_label(prop_name)
+    <> ".",
+  )
+  |> se.line(
+    "pub fn " <> fn_name <> "(value: List(a)) -> Result(List(a), String) {",
+  )
+  |> se.indent(
+    1,
+    "case list.length(value) == list.length(list.unique(value)) {",
+  )
+  |> se.indent(2, "True -> Ok(value)")
+  |> se.indent(2, "False -> Error(\"items must be unique\")")
+  |> se.indent(1, "}")
+  |> se.line("}")
+  |> se.blank_line()
 }
 
 /// Generate a minProperties/maxProperties validation guard for objects.

@@ -1,5 +1,4 @@
 import gleam/list
-import gleam/string
 
 /// Support level for an OpenAPI feature.
 pub type SupportLevel {
@@ -261,52 +260,7 @@ pub fn registry() -> List(Capability) {
   ]
 }
 
-/// Get the list of unsupported schema keywords from the registry.
-pub fn unsupported_schema_keywords() -> List(String) {
-  registry()
-  |> list.filter(fn(c) { c.category == "schema" && c.level == Unsupported })
-  |> list.map(fn(c) { c.name })
-}
-
-/// Check if a security scheme type is unsupported.
-pub fn is_unsupported_security_type(type_name: String) -> Bool {
-  registry()
-  |> list.any(fn(c) {
-    c.category == "security" && c.name == type_name && c.level == Unsupported
-  })
-}
-
 /// Get capabilities by level.
 pub fn by_level(level: SupportLevel) -> List(Capability) {
   list.filter(registry(), fn(c) { c.level == level })
-}
-
-/// Generate the "Current Boundaries" markdown section from the registry.
-pub fn generate_boundaries_markdown() -> String {
-  let unsupported = by_level(Unsupported)
-  let unsupported_names =
-    list.map(unsupported, fn(c) { "`" <> c.name <> "`" })
-    |> string.join(", ")
-  let not_handled = by_level(NotHandled)
-  let not_handled_names =
-    list.map(not_handled, fn(c) { "`" <> c.name <> "`" })
-    |> string.join(", ")
-  let parsed_not_used = by_level(ParsedNotUsed)
-  let parsed_not_used_names =
-    list.map(parsed_not_used, fn(c) { c.name })
-    |> string.join(", ")
-  let normalizable = by_level(Normalizable)
-  let normalizable_lines =
-    list.map(normalizable, fn(c) { "- `" <> c.name <> "`: " <> c.note })
-    |> string.join("\n")
-
-  "## Current Boundaries
-
-These are the most important limitations today:
-
-- The following keywords are detected and rejected: " <> unsupported_names <> "
-- " <> not_handled_names <> " annotations are not handled by the parser
-- Some fields are parsed and preserved but not yet used by codegen: " <> parsed_not_used_names <> "
-- The following are normalized to supported equivalents:
-" <> normalizable_lines
 }

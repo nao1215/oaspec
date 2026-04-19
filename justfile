@@ -15,6 +15,9 @@ format-check:
 typecheck:
   gleam check
 
+lint:
+  gleam run -m glinter -- --stats
+
 build:
   gleam build --warnings-as-errors
 
@@ -39,15 +42,17 @@ integration:
 check: clean
   gleam format --check src/ test/
   gleam check
+  gleam run -m glinter -- --stats
   gleam build --warnings-as-errors
   gleam test
 
 ci: deps check
 
-# Run all tests and checks (format, build, unit, shellspec, integration, escript)
+# Run all tests and checks (format, lint, build, unit, shellspec, integration, escript)
 all: clean deps
   gleam format --check src/ test/
   gleam check
+  gleam run -m glinter -- --stats
   gleam build --warnings-as-errors
   gleam test
   shellspec

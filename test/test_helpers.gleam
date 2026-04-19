@@ -1,3 +1,4 @@
+import gleam/bool
 import gleam/dict
 import gleam/option.{None}
 import gleam/string
@@ -48,15 +49,11 @@ pub fn find_substring_index(
   haystack: String,
   needle: String,
 ) -> Result(Int, Nil) {
-  case string.contains(haystack, needle) {
-    True -> {
-      let parts = string.split(haystack, needle)
-      case parts {
-        [before, ..] -> Ok(string.length(before))
-        _ -> Error(Nil)
-      }
-    }
-    False -> Error(Nil)
+  use <- bool.guard(!string.contains(haystack, needle), Error(Nil))
+  let parts = string.split(haystack, needle)
+  case parts {
+    [before, ..] -> Ok(string.length(before))
+    _ -> Error(Nil)
   }
 }
 

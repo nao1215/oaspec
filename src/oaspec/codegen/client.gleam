@@ -786,17 +786,15 @@ fn generate_client_function(
               }
           }
         })
-      let sb =
-        sb
-        |> se.indent(
-          1,
-          "let query_string = string.join(list.reverse(query_parts), \"&\")",
-        )
-        |> se.indent(1, "let path = case query_string {")
-        |> se.indent(2, "\"\" -> path")
-        |> se.indent(2, "_ -> path <> \"?\" <> query_string")
-        |> se.indent(1, "}")
       sb
+      |> se.indent(
+        1,
+        "let query_string = string.join(list.reverse(query_parts), \"&\")",
+      )
+      |> se.indent(1, "let path = case query_string {")
+      |> se.indent(2, "\"\" -> path")
+      |> se.indent(2, "_ -> path <> \"?\" <> query_string")
+      |> se.indent(1, "}")
     }
   }
 

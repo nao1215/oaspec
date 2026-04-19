@@ -144,8 +144,7 @@ fn generate_anonymous_decoders(
   list.fold(operations, sb, fn(sb, op) {
     let #(op_id, operation, _path, _method) = op
     let sb = generate_anonymous_response_decoders(sb, op_id, operation, ctx)
-    let sb = generate_anonymous_request_body_decoder(sb, op_id, operation, ctx)
-    sb
+    generate_anonymous_request_body_decoder(sb, op_id, operation, ctx)
   })
 }
 
@@ -442,7 +441,7 @@ fn generate_object_decoder(
       // as optional even if listed in required
       let is_write_only = type_gen.schema_ref_is_write_only(prop_ref, ctx)
       let is_required = list.contains(required, prop_name) && !is_write_only
-      let field_decoder = schema_ref_to_decoder(prop_ref, name, prop_name, ctx)
+      let field_decoder = schema_ref_to_decoder(prop_ref, name, prop_name)
       let is_nullable_schema = schema_ref_is_nullable(prop_ref, ctx)
 
       // For nullable schemas, the Gleam type is Option(T),
@@ -517,7 +516,7 @@ fn generate_object_decoder(
   let sb = case additional_properties {
     Typed(ap_ref) -> {
       let inner_decoder =
-        schema_ref_to_decoder(ap_ref, name, "additional_properties", ctx)
+        schema_ref_to_decoder(ap_ref, name, "additional_properties")
       sb
       |> se.indent(
         1,
@@ -825,7 +824,7 @@ fn generate_array_decoder(
   items: SchemaRef,
   ctx: Context,
 ) -> se.StringBuilder {
-  let inner_decoder = schema_ref_to_decoder(items, name, "", ctx)
+  let inner_decoder = schema_ref_to_decoder(items, name, "")
   let inner_type = qualified_schema_ref_type(items, ctx)
   let gleam_type = "List(" <> inner_type <> ")"
   sb
@@ -863,7 +862,7 @@ fn generate_oneof_decoder(
   description: Option(String),
   schemas: List(SchemaRef),
   discriminator: Option(schema.Discriminator),
-  ctx: Context,
+  _ctx: Context,
 ) -> se.StringBuilder {
   // Only handle $ref variants (inline primitives blocked by validator)
   let all_refs =
@@ -963,23 +962,20 @@ fn generate_oneof_decoder(
             |> se.blank_line()
 
           // json.parse wrapper
-          let sb =
-            sb
-            |> se.line(
-              "pub fn "
-              <> fn_name
-              <> "(json_string: String) -> Result(types."
-              <> type_name
-              <> ", json.DecodeError) {",
-            )
-            |> se.indent(
-              1,
-              "json.parse(json_string, " <> decoder_fn_name <> "())",
-            )
-            |> se.line("}")
-            |> se.blank_line()
-
           sb
+          |> se.line(
+            "pub fn "
+            <> fn_name
+            <> "(json_string: String) -> Result(types."
+            <> type_name
+            <> ", json.DecodeError) {",
+          )
+          |> se.indent(
+            1,
+            "json.parse(json_string, " <> decoder_fn_name <> "())",
+          )
+          |> se.line("}")
+          |> se.blank_line()
         }
 
         None -> {
@@ -1055,24 +1051,20 @@ fn generate_oneof_decoder(
             |> se.blank_line()
 
           // json.parse wrapper
-          let sb =
-            sb
-            |> se.line(
-              "pub fn "
-              <> fn_name
-              <> "(json_string: String) -> Result(types."
-              <> type_name
-              <> ", json.DecodeError) {",
-            )
-            |> se.indent(
-              1,
-              "json.parse(json_string, " <> decoder_fn_name <> "())",
-            )
-            |> se.line("}")
-            |> se.blank_line()
-
-          let _ = ctx
           sb
+          |> se.line(
+            "pub fn "
+            <> fn_name
+            <> "(json_string: String) -> Result(types."
+            <> type_name
+            <> ", json.DecodeError) {",
+          )
+          |> se.indent(
+            1,
+            "json.parse(json_string, " <> decoder_fn_name <> "())",
+          )
+          |> se.line("}")
+          |> se.blank_line()
         }
       }
     }
@@ -1099,6 +1091,7 @@ fn get_discriminator_value(
     })
   case found {
     Ok(#(disc_value, _)) -> disc_value
+    // nolint: thrown_away_error -- missing mapping entry is expected; fall back to the ref name
     Error(_) -> ref_name
   }
 }
@@ -1109,9 +1102,7 @@ fn schema_ref_to_decoder(
   ref: SchemaRef,
   parent_name: String,
   prop_name: String,
-  ctx: Context,
 ) -> String {
-  let _ = ctx
   case ref {
     Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
       // Inline enum: use the generated enum decoder
@@ -1123,7 +1114,7 @@ fn schema_ref_to_decoder(
       decoder_name <> "_decoder()"
     }
     Inline(ArraySchema(items:, ..)) -> {
-      let inner = schema_ref_to_decoder(items, parent_name, prop_name, ctx)
+      let inner = schema_ref_to_decoder(items, parent_name, prop_name)
       "decode.list(" <> inner <> ")"
     }
     _ -> schema_dispatch.decoder_expr(ref)
@@ -1136,7 +1127,8 @@ fn schema_ref_is_nullable(ref: SchemaRef, ctx: Context) -> Bool {
     Inline(schema) -> schema.is_nullable(schema)
     Reference(..) ->
       case resolver.resolve_schema_ref(ref, context.spec(ctx)) {
-        Ok(s) -> schema.is_nullable(s)
+        Ok(resolved_schema) -> schema.is_nullable(resolved_schema)
+        // nolint: thrown_away_error -- unresolved refs are treated as non-nullable here; the spec validator reports the ref error separately
         Error(_) -> False
       }
   }
@@ -1416,7 +1408,6 @@ fn generate_encoder(
               prop_ref,
               name,
               prop_name,
-              ctx,
             )
 
           case is_required {
@@ -1435,12 +1426,7 @@ fn generate_encoder(
                   <> "\", json.nullable(value."
                   <> field_name
                   <> ", "
-                  <> schema_ref_to_json_encoder_fn(
-                  prop_ref,
-                  name,
-                  prop_name,
-                  ctx,
-                )
+                  <> schema_ref_to_json_encoder_fn(prop_ref, name, prop_name)
                   <> "))"
                   <> trailing,
               )
@@ -1450,12 +1436,7 @@ fn generate_encoder(
       let sb = case additional_properties {
         Typed(ap_ref) -> {
           let inner_encoder_fn =
-            schema_ref_to_json_encoder_fn(
-              ap_ref,
-              name,
-              "additional_properties",
-              ctx,
-            )
+            schema_ref_to_json_encoder_fn(ap_ref, name, "additional_properties")
           sb
           |> se.indent(1, "]")
           |> se.indent(
@@ -1488,20 +1469,13 @@ fn generate_encoder(
         |> se.blank_line()
 
       // String version: wraps _json
-      let sb =
-        sb
-        |> se.line(
-          "pub fn "
-          <> fn_name
-          <> "(value: types."
-          <> type_name
-          <> ") -> String {",
-        )
-        |> se.indent(1, json_fn_name <> "(value) |> json.to_string()")
-        |> se.line("}")
-        |> se.blank_line()
-
       sb
+      |> se.line(
+        "pub fn " <> fn_name <> "(value: types." <> type_name <> ") -> String {",
+      )
+      |> se.indent(1, json_fn_name <> "(value) |> json.to_string()")
+      |> se.line("}")
+      |> se.blank_line()
     }
 
     Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
@@ -1570,13 +1544,10 @@ fn generate_encoder(
           |> se.indent(2, "types." <> variant <> " -> \"" <> value <> "\"")
         })
 
-      let sb =
-        sb
-        |> se.indent(1, "}")
-        |> se.line("}")
-        |> se.blank_line()
-
       sb
+      |> se.indent(1, "}")
+      |> se.line("}")
+      |> se.blank_line()
     }
 
     Inline(AllOfSchema(metadata:, schemas:)) -> {
@@ -1641,19 +1612,17 @@ fn generate_encoder(
             |> se.indent(1, "}")
             |> se.line("}")
             |> se.blank_line()
-          let sb =
-            sb
-            |> se.line(
-              "pub fn "
-              <> fn_name
-              <> "(value: types."
-              <> type_name
-              <> ") -> String {",
-            )
-            |> se.indent(1, json_fn_name <> "(value) |> json.to_string()")
-            |> se.line("}")
-            |> se.blank_line()
           sb
+          |> se.line(
+            "pub fn "
+            <> fn_name
+            <> "(value: types."
+            <> type_name
+            <> ") -> String {",
+          )
+          |> se.indent(1, json_fn_name <> "(value) |> json.to_string()")
+          |> se.line("}")
+          |> se.blank_line()
         }
       }
     }
@@ -1709,19 +1678,17 @@ fn generate_encoder(
             |> se.line("}")
             |> se.blank_line()
           // String version
-          let sb =
-            sb
-            |> se.line(
-              "pub fn "
-              <> fn_name
-              <> "(value: types."
-              <> type_name
-              <> ") -> String {",
-            )
-            |> se.indent(1, json_fn_name <> "(value) |> json.to_string()")
-            |> se.line("}")
-            |> se.blank_line()
           sb
+          |> se.line(
+            "pub fn "
+            <> fn_name
+            <> "(value: types."
+            <> type_name
+            <> ") -> String {",
+          )
+          |> se.indent(1, json_fn_name <> "(value) |> json.to_string()")
+          |> se.line("}")
+          |> se.blank_line()
         }
       }
     }
@@ -1785,7 +1752,7 @@ fn generate_encoder(
     Inline(ArraySchema(items:, ..)) -> {
       let inner_type = qualified_schema_ref_type(items, ctx)
       let gleam_type = "List(" <> inner_type <> ")"
-      let inner_encoder = schema_ref_to_json_encoder_fn(items, name, "", ctx)
+      let inner_encoder = schema_ref_to_json_encoder_fn(items, name, "")
       generate_primitive_encoder(
         sb,
         fn_name,
@@ -1829,7 +1796,6 @@ fn schema_ref_to_json_encoder(
   ref: SchemaRef,
   parent_name: String,
   prop_name: String,
-  ctx: Context,
 ) -> String {
   case ref {
     Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
@@ -1844,7 +1810,7 @@ fn schema_ref_to_json_encoder(
     }
     Inline(ArraySchema(items:, ..)) -> {
       let inner_fn =
-        schema_ref_to_json_encoder_fn(items, parent_name, prop_name, ctx)
+        schema_ref_to_json_encoder_fn(items, parent_name, prop_name)
       "json.array(" <> value_expr <> ", " <> inner_fn <> ")"
     }
     _ -> schema_dispatch.json_encoder_expr(ref, value_expr)
@@ -1857,9 +1823,7 @@ fn schema_ref_to_json_encoder_fn(
   ref: SchemaRef,
   parent_name: String,
   prop_name: String,
-  ctx: Context,
 ) -> String {
-  let _ = ctx
   case ref {
     Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
       "encode_"
@@ -1870,8 +1834,7 @@ fn schema_ref_to_json_encoder_fn(
       <> "_json"
     }
     Inline(ArraySchema(items:, ..)) -> {
-      let inner =
-        schema_ref_to_json_encoder_fn(items, parent_name, prop_name, ctx)
+      let inner = schema_ref_to_json_encoder_fn(items, parent_name, prop_name)
       "fn(items) { json.array(items, " <> inner <> ") }"
     }
     _ -> schema_dispatch.json_encoder_fn(ref)

@@ -1,6 +1,7 @@
 import gleam/dict.{type Dict}
 import gleam/list
 import gleam/option.{type Option}
+import gleam/result
 import gleam/string
 import oaspec/openapi/value.{type JsonValue}
 
@@ -148,12 +149,9 @@ pub fn make_reference(ref: String) -> SchemaRef {
 fn ref_to_schema_name(ref: String) -> String {
   case string.split(ref, "/") {
     [] -> "Unknown"
-    segments -> {
-      case list.last(segments) {
-        Ok(name) -> name
-        Error(_) -> "Unknown"
-      }
-    }
+    segments ->
+      list.last(segments)
+      |> result.unwrap("Unknown")
   }
 }
 
@@ -162,19 +160,9 @@ pub type Discriminator {
   Discriminator(property_name: String, mapping: Dict(String, String))
 }
 
-/// Get the description from any schema object.
-pub fn get_description(schema: SchemaObject) -> Option(String) {
-  get_metadata(schema).description
-}
-
 /// Check if a schema is nullable.
 pub fn is_nullable(schema: SchemaObject) -> Bool {
   get_metadata(schema).nullable
-}
-
-/// Check if a schema is deprecated.
-pub fn is_deprecated(schema: SchemaObject) -> Bool {
-  get_metadata(schema).deprecated
 }
 
 /// Extract the shared metadata from any schema variant.

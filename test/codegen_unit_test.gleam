@@ -658,20 +658,20 @@ pub fn ir_build_sorted_entries_empty_test() {
 }
 
 pub fn ir_build_sorted_entries_ordering_test() {
-  let d = dict.from_list([#("cherry", 3), #("apple", 1), #("banana", 2)])
-  ir_build.sorted_entries(d)
+  let entries = dict.from_list([#("cherry", 3), #("apple", 1), #("banana", 2)])
+  ir_build.sorted_entries(entries)
   |> should.equal([#("apple", 1), #("banana", 2), #("cherry", 3)])
 }
 
 pub fn ir_build_sorted_entries_single_test() {
-  let d = dict.from_list([#("only", 42)])
-  ir_build.sorted_entries(d)
+  let entries = dict.from_list([#("only", 42)])
+  ir_build.sorted_entries(entries)
   |> should.equal([#("only", 42)])
 }
 
 pub fn ir_build_is_internal_schema_true_test() {
   let meta = schema.SchemaMetadata(..schema.default_metadata(), internal: True)
-  let s =
+  let string_schema =
     schema.StringSchema(
       metadata: meta,
       format: None,
@@ -680,7 +680,7 @@ pub fn ir_build_is_internal_schema_true_test() {
       max_length: None,
       pattern: None,
     )
-  ir_build.is_internal_schema(schema.Inline(s))
+  ir_build.is_internal_schema(schema.Inline(string_schema))
   |> should.be_true()
 }
 

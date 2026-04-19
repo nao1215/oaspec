@@ -42,7 +42,7 @@ pub fn schema_type(schema: SchemaObject) -> String {
 }
 
 /// Map a schema ref to a Gleam type string.
-pub fn schema_ref_type(ref: SchemaRef) -> String {
+fn schema_ref_type(ref: SchemaRef) -> String {
   case ref {
     Inline(schema) -> schema_base_type(schema)
     Reference(name:, ..) -> naming.schema_to_type_name(name)
@@ -86,6 +86,7 @@ pub fn schema_ref_to_string_expr(
           <> value
           <> ")"
         Ok(resolved) -> to_string_expr(resolved, value)
+        // nolint: thrown_away_error -- unresolved refs fall back to the raw accessor; the resolver reports the ref error separately
         Error(_) -> value
       }
     }
@@ -142,6 +143,7 @@ pub fn to_string_fn(ref: SchemaRef, spec: OpenApiSpec(Resolved)) -> String {
         Ok(StringSchema(enum_values:, ..)) if enum_values != [] ->
           "encode.encode_" <> naming.to_snake_case(name) <> "_to_string"
         Ok(resolved) -> to_string_fn(Inline(resolved), spec)
+        // nolint: thrown_away_error -- unresolved refs fall back to identity; the resolver reports the ref error separately
         Error(_) -> "fn(x) { x }"
       }
     }

@@ -5,11 +5,8 @@ import oaspec/codegen/ir_render
 import oaspec/codegen/schema_dispatch
 import oaspec/codegen/schema_utils
 import oaspec/openapi/operations
-import oaspec/openapi/schema.{
-  type SchemaObject, type SchemaRef, Inline, Reference,
-}
+import oaspec/openapi/schema.{type SchemaObject, type SchemaRef}
 import oaspec/openapi/spec.{type Resolved}
-import oaspec/util/naming
 
 /// Generate type definitions from OpenAPI schemas.
 pub fn generate(ctx: Context) -> List(GeneratedFile) {
@@ -42,14 +39,6 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
 fn generate_types(ctx: Context) -> String {
   ir_build.build_types_module(ctx)
   |> ir_render.render()
-}
-
-/// Convert a SchemaRef to a Gleam type string.
-pub fn schema_ref_to_type(ref: SchemaRef, _ctx: Context) -> String {
-  case ref {
-    Inline(schema) -> schema_dispatch.schema_type(schema)
-    Reference(name:, ..) -> naming.schema_to_type_name(name)
-  }
 }
 
 /// Convert a schema object to a Gleam type string.
@@ -105,14 +94,6 @@ pub fn schema_has_additional_properties(
   ctx: Context,
 ) -> Bool {
   schema_utils.schema_has_additional_properties(schema_ref, ctx)
-}
-
-/// Check if a schema has untyped additionalProperties (needs Dynamic import).
-pub fn schema_has_untyped_additional_properties(
-  schema_ref: SchemaRef,
-  ctx: Context,
-) -> Bool {
-  schema_utils.schema_has_untyped_additional_properties(schema_ref, ctx)
 }
 
 /// Check if a schema has any optional or nullable fields that would need Option.
