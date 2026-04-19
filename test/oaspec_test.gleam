@@ -12303,3 +12303,49 @@ paths: {}
     _ -> should.fail()
   }
 }
+
+// --- External Whole-Object $ref Tests ---
+
+pub fn external_whole_object_parameter_ref_test() {
+  // Parse the spec that uses whole-object external refs
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/external_whole_ref_spec.yaml")
+  let assert Some(components) = spec.components
+
+  // The parameter should be resolved from external file (Value, not Ref)
+  let assert Ok(param_ref_or) = dict.get(components.parameters, "LimitParam")
+  case param_ref_or {
+    spec.Value(param) -> {
+      param.name |> should.equal("limit")
+      param.in_ |> should.equal(spec.InQuery)
+    }
+    spec.Ref(_) -> should.fail()
+  }
+}
+
+pub fn external_whole_object_request_body_ref_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/external_whole_ref_spec.yaml")
+  let assert Some(components) = spec.components
+
+  let assert Ok(body_ref_or) =
+    dict.get(components.request_bodies, "CreatePetBody")
+  case body_ref_or {
+    spec.Value(_body) -> should.be_true(True)
+    spec.Ref(_) -> should.fail()
+  }
+}
+
+pub fn external_whole_object_response_ref_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/external_whole_ref_spec.yaml")
+  let assert Some(components) = spec.components
+
+  let assert Ok(resp_ref_or) = dict.get(components.responses, "NotFound")
+  case resp_ref_or {
+    spec.Value(resp) -> {
+      resp.description |> should.equal(Some("Not found"))
+    }
+    spec.Ref(_) -> should.fail()
+  }
+}

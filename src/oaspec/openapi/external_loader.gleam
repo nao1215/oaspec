@@ -1,5 +1,5 @@
-//// Narrow support for external `$ref` values that point at component
-//// schemas in a sibling YAML/JSON file — `./other.yaml#/components/schemas/Foo`
+//// Support for external `$ref` values that point at component definitions
+//// in a sibling YAML/JSON file — `./other.yaml#/components/schemas/Foo`
 //// style. Walks `components.schemas`, pulls referenced schemas from the
 //// target file into the main spec, and rewrites the refs to local form.
 ////
@@ -23,6 +23,9 @@
 ////     definitions, walked via the same `rewrite_path_item` helper
 ////     used at the top level)
 ////   - refs inside `operation.callbacks.*.entries.*` PathItems (recursive)
+////   - whole-object external refs for `components.parameters`,
+////     `components.requestBodies`, `components.responses`, and
+////     `components.pathItems` (e.g., `$ref: './other.yaml#/components/parameters/Foo'`)
 ////   - one level of alias chaining inside the same external file
 ////     (`LegacyX: $ref: "#/components/schemas/X"` in the external file).
 ////     Cross-file chains collapse naturally because parse_file runs
@@ -31,8 +34,6 @@
 ////     time we look it up.
 ////
 //// Out of scope (see issue #98 parent):
-////   - external `$ref` pointing at a parameter / request-body / response
-////     / path-item object itself (the whole entry rather than its schema)
 ////   - alias chains longer than one hop inside the same file
 ////   - HTTP/HTTPS URLs
 ////   - cyclic external refs (e.g., `A.yaml` → `B.yaml` → `A.yaml`)
@@ -53,7 +54,8 @@ import gleam/string
 import oaspec/openapi/diagnostic.{type Diagnostic}
 import oaspec/openapi/schema.{type SchemaRef, Inline, Reference}
 import oaspec/openapi/spec.{
-  type Components, type OpenApiSpec, type Unresolved, Components, OpenApiSpec,
+  type Components, type OpenApiSpec, type Parameter, type PathItem,
+  type RequestBody, type Response, type Unresolved, Components, OpenApiSpec,
 }
 import oaspec/util/http
 import simplifile
@@ -81,9 +83,14 @@ pub fn resolve_external_component_refs(
         parse_file,
         original_local_names,
       ))
+      use whole_resolved <- result.try(process_whole_object_refs(
+        top_resolved,
+        dir,
+        parse_file,
+      ))
       use #(nested_resolved, nested_imports) <- result.try(
         process_nested_property_refs(
-          top_resolved,
+          whole_resolved,
           dir,
           parse_file,
           original_local_names,
@@ -215,6 +222,340 @@ fn local_schema_names(entries: List(#(String, SchemaRef))) -> List(String) {
       None -> Ok(entry.0)
     }
   })
+}
+
+/// Detect external refs like `./other.yaml#/components/parameters/Foo`.
+/// Returns Some(#(file_path, component_prefix, name)) or None.
+/// Supported prefixes: parameters, requestBodies, responses, pathItems.
+fn extract_external_component_ref(
+  ref_str: String,
+) -> option.Option(#(String, String, String)) {
+  case string.starts_with(ref_str, "./") || string.starts_with(ref_str, "../") {
+    True ->
+      case string.split_once(ref_str, "#") {
+        Ok(#(file_path, fragment)) ->
+          try_component_prefix(file_path, fragment, [
+            "/components/parameters/",
+            "/components/requestBodies/",
+            "/components/responses/",
+            "/components/pathItems/",
+          ])
+        _ -> None
+      }
+    False -> None
+  }
+}
+
+/// Try each component prefix against a fragment, returning the first match.
+fn try_component_prefix(
+  file_path: String,
+  fragment: String,
+  prefixes: List(String),
+) -> option.Option(#(String, String, String)) {
+  case prefixes {
+    [] -> None
+    [prefix, ..rest] ->
+      case string.starts_with(fragment, prefix) {
+        True -> {
+          let name = string.replace(fragment, prefix, "")
+          case string.contains(name, "/"), name {
+            False, "" -> None
+            False, _ -> Some(#(file_path, prefix, name))
+            True, _ -> None
+          }
+        }
+        False -> try_component_prefix(file_path, fragment, rest)
+      }
+  }
+}
+
+/// Walk `components.parameters`, `request_bodies`, `responses`, and
+/// `path_items`: for each `Ref(ref_str)` entry that is an external
+/// component ref (e.g., `./other.yaml#/components/parameters/Foo`),
+/// load the external file and replace the entry with `Value(loaded_object)`.
+/// Runs after `process_components` and before `process_nested_property_refs`.
+fn process_whole_object_refs(
+  components: Components(Unresolved),
+  base_dir: String,
+  parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
+) -> Result(Components(Unresolved), Diagnostic) {
+  // parameters
+  use new_parameters <- result.try(resolve_ref_or_dict(
+    components.parameters,
+    base_dir,
+    parse_file,
+    "/components/parameters/",
+    find_external_parameter,
+  ))
+  // request_bodies
+  use new_request_bodies <- result.try(resolve_ref_or_dict(
+    components.request_bodies,
+    base_dir,
+    parse_file,
+    "/components/requestBodies/",
+    find_external_request_body,
+  ))
+  // responses
+  use new_responses <- result.try(resolve_ref_or_dict(
+    components.responses,
+    base_dir,
+    parse_file,
+    "/components/responses/",
+    find_external_response,
+  ))
+  // path_items
+  use new_path_items <- result.try(resolve_ref_or_dict(
+    components.path_items,
+    base_dir,
+    parse_file,
+    "/components/pathItems/",
+    find_external_path_item,
+  ))
+  Ok(
+    Components(
+      ..components,
+      parameters: new_parameters,
+      request_bodies: new_request_bodies,
+      responses: new_responses,
+      path_items: new_path_items,
+    ),
+  )
+}
+
+/// Generic helper that walks a `Dict(String, RefOr(a))`, resolving any
+/// `Ref(ref_str)` whose fragment matches `target_prefix` by loading the
+/// external file and looking up the named object via `finder`.
+fn resolve_ref_or_dict(
+  entries: dict.Dict(String, spec.RefOr(a)),
+  base_dir: String,
+  parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
+  target_prefix: String,
+  finder: fn(OpenApiSpec(Unresolved), String, String) -> Result(a, Diagnostic),
+) -> Result(dict.Dict(String, spec.RefOr(a)), Diagnostic) {
+  let pairs = dict.to_list(entries)
+  use new_pairs <- result.try(
+    list.try_fold(pairs, [], fn(acc, entry) {
+      let #(name, ref_or_val) = entry
+      case ref_or_val {
+        spec.Ref(ref_str) ->
+          case extract_external_component_ref(ref_str) {
+            Some(#(file_path, prefix, obj_name)) if prefix == target_prefix -> {
+              let resolved_path = filepath.join(base_dir, file_path)
+              use loaded <- result.try(parse_file(resolved_path))
+              use target <- result.try(finder(loaded, obj_name, resolved_path))
+              Ok([#(name, spec.Value(target)), ..acc])
+            }
+            _ -> Ok([#(name, ref_or_val), ..acc])
+          }
+        spec.Value(_) -> Ok([#(name, ref_or_val), ..acc])
+      }
+    }),
+  )
+  Ok(
+    list.fold(new_pairs, dict.new(), fn(d, pair) {
+      dict.insert(d, pair.0, pair.1)
+    }),
+  )
+}
+
+/// Look up a parameter by name in an external file's components.
+fn find_external_parameter(
+  loaded: OpenApiSpec(Unresolved),
+  name: String,
+  source_path: String,
+) -> Result(Parameter(Unresolved), Diagnostic) {
+  case loaded.components {
+    Some(components) ->
+      case dict.get(components.parameters, name) {
+        Ok(spec.Value(p)) -> Ok(p)
+        Ok(spec.Ref(_)) ->
+          Error(diagnostic.validation(
+            severity: diagnostic.SeverityError,
+            target: diagnostic.TargetBoth,
+            path: source_path,
+            detail: "External parameter '"
+              <> name
+              <> "' in '"
+              <> source_path
+              <> "' is itself a $ref; chained external refs are not supported.",
+            hint: Some(
+              "Inline the parameter in the external file or flatten the ref chain.",
+            ),
+          ))
+        Error(Nil) ->
+          Error(diagnostic.validation(
+            severity: diagnostic.SeverityError,
+            target: diagnostic.TargetBoth,
+            path: source_path,
+            detail: "External file '"
+              <> source_path
+              <> "' has no components.parameters."
+              <> name,
+            hint: Some(
+              "Verify the ref path and that the referenced file defines the parameter.",
+            ),
+          ))
+      }
+    None ->
+      Error(diagnostic.validation(
+        severity: diagnostic.SeverityError,
+        target: diagnostic.TargetBoth,
+        path: source_path,
+        detail: "External file '" <> source_path <> "' has no components block.",
+        hint: Some(
+          "Add a components.parameters section to the referenced file.",
+        ),
+      ))
+  }
+}
+
+/// Look up a request body by name in an external file's components.
+fn find_external_request_body(
+  loaded: OpenApiSpec(Unresolved),
+  name: String,
+  source_path: String,
+) -> Result(RequestBody(Unresolved), Diagnostic) {
+  case loaded.components {
+    Some(components) ->
+      case dict.get(components.request_bodies, name) {
+        Ok(spec.Value(rb)) -> Ok(rb)
+        Ok(spec.Ref(_)) ->
+          Error(diagnostic.validation(
+            severity: diagnostic.SeverityError,
+            target: diagnostic.TargetBoth,
+            path: source_path,
+            detail: "External request body '"
+              <> name
+              <> "' in '"
+              <> source_path
+              <> "' is itself a $ref; chained external refs are not supported.",
+            hint: Some(
+              "Inline the request body in the external file or flatten the ref chain.",
+            ),
+          ))
+        Error(Nil) ->
+          Error(diagnostic.validation(
+            severity: diagnostic.SeverityError,
+            target: diagnostic.TargetBoth,
+            path: source_path,
+            detail: "External file '"
+              <> source_path
+              <> "' has no components.requestBodies."
+              <> name,
+            hint: Some(
+              "Verify the ref path and that the referenced file defines the request body.",
+            ),
+          ))
+      }
+    None ->
+      Error(diagnostic.validation(
+        severity: diagnostic.SeverityError,
+        target: diagnostic.TargetBoth,
+        path: source_path,
+        detail: "External file '" <> source_path <> "' has no components block.",
+        hint: Some(
+          "Add a components.requestBodies section to the referenced file.",
+        ),
+      ))
+  }
+}
+
+/// Look up a response by name in an external file's components.
+fn find_external_response(
+  loaded: OpenApiSpec(Unresolved),
+  name: String,
+  source_path: String,
+) -> Result(Response(Unresolved), Diagnostic) {
+  case loaded.components {
+    Some(components) ->
+      case dict.get(components.responses, name) {
+        Ok(spec.Value(r)) -> Ok(r)
+        Ok(spec.Ref(_)) ->
+          Error(diagnostic.validation(
+            severity: diagnostic.SeverityError,
+            target: diagnostic.TargetBoth,
+            path: source_path,
+            detail: "External response '"
+              <> name
+              <> "' in '"
+              <> source_path
+              <> "' is itself a $ref; chained external refs are not supported.",
+            hint: Some(
+              "Inline the response in the external file or flatten the ref chain.",
+            ),
+          ))
+        Error(Nil) ->
+          Error(diagnostic.validation(
+            severity: diagnostic.SeverityError,
+            target: diagnostic.TargetBoth,
+            path: source_path,
+            detail: "External file '"
+              <> source_path
+              <> "' has no components.responses."
+              <> name,
+            hint: Some(
+              "Verify the ref path and that the referenced file defines the response.",
+            ),
+          ))
+      }
+    None ->
+      Error(diagnostic.validation(
+        severity: diagnostic.SeverityError,
+        target: diagnostic.TargetBoth,
+        path: source_path,
+        detail: "External file '" <> source_path <> "' has no components block.",
+        hint: Some("Add a components.responses section to the referenced file."),
+      ))
+  }
+}
+
+/// Look up a path item by name in an external file's components.
+fn find_external_path_item(
+  loaded: OpenApiSpec(Unresolved),
+  name: String,
+  source_path: String,
+) -> Result(PathItem(Unresolved), Diagnostic) {
+  case loaded.components {
+    Some(components) ->
+      case dict.get(components.path_items, name) {
+        Ok(spec.Value(pi)) -> Ok(pi)
+        Ok(spec.Ref(_)) ->
+          Error(diagnostic.validation(
+            severity: diagnostic.SeverityError,
+            target: diagnostic.TargetBoth,
+            path: source_path,
+            detail: "External path item '"
+              <> name
+              <> "' in '"
+              <> source_path
+              <> "' is itself a $ref; chained external refs are not supported.",
+            hint: Some(
+              "Inline the path item in the external file or flatten the ref chain.",
+            ),
+          ))
+        Error(Nil) ->
+          Error(diagnostic.validation(
+            severity: diagnostic.SeverityError,
+            target: diagnostic.TargetBoth,
+            path: source_path,
+            detail: "External file '"
+              <> source_path
+              <> "' has no components.pathItems."
+              <> name,
+            hint: Some(
+              "Verify the ref path and that the referenced file defines the path item.",
+            ),
+          ))
+      }
+    None ->
+      Error(diagnostic.validation(
+        severity: diagnostic.SeverityError,
+        target: diagnostic.TargetBoth,
+        path: source_path,
+        detail: "External file '" <> source_path <> "' has no components block.",
+        hint: Some("Add a components.pathItems section to the referenced file."),
+      ))
+  }
 }
 
 /// Walk each `components.schemas` entry that is an `Inline(ObjectSchema)` and

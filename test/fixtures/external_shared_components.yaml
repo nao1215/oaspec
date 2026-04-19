@@ -1,0 +1,33 @@
+openapi: "3.0.0"
+info:
+  title: Shared Components
+  version: "1.0.0"
+paths: {}
+components:
+  parameters:
+    LimitParam:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+  requestBodies:
+    CreatePetBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string

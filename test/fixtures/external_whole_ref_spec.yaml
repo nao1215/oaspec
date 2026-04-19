@@ -1,0 +1,32 @@
+openapi: "3.0.0"
+info:
+  title: Whole Object Ref Test
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      parameters:
+        - $ref: "#/components/parameters/LimitParam"
+      responses:
+        "200":
+          description: OK
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: createPet
+      requestBody:
+        $ref: "#/components/requestBodies/CreatePetBody"
+      responses:
+        "201":
+          description: Created
+components:
+  parameters:
+    LimitParam:
+      $ref: "./external_shared_components.yaml#/components/parameters/LimitParam"
+  requestBodies:
+    CreatePetBody:
+      $ref: "./external_shared_components.yaml#/components/requestBodies/CreatePetBody"
+  responses:
+    NotFound:
+      $ref: "./external_shared_components.yaml#/components/responses/NotFound"
