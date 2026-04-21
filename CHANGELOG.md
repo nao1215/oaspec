@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-04-22
+
+### Added
+
+- **Reserved-keyword escaping regression guard (#215)**: new unit suite iterates every Gleam reserved keyword through `naming.to_snake_case`, `naming.operation_to_function_name`, and `naming.schema_to_type_name`, plus a `reserved_keywords` fixture that exercises keyword identifiers in record fields, `operationId`, and parameter names with `gleam build --warnings-as-errors` in server and client modes.
+- **End-to-end guard rejection tests (#214)**: new `guard_constraints_api` fixture + integration steps call every emitted guard function directly against valid and invalid values (string length / pattern, integer range / exclusive range / multipleOf, float range, array length / uniqueItems, composite validator), and confirm that the `validate: true` opt-in actually embeds `guards.validate_<schema>(...)` into the generated router while the default (unset) path does not.
+- **Top-level `--help` subcommand index (#206)**: `oaspec --help` now lists every registered subcommand with a one-line description, so new users can discover `init` / `generate` / `validate` without running each command individually.
+- **README value-prop section (#204)**: new "Why oaspec?" section above the Quickstart with a short comparison table against hand-rolling decoders, OpenAPI Generator for other languages, and other Gleam generators.
+- **README scope qualifier (#205)**: one-minute "Is oaspec right for your spec?" callout above the Quickstart so readers can self-select before going deeper.
+- **Configuration path-resolution documentation (#207)**: the Configuration section of the README now describes how `oaspec.yaml` paths are resolved (relative to the config file, not the CWD), and the "file not found" error now includes a CWD hint to help users debug mis-placed configs.
+- **Example cross-link (#211)**: the petstore client example's README now links to the shipped `server_adapter` example for readers who want to see both halves of the generated API.
+
+### Changed
+
+- **Stricter lint baseline (#203)**: glinter is now part of the default toolchain with the strictest practical configuration — every rule set to `error`, per-file suppressions only where a global refactor would be required, and `test/oaspec_test.gleam` excluded because the current glinter (2.14.0) analysis is quadratic in module size and would not complete on a ~12k-line test file.
+
+### Fixed
+
+- **README "Current Boundaries" drift (#210)**: response headers are now listed under the Supported narrative instead of under Current Boundaries, matching the reality of #192 which promoted that capability to Supported in v0.14.0.
+
+### Test / tooling
+
+- 677 → 684 unit tests (+7 from #215), 221 → 223 test fixtures (+2: `reserved_keywords.yaml`, `guard_constraints_api.yaml`).
+- Integration suite grows from 13 to 16 steps covering reserved-keyword server + client compile, guard direct-call E2E, and the `validate: true` opt-in wiring check.
+
 ## [0.14.0] - 2026-04-19
 
 ### Added
