@@ -75,6 +75,46 @@ pub fn list_pets(req: request_types.ListPetsRequest)
 }
 ```
 
+## Is oaspec right for your spec?
+
+A one-minute check before you paste in your OpenAPI document — if your
+spec stays inside the green list below, `oaspec` will generate code; if
+it relies on anything in the red list, generation stops with a clear
+diagnostic instead of producing broken output.
+
+**Generates code for:**
+
+- Schemas: `object`, primitives, arrays, enums, nullable, `allOf`,
+  `oneOf`, `anyOf`, typed `additionalProperties`
+- Local `$ref` (and relative-file external `$ref`) across schemas,
+  parameters, request bodies, responses, and path items
+- Parameters: path, query, header, cookie, plus array styles (`form`,
+  `pipeDelimited`, `spaceDelimited`) and objects via `deepObject`
+- Request bodies: `application/json`,
+  `application/x-www-form-urlencoded`, `multipart/form-data`
+- Typed response variants, typed response headers, and `$ref` /
+  `default` responses
+- Security: `apiKey`, HTTP (bearer/basic/digest), OAuth2, OpenID Connect
+  (bearer token attachment)
+
+**Stops with a diagnostic for:**
+
+- JSON Schema 2020 keywords: `$defs`, `prefixItems`, `if/then/else`,
+  `dependentSchemas`, `not`, `unevaluatedProperties` /
+  `unevaluatedItems`, `contentEncoding` / `contentMediaType` /
+  `contentSchema`
+- XML request/response bodies with structural decoding, `xml`
+  annotations, and `mutualTLS` security
+
+**Parsed but not yet turned into code:** callbacks, webhooks,
+`externalDocs`, tags, examples, links, `encoding` metadata.
+
+See [Current Boundaries](#current-boundaries) for the full list,
+including server-mode restrictions and normalization rules. The
+boundaries are kept in sync with the capability registry at
+[`src/oaspec/capability.gleam`](src/oaspec/capability.gleam) by a
+drift-detection test.
+
 ## Quickstart
 
 ### Install from GitHub release (Linux / macOS)
