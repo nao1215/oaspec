@@ -51,5 +51,10 @@ examples/petstore_client/
   src/petstore_client_example.gleam  — the program you run
 ```
 
-More examples (`server_adapter`, `security_client`) will follow in
-subsequent PRs per Issue #26.
+## Related examples
+
+- [`examples/server_adapter`](../server_adapter/) — a framework-free runnable
+  example that bridges the generated `router.route/5` to a canned
+  request/response pair. Run it with `just example-server-adapter`.
+
+A `security_client` example is still to come; see Issue #26.
