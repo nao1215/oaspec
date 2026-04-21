@@ -19,6 +19,12 @@ export TEST_OUTPUT_DIR
 TEST_OUTPUT_DIR_CLIENT="${PROJECT_ROOT}/test_output_client"
 export TEST_OUTPUT_DIR_CLIENT
 
+# Helper: run the oaspec CLI with raw arguments (no subcommand injected).
+# Used for top-level assertions like `oaspec --help`.
+oaspec_cli() {
+  cd "$PROJECT_ROOT" && gleam run -- "$@" 2>&1
+}
+
 # Helper: run oaspec generate command
 generate() {
   cd "$PROJECT_ROOT" && gleam run -- generate "$@" 2>&1

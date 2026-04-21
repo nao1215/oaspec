@@ -19,11 +19,13 @@ import simplifile
 pub fn app() -> glint.Glint(Nil) {
   glint.new()
   |> glint.with_name("oaspec")
-  |> glint.global_help("Generate Gleam code from OpenAPI 3.x specifications")
+  |> glint.global_help(
+    "Generate Gleam code from OpenAPI 3.x specifications\n\nCommands:\n  init       Create a default oaspec.yaml config file\n  generate   Generate Gleam code from an OpenAPI spec\n  validate   Validate an OpenAPI spec without generating code\n\nRun 'oaspec <command> --help' for more information.",
+  )
   |> glint.pretty_help(glint.default_pretty_help())
+  |> glint.add(at: ["init"], do: init_command())
   |> glint.add(at: ["generate"], do: generate_command())
   |> glint.add(at: ["validate"], do: validate_command())
-  |> glint.add(at: ["init"], do: init_command())
 }
 
 /// The generate command definition.

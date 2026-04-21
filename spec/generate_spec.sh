@@ -4,6 +4,19 @@
 # Integration tests for oaspec code generation.
 # Uses a single generation run for file/content checks to keep tests fast.
 
+Describe 'oaspec top-level help'
+  Include "$SHELLSPEC_SPECDIR/spec_helper.sh"
+
+  It 'lists available subcommands when called with --help'
+    When run oaspec_cli --help
+    The status should be success
+    The output should include 'Commands:'
+    The output should include 'init'
+    The output should include 'generate'
+    The output should include 'validate'
+  End
+End
+
 Describe 'oaspec generate'
   Include "$SHELLSPEC_SPECDIR/spec_helper.sh"
 
