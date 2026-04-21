@@ -194,6 +194,55 @@ Generated server code is written to `<dir>/<package>`. Generated client code is 
 | `output.server` | no | `<dir>/<package>` | Server output path |
 | `output.client` | no | `<dir>_client/<package>` | Client output path |
 
+### Configuration paths
+
+All path-valued fields — `input`, `output.dir`, `output.server`,
+`output.client` — are resolved **relative to the current working
+directory** when oaspec runs, not the directory the config file lives
+in.
+
+A config at the repo root that refers to a sibling spec works with no
+prefix:
+
+```text
+myproject/
+├── oaspec.yaml   # input: openapi.yaml
+└── openapi.yaml
+```
+
+```sh
+cd myproject
+oaspec generate --config=oaspec.yaml   # resolves ./openapi.yaml
+```
+
+If the config lives in a subdirectory, its `input` must be reachable
+from where the command is run, so either use a path relative to that
+CWD or keep invoking oaspec from the config's own directory:
+
+```text
+myproject/
+├── api/
+│   ├── oaspec.yaml    # input: openapi.yaml
+│   └── openapi.yaml
+└── (other code)
+```
+
+```sh
+cd myproject/api
+oaspec generate --config=oaspec.yaml   # resolves ./openapi.yaml
+
+# or, from the repo root:
+oaspec generate --config=api/oaspec.yaml   # needs input: api/openapi.yaml
+```
+
+Output directories (`output.dir`, `output.server`, `output.client`)
+are created automatically if they do not exist; existing files in the
+target directories are overwritten by the newly generated code.
+
+If the input spec or the config file itself cannot be opened, oaspec
+exits with a `Config file not found` / `parse_file` diagnostic that
+includes the path it attempted to read.
+
 ### CLI commands
 
 | Command | Description |

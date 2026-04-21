@@ -256,7 +256,10 @@ fn basename(path: String) -> String {
 /// Convert config error to a human-readable string.
 pub fn error_to_string(error: ConfigError) -> String {
   case error {
-    FileNotFound(path:) -> "Config file not found: " <> path
+    FileNotFound(path:) ->
+      "Config file not found: "
+      <> path
+      <> " (paths resolve relative to the current working directory)"
     FileReadError(path:, detail:) ->
       "Error reading config file " <> path <> ": " <> detail
     ParseError(detail:) -> "Config parse error: " <> detail
