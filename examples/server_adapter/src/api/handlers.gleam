@@ -1,75 +1,37 @@
-//// Hand-written handler implementations for the server_adapter example.
-//// These replace the generated panic stubs and return canned test data.
+//// Thin delegator. `oaspec generate` emits `panic` stubs into this
+//// file; the example replaces each stub with a one-line call into
+//// `example_handlers` so real domain logic can live outside the
+//// regeneration-affected `api/` directory.
+////
+//// After regenerating the server, restore this file by replacing the
+//// generated `panic` body of each function with the matching
+//// `example_handlers.<fn>(req)` call. That restoration is mechanical
+//// and version-control-diffable.
 
-import api/guards
 import api/request_types
 import api/response_types
-import api/types
-import gleam/dict
-import gleam/option.{None, Some}
+import example_handlers
 
 pub fn list_pets(
   req: request_types.ListPetsRequest,
 ) -> response_types.ListPetsResponse {
-  let _ = req
-  response_types.ListPetsResponseOk([
-    types.Pet(
-      id: 1,
-      name: "Fido",
-      status: types.PetStatusAvailable,
-      tag: Some("dog"),
-      additional_properties: dict.new(),
-    ),
-    types.Pet(
-      id: 2,
-      name: "Whiskers",
-      status: types.PetStatusPending,
-      tag: None,
-      additional_properties: dict.new(),
-    ),
-  ])
+  example_handlers.list_pets(req)
 }
 
 pub fn create_pet(
   req: request_types.CreatePetRequest,
 ) -> response_types.CreatePetResponse {
-  // Run the generated validation guard before constructing the response.
-  // A well-formed OpenAPI spec will reject out-of-range values at the
-  // guard layer; returning 400 is the idiomatic mapping.
-  case guards.validate_create_pet_request(req.body) {
-    Error(_) -> response_types.CreatePetResponseBadRequest
-    Ok(_) ->
-      response_types.CreatePetResponseCreated(types.Pet(
-        id: 100,
-        name: req.body.name,
-        status: types.PetStatusAvailable,
-        tag: req.body.tag,
-        additional_properties: dict.new(),
-      ))
-  }
+  example_handlers.create_pet(req)
 }
 
 pub fn get_pet(
   req: request_types.GetPetRequest,
 ) -> response_types.GetPetResponse {
-  case req.pet_id {
-    1 ->
-      response_types.GetPetResponseOk(types.Pet(
-        id: 1,
-        name: "Fido",
-        status: types.PetStatusAvailable,
-        tag: Some("dog"),
-        additional_properties: dict.new(),
-      ))
-    _ -> response_types.GetPetResponseNotFound
-  }
+  example_handlers.get_pet(req)
 }
 
 pub fn delete_pet(
   req: request_types.DeletePetRequest,
 ) -> response_types.DeletePetResponse {
-  case req.pet_id {
-    1 -> response_types.DeletePetResponseNoContent
-    _ -> response_types.DeletePetResponseNotFound
-  }
+  example_handlers.delete_pet(req)
 }
