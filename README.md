@@ -228,7 +228,7 @@ Coverage is strongest in these areas:
 - References: local `$ref` resolution for schemas, parameters, request bodies, responses, and path items, including circular-reference detection
 - Parameters: path, query, header, and cookie parameters, including array serialization (`style: form`, `style: pipeDelimited`, `style: spaceDelimited`) and objects via `style: deepObject`
 - Request bodies: `application/json`, `application/x-www-form-urlencoded`, and `multipart/form-data`
-- Responses: typed status-code variants, `$ref` responses, `default` responses, and text or binary passthrough cases
+- Responses: typed status-code variants, `$ref` responses, `default` responses, typed response headers, and text or binary passthrough cases
 - Security: `apiKey` (header, query, cookie), HTTP auth (bearer, basic, digest), OAuth2, and OpenID Connect. For OAuth2 and OpenID Connect, the generated client attaches a bearer token to requests; token acquisition, refresh, and flow execution are outside the generated code.
 - Generation safety: name collision handling, keyword escaping, validation guards, and capability errors with clear failure modes
 
@@ -241,7 +241,7 @@ These are the most important limitations today:
 
 - The following keywords are detected and rejected: `$defs`, `prefixItems`, `if/then/else`, `dependentSchemas`, `not`, `unevaluatedProperties`, `unevaluatedItems`, `contentEncoding`, `contentMediaType`, `contentSchema`, `mutualTLS`
 - `xml` annotations are not handled by the parser
-- Some fields are parsed and preserved but not yet used by codegen: callbacks, webhooks, externalDocs, tags, examples, links, response headers, encoding
+- Some fields are parsed and preserved but not yet used by codegen: callbacks, webhooks, externalDocs, tags, examples, links, encoding
 - Operation-level and path-level server overrides are supported in generated clients (precedence: operation > path > top-level)
 - Server-mode code generation rejects the following spec configurations (supported in client mode): `server: complex path parameters`, `server: non-primitive query array items`, `server: non-primitive header array items`, `server: complex deepObject properties`, `server: mixed form-urlencoded request`, `server: complex form-urlencoded fields`, `server: mixed multipart request`, `server: complex multipart fields`, `server: unsupported request content type`
 - The following are normalized to supported equivalents:
