@@ -3,6 +3,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/config
+import oaspec/openapi/diagnostic_format
 
 /// Pipeline phase that produced the diagnostic.
 pub type Phase {
@@ -270,10 +271,7 @@ pub fn to_short_string(d: Diagnostic) -> String {
     "file_error" -> d.message
     "yaml_error" -> d.message <> loc_str
     "missing_field" -> {
-      let location = case d.pointer {
-        "" -> "root"
-        p -> p
-      }
+      let location = diagnostic_format.pointer_to_human(d.pointer)
       let field = string.replace(d.message, "Missing required field: ", "")
       "Missing required field '"
       <> field
@@ -285,17 +283,14 @@ pub fn to_short_string(d: Diagnostic) -> String {
       }
     }
     "invalid_value" -> {
-      let location = case d.pointer {
-        "" -> "root"
-        p -> p
-      }
+      let location = diagnostic_format.pointer_to_human(d.pointer)
       "Invalid value at " <> location <> ": " <> d.message
     }
     _ ->
       prefix
       <> case d.pointer {
         "" -> ""
-        p -> " at " <> p
+        p -> " at " <> diagnostic_format.pointer_to_human(p)
       }
       <> ": "
       <> d.message
