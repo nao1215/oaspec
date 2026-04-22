@@ -1,5 +1,12 @@
 set shell := ["sh", "-cu"]
 
+# Make the mise-managed toolchain (erlang / gleam / rebar) visible to
+# every recipe even when the invoking shell has not run `mise
+# activate`. The bootstrap helper is the same one that standalone
+# bash scripts source, so `just <recipe>` and `bash scripts/<name>.sh`
+# behave identically in a fresh shell.
+export PATH := shell('. scripts/lib/mise_bootstrap.sh; printf %s "$PATH"')
+
 default:
   @just --list
 

@@ -12,7 +12,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$PATH"
+# shellcheck source=../scripts/lib/mise_bootstrap.sh
+. "$PROJECT_ROOT/scripts/lib/mise_bootstrap.sh"
+oaspec_require_tool gleam
 
 info() { echo "==> $*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }

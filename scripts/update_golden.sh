@@ -2,6 +2,12 @@
 # Regenerate golden test snapshot files.
 # Run via: just update-golden
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/mise_bootstrap.sh
+. "$SCRIPT_DIR/lib/mise_bootstrap.sh"
+oaspec_require_tool gleam
+
 cd "$(git rev-parse --show-toplevel)"
 
 echo "Updating golden files..."

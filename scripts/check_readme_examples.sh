@@ -5,6 +5,11 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/mise_bootstrap.sh
+. "$SCRIPT_DIR/lib/mise_bootstrap.sh"
+oaspec_require_tool gleam
+
 SMOKE_FILE="test/readme_smoke_test_.gleam"
 
 cleanup() { rm -f "$SMOKE_FILE"; }

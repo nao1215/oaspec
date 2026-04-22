@@ -4,6 +4,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# shellcheck source=lib/mise_bootstrap.sh
+. "$SCRIPT_DIR/lib/mise_bootstrap.sh"
+
 ARTIFACT_PATH="${1:-$PROJECT_ROOT/oaspec}"
 ARTIFACT_DIR="$(cd "$(dirname "$ARTIFACT_PATH")" && pwd)"
 ARTIFACT_PATH="$ARTIFACT_DIR/$(basename "$ARTIFACT_PATH")"
@@ -37,15 +41,8 @@ clean_generated_outputs() {
 
 trap cleanup EXIT
 
-if command -v mise >/dev/null 2>&1; then
-  for tool in escript gleam; do
-    TOOL_PATH="$(cd "$PROJECT_ROOT" && mise which "$tool" 2>/dev/null || true)"
-    if [ -n "$TOOL_PATH" ]; then
-      PATH="$(dirname "$TOOL_PATH"):$PATH"
-      export PATH
-    fi
-  done
-fi
+oaspec_require_tool escript
+oaspec_require_tool gleam
 
 [ -f "$ARTIFACT_PATH" ] || fail "Artifact not found: $ARTIFACT_PATH"
 

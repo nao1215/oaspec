@@ -26,8 +26,15 @@ cd oaspec
 
 ```bash
 mise install       # install Gleam, Erlang, rebar3
-gleam deps download
+just deps          # download Gleam dependencies
 ```
+
+`just` recipes and the helper scripts under `scripts/` and
+`integration_test/` automatically locate the mise-managed toolchain
+via `scripts/lib/mise_bootstrap.sh`, so you do **not** need to run
+`mise activate` in the current shell before invoking them. Running
+`gleam` directly still requires activation; use `just deps` instead
+when working from a fresh shell.
 
 ### Verification
 
