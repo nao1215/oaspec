@@ -3,6 +3,7 @@ import gleam/result
 import oaspec/codegen/client
 import oaspec/codegen/context.{type Context, type GeneratedFile}
 import oaspec/codegen/decoders
+import oaspec/codegen/encoders
 import oaspec/codegen/guards
 import oaspec/codegen/server
 import oaspec/codegen/types
@@ -152,6 +153,7 @@ pub fn generate_all_files(ctx: Context) -> List(GeneratedFile) {
 fn generate_shared(ctx: Context) -> List(GeneratedFile) {
   let type_files = types.generate(ctx)
   let decoder_files = decoders.generate(ctx)
+  let encoder_files = encoders.generate(ctx)
   let guard_files = guards.generate(ctx)
-  list.flatten([type_files, decoder_files, guard_files])
+  list.flatten([type_files, decoder_files, encoder_files, guard_files])
 }
