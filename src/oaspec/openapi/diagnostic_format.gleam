@@ -37,6 +37,11 @@ pub fn pointer_to_human(pointer: String) -> String {
 }
 
 fn split_pointer(pointer: String) -> List(String) {
+  // Known limitation: this splits on `.` unconditionally, so a pointer whose
+  // path contains a literal dot (e.g. `/v1.0/pets`) will fragment. Every
+  // pointer constructed inside this repo is dot-free today. If that changes,
+  // switch to splitting on `/` first and only normalising `.` where the
+  // segment is known not to be a user-supplied path.
   pointer
   |> string.replace("#/", "")
   |> string.replace("/", ".")
