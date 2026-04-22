@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # mise_bootstrap.sh -- Shared helper that makes mise-managed tools
 # (erlang, gleam, rebar) visible on PATH without requiring the caller
 # to have run `mise activate` in the current shell.
@@ -9,7 +9,9 @@
 #
 # The sourcing itself runs `oaspec_mise_bootstrap` once, so most
 # callers only need the `.` line. The helper is idempotent -- sourcing
-# it twice leaves PATH unchanged.
+# it twice leaves PATH unchanged. Intentionally POSIX-compatible (no
+# `local`, no `[[ ]]`), so it can be sourced from `sh -cu` as well as
+# bash.
 
 _oaspec_mise_prepend() {
   # Prepend $1 to PATH unless it is already present.
@@ -33,25 +35,20 @@ oaspec_mise_bootstrap() {
     _oaspec_mise_prepend "$HOME/.local/bin"
   fi
 
-  # Fast path: if the toolchain is already visible, do nothing more.
-  # This keeps the helper cheap when the shell has `mise activate`.
-  if command -v gleam >/dev/null 2>&1; then
-    export PATH
-    return 0
-  fi
-
-  # Preferred: ask mise for the concrete install-dir of each tool we
-  # need. These are absolute paths into ~/.local/share/mise/installs,
-  # so they work even when the calling shell is outside a mise project
-  # directory and the shims would fail with "no version set".
+  # Resolve the mise-managed toolchain to its concrete install
+  # directories and add those to PATH. Doing this unconditionally
+  # (even when shims are already on PATH) ensures that escript/erl
+  # shebangs resolve to the real binaries rather than shims, which
+  # fail with "No version is set" when invoked from a directory
+  # outside the mise project where the activation env is not in scope.
   if command -v mise >/dev/null 2>&1; then
-    local _tool _path
-    for _tool in $_OASPEC_MISE_TOOLS; do
-      _path="$(mise which "$_tool" 2>/dev/null || true)"
-      if [ -n "$_path" ]; then
-        _oaspec_mise_prepend "$(dirname "$_path")"
+    for _oaspec_bootstrap_tool in $_OASPEC_MISE_TOOLS; do
+      _oaspec_bootstrap_path="$(mise which "$_oaspec_bootstrap_tool" 2>/dev/null || true)"
+      if [ -n "$_oaspec_bootstrap_path" ]; then
+        _oaspec_mise_prepend "$(dirname "$_oaspec_bootstrap_path")"
       fi
     done
+    unset _oaspec_bootstrap_tool _oaspec_bootstrap_path
   fi
 
   # Fallback: the canonical shim directory. Used when `mise` itself
@@ -65,12 +62,11 @@ oaspec_mise_bootstrap() {
 }
 
 oaspec_require_tool() {
-  local _tool="$1"
-  if command -v "$_tool" >/dev/null 2>&1; then
+  if command -v "$1" >/dev/null 2>&1; then
     return 0
   fi
   cat >&2 <<EOF
-error: required tool '$_tool' was not found on PATH.
+error: required tool '$1' was not found on PATH.
 
 This repository manages its toolchain (Erlang, Gleam, rebar3) with
 mise. To set up the development environment from a fresh checkout:
@@ -78,7 +74,7 @@ mise. To set up the development environment from a fresh checkout:
     mise install
 
 If mise itself is missing, see https://mise.jdx.dev/getting-started.html.
-Alternatively, install '$_tool' by hand and make sure it is on PATH
+Alternatively, install '$1' by hand and make sure it is on PATH
 before running this command.
 EOF
   return 127
