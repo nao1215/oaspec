@@ -8,6 +8,7 @@ import oaspec/capability
 import oaspec/codegen/client as client_gen
 import oaspec/codegen/context
 import oaspec/codegen/decoders
+import oaspec/codegen/encoders
 import oaspec/codegen/guards
 import oaspec/codegen/ir
 import oaspec/codegen/ir_render
@@ -1783,7 +1784,7 @@ components:
   let assert Ok(spec) = parser.parse_string(yaml)
   let spec = hoist.hoist(spec)
   let ctx = make_ctx_from_spec(spec)
-  let files = decoders.generate(ctx)
+  let files = list.append(decoders.generate(ctx), encoders.generate(ctx))
 
   // Find encode file
   let assert Ok(encode_file) =
@@ -2190,7 +2191,7 @@ components:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
-  let files = decoders.generate(ctx)
+  let files = list.append(decoders.generate(ctx), encoders.generate(ctx))
   let combined = list.fold(files, "", fn(acc, f) { acc <> f.content })
   // Fallback branch must emit json.null(), never the classified type name.
   string.contains(combined, "_ -> json.null()") |> should.be_true()
@@ -2825,7 +2826,7 @@ components:
   let ctx = make_ctx_from_spec(spec)
 
   // Check decoders use original wire names
-  let files = decoders.generate(ctx)
+  let files = list.append(decoders.generate(ctx), encoders.generate(ctx))
   let assert [decode_file, ..] = files
   let decode_content = decode_file.content
   // Both original JSON keys must appear in decode.field()
@@ -4034,7 +4035,7 @@ components:
   let assert Ok(spec) = parser.parse_string(yaml)
   let spec = hoist.hoist(spec)
   let ctx = make_ctx_from_spec(spec)
-  let files = decoders.generate(ctx)
+  let files = list.append(decoders.generate(ctx), encoders.generate(ctx))
   let assert [decode_file, _encode_file] = files
   // Must generate tag_list_decoder() function
   string.contains(decode_file.content, "tag_list_decoder")
@@ -4800,7 +4801,7 @@ components:
   let spec = hoist.hoist(spec)
   let spec = dedup.dedup(spec)
   let ctx = make_ctx_from_spec(spec)
-  let files = decoders.generate(ctx)
+  let files = list.append(decoders.generate(ctx), encoders.generate(ctx))
   let assert Ok(encode_file) =
     list.find(files, fn(f) { string.contains(f.path, "encode") })
   let content = encode_file.content
@@ -5171,7 +5172,7 @@ components:
   let spec = hoist.hoist(spec)
   let spec = dedup.dedup(spec)
   let ctx = make_ctx_from_spec(spec)
-  let files = decoders.generate(ctx)
+  let files = list.append(decoders.generate(ctx), encoders.generate(ctx))
   // Find the decode file
   let assert Ok(decode_file) =
     list.find(files, fn(f) { string.contains(f.path, "decode") })
@@ -6633,9 +6634,9 @@ paths:
   // Do NOT hoist -- keep inline schemas to test anonymous encoder filtering
   let ctx = make_ctx_from_spec(spec)
 
-  let decoder_files = decoders.generate(ctx)
+  let encoder_files = encoders.generate(ctx)
   let assert Ok(encode_file) =
-    list.find(decoder_files, fn(f) { f.path == "encode.gleam" })
+    list.find(encoder_files, fn(f) { f.path == "encode.gleam" })
 
   // The encoder for request body should NOT encode the readOnly 'id' field
   // Find the encoder function
@@ -6787,9 +6788,9 @@ paths:
   let ctx = make_ctx_from_spec(spec)
 
   // Check encoder: readOnly 'id' should NOT be encoded
-  let decoder_files = decoders.generate(ctx)
+  let encoder_files = encoders.generate(ctx)
   let assert Ok(encode_file) =
-    list.find(decoder_files, fn(f) { f.path == "encode.gleam" })
+    list.find(encoder_files, fn(f) { f.path == "encode.gleam" })
   let lines = string.split(encode_file.content, "\n")
   let encoder_lines = extract_fn_block(lines, "encode_user_json")
   let encoder_text = string.join(encoder_lines, "\n")
@@ -6802,6 +6803,7 @@ paths:
   string.contains(encoder_text, "\"name\"") |> should.be_true()
 
   // Check decoder: writeOnly 'password' should be treated as optional
+  let decoder_files = decoders.generate(ctx)
   let assert Ok(decode_file) =
     list.find(decoder_files, fn(f) { f.path == "decode.gleam" })
   let dlines = string.split(decode_file.content, "\n")
