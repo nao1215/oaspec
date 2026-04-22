@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-04-22
+
+### Added
+
+- **Human-readable diagnostic locations (#208)**: `Diagnostic.to_short_string` now translates pointer strings like `paths.~1pets.get.parameters.0` into `GET /pets, parameter #0` before printing. Recognises the common shapes for operations (parameters, requestBody, responses), schema components, parameters, responses, and requestBody components, and falls back to the escape-decoded pointer for anything unknown. The structured `Diagnostic.pointer` field itself is unchanged so a future `--format json` output can still emit the raw pointer.
+
+### Changed
+
+- **`parser.gleam` split along spec / schema / error concerns (#213)**: the 2,299-line monolith is now three modules with a clean dependency chain: `parser_error.gleam` (shared `missing_field_from_extraction` / `missing_field_from_selector`) → `parser_schema.gleam` (`parse_schema_ref` + its recursive internals — `parse_schema_object`, `parse_typed_schema`, `parse_properties`, `parse_discriminator`, `detect_unsupported_keywords`) → `parser.gleam` (top-level flow: file I/O, root / paths / operations). Public API (`parse_file`, `parse_string`, `parse_error_to_string`) is unchanged; generated output is byte-identical.
+- **Encoder generation split out of `decoders.gleam` (#212)**: encoder emission now lives in `src/oaspec/codegen/encoders.gleam` with its own `pub fn generate/1`. `decoders.gleam` is decoder-only (~1,135 lines, down from ~1,870). `generate_shared` in `generate.gleam` now calls both sides. Shared traversal helpers (`list_at_or`, `qualified_schema_ref_type`) are duplicated rather than lifted into a third module; a `codegen/codec_dispatch.gleam` extraction stays on the follow-up list.
+- **`examples/server_adapter/` restructured around a regeneration-safe handler layout (#209)**: domain logic moved into `src/example_handlers.gleam`, which the generator never touches. The checked-in `src/api/handlers.gleam` is now a one-line-per-operation delegator whose body is trivial to restore after `gleam run -- generate` overwrites it. The README's "back up your handlers before regenerating" warning is replaced with a "Recommended handler layout" section that explains the pattern.
+
+### Test / tooling
+
+- 684 → 704 unit tests (+20 for `diagnostic_format`).
+- 3 new source modules: `openapi/parser_error.gleam`, `openapi/parser_schema.gleam`, `openapi/diagnostic_format.gleam`. 1 new codegen module: `codegen/encoders.gleam`.
+
 ## [0.15.0] - 2026-04-22
 
 ### Added

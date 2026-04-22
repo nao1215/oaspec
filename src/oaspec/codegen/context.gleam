@@ -2,7 +2,7 @@ import oaspec/config.{type Config}
 import oaspec/openapi/spec.{type OpenApiSpec, type Resolved}
 
 /// The version of oaspec used for generated code headers.
-pub const version = "0.15.0"
+pub const version = "0.16.0"
 
 /// Context for code generation, carrying all needed state.
 /// Only accepts a resolved spec — codegen must not operate on unresolved ASTs.
