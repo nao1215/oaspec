@@ -6,16 +6,12 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
-import oaspec/openapi/diagnostic.{
-  type Diagnostic, type SourceLoc, Diagnostic, NoSourceLoc, SourceLoc,
-}
+import oaspec/openapi/diagnostic.{type Diagnostic, NoSourceLoc, SourceLoc}
 import oaspec/openapi/external_loader
 import oaspec/openapi/location_index.{type LocationIndex}
-import oaspec/openapi/schema.{
-  type Discriminator, type SchemaObject, type SchemaRef, AllOfSchema,
-  AnyOfSchema, ArraySchema, BooleanSchema, Discriminator, Inline, IntegerSchema,
-  NumberSchema, ObjectSchema, OneOfSchema, StringSchema,
-}
+import oaspec/openapi/parser_error
+import oaspec/openapi/parser_schema
+import oaspec/openapi/schema.{type SchemaRef}
 import oaspec/openapi/spec.{
   type Callback, type Components, type Contact, type Encoding, type ExternalDoc,
   type Header, type Info, type License, type Link, type MediaType,
@@ -57,48 +53,6 @@ pub fn parse_file(path: String) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
     spec,
     external_loader.base_dir_of(path),
     parse_file,
-  )
-}
-
-/// Build a `missing_field` diagnostic from a `yay.ExtractionError`, folding
-/// the extractor-internal detail into the diagnostic's hint so nothing is
-/// silently dropped.
-fn missing_field_from_extraction(
-  err: yay.ExtractionError,
-  path path: String,
-  field field: String,
-  loc loc: SourceLoc,
-) -> Diagnostic {
-  let base = diagnostic.missing_field(path:, field:, loc:)
-  Diagnostic(
-    ..base,
-    hint: Some(
-      "Check your OpenAPI spec structure. ("
-      <> yay.extraction_error_to_string(err)
-      <> ")",
-    ),
-  )
-}
-
-/// Build a `missing_field` diagnostic from a `yay.SelectorError`. The
-/// selector error is collapsed to its constructor name since the detail
-/// isn't meaningful to users, but we still thread it through rather than
-/// discarding it outright.
-fn missing_field_from_selector(
-  err: yay.SelectorError,
-  path path: String,
-  field field: String,
-  loc loc: SourceLoc,
-) -> Diagnostic {
-  let detail = case err {
-    yay.NodeNotFound(at:) ->
-      "selector resolved up to segment " <> int.to_string(at)
-    yay.SelectorParseError -> "selector parse error"
-  }
-  let base = diagnostic.missing_field(path:, field:, loc:)
-  Diagnostic(
-    ..base,
-    hint: Some("Check your OpenAPI spec structure. (" <> detail <> ")"),
   )
 }
 
@@ -152,7 +106,7 @@ fn parse_root(
         }
       })
     })
-    |> result.map_error(missing_field_from_extraction(
+    |> result.map_error(parser_error.missing_field_from_extraction(
       _,
       path: "",
       field: "openapi",
@@ -207,7 +161,7 @@ fn parse_optional_components(
 fn parse_info(root: yay.Node, index: LocationIndex) -> Result(Info, Diagnostic) {
   use info_node <- result.try(
     yay.select_sugar(from: root, selector: "info")
-    |> result.map_error(missing_field_from_selector(
+    |> result.map_error(parser_error.missing_field_from_selector(
       _,
       path: "",
       field: "info",
@@ -217,7 +171,7 @@ fn parse_info(root: yay.Node, index: LocationIndex) -> Result(Info, Diagnostic) 
 
   use title <- result.try(
     yay.extract_string(info_node, "title")
-    |> result.map_error(missing_field_from_extraction(
+    |> result.map_error(parser_error.missing_field_from_extraction(
       _,
       path: "info",
       field: "title",
@@ -227,7 +181,7 @@ fn parse_info(root: yay.Node, index: LocationIndex) -> Result(Info, Diagnostic) 
 
   use version <- result.try(
     yay.extract_string(info_node, "version")
-    |> result.map_error(missing_field_from_extraction(
+    |> result.map_error(parser_error.missing_field_from_extraction(
       _,
       path: "info",
       field: "version",
@@ -280,7 +234,7 @@ fn parse_server(
 ) -> Result(Server, Diagnostic) {
   use url <- result.try(
     yay.extract_string(node, "url")
-    |> result.map_error(missing_field_from_extraction(
+    |> result.map_error(parser_error.missing_field_from_extraction(
       _,
       path: "servers",
       field: "url",
@@ -464,7 +418,7 @@ fn parse_operation_at(
 ) -> Result(Operation(Unresolved), Diagnostic) {
   use op_node <- result.try(
     yay.select_sugar(from: node, selector: method_key)
-    |> result.map_error(missing_field_from_selector(
+    |> result.map_error(parser_error.missing_field_from_selector(
       _,
       path:,
       field: method_key,
@@ -605,7 +559,7 @@ fn parse_parameter(
     _ -> {
       use name <- result.try(
         yay.extract_string(node, "name")
-        |> result.map_error(missing_field_from_extraction(
+        |> result.map_error(parser_error.missing_field_from_extraction(
           _,
           path: "parameter",
           field: "name",
@@ -615,7 +569,7 @@ fn parse_parameter(
 
       use in_str <- result.try(
         yay.extract_string(node, "in")
-        |> result.map_error(missing_field_from_extraction(
+        |> result.map_error(parser_error.missing_field_from_extraction(
           _,
           path: "parameter." <> name,
           field: "in",
@@ -654,7 +608,7 @@ fn parse_parameter(
       use param_schema <- result.try(
         case yay.select_sugar(from: node, selector: "schema") {
           Ok(schema_node) -> {
-            use sr <- result.try(parse_schema_ref(
+            use sr <- result.try(parser_schema.parse_schema_ref(
               schema_node,
               "parameter.schema",
               index,
@@ -788,7 +742,7 @@ fn parse_request_body_at(
 ) -> Result(RefOr(RequestBody(Unresolved)), Diagnostic) {
   use rb_node <- result.try(
     yay.select_sugar(from: node, selector: "requestBody")
-    |> result.map_error(missing_field_from_selector(
+    |> result.map_error(parser_error.missing_field_from_selector(
       _,
       path: context,
       field: "requestBody",
@@ -842,7 +796,7 @@ fn parse_required_content(
             use mt_schema <- result.try(
               case yay.select_sugar(from: value_node, selector: "schema") {
                 Ok(schema_node) -> {
-                  use sr <- result.try(parse_schema_ref(
+                  use sr <- result.try(parser_schema.parse_schema_ref(
                     schema_node,
                     context <> ".schema",
                     index,
@@ -898,7 +852,7 @@ fn parse_content(
             use mt_schema <- result.try(
               case yay.select_sugar(from: value_node, selector: "schema") {
                 Ok(schema_node) -> {
-                  use sr <- result.try(parse_schema_ref(
+                  use sr <- result.try(parser_schema.parse_schema_ref(
                     schema_node,
                     context <> ".schema",
                     index,
@@ -985,7 +939,7 @@ fn parse_response(
       use description <- result.try(
         yay.extract_string(node, "description")
         |> result.map(Some)
-        |> result.map_error(missing_field_from_extraction(
+        |> result.map_error(parser_error.missing_field_from_extraction(
           _,
           path: "response",
           field: "description",
@@ -1009,7 +963,7 @@ fn parse_components(
 ) -> Result(Components(Unresolved), Diagnostic) {
   use components_node <- result.try(
     yay.select_sugar(from: root, selector: "components")
-    |> result.map_error(missing_field_from_selector(
+    |> result.map_error(parser_error.missing_field_from_selector(
       _,
       path: "",
       field: "components",
@@ -1057,7 +1011,7 @@ fn parse_schemas_map(
         let #(key_node, value_node) = entry
         case key_node {
           yay.NodeStr(name) -> {
-            use schema_ref <- result.try(parse_schema_ref(
+            use schema_ref <- result.try(parser_schema.parse_schema_ref(
               value_node,
               "components.schemas." <> name,
               index,
@@ -1158,432 +1112,6 @@ fn parse_responses_map(
 }
 
 /// Parse a schema reference (either $ref or inline schema).
-fn parse_schema_ref(
-  node: yay.Node,
-  path: String,
-  index: LocationIndex,
-) -> Result(SchemaRef, Diagnostic) {
-  case yay.extract_optional_string(node, "$ref") {
-    Ok(Some(ref)) -> Ok(schema.make_reference(ref))
-    _ -> {
-      use schema_obj <- result.try(parse_schema_object(node, path, index))
-      Ok(Inline(schema_obj))
-    }
-  }
-}
-
-/// Parse a schema object.
-fn parse_schema_object(
-  node: yay.Node,
-  path: String,
-  index: LocationIndex,
-) -> Result(SchemaObject, Diagnostic) {
-  let nullable =
-    yay.extract_optional_bool(node, "nullable")
-    |> result.unwrap(None)
-    |> option.unwrap(False)
-
-  let description =
-    yay.extract_optional_string(node, "description")
-    |> result.unwrap(None)
-
-  let deprecated =
-    yay.extract_optional_bool(node, "deprecated")
-    |> result.unwrap(None)
-    |> option.unwrap(False)
-
-  let title =
-    yay.extract_optional_string(node, "title")
-    |> result.unwrap(None)
-
-  let read_only =
-    yay.extract_optional_bool(node, "readOnly")
-    |> result.unwrap(None)
-    |> option.unwrap(False)
-
-  let write_only =
-    yay.extract_optional_bool(node, "writeOnly")
-    |> result.unwrap(None)
-    |> option.unwrap(False)
-
-  let default = value.extract_optional(node, "default")
-
-  let example = value.extract_optional(node, "example")
-
-  let const_value = value.extract_optional(node, "const")
-
-  let unsupported_keywords = detect_unsupported_keywords(node)
-
-  let metadata =
-    schema.SchemaMetadata(
-      description:,
-      nullable:,
-      deprecated:,
-      title:,
-      read_only:,
-      write_only:,
-      default:,
-      example:,
-      const_value:,
-      raw_type: None,
-      unsupported_keywords:,
-      internal: False,
-      provenance: schema.UserAuthored,
-    )
-
-  // Check for composition keywords first
-  case yay.select_sugar(from: node, selector: "allOf") {
-    Ok(yay.NodeSeq(items)) -> {
-      use schemas <- result.try(
-        list.try_map(items, parse_schema_ref(_, path <> ".allOf", index)),
-      )
-      Ok(AllOfSchema(metadata:, schemas:))
-    }
-    _ ->
-      case yay.select_sugar(from: node, selector: "oneOf") {
-        Ok(yay.NodeSeq(items)) -> {
-          use schemas <- result.try(
-            list.try_map(items, parse_schema_ref(_, path <> ".oneOf", index)),
-          )
-          use discriminator <- result.try(
-            case
-              result.is_ok(yay.select_sugar(
-                from: node,
-                selector: "discriminator",
-              ))
-            {
-              True -> {
-                use d <- result.try(parse_discriminator(node, index))
-                Ok(Some(d))
-              }
-              False -> Ok(None)
-            },
-          )
-          Ok(OneOfSchema(metadata:, schemas:, discriminator:))
-        }
-        _ ->
-          case yay.select_sugar(from: node, selector: "anyOf") {
-            Ok(yay.NodeSeq(items)) -> {
-              use schemas <- result.try(
-                list.try_map(items, parse_schema_ref(_, path <> ".anyOf", index)),
-              )
-              use discriminator <- result.try(
-                case
-                  result.is_ok(yay.select_sugar(
-                    from: node,
-                    selector: "discriminator",
-                  ))
-                {
-                  True -> {
-                    use d <- result.try(parse_discriminator(node, index))
-                    Ok(Some(d))
-                  }
-                  False -> Ok(None)
-                },
-              )
-              Ok(AnyOfSchema(metadata:, schemas:, discriminator:))
-            }
-            _ -> parse_typed_schema(node, metadata, path, index)
-          }
-      }
-  }
-}
-
-/// Detect unsupported JSON Schema 2020-12 keywords present in a schema node.
-/// Returns a list of keyword names found (does NOT fail — stores them for later).
-/// Note: `const` is NOT in this list because it is parsed into `const_value`.
-fn detect_unsupported_keywords(node: yay.Node) -> List(String) {
-  let keywords = [
-    "$defs", "prefixItems", "if", "then", "else", "dependentSchemas",
-    "unevaluatedProperties", "unevaluatedItems", "contentEncoding",
-    "contentMediaType", "contentSchema", "not",
-  ]
-  list.filter(keywords, fn(keyword) {
-    result.is_ok(yay.select_sugar(from: node, selector: keyword))
-  })
-}
-
-/// Parse a typed schema (string, integer, number, boolean, array, object).
-fn parse_typed_schema(
-  node: yay.Node,
-  metadata: schema.SchemaMetadata,
-  path: String,
-  index: LocationIndex,
-) -> Result(SchemaObject, Diagnostic) {
-  // OpenAPI 3.1 allows type to be an array, e.g. type: [string, 'null'].
-  // Extract the primary type and detect nullable from the array form.
-  // Multi-type unions (e.g. [string, integer]) are not supported.
-  use #(type_str, metadata) <- result.try(
-    case yay.select_sugar(from: node, selector: "type") {
-      Ok(yay.NodeSeq(type_nodes)) -> {
-        let type_strs =
-          list.filter_map(type_nodes, fn(n) {
-            case n {
-              yay.NodeStr(s) -> Ok(s)
-              _ -> Error(Nil)
-            }
-          })
-        let has_null = list.contains(type_strs, "null")
-        let non_null_types = list.filter(type_strs, fn(s) { s != "null" })
-        case non_null_types {
-          [single] ->
-            Ok(#(
-              single,
-              schema.SchemaMetadata(
-                ..metadata,
-                nullable: metadata.nullable || has_null,
-              ),
-            ))
-          [] ->
-            Ok(#(
-              "object",
-              schema.SchemaMetadata(
-                ..metadata,
-                nullable: metadata.nullable || has_null,
-              ),
-            ))
-          _ -> {
-            // Store multi-type for normalize pass
-            let updated_meta =
-              schema.SchemaMetadata(
-                ..metadata,
-                raw_type: Some(non_null_types),
-                nullable: metadata.nullable || has_null,
-              )
-            // Default to first type for now; normalize will convert to oneOf
-            let primary = case non_null_types {
-              [first, ..] -> first
-              [] -> "object"
-            }
-            Ok(#(primary, updated_meta))
-          }
-        }
-      }
-      Ok(yay.NodeStr(type_name)) -> Ok(#(type_name, metadata))
-      _ -> {
-        // When type is absent, default to "object".
-        // Unsupported keywords (const, if/then/else, etc.) are already caught
-        // by check_unsupported_schema_keywords before reaching this point,
-        // so this fallback is safe for legitimate type-less schemas.
-        let type_name =
-          yay.extract_optional_string(node, "type")
-          |> result.unwrap(None)
-          |> option.unwrap("object")
-        Ok(#(type_name, metadata))
-      }
-    },
-  )
-
-  let format =
-    yay.extract_optional_string(node, "format")
-    |> result.unwrap(None)
-
-  case type_str {
-    "string" -> {
-      let enum_values = case yay.extract_string_list(node, "enum") {
-        Ok(values) -> values
-        _ -> []
-      }
-      let min_length =
-        yay.extract_optional_int(node, "minLength") |> result.unwrap(None)
-      let max_length =
-        yay.extract_optional_int(node, "maxLength") |> result.unwrap(None)
-      let pattern =
-        yay.extract_optional_string(node, "pattern") |> result.unwrap(None)
-      Ok(StringSchema(
-        metadata:,
-        format:,
-        enum_values:,
-        min_length:,
-        max_length:,
-        pattern:,
-      ))
-    }
-
-    "integer" -> {
-      let minimum =
-        yay.extract_optional_int(node, "minimum") |> result.unwrap(None)
-      let maximum =
-        yay.extract_optional_int(node, "maximum") |> result.unwrap(None)
-      let exclusive_minimum =
-        yay.extract_optional_int(node, "exclusiveMinimum")
-        |> result.unwrap(None)
-      let exclusive_maximum =
-        yay.extract_optional_int(node, "exclusiveMaximum")
-        |> result.unwrap(None)
-      let multiple_of =
-        yay.extract_optional_int(node, "multipleOf") |> result.unwrap(None)
-      Ok(IntegerSchema(
-        metadata:,
-        format:,
-        minimum:,
-        maximum:,
-        exclusive_minimum:,
-        exclusive_maximum:,
-        multiple_of:,
-      ))
-    }
-
-    "number" -> {
-      let minimum =
-        yay.extract_optional_float(node, "minimum") |> result.unwrap(None)
-      let maximum =
-        yay.extract_optional_float(node, "maximum") |> result.unwrap(None)
-      let exclusive_minimum =
-        yay.extract_optional_float(node, "exclusiveMinimum")
-        |> result.unwrap(None)
-      let exclusive_maximum =
-        yay.extract_optional_float(node, "exclusiveMaximum")
-        |> result.unwrap(None)
-      let multiple_of =
-        yay.extract_optional_float(node, "multipleOf")
-        |> result.unwrap(None)
-      Ok(NumberSchema(
-        metadata:,
-        format:,
-        minimum:,
-        maximum:,
-        exclusive_minimum:,
-        exclusive_maximum:,
-        multiple_of:,
-      ))
-    }
-
-    "boolean" -> Ok(BooleanSchema(metadata:))
-
-    "array" -> {
-      use items <- result.try(
-        case yay.select_sugar(from: node, selector: "items") {
-          Ok(items_node) ->
-            parse_schema_ref(items_node, path <> ".items", index)
-          _ ->
-            Error(diagnostic.missing_field(
-              path: path,
-              field: "items",
-              loc: location_index.lookup_field(index, path, "items"),
-            ))
-        },
-      )
-      let min_items =
-        yay.extract_optional_int(node, "minItems") |> result.unwrap(None)
-      let max_items =
-        yay.extract_optional_int(node, "maxItems") |> result.unwrap(None)
-      let unique_items =
-        yay.extract_optional_bool(node, "uniqueItems")
-        |> result.unwrap(None)
-        |> option.unwrap(False)
-      Ok(ArraySchema(metadata:, items:, min_items:, max_items:, unique_items:))
-    }
-
-    "object" -> {
-      use properties <- result.try(parse_properties(node, path, index))
-      let required = case yay.extract_string_list(node, "required") {
-        Ok(r) -> r
-        _ -> []
-      }
-      use additional_properties <- result.try(
-        case yay.select_sugar(from: node, selector: "additionalProperties") {
-          Ok(yay.NodeBool(True)) -> Ok(schema.Untyped)
-          Ok(yay.NodeBool(False)) -> Ok(schema.Forbidden)
-          Ok(ap_node) -> {
-            use sr <- result.try(parse_schema_ref(
-              ap_node,
-              path <> ".additionalProperties",
-              index,
-            ))
-            Ok(schema.Typed(sr))
-          }
-          // Per JSON Schema, absent additionalProperties means allowed
-          _ -> Ok(schema.Untyped)
-        },
-      )
-      let min_properties =
-        yay.extract_optional_int(node, "minProperties")
-        |> result.unwrap(None)
-      let max_properties =
-        yay.extract_optional_int(node, "maxProperties")
-        |> result.unwrap(None)
-      Ok(ObjectSchema(
-        metadata:,
-        properties:,
-        required:,
-        additional_properties:,
-        min_properties:,
-        max_properties:,
-      ))
-    }
-
-    unrecognized ->
-      Error(diagnostic.invalid_value(
-        path: path <> ".type",
-        detail: "Unrecognized schema type '"
-          <> unrecognized
-          <> "'. Supported types: string, integer, number, boolean, array, object.",
-        loc: location_index.lookup(index, path <> ".type"),
-      ))
-  }
-}
-
-/// Parse properties map from an object schema.
-fn parse_properties(
-  node: yay.Node,
-  path: String,
-  index: LocationIndex,
-) -> Result(Dict(String, SchemaRef), Diagnostic) {
-  case yay.select_sugar(from: node, selector: "properties") {
-    Ok(yay.NodeMap(entries)) -> {
-      list.try_fold(entries, dict.new(), fn(acc, entry) {
-        let #(key_node, value_node) = entry
-        case key_node {
-          yay.NodeStr(prop_name) -> {
-            use schema_ref <- result.try(parse_schema_ref(
-              value_node,
-              path <> "." <> prop_name,
-              index,
-            ))
-            Ok(dict.insert(acc, prop_name, schema_ref))
-          }
-          _ -> Ok(acc)
-        }
-      })
-    }
-    _ -> Ok(dict.new())
-  }
-}
-
-/// Parse discriminator from a node.
-fn parse_discriminator(
-  node: yay.Node,
-  index: LocationIndex,
-) -> Result(Discriminator, Diagnostic) {
-  use disc_node <- result.try(
-    yay.select_sugar(from: node, selector: "discriminator")
-    |> result.map_error(missing_field_from_selector(
-      _,
-      path: "schema",
-      field: "discriminator",
-      loc: location_index.lookup_field(index, "schema", "discriminator"),
-    )),
-  )
-
-  use property_name <- result.try(
-    yay.extract_string(disc_node, "propertyName")
-    |> result.map_error(missing_field_from_extraction(
-      _,
-      path: "discriminator",
-      field: "propertyName",
-      loc: location_index.lookup_field(index, "discriminator", "propertyName"),
-    )),
-  )
-
-  let mapping = case yay.extract_string_map(disc_node, "mapping") {
-    Ok(m) -> m
-    _ -> dict.new()
-  }
-
-  Ok(Discriminator(property_name:, mapping:))
-}
-
 /// Convert a parse error to a human-readable string.
 pub fn parse_error_to_string(error: Diagnostic) -> String {
   diagnostic.to_short_string(error)
@@ -1660,7 +1188,7 @@ fn parse_security_scheme(
 ) -> Result(spec.SecurityScheme, Diagnostic) {
   use type_str <- result.try(
     yay.extract_string(node, "type")
-    |> result.map_error(missing_field_from_extraction(
+    |> result.map_error(parser_error.missing_field_from_extraction(
       _,
       path: "securityScheme",
       field: "type",
@@ -1672,7 +1200,7 @@ fn parse_security_scheme(
     "apiKey" -> {
       use name <- result.try(
         yay.extract_string(node, "name")
-        |> result.map_error(missing_field_from_extraction(
+        |> result.map_error(parser_error.missing_field_from_extraction(
           _,
           path: "securityScheme.apiKey",
           field: "name",
@@ -1685,7 +1213,7 @@ fn parse_security_scheme(
       )
       use in_str <- result.try(
         yay.extract_string(node, "in")
-        |> result.map_error(missing_field_from_extraction(
+        |> result.map_error(parser_error.missing_field_from_extraction(
           _,
           path: "securityScheme.apiKey",
           field: "in",
@@ -1707,7 +1235,7 @@ fn parse_security_scheme(
     "http" -> {
       use scheme <- result.try(
         yay.extract_string(node, "scheme")
-        |> result.map_error(missing_field_from_extraction(
+        |> result.map_error(parser_error.missing_field_from_extraction(
           _,
           path: "securityScheme.http",
           field: "scheme",
@@ -1736,7 +1264,7 @@ fn parse_security_scheme(
         |> result.unwrap(None)
       use open_id_connect_url <- result.try(
         yay.extract_string(node, "openIdConnectUrl")
-        |> result.map_error(missing_field_from_extraction(
+        |> result.map_error(parser_error.missing_field_from_extraction(
           _,
           path: "securityScheme.openIdConnect",
           field: "openIdConnectUrl",
@@ -2158,7 +1686,7 @@ fn parse_content_map(
             use mt_schema <- result.try(
               case yay.select_sugar(from: value_node, selector: "schema") {
                 Ok(schema_node) -> {
-                  use sr <- result.try(parse_schema_ref(
+                  use sr <- result.try(parser_schema.parse_schema_ref(
                     schema_node,
                     "content.schema",
                     index,
@@ -2252,7 +1780,7 @@ fn parse_headers_map(
             use hdr_schema <- result.try(
               case yay.select_sugar(from: value_node, selector: "schema") {
                 Ok(schema_node) -> {
-                  use sr <- result.try(parse_schema_ref(
+                  use sr <- result.try(parser_schema.parse_schema_ref(
                     schema_node,
                     "header." <> header_name <> ".schema",
                     index,
