@@ -282,12 +282,14 @@ paths: {}
 }
 
 pub fn parse_rejects_bare_openapi_3_test() {
-  // YAML-integer `openapi: 3` should also be rejected (the parser
-  // stringifies it to "3"), since oaspec cannot infer whether this is
-  // 3.0.x or 3.1.x.
+  // A bare quoted `"3"` cannot tell us whether the spec was authored
+  // against 3.0.x or 3.1.x, so it is rejected. (An unquoted `openapi: 3`
+  // is parsed as a YAML integer, coerced to the float 3.0, and
+  // normalized to the string "3.0" — which is an explicitly accepted
+  // two-segment form, so that case does NOT error.)
   let yaml =
     "
-openapi: 3
+openapi: \"3\"
 info:
   title: Ambiguous API
   version: 1.0.0
@@ -295,6 +297,7 @@ paths: {}
 "
   let result = parser.parse_string(yaml)
   should.be_error(result)
+  let assert Error(Diagnostic(code: "invalid_value", ..)) = result
 }
 
 pub fn parse_accepts_openapi_3_0_3_test() {
