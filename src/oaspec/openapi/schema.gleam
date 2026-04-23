@@ -202,7 +202,7 @@ pub fn get_provenance(schema: SchemaObject) -> OriginKind {
 }
 
 /// Replace the metadata on a schema object.
-fn set_metadata(schema: SchemaObject, meta: SchemaMetadata) -> SchemaObject {
+pub fn set_metadata(schema: SchemaObject, meta: SchemaMetadata) -> SchemaObject {
   case schema {
     StringSchema(format:, enum_values:, min_length:, max_length:, pattern:, ..) ->
       StringSchema(

@@ -11,7 +11,7 @@ Generate usable Gleam code from OpenAPI 3.x specifications.
 - Generate client and server-side modules from a single spec
 - Produce readable Gleam types, encoders, decoders, request types, and response types
 - Handle real-world OpenAPI patterns: unions, nullable fields, `additionalProperties`, form bodies, multipart, and security
-- Backed by 726 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 228 test fixtures (including 94 OSS-derived edge-case specs)
+- Backed by 729 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 229 test fixtures (including 94 OSS-derived edge-case specs)
 
 ## Why oaspec?
 
@@ -343,8 +343,9 @@ These boundaries are generated from the capability registry in `src/oaspec/capab
 
 These are the most important limitations today:
 
-- The following keywords are detected and rejected: `$defs`, `prefixItems`, `if/then/else`, `dependentSchemas`, `not`, `unevaluatedProperties`, `unevaluatedItems`, `contentEncoding`, `contentMediaType`, `contentSchema`, `mutualTLS`, `$id`
+- The following keywords are detected and rejected: `$defs`, `prefixItems`, `if/then/else`, `dependentSchemas`, `not`, `unevaluatedProperties`, `unevaluatedItems`, `contentEncoding`, `contentMediaType`, `contentSchema`, `mutualTLS`, `$id`, `const (non-string)`, `type: [T1, T2] with type-specific constraints`
 - OpenAPI 3.1 `$id`-backed URL refs (e.g. `$ref: https://example.com/Box` paired with `$id: https://example.com/Box` inside `components.schemas`) are an explicit boundary: the parser accepts them, but validation rejects them with a dedicated URL-ref diagnostic. Rewrite to local `#/components/schemas/...` refs.
+- `const` is only supported on string schemas (lowered to a single-value enum). Non-string `const` (bool, int, number, object, array, null) and multi-type schemas that carry type-specific constraints (`pattern`, `minLength`, `minimum`, etc.) are rejected explicitly during `generate` / `validate` so semantic loss never slips into generated code.
 - `xml` annotations are not handled by the parser
 - Some fields are parsed and preserved but not yet used by codegen: callbacks, webhooks, externalDocs, tags, examples, links, encoding
 - Operation-level and path-level server overrides are supported in generated clients (precedence: operation > path > top-level)

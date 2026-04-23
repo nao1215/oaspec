@@ -11119,6 +11119,86 @@ pub fn normalize_preserves_non_string_const_test() {
   int_meta.const_value |> should.equal(Some(value.JsonInt(42)))
 }
 
+/// Issue #238: a non-string `const` cannot be represented as a Gleam
+/// enum, so normalize now marks the schema as carrying the unsupported
+/// keyword `const (non-string)` instead of silently dropping the
+/// restriction at codegen. capability_check must reject with a
+/// targeted diagnostic.
+pub fn normalize_flags_non_string_const_as_unsupported_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/normalize_const_types.yaml")
+  let normalized = normalize.normalize(spec)
+  let assert Some(components) = normalized.components
+  let assert Ok(schema.Inline(bool_schema)) =
+    dict.get(components.schemas, "BoolConst")
+  list.contains(
+    schema.get_metadata(bool_schema).unsupported_keywords,
+    "const (non-string)",
+  )
+  |> should.be_true()
+  let assert Ok(schema.Inline(int_schema)) =
+    dict.get(components.schemas, "IntConst")
+  list.contains(
+    schema.get_metadata(int_schema).unsupported_keywords,
+    "const (non-string)",
+  )
+  |> should.be_true()
+}
+
+/// Issue #238: non-string `const` must surface as a capability_check
+/// error during generate, not succeed silently.
+pub fn generate_rejects_non_string_const_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/normalize_const_types.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/normalize_const_types.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Both,
+      validate: False,
+    )
+  case generate.generate(spec, cfg) {
+    Error(generate.ValidationErrors(errors:)) -> {
+      let messages = list.map(errors, validate.error_to_string)
+      list.any(messages, fn(s) { string.contains(s, "const (non-string)") })
+      |> should.be_true()
+    }
+    Ok(_) -> should.fail()
+  }
+}
+
+/// Issue #238: a multi-type schema with type-specific constraints
+/// (here: `minLength`, `maxLength`, `pattern` on a `type: [string,
+/// integer]`) cannot be losslessly rewritten to oneOf, so normalize
+/// must flag it and capability_check must reject it.
+pub fn generate_rejects_multi_type_with_constraints_test() {
+  let assert Ok(spec) =
+    parser.parse_file(
+      "test/fixtures/normalize_multi_type_with_constraints.yaml",
+    )
+  let cfg =
+    config.new(
+      input: "test/fixtures/normalize_multi_type_with_constraints.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Both,
+      validate: False,
+    )
+  case generate.generate(spec, cfg) {
+    Error(generate.ValidationErrors(errors:)) -> {
+      let messages = list.map(errors, validate.error_to_string)
+      list.any(messages, fn(s) {
+        string.contains(s, "type: [T1, T2] with type-specific constraints")
+      })
+      |> should.be_true()
+    }
+    Ok(_) -> should.fail()
+  }
+}
+
 /// type: [string, integer] is normalized to oneOf by normalize pass.
 pub fn normalize_multi_type_to_oneof_test() {
   let assert Ok(spec) =

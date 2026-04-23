@@ -184,10 +184,11 @@ fn normalize_schema_ref(ref: SchemaRef) -> SchemaRef {
 }
 
 fn normalize_schema(schema_obj: SchemaObject) -> SchemaObject {
-  // 1. const_value -> single-value enum (string const only)
-  // Non-string const (bool, int, float, object, array, null) is preserved
-  // as-is in metadata — codegen doesn't support const for these types yet,
-  // and capability_check will warn about it.
+  // 1. const_value -> single-value enum (string const only).
+  // Non-string const (bool, int, float, object, array, null) cannot be
+  // represented as a Gleam enum, so flag it as unsupported. Previously
+  // the const was silently dropped and codegen emitted a bare
+  // `pub type BoolConst = Bool` that lost the const restriction (#238).
   let schema_obj = case schema_obj {
     StringSchema(metadata: meta, ..) ->
       case meta.const_value {
@@ -199,30 +200,46 @@ fn normalize_schema(schema_obj: SchemaObject) -> SchemaObject {
           )
         _ -> schema_obj
       }
-    _ -> schema_obj
+    _ ->
+      case schema.get_metadata(schema_obj).const_value {
+        Some(_) -> mark_unsupported(schema_obj, "const (non-string)")
+        None -> schema_obj
+      }
   }
 
-  // 2. raw_type with multiple types -> oneOf
+  // 2. raw_type with multiple types -> oneOf. If the primary schema
+  // carried type-specific constraints (pattern, minLength, minimum,
+  // enum, etc.) the `make_typed_schema` rewrite would silently drop
+  // them when it builds bare variants, so flag it instead (#238).
   let schema_obj = case schema.get_metadata(schema_obj).raw_type {
     Some(types) ->
       case list.length(types) > 1 {
         True -> {
           let meta = schema.get_metadata(schema_obj)
-          let type_schemas =
-            list.map(types, fn(t) {
-              Inline(make_typed_schema(
-                t,
-                SchemaMetadata(
-                  ..schema.default_metadata(),
-                  nullable: meta.nullable,
-                ),
-              ))
-            })
-          OneOfSchema(
-            metadata: SchemaMetadata(..meta, raw_type: None),
-            schemas: type_schemas,
-            discriminator: None,
-          )
+          case has_type_specific_constraints(schema_obj) {
+            True ->
+              mark_unsupported(
+                schema_obj,
+                "type: [T1, T2] with type-specific constraints",
+              )
+            False -> {
+              let type_schemas =
+                list.map(types, fn(t) {
+                  Inline(make_typed_schema(
+                    t,
+                    SchemaMetadata(
+                      ..schema.default_metadata(),
+                      nullable: meta.nullable,
+                    ),
+                  ))
+                })
+              OneOfSchema(
+                metadata: SchemaMetadata(..meta, raw_type: None),
+                schemas: type_schemas,
+                discriminator: None,
+              )
+            }
+          }
         }
         False -> schema_obj
       }
@@ -231,6 +248,65 @@ fn normalize_schema(schema_obj: SchemaObject) -> SchemaObject {
 
   // 3. Recurse into sub-schemas
   normalize_schema_children(schema_obj)
+}
+
+/// Add `keyword` to the schema's `unsupported_keywords` list so the
+/// downstream capability_check rejects the schema with a targeted error
+/// instead of silently dropping the constraint.
+fn mark_unsupported(schema_obj: SchemaObject, keyword: String) -> SchemaObject {
+  let meta = schema.get_metadata(schema_obj)
+  let new_meta =
+    SchemaMetadata(..meta, unsupported_keywords: [
+      keyword,
+      ..meta.unsupported_keywords
+    ])
+  schema.set_metadata(schema_obj, new_meta)
+}
+
+/// Does this primitive-typed schema carry any constraint that the
+/// multi-type `oneOf` rewrite would drop? Only type-specific constraints
+/// count — generic metadata like `nullable` or `description` is already
+/// preserved by the rewrite.
+fn has_type_specific_constraints(schema_obj: SchemaObject) -> Bool {
+  case schema_obj {
+    StringSchema(format:, enum_values:, min_length:, max_length:, pattern:, ..) ->
+      option.is_some(format)
+      || enum_values != []
+      || option.is_some(min_length)
+      || option.is_some(max_length)
+      || option.is_some(pattern)
+    IntegerSchema(
+      format:,
+      minimum:,
+      maximum:,
+      exclusive_minimum:,
+      exclusive_maximum:,
+      multiple_of:,
+      ..,
+    ) ->
+      option.is_some(format)
+      || option.is_some(minimum)
+      || option.is_some(maximum)
+      || option.is_some(exclusive_minimum)
+      || option.is_some(exclusive_maximum)
+      || option.is_some(multiple_of)
+    NumberSchema(
+      format:,
+      minimum:,
+      maximum:,
+      exclusive_minimum:,
+      exclusive_maximum:,
+      multiple_of:,
+      ..,
+    ) ->
+      option.is_some(format)
+      || option.is_some(minimum)
+      || option.is_some(maximum)
+      || option.is_some(exclusive_minimum)
+      || option.is_some(exclusive_maximum)
+      || option.is_some(multiple_of)
+    _ -> False
+  }
 }
 
 fn make_typed_schema(type_str: String, metadata: SchemaMetadata) -> SchemaObject {

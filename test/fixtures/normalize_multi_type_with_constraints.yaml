@@ -1,0 +1,14 @@
+openapi: "3.1.0"
+info:
+  title: Normalize Multi-Type With Constraints Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    LossyFlexibleId:
+      type:
+        - string
+        - integer
+      minLength: 3
+      maxLength: 64
+      pattern: "^[a-z0-9_-]+$"

@@ -105,6 +105,18 @@ pub fn registry() -> List(Capability) {
       Unsupported,
       "OpenAPI 3.1 JSON Schema `$id`-backed URL refs are not resolved; use local `#/components/schemas/...` refs instead",
     ),
+    Capability(
+      "const (non-string)",
+      "schema",
+      Unsupported,
+      "Only string `const` is lowered to a single-value enum; non-string `const` (bool, int, number, object, array, null) cannot be represented in generated code",
+    ),
+    Capability(
+      "type: [T1, T2] with type-specific constraints",
+      "schema",
+      Unsupported,
+      "Multi-type schemas are rewritten to `oneOf`, which would silently drop type-specific constraints (pattern, minLength, minimum, etc.). Split the schema into separate variants or drop the constraints",
+    ),
     // Security
     Capability("apiKey", "security", Supported, "Header, query, cookie"),
     Capability("http", "security", Supported, "Bearer, basic, and digest auth"),
