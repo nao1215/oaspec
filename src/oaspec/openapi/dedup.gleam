@@ -268,31 +268,40 @@ pub fn dedup_enum_variants(enum_values: List(String)) -> List(String) {
 
 /// Deduplicate a list of strings by appending "_2", "_3", etc. for duplicates.
 /// The chosen suffix skips any name that already appears elsewhere in the
-/// input, so a later literal `foo_2` cannot collide with a generated
-/// `foo_2` produced from the second `foo`.
+/// input (so a later literal `foo_2` keeps its label and an earlier
+/// duplicate `foo` advances to `foo_3`) and any suffix this call has
+/// already handed out, so the output has no collisions in either
+/// direction.
 fn deduplicate_strings(names: List(String)) -> List(String) {
+  let input_names =
+    list.fold(names, dict.new(), fn(acc, name) { dict.insert(acc, name, True) })
   let #(result_rev, _) =
     list.fold(names, #([], dict.new()), fn(acc, name) {
-      let #(result, used) = acc
-      let unique_name = next_unique_name(name, used, 1)
-      #([unique_name, ..result], dict.insert(used, unique_name, True))
+      let #(result, claimed) = acc
+      case dict.has_key(claimed, name) {
+        False -> #([name, ..result], dict.insert(claimed, name, True))
+        True -> {
+          let unique_name = next_unique_name(name, input_names, claimed, 2)
+          #([unique_name, ..result], dict.insert(claimed, unique_name, True))
+        }
+      }
     })
   list.reverse(result_rev)
 }
 
-/// Pick the first suffixed variant of `base` that is not already claimed.
-/// Suffix `1` means the raw name; higher suffixes append `_2`, `_3`, etc.
+/// Pick the first `base_<n>` suffix that collides neither with another
+/// literal input name nor with a name this call has already minted.
 fn next_unique_name(
   base: String,
-  used: Dict(String, Bool),
+  input_names: Dict(String, Bool),
+  claimed: Dict(String, Bool),
   suffix: Int,
 ) -> String {
-  let candidate = case suffix {
-    1 -> base
-    n -> base <> "_" <> int.to_string(n)
-  }
-  case dict.has_key(used, candidate) {
-    True -> next_unique_name(base, used, suffix + 1)
+  let candidate = base <> "_" <> int.to_string(suffix)
+  case
+    dict.has_key(input_names, candidate) || dict.has_key(claimed, candidate)
+  {
+    True -> next_unique_name(base, input_names, claimed, suffix + 1)
     False -> candidate
   }
 }
