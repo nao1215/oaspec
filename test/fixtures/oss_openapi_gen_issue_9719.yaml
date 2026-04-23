@@ -30,8 +30,8 @@ paths:
                 type: string
   /underscoreDelimiter:
     get:
-      summary: List all users
-      operationId: petstore_api_users_getAll
+      summary: List all admins (underscore-delimited variant)
+      operationId: petstore_api_admins_getAll
       tags:
         - users
       responses:

@@ -975,12 +975,64 @@ pub fn validate_deep_additional_properties_in_response_test() {
   |> should.be_false()
 }
 
-pub fn dedup_resolves_duplicate_operation_id_test() {
+pub fn validate_rejects_duplicate_operation_id_test() {
+  // Issue #237: duplicate operationIds must fail validation with a clear
+  // diagnostic that names every site that claimed the colliding ID.
+  // (Previously the dedup pass silently renamed the second occurrence,
+  // mutating the generated public API surface without notifying the
+  // user.)
+  let ctx = make_ctx("test/fixtures/error_duplicate_operation_id.yaml")
+  let errors = validate.validate(ctx)
+  let messages = list.map(errors, validate.error_to_string)
+  list.any(messages, fn(s) { string.contains(s, "Duplicate operationId") })
+  |> should.be_true()
+  list.any(messages, fn(s) { string.contains(s, "listItems") })
+  |> should.be_true()
+  list.any(messages, fn(s) {
+    string.contains(s, "GET /users") && string.contains(s, "GET /items")
+  })
+  |> should.be_true()
+}
+
+pub fn validate_rejects_operation_ids_colliding_after_snake_case_test() {
+  // Two operationIds that differ only in case (listItems vs list_items)
+  // collapse to the same snake_case function name in generated code.
+  // That collision must fail validation even though the raw IDs differ.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Case Collision
+  version: 1.0.0
+paths:
+  /a:
+    get:
+      operationId: listItems
+      responses:
+        '200': { description: ok }
+  /b:
+    get:
+      operationId: list_items
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  let messages = list.map(errors, validate.error_to_string)
+  list.any(messages, fn(s) {
+    string.contains(s, "list_items") && string.contains(s, "generated function")
+  })
+  |> should.be_true()
+}
+
+pub fn validate_accepts_unique_operation_ids_test() {
+  // Sanity check: a well-formed spec with unique operationIds must not
+  // produce any duplicate-operationId diagnostic.
   let ctx = make_ctx("test/fixtures/collision.yaml")
   let errors = validate.validate(ctx)
-  // No duplicate operationId errors since dedup resolved them
-  let error_strings = list.map(errors, validate.error_to_string)
-  list.any(error_strings, fn(s) { string.contains(s, "Duplicate operationId") })
+  let messages = list.map(errors, validate.error_to_string)
+  list.any(messages, fn(s) { string.contains(s, "Duplicate operationId") })
   |> should.be_false()
 }
 
@@ -11482,9 +11534,10 @@ pub fn error_invalid_json_as_yaml_parsed_but_may_fail_test() {
 }
 
 pub fn error_duplicate_operation_id_parses_test() {
-  // Duplicate operationId is parsed without error; oaspec currently does not
-  // validate operationId uniqueness (the OpenAPI spec requires it, but oaspec
-  // treats them as independent labels). This test verifies the spec parses.
+  // The parser accepts a spec with duplicate operationIds — the uniqueness
+  // constraint is surfaced as a validation error (see issue #237 and
+  // `validate_rejects_duplicate_operation_id_test`), not a parse failure,
+  // so tooling can still load and inspect the broken spec.
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/error_duplicate_operation_id.yaml")
   dict.size(spec.paths) |> should.equal(2)

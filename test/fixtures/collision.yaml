@@ -23,7 +23,7 @@ paths:
           description: ok
   /admins/{id}:
     get:
-      operationId: getUser
+      operationId: getAdmin
       parameters:
         - name: id
           in: path
