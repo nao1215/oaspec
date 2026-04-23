@@ -186,6 +186,163 @@ pub fn parse_file_not_found_test() {
   should.be_error(result)
 }
 
+// --- OpenAPI version gate (issue #235) ---
+//
+// oaspec advertises itself as an OpenAPI 3.x parser/generator. Feeding it a
+// spec with a version it cannot actually support (Swagger 2.0, a future
+// 4.x, or a bare "3") would produce plausible-looking but meaningless
+// output, so the parser rejects anything outside 3.0.x / 3.1.x up front.
+
+pub fn parse_rejects_openapi_2_0_test() {
+  let yaml =
+    "
+openapi: 2.0
+info:
+  title: Wrong API
+  version: 1.0.0
+paths: {}
+"
+  let result = parser.parse_string(yaml)
+  should.be_error(result)
+  let assert Error(Diagnostic(code: "invalid_value", message: detail, ..)) =
+    result
+  string.contains(detail, "Unsupported OpenAPI version") |> should.be_true()
+  string.contains(detail, "2.0") |> should.be_true()
+}
+
+pub fn parse_rejects_openapi_4_0_0_test() {
+  let yaml =
+    "
+openapi: 4.0.0
+info:
+  title: Future API
+  version: 1.0.0
+paths: {}
+"
+  let result = parser.parse_string(yaml)
+  should.be_error(result)
+  let assert Error(Diagnostic(code: "invalid_value", message: detail, ..)) =
+    result
+  string.contains(detail, "Unsupported OpenAPI version") |> should.be_true()
+  string.contains(detail, "4.0.0") |> should.be_true()
+}
+
+pub fn parse_rejects_openapi_3_2_0_test() {
+  // An as-yet-unreleased 3.2 must not sneak through a "starts with 3"
+  // check. oaspec only supports 3.0.x and 3.1.x.
+  let yaml =
+    "
+openapi: 3.2.0
+info:
+  title: Future Minor API
+  version: 1.0.0
+paths: {}
+"
+  let result = parser.parse_string(yaml)
+  should.be_error(result)
+  let assert Error(Diagnostic(
+    code: "invalid_value",
+    pointer: "openapi",
+    message: detail,
+    ..,
+  )) = result
+  string.contains(detail, "Unsupported OpenAPI version") |> should.be_true()
+  string.contains(detail, "3.2.0") |> should.be_true()
+}
+
+pub fn parse_rejects_malformed_patch_segment_test() {
+  // A non-numeric patch must be rejected — if we let `3.0.foo` through,
+  // the "exact accepted range" promise stops being exact.
+  let yaml =
+    "
+openapi: 3.0.foo
+info:
+  title: Garbage Patch API
+  version: 1.0.0
+paths: {}
+"
+  let result = parser.parse_string(yaml)
+  should.be_error(result)
+  let assert Error(Diagnostic(code: "invalid_value", ..)) = result
+}
+
+pub fn parse_rejects_openapi_with_extra_segment_test() {
+  // More than three segments is not a valid SemVer-ish form.
+  let yaml =
+    "
+openapi: 3.0.0.1
+info:
+  title: Over-Segmented API
+  version: 1.0.0
+paths: {}
+"
+  let result = parser.parse_string(yaml)
+  should.be_error(result)
+  let assert Error(Diagnostic(code: "invalid_value", ..)) = result
+}
+
+pub fn parse_rejects_bare_openapi_3_test() {
+  // A bare quoted `"3"` cannot tell us whether the spec was authored
+  // against 3.0.x or 3.1.x, so it is rejected. (An unquoted `openapi: 3`
+  // is parsed as a YAML integer, coerced to the float 3.0, and
+  // normalized to the string "3.0" — which is an explicitly accepted
+  // two-segment form, so that case does NOT error.)
+  let yaml =
+    "
+openapi: \"3\"
+info:
+  title: Ambiguous API
+  version: 1.0.0
+paths: {}
+"
+  let result = parser.parse_string(yaml)
+  should.be_error(result)
+  let assert Error(Diagnostic(code: "invalid_value", ..)) = result
+}
+
+pub fn parse_accepts_openapi_3_0_3_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: API
+  version: 1.0.0
+paths: {}
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  spec.openapi |> should.equal("3.0.3")
+}
+
+pub fn parse_accepts_openapi_3_1_0_test() {
+  let yaml =
+    "
+openapi: 3.1.0
+info:
+  title: API
+  version: 1.0.0
+paths: {}
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  spec.openapi |> should.equal("3.1.0")
+}
+
+pub fn parse_accepts_openapi_3_0_from_yaml_float_test() {
+  // YAML numbers like `openapi: 3.0` arrive as the float 3.0 and get
+  // normalized to the string "3.0". That two-segment form must still
+  // parse so existing specs that rely on YAML float semantics keep
+  // working.
+  let yaml =
+    "
+openapi: 3.0
+info:
+  title: API
+  version: 1.0.0
+paths: {}
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  spec.openapi |> should.equal("3.0")
+}
+
 pub fn parse_secure_api_has_security_schemes_test() {
   let assert Ok(spec) = parser.parse_file("test/fixtures/secure_api.yaml")
   let assert Some(components) = spec.components

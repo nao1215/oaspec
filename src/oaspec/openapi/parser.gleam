@@ -114,6 +114,11 @@ fn parse_root(
     )),
   )
 
+  use _ <- result.try(validate_openapi_version(
+    openapi,
+    location_index.lookup_field(index, "", "openapi"),
+  ))
+
   use info <- result.try(parse_info(node, index))
 
   // Parse components FIRST so we can resolve $ref during path parsing.
@@ -142,6 +147,41 @@ fn parse_root(
     external_docs:,
     json_schema_dialect:,
   ))
+}
+
+/// Reject spec files whose `openapi` field is not in the supported 3.0.x /
+/// 3.1.x range. OpenAPI 3.x is what oaspec claims to generate from, so
+/// accepting 2.0 or 4.0.0 would let users feed specs that are either
+/// subtly or grossly incompatible with the generator.
+fn validate_openapi_version(
+  version: String,
+  loc: diagnostic.SourceLoc,
+) -> Result(Nil, Diagnostic) {
+  use <- bool.guard(is_supported_openapi_version(version), Ok(Nil))
+  Error(diagnostic.invalid_value(
+    path: "openapi",
+    detail: "Unsupported OpenAPI version: '"
+      <> version
+      <> "'. oaspec only supports OpenAPI 3.0.x and 3.1.x.",
+    loc: loc,
+  ))
+}
+
+fn is_supported_openapi_version(version: String) -> Bool {
+  case string.split(version, ".") {
+    // Three-segment form: major.minor.patch. The patch must be a
+    // non-negative integer — `3.0.foo`, `3.0.-1`, and `3.0.0.1` must all
+    // fail so the "exact accepted range" guarantee holds.
+    ["3", "0", patch] | ["3", "1", patch] ->
+      case int.parse(patch) {
+        Ok(n) if n >= 0 -> True
+        _ -> False
+      }
+    // Two-segment "3.0" / "3.1" is tolerated: float-parsed YAML numbers
+    // like `openapi: 3.0` arrive as "3.0" after normalization.
+    ["3", "0"] | ["3", "1"] -> True
+    _ -> False
+  }
 }
 
 /// Parse optional components section.

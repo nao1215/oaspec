@@ -11,7 +11,7 @@ Generate usable Gleam code from OpenAPI 3.x specifications.
 - Generate client and server-side modules from a single spec
 - Produce readable Gleam types, encoders, decoders, request types, and response types
 - Handle real-world OpenAPI patterns: unions, nullable fields, `additionalProperties`, form bodies, multipart, and security
-- Backed by 707 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 223 test fixtures (including 94 OSS-derived edge-case specs)
+- Backed by 716 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 223 test fixtures (including 94 OSS-derived edge-case specs)
 
 ## Why oaspec?
 
@@ -318,7 +318,7 @@ oaspec generate --config=oaspec.yaml --check --fail-on-warnings
 
 ## OpenAPI Support
 
-`oaspec` supports OpenAPI 3.0.x and a practical subset of OpenAPI 3.1 in YAML or JSON.
+`oaspec` supports OpenAPI 3.0.x and a practical subset of OpenAPI 3.1.x in YAML or JSON. For compatibility, the parser also accepts the two-segment forms `3.0` / `3.1`, including YAML numeric values such as `openapi: 3.0` that arrive as the float `3.0`. Any other `openapi` value — for example `2.0`, `4.0.0`, a bare `3`, or a malformed `3.0.foo` — is rejected with an `invalid_value` diagnostic so unsupported versions fail fast instead of producing plausible-looking but meaningless output.
 
 Coverage is strongest in these areas:
 
