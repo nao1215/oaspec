@@ -915,6 +915,7 @@ fn make_security_ctx(
       headers: dict.new(),
       examples: dict.new(),
       links: dict.new(),
+      callbacks: dict.new(),
     )
   let test_spec =
     spec.OpenApiSpec(

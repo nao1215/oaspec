@@ -1011,16 +1011,18 @@ fn rewrite_operation(
 /// Walk `operation.callbacks`: for each callback, rewrite every inline
 /// PathItem in its `entries` dict via the same `rewrite_path_item`
 /// helper used at the top level. `Ref` entries pointing at external
-/// PathItem objects pass through unchanged.
+/// PathItem objects pass through unchanged, and now so do top-level
+/// `Ref` callback entries (e.g. `myEvent: { $ref: '#/components/callbacks/foo' }`),
+/// which we keep as refs rather than inlining.
 fn rewrite_callback_map(
-  callbacks: dict.Dict(String, spec.Callback(Unresolved)),
+  callbacks: dict.Dict(String, spec.RefOr(spec.Callback(Unresolved))),
   base_dir: String,
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   imports: dict.Dict(String, #(String, SchemaRef)),
   original_local_names: List(String),
 ) -> Result(
   #(
-    dict.Dict(String, spec.Callback(Unresolved)),
+    dict.Dict(String, spec.RefOr(spec.Callback(Unresolved))),
     dict.Dict(String, #(String, SchemaRef)),
   ),
   Diagnostic,
@@ -1029,16 +1031,23 @@ fn rewrite_callback_map(
   use #(rewritten, new_imports) <- result.try(
     list.try_fold(entries, #([], imports), fn(acc, entry) {
       let #(collected, imports) = acc
-      let #(name, callback) = entry
-      use #(new_entries, new_imports) <- result.try(rewrite_callback_entries(
-        callback.entries,
-        base_dir,
-        parse_file,
-        imports,
-        original_local_names,
-      ))
-      let new_callback = spec.Callback(entries: new_entries)
-      Ok(#([#(name, new_callback), ..collected], new_imports))
+      let #(name, ref_or_callback) = entry
+      case ref_or_callback {
+        spec.Ref(_) as r -> Ok(#([#(name, r), ..collected], imports))
+        spec.Value(callback) -> {
+          use #(new_entries, new_imports) <- result.try(
+            rewrite_callback_entries(
+              callback.entries,
+              base_dir,
+              parse_file,
+              imports,
+              original_local_names,
+            ),
+          )
+          let new_callback = spec.Value(spec.Callback(entries: new_entries))
+          Ok(#([#(name, new_callback), ..collected], new_imports))
+        }
+      }
     }),
   )
   let new_callbacks =

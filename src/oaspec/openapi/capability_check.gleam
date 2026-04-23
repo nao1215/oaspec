@@ -411,10 +411,41 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
           ),
         ]
       }
-      list.flatten([header_w, example_w, link_w])
+      let callback_w = case dict.is_empty(components.callbacks) {
+        True -> []
+        False -> [
+          diagnostic.capability(
+            severity: SeverityWarning,
+            target: TargetBoth,
+            path: "components.callbacks",
+            detail: "Component callbacks are parsed and preserved but not used by code generation.",
+            hint: Some(
+              "Callback endpoints will not appear in generated code. No action needed unless you expected handler stubs for them.",
+            ),
+          ),
+        ]
+      }
+      list.flatten([header_w, example_w, link_w, callback_w])
     }
     None -> []
   }
+  let operation_callback_warnings =
+    list.filter_map(ops, fn(op) {
+      let #(op_id, operation, _path, _method) = op
+      case dict.is_empty(operation.callbacks) {
+        True -> Error(Nil)
+        False ->
+          Ok(diagnostic.capability(
+            severity: SeverityWarning,
+            target: TargetBoth,
+            path: op_id <> ".callbacks",
+            detail: "Operation-level callbacks are parsed and preserved but not used by code generation.",
+            hint: Some(
+              "The callback endpoints listed here will not appear in generated server/client code. No action needed unless you expected handler stubs.",
+            ),
+          ))
+      }
+    })
   list.flatten([
     webhook_warnings,
     response_warnings,
@@ -424,5 +455,6 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
     operation_server_warnings,
     path_server_warnings,
     component_warnings,
+    operation_callback_warnings,
   ])
 }

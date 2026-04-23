@@ -197,6 +197,7 @@ pub fn resolve_circular_component_alias_error_test() {
       headers: dict.new(),
       examples: dict.new(),
       links: dict.new(),
+      callbacks: dict.new(),
     )
   let test_spec =
     spec.OpenApiSpec(
@@ -248,6 +249,7 @@ pub fn resolve_unresolved_ref_target_error_test() {
       headers: dict.new(),
       examples: dict.new(),
       links: dict.new(),
+      callbacks: dict.new(),
     )
   let test_spec =
     spec.OpenApiSpec(
@@ -299,6 +301,7 @@ pub fn resolve_wrong_kind_ref_in_parameter_position_error_test() {
       headers: dict.new(),
       examples: dict.new(),
       links: dict.new(),
+      callbacks: dict.new(),
     )
   let operation =
     spec.Operation(
@@ -379,6 +382,7 @@ pub fn resolve_wrong_kind_ref_in_request_body_position_error_test() {
       headers: dict.new(),
       examples: dict.new(),
       links: dict.new(),
+      callbacks: dict.new(),
     )
   let operation =
     spec.Operation(
@@ -458,6 +462,7 @@ pub fn resolve_unresolved_inline_response_ref_error_test() {
       headers: dict.new(),
       examples: dict.new(),
       links: dict.new(),
+      callbacks: dict.new(),
     )
   let operation =
     spec.Operation(
@@ -543,6 +548,7 @@ pub fn resolve_unresolved_path_item_ref_error_test() {
       headers: dict.new(),
       examples: dict.new(),
       links: dict.new(),
+      callbacks: dict.new(),
     )
   let test_spec =
     spec.OpenApiSpec(
@@ -593,6 +599,7 @@ pub fn resolve_wrong_kind_path_item_ref_error_test() {
       headers: dict.new(),
       examples: dict.new(),
       links: dict.new(),
+      callbacks: dict.new(),
     )
   let test_spec =
     spec.OpenApiSpec(
@@ -648,6 +655,7 @@ pub fn resolve_three_way_circular_alias_error_test() {
       headers: dict.new(),
       examples: dict.new(),
       links: dict.new(),
+      callbacks: dict.new(),
     )
   let test_spec =
     spec.OpenApiSpec(

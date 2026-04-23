@@ -137,6 +137,7 @@ pub type Components(stage) {
     headers: Dict(String, Header),
     examples: Dict(String, JsonValue),
     links: Dict(String, Link),
+    callbacks: Dict(String, RefOr(Callback(stage))),
   )
 }
 
@@ -227,7 +228,7 @@ pub type Operation(stage) {
     responses: Dict(http.HttpStatusCode, RefOr(Response(stage))),
     deprecated: Bool,
     security: Option(List(SecurityRequirement)),
-    callbacks: Dict(String, Callback(stage)),
+    callbacks: Dict(String, RefOr(Callback(stage))),
     servers: List(Server),
     external_docs: Option(ExternalDoc),
   )
