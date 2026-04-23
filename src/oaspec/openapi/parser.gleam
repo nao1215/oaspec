@@ -1059,12 +1059,9 @@ fn parse_components_callbacks_map(
         let #(key_node, value_node) = entry
         case key_node {
           yay.NodeStr(name) -> {
-            case
-              yay.extract_optional_string(value_node, "$ref")
-              |> result.unwrap(None)
-            {
-              Some(ref_str) -> Ok(dict.insert(acc, name, Ref(ref_str)))
-              None -> {
+            case yay.extract_optional_string(value_node, "$ref") {
+              Ok(Some(ref_str)) -> Ok(dict.insert(acc, name, Ref(ref_str)))
+              Ok(None) -> {
                 use callback <- result.try(parse_callback_object(
                   value_node,
                   "components.callbacks." <> name,
@@ -1073,6 +1070,16 @@ fn parse_components_callbacks_map(
                 ))
                 Ok(dict.insert(acc, name, Value(callback)))
               }
+              Error(_) ->
+                Error(diagnostic.invalid_value(
+                  path: "components.callbacks." <> name <> ".$ref",
+                  detail: "`$ref` under a reusable callback must be a string pointing at '#/components/callbacks/...'.",
+                  loc: location_index.lookup_field(
+                    index,
+                    "components.callbacks." <> name,
+                    "$ref",
+                  ),
+                ))
             }
           }
           _ -> Ok(acc)
@@ -1537,12 +1544,10 @@ fn parse_callbacks(
           yay.NodeStr(callback_name) -> {
             // A top-level `$ref` here means the operation is pointing
             // at a reusable callback object — keep it as Ref.
-            case
-              yay.extract_optional_string(value_node, "$ref")
-              |> result.unwrap(None)
-            {
-              Some(ref_str) -> Ok(dict.insert(acc, callback_name, Ref(ref_str)))
-              None -> {
+            case yay.extract_optional_string(value_node, "$ref") {
+              Ok(Some(ref_str)) ->
+                Ok(dict.insert(acc, callback_name, Ref(ref_str)))
+              Ok(None) -> {
                 use callback <- result.try(parse_callback_object(
                   value_node,
                   context,
@@ -1551,6 +1556,16 @@ fn parse_callbacks(
                 ))
                 Ok(dict.insert(acc, callback_name, Value(callback)))
               }
+              Error(_) ->
+                Error(diagnostic.invalid_value(
+                  path: context <> ".callbacks." <> callback_name <> ".$ref",
+                  detail: "`$ref` under a callback entry must be a string pointing at '#/components/callbacks/...'.",
+                  loc: location_index.lookup_field(
+                    index,
+                    context <> ".callbacks." <> callback_name,
+                    "$ref",
+                  ),
+                ))
             }
           }
           _ -> Ok(acc)

@@ -394,10 +394,11 @@ fn resolve_inline_operation(
   )
 }
 
-/// Resolve a `RefOr(Callback)`: top-level `$ref` entries are validated
-/// against `components.callbacks` and kept as `Ref` so downstream
-/// passes can recognise reusable-callback references; inline `Value`
-/// entries have their URL→PathItem entries recursively resolved.
+/// Resolve a `RefOr(Callback)`: top-level `$ref` entries are walked
+/// through `components.callbacks` — aliases (`Foo -> Ref(Bar)`) are
+/// allowed up to a small bound, but the chain must eventually land on
+/// a concrete `Value(Callback)`. Cycles, dangling targets, and
+/// non-callback refs become a single `invalid_value` diagnostic.
 fn resolve_callback_ref(
   ref_or: RefOr(Callback(stage)),
   path: String,
@@ -405,26 +406,53 @@ fn resolve_callback_ref(
 ) -> Result(RefOr(Callback(stage)), List(Diagnostic)) {
   case ref_or {
     Ref(ref_str) ->
-      validate_ref_kind(ref_str, "#/components/callbacks/", "paths." <> path)
-      |> result.try(fn(ref_name) {
-        case dict.get(components.callbacks, ref_name) {
-          Ok(_) -> Ok(Ref(ref_str))
-          Error(_) ->
-            Error(diagnostic.invalid_value(
-              path: "paths." <> path <> ".callbacks",
-              detail: "Callback $ref '"
-                <> ref_str
-                <> "' does not resolve to an entry in components.callbacks.",
-              loc: diagnostic.NoSourceLoc,
-            ))
-        }
-      })
+      follow_callback_ref_chain(ref_str, path, components, [])
+      |> result.map(fn(_) { Ref(ref_str) })
       |> result.map_error(fn(e) { [e] })
     Value(cb) ->
       case resolve_inline_callback(cb, path, components) {
         Ok(resolved) -> Ok(Value(resolved))
         Error(errs) -> Error(errs)
       }
+  }
+}
+
+/// Walk a callback `$ref` chain until it lands on `Value(Callback)`,
+/// refusing cycles and nonsensical targets. `seen` is the list of ref
+/// strings we have already visited on this chain.
+fn follow_callback_ref_chain(
+  ref_str: String,
+  path: String,
+  components: Components(stage),
+  seen: List(String),
+) -> Result(Nil, Diagnostic) {
+  use <- bool.guard(
+    list.contains(seen, ref_str),
+    Error(diagnostic.invalid_value(
+      path: "paths." <> path <> ".callbacks",
+      detail: "Callback $ref chain is cyclic; visited: "
+        <> string.join(list.reverse([ref_str, ..seen]), " -> ")
+        <> ".",
+      loc: diagnostic.NoSourceLoc,
+    )),
+  )
+  use ref_name <- result.try(validate_ref_kind(
+    ref_str,
+    "#/components/callbacks/",
+    "paths." <> path,
+  ))
+  case dict.get(components.callbacks, ref_name) {
+    Ok(Value(_)) -> Ok(Nil)
+    Ok(Ref(next_ref)) ->
+      follow_callback_ref_chain(next_ref, path, components, [ref_str, ..seen])
+    Error(_) ->
+      Error(diagnostic.invalid_value(
+        path: "paths." <> path <> ".callbacks",
+        detail: "Callback $ref '"
+          <> ref_str
+          <> "' does not resolve to an entry in components.callbacks.",
+        loc: diagnostic.NoSourceLoc,
+      ))
   }
 }
 

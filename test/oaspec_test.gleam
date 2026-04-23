@@ -10396,12 +10396,51 @@ components:
   }
 }
 
+/// Issue #232: a cyclic callback $ref chain
+/// (components.callbacks.A -> B -> A) must be detected at resolve time
+/// instead of being accepted as "exists in components".
+pub fn validate_rejects_cyclic_callback_ref_chain_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Cyclic Callback Ref
+  version: 1.0.0
+paths:
+  /register:
+    post:
+      operationId: subscribe
+      responses:
+        '200': { description: ok }
+      callbacks:
+        myEvent:
+          $ref: '#/components/callbacks/A'
+components:
+  callbacks:
+    A:
+      $ref: '#/components/callbacks/B'
+    B:
+      $ref: '#/components/callbacks/A'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  case resolve.resolve(spec) {
+    Error(errors) -> {
+      let messages = list.map(errors, validate.error_to_string)
+      list.any(messages, fn(s) { string.contains(s, "cyclic") })
+      |> should.be_true()
+    }
+    Ok(_) -> should.fail()
+  }
+}
+
 /// Issue #232: both operation-level and components.callbacks must emit
-/// `ParsedNotUsed` capability warnings so users are not misled into
-/// thinking callbacks are code-generated.
+/// `ParsedNotUsed` capability warnings (not errors) so users are not
+/// misled into thinking callbacks are code-generated.
 pub fn capability_check_warns_on_callbacks_test() {
   let ctx = make_ctx("test/fixtures/oss_swagger_parser_java_callback_ref.yaml")
-  let warnings = capability_check.check_preserved(ctx)
+  let warnings =
+    capability_check.check_preserved(ctx)
+    |> validate.warnings_only
   let messages = list.map(warnings, validate.error_to_string)
   list.any(messages, fn(s) {
     string.contains(s, "Operation-level callbacks")
