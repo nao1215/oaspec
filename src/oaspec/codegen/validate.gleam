@@ -1,4 +1,4 @@
-import gleam/dict
+import gleam/dict.{type Dict}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/regexp
@@ -18,17 +18,107 @@ import oaspec/openapi/schema.{
 import oaspec/openapi/spec.{type Resolved}
 import oaspec/util/content_type
 import oaspec/util/http
+import oaspec/util/naming
 
 /// Validate the parsed spec for unsupported patterns.
 /// Returns a list of errors; empty list means validation passed.
-/// Name collisions and duplicate operationIds are handled by the dedup pass
-/// before validation, so they are no longer checked here.
+///
+/// operationId uniqueness is enforced here with a hard error (issue #237):
+/// silently renaming duplicates would mutate the generated public API
+/// surface without telling the user, which is worse than failing the spec.
 pub fn validate(ctx: Context) -> List(Diagnostic) {
   let operations = operations.collect_operations(ctx)
   let op_errors = validate_operations(ctx, operations)
+  let opid_errors = validate_unique_operation_ids(operations)
   let schema_errors = validate_component_schemas(ctx)
   let security_errors = validate_security_schemes(ctx, operations)
-  list.flatten([op_errors, schema_errors, security_errors])
+  list.flatten([op_errors, opid_errors, schema_errors, security_errors])
+}
+
+/// Fail the spec if two operations end up sharing an operationId, either
+/// literally or after snake_case conversion to the generated function
+/// name. Returns one diagnostic per distinct colliding name, listing all
+/// `METHOD /path` sites that claimed it.
+fn validate_unique_operation_ids(
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+) -> List(Diagnostic) {
+  let literal = group_operations_by_id(operations, fn(op_id) { op_id })
+  let by_function =
+    group_operations_by_id(operations, naming.operation_to_function_name)
+
+  let literal_errors =
+    dict.to_list(literal)
+    |> list.filter_map(fn(entry) {
+      let #(op_id, sites) = entry
+      case sites {
+        [_, _, ..] -> Ok(duplicate_operation_id_diagnostic(op_id, sites))
+        _ -> Error(Nil)
+      }
+    })
+
+  // A spec with "listItems" and "list_items" has no literal collision but
+  // generates two functions called `list_items/N` — catch that too.
+  let literal_keys = dict.keys(literal)
+  let function_errors =
+    dict.to_list(by_function)
+    |> list.filter_map(fn(entry) {
+      let #(fn_name, sites) = entry
+      case sites, list.contains(literal_keys, fn_name) {
+        [_, _, ..], False ->
+          Ok(duplicate_function_name_diagnostic(fn_name, sites))
+        _, _ -> Error(Nil)
+      }
+    })
+
+  list.append(literal_errors, function_errors)
+}
+
+fn group_operations_by_id(
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  key_fn: fn(String) -> String,
+) -> Dict(String, List(String)) {
+  list.fold(operations, dict.new(), fn(acc, entry) {
+    let #(op_id, _operation, path, method) = entry
+    let key = key_fn(op_id)
+    let site = string.uppercase(spec.method_to_string(method)) <> " " <> path
+    case dict.get(acc, key) {
+      Ok(existing) -> dict.insert(acc, key, list.append(existing, [site]))
+      // nolint: thrown_away_error -- dict.get's Error signals absence of key; we start a new list for the first occurrence
+      Error(_) -> dict.insert(acc, key, [site])
+    }
+  })
+}
+
+fn duplicate_operation_id_diagnostic(
+  op_id: String,
+  sites: List(String),
+) -> Diagnostic {
+  diagnostic.invalid_value(
+    path: "paths.*.operationId",
+    detail: "Duplicate operationId '"
+      <> op_id
+      <> "' found on: "
+      <> string.join(sites, ", ")
+      <> ". operationId must be unique across the entire spec; "
+      <> "rename one of the operations to keep the generated API stable.",
+    loc: diagnostic.NoSourceLoc,
+  )
+}
+
+fn duplicate_function_name_diagnostic(
+  fn_name: String,
+  sites: List(String),
+) -> Diagnostic {
+  diagnostic.invalid_value(
+    path: "paths.*.operationId",
+    detail: "operationIds that normalize to the same generated function name '"
+      <> fn_name
+      <> "' found on: "
+      <> string.join(sites, ", ")
+      <> ". oaspec converts operationIds to snake_case, so values like "
+      <> "'listItems' and 'list_items' collide; rename one of them.",
+    loc: diagnostic.NoSourceLoc,
+  )
 }
 
 /// Filter to only errors (not warnings).
