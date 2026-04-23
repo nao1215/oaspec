@@ -903,6 +903,54 @@ paths:
   |> should.be_true()
 }
 
+pub fn dedup_param_field_names_skips_existing_suffix_test() {
+  // Regression: when a later parameter literally matches a suffix the
+  // deduper would otherwise generate (e.g. wire names `body`, `body`,
+  // `body_2`), the deduper must pick the next free suffix (`body_3`)
+  // rather than minting a second `body_2`.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Suffix Collision
+  version: 1.0.0
+paths:
+  /items:
+    post:
+      operationId: createItem
+      parameters:
+        - name: body
+          in: query
+          required: false
+          schema: { type: string }
+        - name: body_2
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { name: { type: string } } }
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+
+  let type_files = types.generate(ctx)
+  let assert Ok(request_types_file) =
+    list.find(type_files, fn(f) {
+      string.contains(f.path, "request_types.gleam")
+    })
+
+  // The reserved `body` (request body) is kept, the query `body` is
+  // renamed to `body_3` (since `body_2` is already a real wire name),
+  // and the header `body_2` keeps its original label.
+  string.contains(request_types_file.content, "body_3:") |> should.be_true()
+  string.contains(request_types_file.content, "body_2:") |> should.be_true()
+}
+
 pub fn validate_accepts_typed_additional_properties_test() {
   let yaml =
     "

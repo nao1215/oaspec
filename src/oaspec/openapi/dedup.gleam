@@ -267,25 +267,34 @@ pub fn dedup_enum_variants(enum_values: List(String)) -> List(String) {
 }
 
 /// Deduplicate a list of strings by appending "_2", "_3", etc. for duplicates.
+/// The chosen suffix skips any name that already appears elsewhere in the
+/// input, so a later literal `foo_2` cannot collide with a generated
+/// `foo_2` produced from the second `foo`.
 fn deduplicate_strings(names: List(String)) -> List(String) {
   let #(result_rev, _) =
     list.fold(names, #([], dict.new()), fn(acc, name) {
-      let #(result, counts) = acc
-      case dict.get(counts, name) {
-        // nolint: thrown_away_error -- dict.get's Error signals absence of key; no diagnostic info to propagate
-        Error(_) -> {
-          let counts = dict.insert(counts, name, 1)
-          #([name, ..result], counts)
-        }
-        Ok(count) -> {
-          let new_count = count + 1
-          let unique_name = name <> "_" <> int.to_string(new_count)
-          let counts = dict.insert(counts, name, new_count)
-          #([unique_name, ..result], counts)
-        }
-      }
+      let #(result, used) = acc
+      let unique_name = next_unique_name(name, used, 1)
+      #([unique_name, ..result], dict.insert(used, unique_name, True))
     })
   list.reverse(result_rev)
+}
+
+/// Pick the first suffixed variant of `base` that is not already claimed.
+/// Suffix `1` means the raw name; higher suffixes append `_2`, `_3`, etc.
+fn next_unique_name(
+  base: String,
+  used: Dict(String, Bool),
+  suffix: Int,
+) -> String {
+  let candidate = case suffix {
+    1 -> base
+    n -> base <> "_" <> int.to_string(n)
+  }
+  case dict.has_key(used, candidate) {
+    True -> next_unique_name(base, used, suffix + 1)
+    False -> candidate
+  }
 }
 
 /// Get element at index from a list.
