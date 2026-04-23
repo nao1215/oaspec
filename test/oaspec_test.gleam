@@ -3717,6 +3717,30 @@ pub fn external_ref_collision_across_files_rejected_test() {
   string.contains(msg, "already imported") |> should.be_true()
 }
 
+pub fn external_ref_two_file_cycle_rejected_test() {
+  // Issue #233: A.yaml -> B.yaml -> A.yaml used to loop forever. The
+  // loader must now detect the cycle, stop walking, and emit a
+  // diagnostic listing the visited files.
+  let result = parser.parse_file("test/fixtures/external_ref_cycle_a.yaml")
+  let assert Error(err) = result
+  let msg = parser.parse_error_to_string(err)
+  string.contains(msg, "Cyclic external $ref") |> should.be_true()
+  string.contains(msg, "external_ref_cycle_a.yaml") |> should.be_true()
+  string.contains(msg, "external_ref_cycle_b.yaml") |> should.be_true()
+}
+
+pub fn external_ref_three_file_cycle_rejected_test() {
+  // Issue #233: A -> B -> C -> A cycles must also be caught, not just
+  // direct two-file back-references.
+  let result = parser.parse_file("test/fixtures/external_ref_cycle_deep_a.yaml")
+  let assert Error(err) = result
+  let msg = parser.parse_error_to_string(err)
+  string.contains(msg, "Cyclic external $ref") |> should.be_true()
+  string.contains(msg, "external_ref_cycle_deep_a.yaml") |> should.be_true()
+  string.contains(msg, "external_ref_cycle_deep_b.yaml") |> should.be_true()
+  string.contains(msg, "external_ref_cycle_deep_c.yaml") |> should.be_true()
+}
+
 pub fn external_ref_nested_collision_with_local_schema_rejected_test() {
   // Main spec defines a local `Widget` AND an Envelope.payload property
   // that imports a *different* `Widget` from a sibling file. Silently

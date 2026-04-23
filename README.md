@@ -11,7 +11,7 @@ Generate usable Gleam code from OpenAPI 3.x specifications.
 - Generate client and server-side modules from a single spec
 - Produce readable Gleam types, encoders, decoders, request types, and response types
 - Handle real-world OpenAPI patterns: unions, nullable fields, `additionalProperties`, form bodies, multipart, and security
-- Backed by 723 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 223 test fixtures (including 94 OSS-derived edge-case specs)
+- Backed by 725 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 228 test fixtures (including 94 OSS-derived edge-case specs)
 
 ## Why oaspec?
 
@@ -96,7 +96,9 @@ diagnostic instead of producing broken output.
 - Schemas: `object`, primitives, arrays, enums, nullable, `allOf`,
   `oneOf`, `anyOf`, typed `additionalProperties`
 - Local `$ref` (and relative-file external `$ref`) across schemas,
-  parameters, request bodies, responses, and path items
+  parameters, request bodies, responses, and path items. External ref
+  graphs must be acyclic — cycles such as `A.yaml → B.yaml → A.yaml`
+  fail fast with a dedicated diagnostic that shows the visited chain.
 - Parameters: path, query, header, cookie, plus array styles (`form`,
   `pipeDelimited`, `spaceDelimited`) and objects via `deepObject`
 - Request bodies: `application/json`,

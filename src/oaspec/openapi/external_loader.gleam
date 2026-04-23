@@ -36,9 +36,12 @@
 //// Out of scope (see issue #98 parent):
 ////   - alias chains longer than one hop inside the same file
 ////   - HTTP/HTTPS URLs
-////   - cyclic external refs (e.g., `A.yaml` → `B.yaml` → `A.yaml`)
-////     would loop forever; callers are expected to maintain acyclic
-////     file graphs.
+////
+//// Cyclic external refs (e.g., `A.yaml` → `B.yaml` → `A.yaml`) used
+//// to loop forever, but are now detected: `parser.parse_file`
+//// threads a visited-file stack through every recursive load and
+//// emits a dedicated `invalid_value` diagnostic that shows the cycle
+//// path instead of recursing indefinitely (issue #233).
 ////
 //// Name collisions — when an external ref would overwrite an existing local
 //// schema, or when two external refs pull in the same fragment name from

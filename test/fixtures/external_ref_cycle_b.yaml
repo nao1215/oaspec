@@ -1,0 +1,9 @@
+openapi: 3.0.3
+info:
+  title: External Ref Cycle B
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    FromB:
+      $ref: "./external_ref_cycle_a.yaml#/components/schemas/FromA"

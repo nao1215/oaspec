@@ -35,6 +35,22 @@ import yay
 /// merging their schemas. Nested or parameter/response external refs are
 /// left to downstream validation.
 pub fn parse_file(path: String) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
+  parse_file_internal(path, [])
+}
+
+/// Internal parse entry that threads the `visited` stack through every
+/// external-ref recursion so `A.yaml -> B.yaml -> A.yaml` cycles fail
+/// fast with a dedicated diagnostic instead of spinning forever.
+fn parse_file_internal(
+  path: String,
+  visited: List(String),
+) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
+  let canonical = canonicalize_ref_path(path)
+  use <- bool.guard(
+    list.contains(visited, canonical),
+    Error(cyclic_external_ref_diagnostic(canonical, visited)),
+  )
+
   use content <- result.try(
     simplifile.read(path)
     |> result.map_error(fn(err) {
@@ -49,10 +65,41 @@ pub fn parse_file(path: String) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
   )
 
   use spec <- result.try(parse_string(content))
+  let new_visited = [canonical, ..visited]
   external_loader.resolve_external_component_refs(
     spec,
     external_loader.base_dir_of(path),
-    parse_file,
+    fn(sub_path) { parse_file_internal(sub_path, new_visited) },
+  )
+}
+
+/// Normalize a path string for cycle detection. This is not a full
+/// canonicalization (no symlink resolution, no realpath call); it just
+/// collapses the `./` and duplicate-slash noise that `filepath.join`
+/// can leave behind so the same file reached via two equivalent
+/// relative paths compares equal.
+fn canonicalize_ref_path(path: String) -> String {
+  let segments =
+    path
+    |> string.split("/")
+    |> list.filter(fn(seg) { seg != "" && seg != "." })
+  case string.starts_with(path, "/") {
+    True -> "/" <> string.join(segments, "/")
+    False -> string.join(segments, "/")
+  }
+}
+
+fn cyclic_external_ref_diagnostic(
+  current: String,
+  visited: List(String),
+) -> Diagnostic {
+  let chain = list.reverse([current, ..visited])
+  diagnostic.invalid_value(
+    path: "external_ref",
+    detail: "Cyclic external $ref graph detected: "
+      <> string.join(chain, " -> ")
+      <> ". oaspec requires external ref graphs to be acyclic.",
+    loc: NoSourceLoc,
   )
 }
 
