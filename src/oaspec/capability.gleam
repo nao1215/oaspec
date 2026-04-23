@@ -246,6 +246,12 @@ pub fn registry() -> List(Capability) {
     Capability("tags", "scope", ParsedNotUsed, "Parsed but no codegen"),
     Capability("examples", "scope", ParsedNotUsed, "Parsed but no codegen"),
     Capability("links", "scope", ParsedNotUsed, "Parsed but no codegen"),
+    Capability(
+      "callbacks",
+      "scope",
+      ParsedNotUsed,
+      "Operation-level and components.callbacks are parsed and preserved (including `$ref` to `#/components/callbacks/...`) but no code is generated for callback endpoints",
+    ),
     Capability("xml", "scope", NotHandled, "XML annotations ignored"),
     // operation-level and path-level server overrides are supported as of #96
     // (generated clients resolve operation > path > top-level). They are no

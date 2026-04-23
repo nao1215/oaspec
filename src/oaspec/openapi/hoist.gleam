@@ -78,6 +78,7 @@ pub fn hoist(spec: OpenApiSpec(stage)) -> OpenApiSpec(stage) {
             headers: dict.new(),
             examples: dict.new(),
             links: dict.new(),
+            callbacks: dict.new(),
           ))
       }
   }

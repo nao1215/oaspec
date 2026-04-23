@@ -42,6 +42,7 @@ fn resolve_internal(
       headers: dict.new(),
       examples: dict.new(),
       links: dict.new(),
+      callbacks: dict.new(),
     )
   case spec.components {
     None -> {
@@ -378,8 +379,8 @@ fn resolve_inline_operation(
     }),
   )
   use callbacks <- result.try(
-    try_map_values(op.callbacks, fn(_name, cb) {
-      resolve_inline_callback(cb, path, components)
+    try_map_values(op.callbacks, fn(_name, ref_or_cb) {
+      resolve_callback_ref(ref_or_cb, path, components)
     }),
   )
   Ok(
@@ -391,6 +392,40 @@ fn resolve_inline_operation(
       callbacks: callbacks,
     ),
   )
+}
+
+/// Resolve a `RefOr(Callback)`: top-level `$ref` entries are validated
+/// against `components.callbacks` and kept as `Ref` so downstream
+/// passes can recognise reusable-callback references; inline `Value`
+/// entries have their URL→PathItem entries recursively resolved.
+fn resolve_callback_ref(
+  ref_or: RefOr(Callback(stage)),
+  path: String,
+  components: Components(stage),
+) -> Result(RefOr(Callback(stage)), List(Diagnostic)) {
+  case ref_or {
+    Ref(ref_str) ->
+      validate_ref_kind(ref_str, "#/components/callbacks/", "paths." <> path)
+      |> result.try(fn(ref_name) {
+        case dict.get(components.callbacks, ref_name) {
+          Ok(_) -> Ok(Ref(ref_str))
+          Error(_) ->
+            Error(diagnostic.invalid_value(
+              path: "paths." <> path <> ".callbacks",
+              detail: "Callback $ref '"
+                <> ref_str
+                <> "' does not resolve to an entry in components.callbacks.",
+              loc: diagnostic.NoSourceLoc,
+            ))
+        }
+      })
+      |> result.map_error(fn(e) { [e] })
+    Value(cb) ->
+      case resolve_inline_callback(cb, path, components) {
+        Ok(resolved) -> Ok(Value(resolved))
+        Error(errs) -> Error(errs)
+      }
+  }
 }
 
 /// Resolve inline refs within a callback.

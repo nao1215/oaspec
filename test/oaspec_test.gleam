@@ -3424,7 +3424,7 @@ paths:
   let subscribe_path = dict.get(spec.paths, "/subscribe")
   let assert Ok(spec.Value(path_item)) = subscribe_path
   let assert Some(post_op) = path_item.post
-  let assert Ok(callback) = dict.get(post_op.callbacks, "onEvent")
+  let assert Ok(spec.Value(callback)) = dict.get(post_op.callbacks, "onEvent")
   // Callback entries dict must have 2 URL expressions
   let entries = dict.to_list(callback.entries)
   list.length(entries) |> should.equal(2)
@@ -3857,7 +3857,8 @@ pub fn external_ref_in_callback_path_item_test() {
   // schema ref is rewritten to local form.
   let assert Ok(spec.Value(path_item)) = dict.get(loaded.paths, "/subscribe")
   let assert Some(post_op) = path_item.post
-  let assert Ok(callback) = dict.get(post_op.callbacks, "widgetEvent")
+  let assert Ok(spec.Value(callback)) =
+    dict.get(post_op.callbacks, "widgetEvent")
   let assert Ok(spec.Value(cb_path_item)) =
     dict.get(callback.entries, "{$request.body#/callbackUrl}")
   let assert Some(cb_post) = cb_path_item.post
@@ -10328,6 +10329,90 @@ pub fn oss_swagger_parser_java_callback_ref_parses_test() {
     parser.parse_file("test/fixtures/oss_swagger_parser_java_callback_ref.yaml")
   spec.info.title |> should.equal("Callback with ref Example")
   dict.size(spec.paths) |> should.equal(1)
+}
+
+/// Issue #232: operation-level `{ myEvent: { $ref: '#/components/callbacks/foo' } }`
+/// must be preserved as a `Ref(...)` entry on `operation.callbacks`, not
+/// flattened into the inline URL-expression shape.
+pub fn parse_preserves_operation_level_callback_ref_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_swagger_parser_java_callback_ref.yaml")
+  let assert Ok(spec.Value(path_item)) = dict.get(spec.paths, "/register")
+  let assert Some(post_op) = path_item.post
+  let assert Ok(entry) = dict.get(post_op.callbacks, "myEvent")
+  case entry {
+    spec.Ref(ref_str) ->
+      ref_str |> should.equal("#/components/callbacks/callbackEvent")
+    spec.Value(_) -> should.fail()
+  }
+}
+
+/// Issue #232: `components.callbacks` entries must be parsed losslessly
+/// into the reusable-components AST so downstream passes can see them.
+pub fn parse_populates_components_callbacks_test() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_swagger_parser_java_callback_ref.yaml")
+  let assert Some(components) = spec.components
+  dict.size(components.callbacks) |> should.equal(1)
+  let assert Ok(spec.Value(callback)) =
+    dict.get(components.callbacks, "callbackEvent")
+  dict.has_key(callback.entries, "{$request.body#/callbackUrl}")
+  |> should.be_true()
+}
+
+/// Issue #232: a callback `$ref` that does not resolve to an entry in
+/// `components.callbacks` must produce a validation error — otherwise
+/// users get silent nothingness for a clearly broken spec.
+pub fn validate_rejects_callback_ref_with_missing_target_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Dangling Callback Ref
+  version: 1.0.0
+paths:
+  /register:
+    post:
+      operationId: subscribe
+      responses:
+        '200': { description: ok }
+      callbacks:
+        myEvent:
+          $ref: '#/components/callbacks/doesNotExist'
+components:
+  callbacks: {}
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  case resolve.resolve(spec) {
+    Error(errors) -> {
+      let messages = list.map(errors, validate.error_to_string)
+      list.any(messages, fn(s) {
+        string.contains(s, "doesNotExist")
+        && string.contains(s, "components.callbacks")
+      })
+      |> should.be_true()
+    }
+    Ok(_) -> should.fail()
+  }
+}
+
+/// Issue #232: both operation-level and components.callbacks must emit
+/// `ParsedNotUsed` capability warnings so users are not misled into
+/// thinking callbacks are code-generated.
+pub fn capability_check_warns_on_callbacks_test() {
+  let ctx = make_ctx("test/fixtures/oss_swagger_parser_java_callback_ref.yaml")
+  let warnings = capability_check.check_preserved(ctx)
+  let messages = list.map(warnings, validate.error_to_string)
+  list.any(messages, fn(s) {
+    string.contains(s, "Operation-level callbacks")
+    && string.contains(s, "parsed and preserved")
+  })
+  |> should.be_true()
+  list.any(messages, fn(s) {
+    string.contains(s, "Component callbacks")
+    && string.contains(s, "parsed and preserved")
+  })
+  |> should.be_true()
 }
 
 /// swagger-parser-java issue1433: schema without explicit type field.

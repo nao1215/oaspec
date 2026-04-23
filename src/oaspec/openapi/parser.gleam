@@ -1026,6 +1026,10 @@ fn parse_components(
   use headers <- result.try(parse_headers_map(components_node, index))
   let examples = value.extract_map(components_node, "examples")
   use links <- result.try(parse_links_map(components_node))
+  use callbacks <- result.try(parse_components_callbacks_map(
+    components_node,
+    index,
+  ))
 
   Ok(Components(
     schemas:,
@@ -1037,7 +1041,46 @@ fn parse_components(
     headers:,
     examples:,
     links:,
+    callbacks:,
   ))
+}
+
+/// Parse `components.callbacks`: each entry is a named reusable callback
+/// object. Returns an empty dict if the section is missing. `$ref` values
+/// are preserved so chains like `components.callbacks.foo.$ref: ...`
+/// stay as references.
+fn parse_components_callbacks_map(
+  components_node: yay.Node,
+  index: LocationIndex,
+) -> Result(Dict(String, RefOr(Callback(Unresolved))), Diagnostic) {
+  case yay.select_sugar(from: components_node, selector: "callbacks") {
+    Ok(yay.NodeMap(entries)) -> {
+      list.try_fold(entries, dict.new(), fn(acc, entry) {
+        let #(key_node, value_node) = entry
+        case key_node {
+          yay.NodeStr(name) -> {
+            case
+              yay.extract_optional_string(value_node, "$ref")
+              |> result.unwrap(None)
+            {
+              Some(ref_str) -> Ok(dict.insert(acc, name, Ref(ref_str)))
+              None -> {
+                use callback <- result.try(parse_callback_object(
+                  value_node,
+                  "components.callbacks." <> name,
+                  None,
+                  index,
+                ))
+                Ok(dict.insert(acc, name, Value(callback)))
+              }
+            }
+          }
+          _ -> Ok(acc)
+        }
+      })
+    }
+    _ -> Ok(dict.new())
+  }
 }
 
 /// Parse the schemas map from components.
@@ -1476,26 +1519,39 @@ fn parse_security_requirement_object(
 
 /// Parse callbacks from an operation node.
 /// Returns an empty dict if no callbacks are present.
-/// Propagates parse errors instead of silently dropping invalid callbacks.
+/// Each entry is a `RefOr(Callback)`: a top-level `$ref` pointing at
+/// `#/components/callbacks/foo` is preserved as-is (so the reusable
+/// callback reference survives into the resolved AST), while inline
+/// definitions are parsed into their URL-expression→PathItem shape.
 fn parse_callbacks(
   node: yay.Node,
   context: String,
   components: Option(Components(Unresolved)),
   index: LocationIndex,
-) -> Result(dict.Dict(String, Callback(Unresolved)), Diagnostic) {
+) -> Result(dict.Dict(String, RefOr(Callback(Unresolved))), Diagnostic) {
   case yay.select_sugar(from: node, selector: "callbacks") {
     Ok(yay.NodeMap(entries)) -> {
       list.try_fold(entries, dict.new(), fn(acc, entry) {
         let #(key_node, value_node) = entry
         case key_node {
           yay.NodeStr(callback_name) -> {
-            use callback <- result.try(parse_callback_object(
-              value_node,
-              context,
-              components,
-              index,
-            ))
-            Ok(dict.insert(acc, callback_name, callback))
+            // A top-level `$ref` here means the operation is pointing
+            // at a reusable callback object — keep it as Ref.
+            case
+              yay.extract_optional_string(value_node, "$ref")
+              |> result.unwrap(None)
+            {
+              Some(ref_str) -> Ok(dict.insert(acc, callback_name, Ref(ref_str)))
+              None -> {
+                use callback <- result.try(parse_callback_object(
+                  value_node,
+                  context,
+                  components,
+                  index,
+                ))
+                Ok(dict.insert(acc, callback_name, Value(callback)))
+              }
+            }
           }
           _ -> Ok(acc)
         }

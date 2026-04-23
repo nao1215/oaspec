@@ -125,8 +125,11 @@ fn normalize_operation(op: Operation(stage)) -> Operation(stage) {
         Value(r) -> Value(normalize_response(r))
       }
     }),
-    callbacks: dict.map_values(op.callbacks, fn(_k, cb) {
-      normalize_callback(cb)
+    callbacks: dict.map_values(op.callbacks, fn(_k, ref_or) {
+      case ref_or {
+        Ref(r) -> Ref(r)
+        Value(cb) -> Value(normalize_callback(cb))
+      }
     }),
   )
 }
