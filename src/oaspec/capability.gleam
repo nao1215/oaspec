@@ -99,6 +99,12 @@ pub fn registry() -> List(Capability) {
     Capability("contentEncoding", "schema", Unsupported, "Not supported"),
     Capability("contentMediaType", "schema", Unsupported, "Not supported"),
     Capability("contentSchema", "schema", Unsupported, "Not supported"),
+    Capability(
+      "$id",
+      "schema",
+      Unsupported,
+      "OpenAPI 3.1 JSON Schema `$id`-backed URL refs are not resolved; use local `#/components/schemas/...` refs instead",
+    ),
     // Security
     Capability("apiKey", "security", Supported, "Header, query, cookie"),
     Capability("http", "security", Supported, "Bearer, basic, and digest auth"),

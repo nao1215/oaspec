@@ -1027,6 +1027,14 @@ fn validate_component_schemas(ctx: Context) -> List(Diagnostic) {
 }
 
 /// Recursively validate a SchemaRef at any depth.
+/// Does this `$ref` value look like an absolute URL (http/https)? These
+/// are the shape that OpenAPI 3.1 `$id`-backed same-document refs take,
+/// and we surface them as a dedicated diagnostic separate from generic
+/// external `$ref` errors.
+fn is_url_style_ref(ref: String) -> Bool {
+  string.starts_with(ref, "http://") || string.starts_with(ref, "https://")
+}
+
 /// References are checked for resolvability against the spec's components.
 fn validate_schema_ref_recursive(
   path: String,
@@ -1038,17 +1046,32 @@ fn validate_schema_ref_recursive(
       // Detect external refs (not starting with #/) before resolution
       case string.starts_with(ref, "#/") {
         False -> [
-          diagnostic.validation(
-            severity: SeverityError,
-            target: TargetBoth,
-            path: path,
-            detail: "External $ref '"
-              <> ref
-              <> "' is not supported. Only local references (#/components/...) are supported.",
-            hint: Some(
-              "Inline the external schema or copy it into #/components/schemas/ and use a local $ref.",
-            ),
-          ),
+          case is_url_style_ref(ref) {
+            True ->
+              diagnostic.validation(
+                severity: SeverityError,
+                target: TargetBoth,
+                path: path,
+                detail: "URL-style $ref '"
+                  <> ref
+                  <> "' is not supported. oaspec does not resolve OpenAPI 3.1 / JSON Schema `$id`-backed identifiers — those refs are an explicit boundary.",
+                hint: Some(
+                  "Rewrite the schema to a local $ref (`#/components/schemas/...`) and drop the `$id` URL, or inline the schema at the use site.",
+                ),
+              )
+            False ->
+              diagnostic.validation(
+                severity: SeverityError,
+                target: TargetBoth,
+                path: path,
+                detail: "External $ref '"
+                  <> ref
+                  <> "' is not supported. Only local references (#/components/...) are supported.",
+                hint: Some(
+                  "Inline the external schema or copy it into #/components/schemas/ and use a local $ref.",
+                ),
+              )
+          },
         ]
         True ->
           case resolver.resolve_schema_ref(schema_ref, context.spec(ctx)) {

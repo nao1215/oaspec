@@ -10332,6 +10332,30 @@ pub fn oss_openapi_dotnet_dollar_id_parses_test() {
   dict.size(spec.paths) |> should.equal(2)
 }
 
+/// Issue #234: URL-style `$ref` values (the shape OpenAPI 3.1
+/// `$id`-backed refs take) must fail validation with a dedicated
+/// URL-ref diagnostic, not a generic "external $ref" error. This keeps
+/// the advertised OpenAPI 3.1 boundary explicit and gives users an
+/// actionable hint.
+pub fn validate_rejects_id_backed_url_ref_with_dedicated_diagnostic_test() {
+  let ctx = make_ctx("test/fixtures/oss_openapi_dotnet_dollar_id.yaml")
+  let errors = validate.validate(ctx) |> validate.errors_only
+  let messages = list.map(errors, validate.error_to_string)
+  list.any(messages, fn(s) {
+    string.contains(s, "URL-style $ref")
+    && string.contains(s, "OpenAPI 3.1")
+    && string.contains(s, "$id")
+  })
+  |> should.be_true()
+  // A generic "External $ref ... is not supported" message must NOT be
+  // emitted for URL-style refs — that's the old gray-area behavior.
+  list.any(messages, fn(s) {
+    string.contains(s, "External $ref")
+    && string.contains(s, "https://foo.bar/Box")
+  })
+  |> should.be_false()
+}
+
 // ---------------------------------------------------------------------------
 // OSS: swagger-parser-java (Apache-2.0)
 // Test data derived from https://github.com/swagger-api/swagger-parser
