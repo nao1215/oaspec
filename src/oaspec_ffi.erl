@@ -1,5 +1,5 @@
 -module(oaspec_ffi).
--export([find_executable/1, run_executable/2]).
+-export([find_executable/1, run_executable/2, is_stdout_tty/0, no_color_set/0]).
 
 %% Find an executable on PATH. Returns {ok, Path} or {error, nil}.
 -spec find_executable(binary()) -> {ok, binary()} | {error, nil}.
@@ -28,4 +28,29 @@ collect_exit(Port) ->
     after 60000 ->
         catch port_close(Port),
         1
+    end.
+
+%% Detect whether standard_io is connected to a terminal. io:getopts/1
+%% reports a `terminal' flag for interactive sessions; non-TTY (pipe,
+%% redirection, escript captured stdout) returns false or omits the key.
+-spec is_stdout_tty() -> boolean().
+is_stdout_tty() ->
+    case io:getopts(standard_io) of
+        {ok, Opts} ->
+            case lists:keyfind(terminal, 1, Opts) of
+                {terminal, true} -> true;
+                _ -> false
+            end;
+        _ -> false
+    end.
+
+%% Honor the NO_COLOR convention (https://no-color.org/): an unset or
+%% empty value means "do not opt out"; any non-empty value means "no
+%% color".
+-spec no_color_set() -> boolean().
+no_color_set() ->
+    case os:getenv("NO_COLOR") of
+        false -> false;
+        "" -> false;
+        _ -> true
     end.

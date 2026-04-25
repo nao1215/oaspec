@@ -15,6 +15,24 @@ Describe 'oaspec top-level help'
     The output should include 'generate'
     The output should include 'validate'
   End
+
+  Describe 'colour output'
+    # shellspec captures stdout via a pipe, so the CLI sees stdout as
+    # non-TTY. Both checks together cover the two suppression paths
+    # (TTY check and NO_COLOR honour).
+    It 'omits ANSI escape sequences when stdout is not a TTY'
+      When run oaspec_cli --help
+      The status should be success
+      The output should not include "$(printf '\033[')"
+    End
+
+    It 'omits ANSI escape sequences when NO_COLOR is set'
+      export NO_COLOR=1
+      When run oaspec_cli --help
+      The status should be success
+      The output should not include "$(printf '\033[')"
+    End
+  End
 End
 
 Describe 'oaspec generate'

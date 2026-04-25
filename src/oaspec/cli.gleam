@@ -15,6 +15,23 @@ import oaspec/openapi/diagnostic
 import oaspec/openapi/parser
 import simplifile
 
+@external(erlang, "oaspec_ffi", "is_stdout_tty")
+fn is_stdout_tty() -> Bool
+
+@external(erlang, "oaspec_ffi", "no_color_set")
+fn no_color_set() -> Bool
+
+/// Apply colour styling only when stdout is a terminal and NO_COLOR is unset,
+/// per <https://no-color.org/> and the CLIG "colorize when stdout is a TTY only"
+/// guideline. When either check fails, glint keeps its `pretty_help` as `None`
+/// and emits plain text.
+fn maybe_pretty_help(glint: glint.Glint(a)) -> glint.Glint(a) {
+  case is_stdout_tty(), no_color_set() {
+    True, False -> glint.pretty_help(glint, glint.default_pretty_help())
+    _, _ -> glint
+  }
+}
+
 /// Set up the CLI application.
 pub fn app() -> glint.Glint(Nil) {
   glint.new()
@@ -22,7 +39,7 @@ pub fn app() -> glint.Glint(Nil) {
   |> glint.global_help(
     "Generate Gleam code from OpenAPI 3.x specifications\n\nCommands:\n  init       Create a default oaspec.yaml config file\n  generate   Generate Gleam code from an OpenAPI spec\n  validate   Validate an OpenAPI spec without generating code\n\nRun 'oaspec <command> --help' for more information.",
   )
-  |> glint.pretty_help(glint.default_pretty_help())
+  |> maybe_pretty_help
   |> glint.add(at: ["init"], do: init_command())
   |> glint.add(at: ["generate"], do: generate_command())
   |> glint.add(at: ["validate"], do: validate_command())
