@@ -2,7 +2,7 @@
 
 import api/decode
 import api/encode
-import api/handlers
+import api/handlers_generated
 import api/request_types
 import api/response_types
 import gleam/dict.{type Dict}
@@ -34,7 +34,7 @@ pub fn route(
             }
           }
         })
-      let response = handlers.post_search(request)
+      let response = handlers_generated.post_search(request)
       case response {
         response_types.PostSearchResponseOk(data) ->
           ServerResponse(
@@ -48,7 +48,7 @@ pub fn route(
     }
     "GET", ["users", user_id] -> {
       let request = request_types.GetUserRequest(user_id: user_id)
-      let response = handlers.get_user(request)
+      let response = handlers_generated.get_user(request)
       case response {
         response_types.GetUserResponseOk(data) ->
           ServerResponse(
@@ -75,7 +75,7 @@ pub fn route(
             }
           }
         })
-      let response = handlers.post_webhook(request)
+      let response = handlers_generated.post_webhook(request)
       case response {
         response_types.PostWebhookResponseOk ->
           ServerResponse(status: 200, body: "", headers: [])

@@ -306,10 +306,15 @@ fn write_files(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
 
 /// Check that generated code matches existing files on disk.
 /// Exits 0 if all files match, exits 1 if any differ, missing, or orphaned.
+///
+/// Issue #247: user-owned `handlers.gleam` (`SkipIfExists`) is dropped from
+/// the byte-comparison list (`resolve_paths` does that filtering) but kept in
+/// the expected-paths list so orphan detection still recognises it as a known
+/// generator output instead of flagging it as an orphan.
 fn run_check(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
   io.println("Checking generated code against existing files...")
   let resolved = writer.resolve_paths(files, cfg)
-  let expected_paths = list.map(resolved, fn(entry) { entry.0 })
+  let expected_paths = writer.expected_paths(files, cfg)
 
   // Format generated content via temp files before comparison
   let resolved = format_resolved_content(resolved)

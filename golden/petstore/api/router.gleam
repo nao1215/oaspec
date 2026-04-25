@@ -2,7 +2,7 @@
 
 import api/decode
 import api/encode
-import api/handlers
+import api/handlers_generated
 import api/request_types
 import api/response_types
 import gleam/dict.{type Dict}
@@ -46,7 +46,7 @@ pub fn route(
             _ -> None
           },
         )
-      let response = handlers.list_pets(request)
+      let response = handlers_generated.list_pets(request)
       case response {
         response_types.ListPetsResponseOk(data) ->
           ServerResponse(
@@ -64,7 +64,7 @@ pub fn route(
       case decode.decode_create_pet_request(body) {
         Ok(decoded_body) -> {
           let request = request_types.CreatePetRequest(body: decoded_body)
-          let response = handlers.create_pet(request)
+          let response = handlers_generated.create_pet(request)
           case response {
             response_types.CreatePetResponseCreated(data) ->
               ServerResponse(
@@ -86,7 +86,7 @@ pub fn route(
       case int.parse(pet_id) {
         Ok(pet_id_parsed) -> {
           let request = request_types.GetPetRequest(pet_id: pet_id_parsed)
-          let response = handlers.get_pet(request)
+          let response = handlers_generated.get_pet(request)
           case response {
             response_types.GetPetResponseOk(data) ->
               ServerResponse(
@@ -108,7 +108,7 @@ pub fn route(
       case int.parse(pet_id) {
         Ok(pet_id_parsed) -> {
           let request = request_types.DeletePetRequest(pet_id: pet_id_parsed)
-          let response = handlers.delete_pet(request)
+          let response = handlers_generated.delete_pet(request)
           case response {
             response_types.DeletePetResponseNoContent ->
               ServerResponse(status: 204, body: "", headers: [])

@@ -37,7 +37,25 @@ pub type FileTarget {
   ClientTarget
 }
 
-/// A generated file with its path, content, and output target.
+/// How the writer should treat a `GeneratedFile` that already exists on
+/// disk. Most generated files are sealed (`Overwrite`) — the user is
+/// expected not to touch them and the generator clobbers any local
+/// changes on every run. `SkipIfExists` is for files the generator
+/// emits ONCE as a starting point, then leaves alone so the user can
+/// own the contents (Issue #247: `handlers.gleam` panic stubs).
+pub type WriteMode {
+  Overwrite
+  SkipIfExists
+}
+
+/// A generated file with its path, content, output target, and write
+/// mode. `write_mode` defaults to `Overwrite` for every file the
+/// generator owns end-to-end.
 pub type GeneratedFile {
-  GeneratedFile(path: String, content: String, target: FileTarget)
+  GeneratedFile(
+    path: String,
+    content: String,
+    target: FileTarget,
+    write_mode: WriteMode,
+  )
 }

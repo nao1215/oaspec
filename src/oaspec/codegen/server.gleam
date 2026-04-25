@@ -18,9 +18,21 @@ import oaspec/util/naming
 import oaspec/util/string_extra as se
 
 /// Generate server stub files.
+///
+/// Issue #247 splits the handler surface in two:
+///
+/// - `handlers.gleam` carries user-editable panic stubs and is emitted
+///   only on first generation (`SkipIfExists`). Re-running
+///   `oaspec generate` leaves it alone, so user implementations
+///   survive regeneration.
+/// - `handlers_generated.gleam` is a sealed delegator that `router.gleam`
+///   imports. Each operation forwards to `handlers.<op_name>(req)`. It
+///   is always overwritten so the wiring stays in lock-step with the
+///   spec.
 pub fn generate(ctx: Context) -> List(GeneratedFile) {
   let operations = operations.collect_operations(ctx)
   let handlers_content = generate_handlers(ctx, operations)
+  let handlers_generated_content = generate_handlers_generated(ctx, operations)
   let router_content = generate_router(ctx, operations)
 
   [
@@ -28,22 +40,42 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
       path: "handlers.gleam",
       content: handlers_content,
       target: context.ServerTarget,
+      write_mode: context.SkipIfExists,
+    ),
+    GeneratedFile(
+      path: "handlers_generated.gleam",
+      content: handlers_generated_content,
+      target: context.ServerTarget,
+      write_mode: context.Overwrite,
     ),
     GeneratedFile(
       path: "router.gleam",
       content: router_content,
       target: context.ServerTarget,
+      write_mode: context.Overwrite,
     ),
   ]
 }
 
-/// Generate handler stubs for all operations.
+/// Generate the user-owned `handlers.gleam`. Emitted only on first
+/// generation; the writer's `SkipIfExists` mode prevents subsequent
+/// runs from clobbering the user's implementation. The `// DO NOT EDIT`
+/// banner is intentionally absent — the user owns this file.
 fn generate_handlers(
   ctx: Context,
   operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
 ) -> String {
   let sb =
-    se.file_header(context.version)
+    se.line(
+      se.new(),
+      "//// Implement these handler functions. This file is emitted once",
+    )
+    |> se.line(
+      "//// by `oaspec generate` and skipped on subsequent runs, so your",
+    )
+    |> se.line("//// edits survive regeneration. Router wiring lives in")
+    |> se.line("//// `handlers_generated.gleam`, which delegates here.")
+    |> se.blank_line()
     |> se.imports([
       config.package(context.config(ctx)) <> "/request_types",
       config.package(context.config(ctx)) <> "/response_types",
@@ -61,6 +93,73 @@ fn generate_handlers(
   // useful. Callback support is now documented as parsed-but-not-codegen
   // until a typed codegen story exists (see issue #117).
   se.to_string(sb)
+}
+
+/// Generate `handlers_generated.gleam`, a sealed delegator that the
+/// router imports. Each operation forwards to `handlers.<op_name>(req)`.
+/// Issue #247: this file carries the `// DO NOT EDIT` banner and is
+/// always overwritten so router/handler wiring stays in sync with the
+/// spec without touching the user's `handlers.gleam`.
+fn generate_handlers_generated(
+  ctx: Context,
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+) -> String {
+  let pkg = config.package(context.config(ctx))
+  let sb =
+    se.file_header(context.version)
+    |> se.imports([
+      pkg <> "/handlers",
+      pkg <> "/request_types",
+      pkg <> "/response_types",
+    ])
+
+  let sb =
+    list.fold(operations, sb, fn(sb, op) {
+      let #(op_id, operation, _path, _method) = op
+      generate_handler_delegator(sb, op_id, operation)
+    })
+
+  se.to_string(sb)
+}
+
+/// Generate a single delegator function in `handlers_generated.gleam`.
+fn generate_handler_delegator(
+  sb: se.StringBuilder,
+  op_id: String,
+  operation: spec.Operation(Resolved),
+) -> se.StringBuilder {
+  let fn_name = naming.operation_to_function_name(op_id)
+  let request_type = naming.schema_to_type_name(op_id) <> "Request"
+  let response_type = naming.schema_to_type_name(op_id) <> "Response"
+
+  let has_params =
+    !list.is_empty(operation.parameters)
+    || option.is_some(operation.request_body)
+
+  case has_params {
+    True ->
+      sb
+      |> se.line(
+        "pub fn "
+        <> fn_name
+        <> "(req: request_types."
+        <> request_type
+        <> ") -> response_types."
+        <> response_type
+        <> " {",
+      )
+      |> se.indent(1, "handlers." <> fn_name <> "(req)")
+      |> se.line("}")
+      |> se.blank_line()
+    False ->
+      sb
+      |> se.line(
+        "pub fn " <> fn_name <> "() -> response_types." <> response_type <> " {",
+      )
+      |> se.indent(1, "handlers." <> fn_name <> "()")
+      |> se.line("}")
+      |> se.blank_line()
+  }
 }
 
 /// Generate a single handler stub.
@@ -459,7 +558,13 @@ fn generate_router(
     False -> std_imports
   }
 
-  let pkg_imports = [config.package(context.config(ctx)) <> "/handlers"]
+  // Issue #247: router imports the sealed delegator, not the user-owned
+  // handlers module. handlers_generated.gleam forwards every call to
+  // handlers.<op_name>, so the router stays in lock-step with the spec
+  // without ever touching user code.
+  let pkg_imports = [
+    config.package(context.config(ctx)) <> "/handlers_generated",
+  ]
   let pkg_imports = case
     has_deep_object || has_form_urlencoded_body || has_multipart_body
   {
@@ -858,7 +963,7 @@ fn generate_route_body(
     False -> {
       // No parameters: call handler directly, convert response
       sb
-      |> se.indent(3, "let response = handlers." <> fn_name <> "()")
+      |> se.indent(3, "let response = handlers_generated." <> fn_name <> "()")
       |> generate_response_conversion(response_type_name, operation, ctx)
     }
     True -> {
@@ -1084,7 +1189,10 @@ fn generate_safe_request_and_dispatch(
   // Call handler and convert response
   let sb =
     sb
-    |> se.indent(3, "let response = handlers." <> fn_name <> "(request)")
+    |> se.indent(
+      3,
+      "let response = handlers_generated." <> fn_name <> "(request)",
+    )
     |> generate_response_conversion(response_type_name, operation, ctx)
 
   // Close guard validation (returns 422 with error details)

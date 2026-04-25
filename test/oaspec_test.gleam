@@ -4795,8 +4795,9 @@ paths:
   // Router must NOT have placeholder "OK" strings
   string.contains(router.content, "\"OK\"")
   |> should.be_false()
-  // Router must actually call the handler
-  string.contains(router.content, "handlers.get_items()")
+  // Router must actually call the handler (via the sealed delegator,
+  // Issue #247).
+  string.contains(router.content, "handlers_generated.get_items()")
   |> should.be_true()
   // Router must have ServerResponse type
   string.contains(router.content, "pub type ServerResponse")

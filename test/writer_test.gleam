@@ -32,16 +32,19 @@ fn test_files() -> List(context.GeneratedFile) {
       path: "types.gleam",
       content: "// types",
       target: context.SharedTarget,
+      write_mode: context.Overwrite,
     ),
     context.GeneratedFile(
       path: "server.gleam",
       content: "// server",
       target: context.ServerTarget,
+      write_mode: context.Overwrite,
     ),
     context.GeneratedFile(
       path: "client.gleam",
       content: "// client",
       target: context.ClientTarget,
+      write_mode: context.Overwrite,
     ),
   ]
 }

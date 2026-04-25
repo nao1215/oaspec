@@ -82,7 +82,7 @@ Describe 'oaspec generate'
       When run generate --config=test/fixtures/oaspec.yaml
       The status should be success
       The output should include 'Successfully generated'
-      The output should include '15 files'
+      The output should include '16 files'
     End
   End
 
@@ -119,6 +119,10 @@ Describe 'oaspec generate'
 
     It 'creates server/handlers.gleam'
       The path "$TEST_OUTPUT_DIR/api/handlers.gleam" should be file
+    End
+
+    It 'creates server/handlers_generated.gleam (Issue #247 sealed delegator)'
+      The path "$TEST_OUTPUT_DIR/api/handlers_generated.gleam" should be file
     End
 
     It 'creates server/router.gleam'
@@ -267,6 +271,27 @@ Describe 'oaspec generate'
       The contents of file "$TEST_OUTPUT_DIR/api/handlers.gleam" should include 'response_types.ListPetsResponse'
     End
 
+    It 'user-owned handlers.gleam has no DO NOT EDIT banner (Issue #247)'
+      The contents of file "$TEST_OUTPUT_DIR/api/handlers.gleam" should not include 'DO NOT EDIT'
+    End
+
+    # --- handlers_generated.gleam (Issue #247 sealed delegator) ---
+
+    It 'handlers_generated.gleam carries the DO NOT EDIT banner'
+      The contents of file "$TEST_OUTPUT_DIR/api/handlers_generated.gleam" should include 'DO NOT EDIT'
+    End
+
+    It 'handlers_generated.gleam imports the user handlers module'
+      The contents of file "$TEST_OUTPUT_DIR/api/handlers_generated.gleam" should include 'import api/handlers'
+    End
+
+    It 'handlers_generated.gleam delegates each operation to handlers'
+      The contents of file "$TEST_OUTPUT_DIR/api/handlers_generated.gleam" should include 'handlers.list_pets(req)'
+      The contents of file "$TEST_OUTPUT_DIR/api/handlers_generated.gleam" should include 'handlers.create_pet(req)'
+      The contents of file "$TEST_OUTPUT_DIR/api/handlers_generated.gleam" should include 'handlers.get_pet(req)'
+      The contents of file "$TEST_OUTPUT_DIR/api/handlers_generated.gleam" should include 'handlers.delete_pet(req)'
+    End
+
     # --- Router ---
 
     It 'generates router with path matching'
@@ -274,6 +299,11 @@ Describe 'oaspec generate'
       The contents of file "$TEST_OUTPUT_DIR/api/router.gleam" should include '"GET"'
       The contents of file "$TEST_OUTPUT_DIR/api/router.gleam" should include '"POST"'
       The contents of file "$TEST_OUTPUT_DIR/api/router.gleam" should include '"DELETE"'
+    End
+
+    It 'router dispatches via handlers_generated (Issue #247)'
+      The contents of file "$TEST_OUTPUT_DIR/api/router.gleam" should include 'import api/handlers_generated'
+      The contents of file "$TEST_OUTPUT_DIR/api/router.gleam" should include 'handlers_generated.'
     End
 
     # --- Client ---

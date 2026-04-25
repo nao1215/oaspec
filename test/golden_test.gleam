@@ -151,18 +151,19 @@ pub fn golden_complex_supported_test() {
   )
 }
 
-/// Verify golden files exist for petstore (all 9 expected files).
+/// Verify golden files exist for petstore (all 10 expected files).
 pub fn golden_petstore_file_count_test() {
   let files = golden_generate("test/fixtures/petstore.yaml")
-  // Shared(6, no middleware after #116) + Server(2) + Client(1) = 9 files
-  list.length(files) |> should.equal(9)
+  // Shared(6) + Server(3: handlers, handlers_generated, router) + Client(1) = 10
+  // The Server count grew by one with #247's two-file handler split.
+  list.length(files) |> should.equal(10)
 }
 
 /// Verify golden files exist for complex_supported spec.
 pub fn golden_complex_supported_file_count_test() {
   let files = golden_generate("test/fixtures/complex_supported_openapi.yaml")
-  // Shared(5, no guards, no middleware after #116) + Server(2) + Client(1) = 8 files
-  list.length(files) |> should.equal(8)
+  // Shared(5, no guards) + Server(3: handlers, handlers_generated, router) + Client(1) = 9
+  list.length(files) |> should.equal(9)
 }
 
 /// Verify idempotency: generating twice produces identical output.

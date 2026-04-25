@@ -20,16 +20,19 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
       path: "types.gleam",
       content: types_content,
       target: context.SharedTarget,
+      write_mode: context.Overwrite,
     ),
     GeneratedFile(
       path: "request_types.gleam",
       content: request_types_content,
       target: context.SharedTarget,
+      write_mode: context.Overwrite,
     ),
     GeneratedFile(
       path: "response_types.gleam",
       content: response_types_content,
       target: context.SharedTarget,
+      write_mode: context.Overwrite,
     ),
   ]
 }

@@ -40,7 +40,8 @@ gen/my_api/
   request_types.gleam
   response_types.gleam
   guards.gleam          (only if schemas have validation constraints)
-  handlers.gleam
+  handlers.gleam        (user-owned: written once with panic stubs, skipped on regeneration)
+  handlers_generated.gleam (sealed delegator; router imports this)
   router.gleam
 
 gen_client/my_api/
@@ -370,9 +371,12 @@ These are the most important limitations today:
 | `request_types.gleam` | yes | yes |
 | `response_types.gleam` | yes | yes |
 | `guards.gleam` | yes | yes |
-| `handlers.gleam` | yes | - |
+| `handlers.gleam` | yes (once) | - |
+| `handlers_generated.gleam` | yes | - |
 | `router.gleam` | yes | - |
 | `client.gleam` | - | yes |
+
+`handlers.gleam` is **user-owned**: the generator writes panic stubs on the first run and skips the file on every subsequent run, so your implementations survive regeneration. `handlers_generated.gleam` is the sealed delegator the router imports — each operation forwards to `handlers.<op_name>(req)`, so router/handler wiring stays in sync with the spec without ever touching your code.
 
 ### Feature restrictions by mode
 

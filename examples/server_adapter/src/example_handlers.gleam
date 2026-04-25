@@ -10,7 +10,6 @@ import api/guards
 import api/request_types
 import api/response_types
 import api/types
-import gleam/dict
 import gleam/option.{None, Some}
 
 pub fn list_pets(
@@ -23,14 +22,12 @@ pub fn list_pets(
       name: "Fido",
       status: types.PetStatusAvailable,
       tag: Some("dog"),
-      additional_properties: dict.new(),
     ),
     types.Pet(
       id: 2,
       name: "Whiskers",
       status: types.PetStatusPending,
       tag: None,
-      additional_properties: dict.new(),
     ),
   ])
 }
@@ -49,7 +46,6 @@ pub fn create_pet(
         name: req.body.name,
         status: types.PetStatusAvailable,
         tag: req.body.tag,
-        additional_properties: dict.new(),
       ))
   }
 }
@@ -64,7 +60,6 @@ pub fn get_pet(
         name: "Fido",
         status: types.PetStatusAvailable,
         tag: Some("dog"),
-        additional_properties: dict.new(),
       ))
     _ -> response_types.GetPetResponseNotFound
   }

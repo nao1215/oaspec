@@ -27,6 +27,7 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
       path: "client.gleam",
       content: client_content,
       target: context.ClientTarget,
+      write_mode: context.Overwrite,
     ),
   ]
 }

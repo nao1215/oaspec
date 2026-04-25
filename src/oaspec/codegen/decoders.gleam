@@ -34,6 +34,7 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
       path: "decode.gleam",
       content: decode_content,
       target: context.SharedTarget,
+      write_mode: context.Overwrite,
     ),
   ]
 }

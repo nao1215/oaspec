@@ -38,6 +38,7 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
       path: "encode.gleam",
       content: content,
       target: context.SharedTarget,
+      write_mode: context.Overwrite,
     ),
   ]
 }
