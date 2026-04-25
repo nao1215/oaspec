@@ -37,12 +37,22 @@ pub fn app() -> glint.Glint(Nil) {
   glint.new()
   |> glint.with_name("oaspec")
   |> glint.global_help(
-    "Generate Gleam code from OpenAPI 3.x specifications\n\nCommands:\n  init       Create a default oaspec.yaml config file\n  generate   Generate Gleam code from an OpenAPI spec\n  validate   Validate an OpenAPI spec without generating code\n\nRun 'oaspec <command> --help' for more information.",
+    "Generate Gleam code from OpenAPI 3.x specifications\n\nCommands:\n  init       Create a default oaspec.yaml config file\n  generate   Generate Gleam code from an OpenAPI spec\n  validate   Validate an OpenAPI spec without generating code\n  version    Print the oaspec version and exit\n\nRun 'oaspec <command> --help' for more information.\nUse 'oaspec --version' for a flag-style version check.",
   )
   |> maybe_pretty_help
   |> glint.add(at: ["init"], do: init_command())
   |> glint.add(at: ["generate"], do: generate_command())
   |> glint.add(at: ["validate"], do: validate_command())
+  |> glint.add(at: ["version"], do: version_command())
+}
+
+/// The version command definition.
+fn version_command() -> glint.Command(Nil) {
+  glint.command_help("Print the oaspec version and exit", fn() {
+    glint.command(fn(_named_args, _args, _flags) {
+      io.println("oaspec v" <> context.version)
+    })
+  })
 }
 
 /// The generate command definition.

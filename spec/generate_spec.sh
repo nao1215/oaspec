@@ -14,6 +14,7 @@ Describe 'oaspec top-level help'
     The output should include 'init'
     The output should include 'generate'
     The output should include 'validate'
+    The output should include 'version'
   End
 
   Describe 'colour output'
@@ -32,6 +33,22 @@ Describe 'oaspec top-level help'
       The status should be success
       The output should not include "$(printf '\033[')"
     End
+  End
+End
+
+Describe 'oaspec version'
+  Include "$SHELLSPEC_SPECDIR/spec_helper.sh"
+
+  It 'prints the version when invoked as --version'
+    When run oaspec_cli --version
+    The status should be success
+    The output should include 'oaspec v'
+  End
+
+  It 'prints the version when invoked as the version subcommand'
+    When run oaspec_cli version
+    The status should be success
+    The output should include 'oaspec v'
   End
 End
 
