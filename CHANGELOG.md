@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-04-25
+
+This release is a UX overhaul of the generated server / client surface.
+The generator now distinguishes user-owned files from sealed wrappers,
+the default output layout is `gleam build`-friendly, closed-object
+schemas no longer drag a `Dict(String, Dynamic)` field through every
+constructor call, and the CLI honours POSIX/CLIG conventions for stderr,
+`NO_COLOR`, and version reporting. Most entries below are breaking
+changes — see each entry for migration steps.
+
 ### Changed
 
 - **Generated handlers split into a sealed delegator and a user-owned stub (#247) — breaking for code that imports `<package>/handlers` outside of `handlers.gleam` itself**: previously `oaspec generate` emitted a single `handlers.gleam` with a `// DO NOT EDIT` banner *and* `panic as "unimplemented: ..."` stubs the user had to replace, and re-running the generator clobbered the user's implementation. The handler surface is now two files. `handlers_generated.gleam` is sealed (`// DO NOT EDIT`, always overwritten) — each operation forwards to `handlers.<op_name>(req)` — and `router.gleam` imports it. `handlers.gleam` is now user-owned: the generator writes panic stubs on the first run and skips the file on every subsequent run, so user implementations survive regeneration. The codegen IR gained a `WriteMode` field (`Overwrite` / `SkipIfExists`); the writer honours it and `--check` ignores `SkipIfExists` files so user edits do not show up as drift. **Migration**: code that previously imported `<package>/handlers` from anywhere except `handlers.gleam` itself (e.g. a custom `router.gleam` users hand-wrote on top of the old single-file shape) now needs to import `<package>/handlers_generated`. The bundled router and the integration suite are updated automatically.
