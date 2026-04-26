@@ -653,6 +653,41 @@ paths:
   |> should.be_true()
 }
 
+// Issue #265: application/octet-stream must be accepted as a request body
+// content type so callers can describe binary upload endpoints (S3
+// PutObject-style, image upload, log shipping, etc.).
+pub fn validate_accepts_octet_stream_request_body_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /blobs:
+    post:
+      operationId: putBlob
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '201': { description: stored }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  // No content-type-related diagnostic should mention application/octet-stream
+  // as unsupported.
+  let error_strings = list.map(errors, validate.error_to_string)
+  list.any(error_strings, fn(s) {
+    string.contains(s, "application/octet-stream")
+    && string.contains(s, "is not supported")
+  })
+  |> should.be_false()
+}
+
 pub fn dedup_resolves_property_name_collision_test() {
   let yaml =
     "
@@ -4312,6 +4347,7 @@ pub fn capability_registry_covers_content_type_request_helpers_test() {
     "application/json",
     "application/x-www-form-urlencoded",
     "multipart/form-data",
+    "application/octet-stream",
   ]
   let registry_request_names =
     capability.registry()

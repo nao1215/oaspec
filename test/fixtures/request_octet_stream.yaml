@@ -1,0 +1,30 @@
+openapi: 3.0.0
+info:
+  title: Binary Upload API
+  version: 1.0.0
+paths:
+  /blobs:
+    post:
+      operationId: putBlob
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "201":
+          description: stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PutResult"
+components:
+  schemas:
+    PutResult:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string

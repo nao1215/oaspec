@@ -174,6 +174,12 @@ pub fn registry() -> List(Capability) {
     ),
     Capability("multipart/form-data", "request", Supported, "Multipart upload"),
     Capability(
+      "application/octet-stream",
+      "request",
+      Supported,
+      "Binary upload (raw bytes; passes through as the body parameter without JSON decoding)",
+    ),
+    Capability(
       "+json/+xml suffix",
       "content-type",
       Supported,
