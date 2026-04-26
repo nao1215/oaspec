@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-04-27
+
 ### Fixed
 
 - Generated record fields no longer split letter+digit identifiers, so
