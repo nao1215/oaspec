@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-04-26
+
+### Fixed
+
+- Client-only mode (`mode: client`) now writes generated files to
+  `<output.dir>/<package>/` instead of `<output.dir>/<package>_client/`,
+  so the directory matches the `import <package>/...` lines emitted in
+  the generated code. Previously a fresh `gleam new` + `gleam add
+  oaspec` + `gleam run -m oaspec -- generate` pipeline failed
+  immediately with `Unknown module: <package>/decode` and friends. The
+  `_client` suffix is preserved in `Both` mode (where server and
+  client need distinct basenames inside one `<dir>`). (#262)
+
+### Added
+
+- `application/octet-stream` is now accepted as a request-body content
+  type. Binary upload endpoints (S3 PutObject-style, image upload, PDF
+  upload, log shipping, sensor data) can be described in OpenAPI specs
+  and pass through codegen. The body parameter is currently `String`
+  (binary-safe on the Erlang target); a `BitArray`-typed body is
+  tracked as future work. (#265)
+
 ## [0.19.0] - 2026-04-26
 
 ### Changed
