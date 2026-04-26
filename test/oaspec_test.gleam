@@ -155,6 +155,7 @@ pub fn config_with_output_client_only_drops_suffix_test() {
       validate: False,
     )
   let updated = config.with_output(cfg, Some("./new"))
+  config.output_server(updated) |> should.equal("./new/api")
   config.output_client(updated) |> should.equal("./new/api")
 }
 
@@ -171,6 +172,27 @@ pub fn config_with_output_both_keeps_suffix_test() {
   let updated = config.with_output(cfg, Some("./new"))
   config.output_server(updated) |> should.equal("./new/api")
   config.output_client(updated) |> should.equal("./new/api_client")
+}
+
+pub fn config_validate_rejects_both_mode_with_same_paths_test() {
+  // Guards the with_mode-after-load edge case: a Client-mode config
+  // upgraded to Both must not silently overwrite the server directory
+  // with client content. validate_output_package_match catches the
+  // collision.
+  let cfg =
+    config.new(
+      input: "test/fixtures/petstore.yaml",
+      output_server: "./gen/api",
+      output_client: "./gen/api",
+      package: "api",
+      mode: config.Both,
+      validate: True,
+    )
+  case config.validate_output_package_match(cfg) {
+    Error(config.InvalidValue(field: "output.client", detail: _)) ->
+      should.be_true(True)
+    _ -> should.fail()
+  }
 }
 
 pub fn config_validate_default_both_test() {

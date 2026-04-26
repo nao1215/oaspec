@@ -226,6 +226,10 @@ pub fn with_validate(config: Config, validate: Bool) -> Config {
 /// Derives server/client paths as <dir>/<package> and <dir>/<package>_client
 /// in `Both` mode. In client-only mode the client path drops the suffix
 /// (Issue #262) so generated `import <package>/...` lines resolve.
+///
+/// The suffix decision reads `config.mode` at call time, so apply
+/// `with_mode/2` before `with_output/2` if both overrides are needed —
+/// otherwise the client path will reflect the previous mode's default.
 pub fn with_output(config: Config, output: Option(String)) -> Config {
   case output {
     Some(dir) ->
@@ -267,6 +271,22 @@ pub fn validate_output_package_match(config: Config) -> Result(Nil, ConfigError)
       }
     Client -> Ok(Nil)
   }
+  |> result.try(fn(_) {
+    // Both-mode safety: server and client must not write to the same
+    // directory or one would overwrite the other (Issue #262 follow-up).
+    case config.mode {
+      Both ->
+        case config.output_server == config.output_client {
+          False -> Ok(Nil)
+          True ->
+            Error(InvalidValue(
+              field: "output.client",
+              detail: "In `Both` mode, output.server and output.client must differ. Set them explicitly, or use `mode: client` / `mode: server` to opt out of dual emission.",
+            ))
+        }
+      Server | Client -> Ok(Nil)
+    }
+  })
   |> result.try(fn(_) {
     case config.mode {
       Client | Both -> {
