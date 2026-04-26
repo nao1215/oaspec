@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `application/x-ndjson` (newline-delimited JSON) is now accepted as
+  a response content type. NDJSON is widely deployed for streaming
+  JSON Lines responses (Elasticsearch bulk API, Loki, OpenAI
+  streaming endpoints, log shippers) and the previous "unsupported
+  response content type" rejection blocked any spec that used it.
+  For codegen purposes the body is a `String` and no per-line
+  decoding happens at the SDK layer, so the implementation aliases
+  to the existing `text/plain` branch in `content_type.from_string`.
+  The original `application/x-ndjson` string is still embedded
+  verbatim into the generated server's `Content-Type` response
+  header (the codegen pulls the media-type name from the spec, not
+  from the alias). Same behaviour applies to validate-only runs
+  via `oaspec validate`. (#261)
+
 ### Fixed
 
 - `oaspec generate --config oaspec.yaml` (GNU long-option form with a

@@ -183,6 +183,12 @@ pub fn registry() -> List(Capability) {
     Capability("application/json", "response", Supported, "JSON responses"),
     Capability("text/plain", "response", Supported, "Text passthrough"),
     Capability(
+      "application/x-ndjson",
+      "response",
+      Supported,
+      "NDJSON streaming, treated as text passthrough",
+    ),
+    Capability(
       "application/octet-stream",
       "response",
       Supported,

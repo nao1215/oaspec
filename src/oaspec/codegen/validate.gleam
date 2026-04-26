@@ -994,9 +994,9 @@ fn validate_responses(
             path: path,
             detail: "Response content type '"
               <> media_type_name
-              <> "' is not supported. Supported response content types: application/json (and +json suffix types), text/plain, application/octet-stream, application/xml (and +xml suffix types), text/xml.",
+              <> "' is not supported. Supported response content types: application/json (and +json suffix types), text/plain, application/x-ndjson, application/octet-stream, application/xml (and +xml suffix types), text/xml.",
             hint: Some(
-              "Use application/json (or a +json suffix type), text/plain, application/octet-stream, application/xml (or a +xml suffix type), or text/xml.",
+              "Use application/json (or a +json suffix type), text/plain, application/x-ndjson, application/octet-stream, application/xml (or a +xml suffix type), or text/xml.",
             ),
           ),
         ]

@@ -1788,6 +1788,17 @@ pub fn content_type_from_string_test() {
 
   content_type.from_string("application/octet-stream")
   |> should.equal(content_type.ApplicationOctetStream)
+
+  // application/x-ndjson aliases to TextPlain (issue #261)
+  content_type.from_string("application/x-ndjson")
+  |> should.equal(content_type.TextPlain)
+}
+
+pub fn content_type_x_ndjson_is_supported_response_test() {
+  content_type.is_supported_response(content_type.from_string(
+    "application/x-ndjson",
+  ))
+  |> should.be_true()
 }
 
 pub fn content_type_to_string_test() {

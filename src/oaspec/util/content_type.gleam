@@ -21,6 +21,15 @@ pub fn from_string(content_type: String) -> ContentType {
   case content_type {
     "application/json" -> ApplicationJson
     "text/plain" -> TextPlain
+    // application/x-ndjson (newline-delimited JSON) is widely deployed for
+    // streaming JSON Lines responses (Elasticsearch bulk, Loki, OpenAI
+    // streaming, log shippers). For codegen purposes the body is a `String`
+    // and no per-line decoding happens at the SDK layer, so it aliases to
+    // TextPlain. The original "application/x-ndjson" string is still embedded
+    // verbatim into the generated server's `Content-Type` response header
+    // because the codegen pulls the media-type name from the spec, not from
+    // `to_string`.
+    "application/x-ndjson" -> TextPlain
     "multipart/form-data" -> MultipartFormData
     "application/x-www-form-urlencoded" -> FormUrlEncoded
     "application/octet-stream" -> ApplicationOctetStream
