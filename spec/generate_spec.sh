@@ -100,6 +100,25 @@ Describe 'oaspec generate'
     End
   End
 
+  Describe 'pattern constraint dependency hint (Issue #284)'
+    It 'prints a Note about gleam_regexp when generated code uses pattern validation'
+      clean_test_output
+      When run generate --config=test/fixtures/oaspec_guards_pattern.yaml
+      The status should be success
+      The output should include 'Successfully generated'
+      The output should include 'gleam/regexp for pattern validation'
+      The output should include "gleam add gleam_regexp"
+    End
+
+    It 'does not print the Note when no patterns are present'
+      clean_test_output
+      When run generate --config=test/fixtures/oaspec.yaml
+      The status should be success
+      The output should include 'Successfully generated'
+      The output should not include 'gleam_regexp'
+    End
+  End
+
   # -------------------------------------------------------------------
   # File existence checks (generate once, check many)
   # -------------------------------------------------------------------

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Generated record fields no longer split letter+digit identifiers, so
+  `rev_b58`, `sha256`, `port_8080`, `iso8601`, etc. survive codegen
+  unchanged instead of becoming `rev_b_58` / `sha_256` / `port_8_080`.
+  Matches the convention sqlode landed on in nao1215/sqlode#480; the
+  digit→letter direction (`256sha` → `256_sha`) still splits because
+  that asymmetry is the standard reading. (#283)
+
+### Added
+
+- `oaspec generate` now prints a `Note:` line at the end of generation
+  reminding the user to `gleam add gleam_regexp` when the generated
+  code imports `gleam/regexp` for pattern validation. Without the
+  direct dep, `gleam build` warns about the transitive import (and a
+  future Gleam release turns this into a hard error). The hint is only
+  printed when at least one generated file actually imports
+  `gleam/regexp`. (#284)
+
 ## [0.21.0] - 2026-04-26
 
 ### Changed

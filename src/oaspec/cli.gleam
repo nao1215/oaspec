@@ -314,6 +314,32 @@ fn write_files(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
   io.println(
     "Successfully generated " <> int.to_string(list.length(written)) <> " files",
   )
+  print_dep_hints(files)
+}
+
+/// Issue #284: when the generated code imports a Gleam stdlib module
+/// whose package is not a direct dep of the consumer's project (today,
+/// only `gleam/regexp` for pattern validation), `gleam build` warns
+/// about the transitive import and a future Gleam release turns this
+/// into a hard error. Print an actionable hint so the user adds the
+/// missing dep — we deliberately do not rewrite the consumer's
+/// `gleam.toml` because modifying user-managed config invisibly is
+/// surprising.
+fn print_dep_hints(files: List(context.GeneratedFile)) -> Nil {
+  let needs_regexp =
+    list.any(files, fn(f) { string.contains(f.content, "import gleam/regexp") })
+  case needs_regexp {
+    True -> {
+      io.println("")
+      io.println(
+        "Note: generated code imports gleam/regexp for pattern validation.",
+      )
+      io.println(
+        "      Run 'gleam add gleam_regexp' in your project before 'gleam build'.",
+      )
+    }
+    False -> Nil
+  }
 }
 
 /// Check that generated code matches existing files on disk.

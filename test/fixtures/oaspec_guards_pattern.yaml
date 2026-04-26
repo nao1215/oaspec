@@ -1,0 +1,6 @@
+input: test/fixtures/guard_constraints_api.yaml
+output:
+  server: ./test_output/api
+  client: ./test_output_client/api
+package: api
+validate: true
