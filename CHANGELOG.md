@@ -25,6 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A spec that defines both `Foo` and `FooList` component schemas
+  (or any `<Name>` + `<Name>List` pair) used to fail at `gleam build`
+  time with `Duplicate definition: decode_<name>_list` rather than
+  during validation. The synthetic list decoder for `Foo` and the
+  user-named decoder for `FooList` collided on the same identifier
+  in `decode.gleam`. The validator now detects the pair before
+  codegen and emits a spec-level diagnostic naming both schemas and
+  the offending identifier, with rename suggestions
+  (`<Name>Collection`, `<Name>Page`, `<Name>Items`). Specs that only
+  define one of the pair are unaffected. (#267)
 - A 2xx response whose schema is a top-level array of primitive items
   (`type: array, items: { type: string }` etc.) used to generate
   `body: json.to_string(json.string(data))` in the server router,

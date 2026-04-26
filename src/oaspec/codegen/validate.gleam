@@ -32,7 +32,66 @@ pub fn validate(ctx: Context) -> List(Diagnostic) {
   let opid_errors = validate_unique_operation_ids(operations)
   let schema_errors = validate_component_schemas(ctx)
   let security_errors = validate_security_schemes(ctx, operations)
-  list.flatten([op_errors, opid_errors, schema_errors, security_errors])
+  let list_decoder_errors = validate_decode_list_collisions(ctx)
+  list.flatten([
+    op_errors,
+    opid_errors,
+    schema_errors,
+    security_errors,
+    list_decoder_errors,
+  ])
+}
+
+/// Detect `Foo` + `FooList` schema name pairs that would generate two
+/// `decode_foo_list` functions in `decode.gleam` and trip the gleam
+/// compiler's `Duplicate definition` check. The synthetic list decoder
+/// (`decode_<schema>_list` returning `List(<Schema>)`) is emitted for
+/// every component schema, so any user-named `<Schema>List` schema
+/// collides on the same identifier. Detected at validation time so the
+/// user gets a one-line spec-level diagnostic instead of a confusing
+/// post-codegen build failure. (#267)
+fn validate_decode_list_collisions(ctx: Context) -> List(Diagnostic) {
+  let schema_names = case context.spec(ctx).components {
+    Some(components) ->
+      dict.to_list(components.schemas) |> list.map(fn(entry) { entry.0 })
+    None -> []
+  }
+  list.filter_map(schema_names, fn(base_name) {
+    let collider_name = base_name <> "List"
+    case list.contains(schema_names, collider_name) {
+      False -> Error(Nil)
+      True -> {
+        let snake = naming.to_snake_case(base_name)
+        Ok(diagnostic.validation(
+          severity: SeverityError,
+          target: TargetBoth,
+          path: "components.schemas." <> collider_name,
+          detail: "Schema name '"
+            <> collider_name
+            <> "' would generate decode_"
+            <> snake
+            <> "_list, which collides with the synthetic list decoder for '"
+            <> base_name
+            <> "' (a JSON array of "
+            <> base_name
+            <> "). gleam build will fail with `Duplicate definition: decode_"
+            <> snake
+            <> "_list`.",
+          hint: Some(
+            "Rename one of the schemas. Example: rename '"
+            <> collider_name
+            <> "' to '"
+            <> base_name
+            <> "Collection', '"
+            <> base_name
+            <> "Page', or '"
+            <> base_name
+            <> "Items'.",
+          ),
+        ))
+      }
+    }
+  })
 }
 
 /// Fail the spec if two operations end up sharing an operationId, either

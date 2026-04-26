@@ -13006,6 +13006,69 @@ paths:
                   type: string
 "
 
+/// Spec where two component schemas would collide on `decode_card_list`
+/// (Issue #267): `Card` synthesises a list decoder; `CardList` reuses the
+/// same identifier. The validator must surface this before codegen.
+const decode_list_collision_spec = "
+openapi: 3.0.3
+info:
+  title: Decode List Collision
+  version: 1.0.0
+servers:
+  - url: https://example.com
+paths:
+  /cards:
+    get:
+      operationId: listCards
+      responses:
+        '200':
+          description: list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardList'
+components:
+  schemas:
+    Card:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+    CardList:
+      type: object
+      required: [cards]
+      properties:
+        cards:
+          type: array
+          items:
+            $ref: '#/components/schemas/Card'
+"
+
+pub fn validate_detects_decode_list_collision_test() {
+  let assert Ok(spec) = parser.parse_string(decode_list_collision_spec)
+  let assert Ok(resolved) = resolve.resolve(spec)
+  let resolved = hoist.hoist(resolved)
+  let resolved = dedup.dedup(resolved)
+  let cfg =
+    config.new(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Both,
+      validate: False,
+    )
+  let ctx = context.new(resolved, cfg)
+  let errors = validate.validate(ctx)
+  let has_collision_error =
+    list.any(errors, fn(e) {
+      string.contains(diagnostic.to_string(e), "decode_card_list")
+      && string.contains(diagnostic.to_string(e), "CardList")
+    })
+  has_collision_error |> should.be_true()
+}
+
 pub fn top_level_array_response_uses_json_array_test() {
   let ctx = make_validate_ctx_from_yaml(top_level_array_spec)
   let files = server_gen.generate(ctx)
