@@ -406,8 +406,13 @@ fn generate_client(ctx: Context) -> String {
     |> se.indent(1, "DecodeError(detail: String)")
     |> se.indent(1, "InvalidUrl(detail: String)")
     |> se.indent(1, "UnexpectedStatus(status: Int, body: String)")
-  let sb = case config.validate(context.config(ctx)) {
-    True -> sb |> se.indent(1, "ValidationError(errors: List(String))")
+  // ValidationError needs the guards module import for `guards.ValidationFailure`,
+  // so emit it only when guards.gleam itself is generated (= some schema has
+  // a validator). `needs_guards` already encodes that.
+  let sb = case needs_guards {
+    True ->
+      sb
+      |> se.indent(1, "ValidationError(errors: List(guards.ValidationFailure))")
     False -> sb
   }
   let sb =

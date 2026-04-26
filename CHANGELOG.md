@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING**: generated `guards.gleam` validators now return
+  structured `ValidationFailure(field, code, message)` values instead of
+  bare strings. Helper signatures change from `Result(_, String)` to
+  `Result(_, ValidationFailure)`, and composite `validate_*` functions
+  change from `Result(_, List(String))` to
+  `Result(_, List(ValidationFailure))`. `code` is the JSON Schema
+  keyword that failed (`minLength` / `maximum` / `pattern` /
+  `multipleOf` / `uniqueItems` / `minProperties` / etc., plus
+  `invalidPattern` for regex compile errors), `field` is the OpenAPI
+  property name (empty for top-level constraints), and `message` keeps
+  the previous human-readable text. Server `router.gleam` now serialises
+  the 422 body via `guards.validation_failure_to_json` so each failure
+  is its own JSON object instead of a string. Generated client
+  `ClientError.ValidationError` carries
+  `errors: List(guards.ValidationFailure)`. To migrate, replace
+  `Error(msg) -> ...` arms with
+  `Error(failure) -> ...` and read `failure.field`, `failure.code`,
+  `failure.message`; the previous prose is still available as
+  `failure.message`. (#269)
+
 ### Fixed
 
 - Generated `router.gleam` no longer crashes the BEAM process when a

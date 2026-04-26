@@ -65,8 +65,10 @@ fn generate_guards(ctx: Context) -> String {
   // Generated guard functions use string/list.length for validation;
   // constraint values (min/max) are baked as literals at generation time,
   // so gleam/int and gleam/float are NOT needed in the generated output.
+  // gleam/json is always imported because the ValidationFailure encoder
+  // emitted below uses it.
   let constraint_types = collect_constraint_types(schemas, ctx)
-  let imports = []
+  let imports = ["gleam/json"]
   let imports = case constraint_types.has_string {
     True -> ["gleam/string", ..imports]
     False -> imports
@@ -129,6 +131,7 @@ fn generate_guards(ctx: Context) -> String {
   let sb =
     se.file_header(context.version)
     |> se.imports(imports)
+    |> emit_validation_failure_type()
 
   let sb =
     list.fold(schemas, sb, fn(sb, entry) {
@@ -428,8 +431,18 @@ fn generate_string_pattern_guard(
       let pattern_literal = gleam_string_literal(pattern)
       let invalid_pattern_prefix =
         gleam_string_literal("invalid pattern: " <> pattern <> ": ")
-      let mismatch_message =
-        gleam_string_literal("must match pattern: " <> pattern)
+      let mismatch_failure =
+        validation_failure_literal(
+          prop_name,
+          "pattern",
+          "must match pattern: " <> pattern,
+        )
+      let invalid_pattern_failure =
+        validation_failure_dynamic(
+          prop_name,
+          "invalidPattern",
+          invalid_pattern_prefix <> " <> error",
+        )
       sb
       |> se.line(
         "/// Validate string pattern for "
@@ -438,18 +451,18 @@ fn generate_string_pattern_guard(
         <> ".",
       )
       |> se.line(
-        "pub fn " <> fn_name <> "(value: String) -> Result(String, String) {",
+        "pub fn "
+        <> fn_name
+        <> "(value: String) -> Result(String, ValidationFailure) {",
       )
       |> se.indent(1, "case regexp.from_string(" <> pattern_literal <> ") {")
       |> se.indent(2, "Ok(re) -> case regexp.check(re, value) {")
       |> se.indent(3, "True -> Ok(value)")
-      |> se.indent(3, "False -> Error(" <> mismatch_message <> ")")
+      |> se.indent(3, "False -> " <> mismatch_failure)
       |> se.indent(2, "}")
       |> se.indent(
         2,
-        "Error(regexp.CompileError(error:, ..)) -> Error("
-          <> invalid_pattern_prefix
-          <> " <> error)",
+        "Error(regexp.CompileError(error:, ..)) -> " <> invalid_pattern_failure,
       )
       |> se.indent(1, "}")
       |> se.line("}")
@@ -479,6 +492,23 @@ fn generate_string_guard(
     None, None -> sb
     _, _ -> {
       let fn_name = guard_function_name(schema_name, prop_name, "length")
+      let min_failure = fn(min) {
+        validation_failure_literal(
+          prop_name,
+          "minLength",
+          "must be at least "
+            <> int.to_string(min)
+            <> " "
+            <> character_word(min),
+        )
+      }
+      let max_failure = fn(max) {
+        validation_failure_literal(
+          prop_name,
+          "maxLength",
+          "must be at most " <> int.to_string(max) <> " " <> character_word(max),
+        )
+      }
       let sb =
         sb
         |> se.line(
@@ -490,58 +520,32 @@ fn generate_string_guard(
       let sb =
         sb
         |> se.line(
-          "pub fn " <> fn_name <> "(value: String) -> Result(String, String) {",
+          "pub fn "
+          <> fn_name
+          <> "(value: String) -> Result(String, ValidationFailure) {",
         )
       let sb = sb |> se.indent(1, "let len = string.length(value)")
       let sb = case min_length, max_length {
         Some(min), Some(max) ->
           sb
           |> se.indent(1, "case len < " <> int.to_string(min) <> " {")
-          |> se.indent(
-            2,
-            "True -> Error(\"must be at least "
-              <> int.to_string(min)
-              <> " "
-              <> character_word(min)
-              <> "\")",
-          )
+          |> se.indent(2, "True -> " <> min_failure(min))
           |> se.indent(2, "False ->")
           |> se.indent(3, "case len > " <> int.to_string(max) <> " {")
-          |> se.indent(
-            4,
-            "True -> Error(\"must be at most "
-              <> int.to_string(max)
-              <> " "
-              <> character_word(max)
-              <> "\")",
-          )
+          |> se.indent(4, "True -> " <> max_failure(max))
           |> se.indent(4, "False -> Ok(value)")
           |> se.indent(3, "}")
           |> se.indent(1, "}")
         Some(min), None ->
           sb
           |> se.indent(1, "case len < " <> int.to_string(min) <> " {")
-          |> se.indent(
-            2,
-            "True -> Error(\"must be at least "
-              <> int.to_string(min)
-              <> " "
-              <> character_word(min)
-              <> "\")",
-          )
+          |> se.indent(2, "True -> " <> min_failure(min))
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
         None, Some(max) ->
           sb
           |> se.indent(1, "case len > " <> int.to_string(max) <> " {")
-          |> se.indent(
-            2,
-            "True -> Error(\"must be at most "
-              <> int.to_string(max)
-              <> " "
-              <> character_word(max)
-              <> "\")",
-          )
+          |> se.indent(2, "True -> " <> max_failure(max))
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
         None, None -> sb
@@ -565,6 +569,20 @@ fn generate_integer_guard(
     None, None -> sb
     _, _ -> {
       let fn_name = guard_function_name(schema_name, prop_name, "range")
+      let min_failure = fn(min) {
+        validation_failure_literal(
+          prop_name,
+          "minimum",
+          "must be at least " <> int.to_string(min),
+        )
+      }
+      let max_failure = fn(max) {
+        validation_failure_literal(
+          prop_name,
+          "maximum",
+          "must be at most " <> int.to_string(max),
+        )
+      }
       let sb =
         sb
         |> se.line(
@@ -576,41 +594,31 @@ fn generate_integer_guard(
       let sb =
         sb
         |> se.line(
-          "pub fn " <> fn_name <> "(value: Int) -> Result(Int, String) {",
+          "pub fn "
+          <> fn_name
+          <> "(value: Int) -> Result(Int, ValidationFailure) {",
         )
       let sb = case minimum, maximum {
         Some(min), Some(max) ->
           sb
           |> se.indent(1, "case value < " <> int.to_string(min) <> " {")
-          |> se.indent(
-            2,
-            "True -> Error(\"must be at least " <> int.to_string(min) <> "\")",
-          )
+          |> se.indent(2, "True -> " <> min_failure(min))
           |> se.indent(2, "False ->")
           |> se.indent(3, "case value > " <> int.to_string(max) <> " {")
-          |> se.indent(
-            4,
-            "True -> Error(\"must be at most " <> int.to_string(max) <> "\")",
-          )
+          |> se.indent(4, "True -> " <> max_failure(max))
           |> se.indent(4, "False -> Ok(value)")
           |> se.indent(3, "}")
           |> se.indent(1, "}")
         Some(min), None ->
           sb
           |> se.indent(1, "case value < " <> int.to_string(min) <> " {")
-          |> se.indent(
-            2,
-            "True -> Error(\"must be at least " <> int.to_string(min) <> "\")",
-          )
+          |> se.indent(2, "True -> " <> min_failure(min))
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
         None, Some(max) ->
           sb
           |> se.indent(1, "case value > " <> int.to_string(max) <> " {")
-          |> se.indent(
-            2,
-            "True -> Error(\"must be at most " <> int.to_string(max) <> "\")",
-          )
+          |> se.indent(2, "True -> " <> max_failure(max))
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
         None, None -> sb
@@ -634,6 +642,20 @@ fn generate_float_guard(
     None, None -> sb
     _, _ -> {
       let fn_name = guard_function_name(schema_name, prop_name, "range")
+      let min_failure = fn(min) {
+        validation_failure_literal(
+          prop_name,
+          "minimum",
+          "must be at least " <> float.to_string(min),
+        )
+      }
+      let max_failure = fn(max) {
+        validation_failure_literal(
+          prop_name,
+          "maximum",
+          "must be at most " <> float.to_string(max),
+        )
+      }
       let sb =
         sb
         |> se.line(
@@ -645,41 +667,31 @@ fn generate_float_guard(
       let sb =
         sb
         |> se.line(
-          "pub fn " <> fn_name <> "(value: Float) -> Result(Float, String) {",
+          "pub fn "
+          <> fn_name
+          <> "(value: Float) -> Result(Float, ValidationFailure) {",
         )
       let sb = case minimum, maximum {
         Some(min), Some(max) ->
           sb
           |> se.indent(1, "case value <. " <> float.to_string(min) <> " {")
-          |> se.indent(
-            2,
-            "True -> Error(\"must be at least " <> float.to_string(min) <> "\")",
-          )
+          |> se.indent(2, "True -> " <> min_failure(min))
           |> se.indent(2, "False ->")
           |> se.indent(3, "case value >. " <> float.to_string(max) <> " {")
-          |> se.indent(
-            4,
-            "True -> Error(\"must be at most " <> float.to_string(max) <> "\")",
-          )
+          |> se.indent(4, "True -> " <> max_failure(max))
           |> se.indent(4, "False -> Ok(value)")
           |> se.indent(3, "}")
           |> se.indent(1, "}")
         Some(min), None ->
           sb
           |> se.indent(1, "case value <. " <> float.to_string(min) <> " {")
-          |> se.indent(
-            2,
-            "True -> Error(\"must be at least " <> float.to_string(min) <> "\")",
-          )
+          |> se.indent(2, "True -> " <> min_failure(min))
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
         None, Some(max) ->
           sb
           |> se.indent(1, "case value >. " <> float.to_string(max) <> " {")
-          |> se.indent(
-            2,
-            "True -> Error(\"must be at most " <> float.to_string(max) <> "\")",
-          )
+          |> se.indent(2, "True -> " <> max_failure(max))
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
         None, None -> sb
@@ -704,6 +716,20 @@ fn generate_integer_exclusive_guard(
     _, _ -> {
       let fn_name =
         guard_function_name(schema_name, prop_name, "exclusive_range")
+      let min_failure = fn(min) {
+        validation_failure_literal(
+          prop_name,
+          "exclusiveMinimum",
+          "must be greater than " <> int.to_string(min),
+        )
+      }
+      let max_failure = fn(max) {
+        validation_failure_literal(
+          prop_name,
+          "exclusiveMaximum",
+          "must be less than " <> int.to_string(max),
+        )
+      }
       let sb =
         sb
         |> se.line(
@@ -715,45 +741,31 @@ fn generate_integer_exclusive_guard(
       let sb =
         sb
         |> se.line(
-          "pub fn " <> fn_name <> "(value: Int) -> Result(Int, String) {",
+          "pub fn "
+          <> fn_name
+          <> "(value: Int) -> Result(Int, ValidationFailure) {",
         )
       let sb = case exclusive_minimum, exclusive_maximum {
         Some(min), Some(max) ->
           sb
           |> se.indent(1, "case value > " <> int.to_string(min) <> " {")
-          |> se.indent(
-            2,
-            "False -> Error(\"must be greater than "
-              <> int.to_string(min)
-              <> "\")",
-          )
+          |> se.indent(2, "False -> " <> min_failure(min))
           |> se.indent(2, "True ->")
           |> se.indent(3, "case value < " <> int.to_string(max) <> " {")
-          |> se.indent(
-            4,
-            "False -> Error(\"must be less than " <> int.to_string(max) <> "\")",
-          )
+          |> se.indent(4, "False -> " <> max_failure(max))
           |> se.indent(4, "True -> Ok(value)")
           |> se.indent(3, "}")
           |> se.indent(1, "}")
         Some(min), None ->
           sb
           |> se.indent(1, "case value > " <> int.to_string(min) <> " {")
-          |> se.indent(
-            2,
-            "False -> Error(\"must be greater than "
-              <> int.to_string(min)
-              <> "\")",
-          )
+          |> se.indent(2, "False -> " <> min_failure(min))
           |> se.indent(2, "True -> Ok(value)")
           |> se.indent(1, "}")
         None, Some(max) ->
           sb
           |> se.indent(1, "case value < " <> int.to_string(max) <> " {")
-          |> se.indent(
-            2,
-            "False -> Error(\"must be less than " <> int.to_string(max) <> "\")",
-          )
+          |> se.indent(2, "False -> " <> max_failure(max))
           |> se.indent(2, "True -> Ok(value)")
           |> se.indent(1, "}")
         None, None -> sb
@@ -776,6 +788,12 @@ fn generate_integer_multiple_of_guard(
     None -> sb
     Some(m) -> {
       let fn_name = guard_function_name(schema_name, prop_name, "multiple_of")
+      let failure =
+        validation_failure_literal(
+          prop_name,
+          "multipleOf",
+          "must be a multiple of " <> int.to_string(m),
+        )
       sb
       |> se.line(
         "/// Validate integer multipleOf for "
@@ -784,13 +802,12 @@ fn generate_integer_multiple_of_guard(
         <> ".",
       )
       |> se.line(
-        "pub fn " <> fn_name <> "(value: Int) -> Result(Int, String) {",
+        "pub fn "
+        <> fn_name
+        <> "(value: Int) -> Result(Int, ValidationFailure) {",
       )
       |> se.indent(1, "case value % " <> int.to_string(m) <> " == 0 {")
-      |> se.indent(
-        2,
-        "False -> Error(\"must be a multiple of " <> int.to_string(m) <> "\")",
-      )
+      |> se.indent(2, "False -> " <> failure)
       |> se.indent(2, "True -> Ok(value)")
       |> se.indent(1, "}")
       |> se.line("}")
@@ -812,6 +829,20 @@ fn generate_float_exclusive_guard(
     _, _ -> {
       let fn_name =
         guard_function_name(schema_name, prop_name, "exclusive_range")
+      let min_failure = fn(min) {
+        validation_failure_literal(
+          prop_name,
+          "exclusiveMinimum",
+          "must be greater than " <> float.to_string(min),
+        )
+      }
+      let max_failure = fn(max) {
+        validation_failure_literal(
+          prop_name,
+          "exclusiveMaximum",
+          "must be less than " <> float.to_string(max),
+        )
+      }
       let sb =
         sb
         |> se.line(
@@ -823,49 +854,31 @@ fn generate_float_exclusive_guard(
       let sb =
         sb
         |> se.line(
-          "pub fn " <> fn_name <> "(value: Float) -> Result(Float, String) {",
+          "pub fn "
+          <> fn_name
+          <> "(value: Float) -> Result(Float, ValidationFailure) {",
         )
       let sb = case exclusive_minimum, exclusive_maximum {
         Some(min), Some(max) ->
           sb
           |> se.indent(1, "case value >. " <> float.to_string(min) <> " {")
-          |> se.indent(
-            2,
-            "False -> Error(\"must be greater than "
-              <> float.to_string(min)
-              <> "\")",
-          )
+          |> se.indent(2, "False -> " <> min_failure(min))
           |> se.indent(2, "True ->")
           |> se.indent(3, "case value <. " <> float.to_string(max) <> " {")
-          |> se.indent(
-            4,
-            "False -> Error(\"must be less than "
-              <> float.to_string(max)
-              <> "\")",
-          )
+          |> se.indent(4, "False -> " <> max_failure(max))
           |> se.indent(4, "True -> Ok(value)")
           |> se.indent(3, "}")
           |> se.indent(1, "}")
         Some(min), None ->
           sb
           |> se.indent(1, "case value >. " <> float.to_string(min) <> " {")
-          |> se.indent(
-            2,
-            "False -> Error(\"must be greater than "
-              <> float.to_string(min)
-              <> "\")",
-          )
+          |> se.indent(2, "False -> " <> min_failure(min))
           |> se.indent(2, "True -> Ok(value)")
           |> se.indent(1, "}")
         None, Some(max) ->
           sb
           |> se.indent(1, "case value <. " <> float.to_string(max) <> " {")
-          |> se.indent(
-            2,
-            "False -> Error(\"must be less than "
-              <> float.to_string(max)
-              <> "\")",
-          )
+          |> se.indent(2, "False -> " <> max_failure(max))
           |> se.indent(2, "True -> Ok(value)")
           |> se.indent(1, "}")
         None, None -> sb
@@ -888,6 +901,12 @@ fn generate_float_multiple_of_guard(
     None -> sb
     Some(m) -> {
       let fn_name = guard_function_name(schema_name, prop_name, "multiple_of")
+      let failure =
+        validation_failure_literal(
+          prop_name,
+          "multipleOf",
+          "must be a multiple of " <> float.to_string(m),
+        )
       sb
       |> se.line(
         "/// Validate float multipleOf for "
@@ -896,7 +915,9 @@ fn generate_float_multiple_of_guard(
         <> ".",
       )
       |> se.line(
-        "pub fn " <> fn_name <> "(value: Float) -> Result(Float, String) {",
+        "pub fn "
+        <> fn_name
+        <> "(value: Float) -> Result(Float, ValidationFailure) {",
       )
       |> se.indent(
         1,
@@ -906,10 +927,7 @@ fn generate_float_multiple_of_guard(
           <> float.to_string(m),
       )
       |> se.indent(1, "case remainder == 0.0 || remainder == -0.0 {")
-      |> se.indent(
-        2,
-        "False -> Error(\"must be a multiple of " <> float.to_string(m) <> "\")",
-      )
+      |> se.indent(2, "False -> " <> failure)
       |> se.indent(2, "True -> Ok(value)")
       |> se.indent(1, "}")
       |> se.line("}")
@@ -930,6 +948,20 @@ fn generate_list_guard(
     None, None -> sb
     _, _ -> {
       let fn_name = guard_function_name(schema_name, prop_name, "length")
+      let min_failure = fn(min) {
+        validation_failure_literal(
+          prop_name,
+          "minItems",
+          "must have at least " <> int.to_string(min) <> " items",
+        )
+      }
+      let max_failure = fn(max) {
+        validation_failure_literal(
+          prop_name,
+          "maxItems",
+          "must have at most " <> int.to_string(max) <> " items",
+        )
+      }
       let sb =
         sb
         |> se.line(
@@ -943,7 +975,7 @@ fn generate_list_guard(
         |> se.line(
           "pub fn "
           <> fn_name
-          <> "(value: List(a)) -> Result(List(a), String) {",
+          <> "(value: List(a)) -> Result(List(a), ValidationFailure) {",
         )
       let sb =
         sb
@@ -952,43 +984,23 @@ fn generate_list_guard(
         Some(min), Some(max) ->
           sb
           |> se.indent(1, "case len < " <> int.to_string(min) <> " {")
-          |> se.indent(
-            2,
-            "True -> Error(\"must have at least "
-              <> int.to_string(min)
-              <> " items\")",
-          )
+          |> se.indent(2, "True -> " <> min_failure(min))
           |> se.indent(2, "False ->")
           |> se.indent(3, "case len > " <> int.to_string(max) <> " {")
-          |> se.indent(
-            4,
-            "True -> Error(\"must have at most "
-              <> int.to_string(max)
-              <> " items\")",
-          )
+          |> se.indent(4, "True -> " <> max_failure(max))
           |> se.indent(4, "False -> Ok(value)")
           |> se.indent(3, "}")
           |> se.indent(1, "}")
         Some(min), None ->
           sb
           |> se.indent(1, "case len < " <> int.to_string(min) <> " {")
-          |> se.indent(
-            2,
-            "True -> Error(\"must have at least "
-              <> int.to_string(min)
-              <> " items\")",
-          )
+          |> se.indent(2, "True -> " <> min_failure(min))
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
         None, Some(max) ->
           sb
           |> se.indent(1, "case len > " <> int.to_string(max) <> " {")
-          |> se.indent(
-            2,
-            "True -> Error(\"must have at most "
-              <> int.to_string(max)
-              <> " items\")",
-          )
+          |> se.indent(2, "True -> " <> max_failure(max))
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
         None, None -> sb
@@ -1009,6 +1021,8 @@ fn generate_unique_items_guard(
 ) -> se.StringBuilder {
   use <- bool.guard(!unique_items, sb)
   let fn_name = guard_function_name(schema_name, prop_name, "unique")
+  let failure =
+    validation_failure_literal(prop_name, "uniqueItems", "items must be unique")
   sb
   |> se.line(
     "/// Validate unique items for "
@@ -1017,14 +1031,16 @@ fn generate_unique_items_guard(
     <> ".",
   )
   |> se.line(
-    "pub fn " <> fn_name <> "(value: List(a)) -> Result(List(a), String) {",
+    "pub fn "
+    <> fn_name
+    <> "(value: List(a)) -> Result(List(a), ValidationFailure) {",
   )
   |> se.indent(
     1,
     "case list.length(value) == list.length(list.unique(value)) {",
   )
   |> se.indent(2, "True -> Ok(value)")
-  |> se.indent(2, "False -> Error(\"items must be unique\")")
+  |> se.indent(2, "False -> " <> failure)
   |> se.indent(1, "}")
   |> se.line("}")
   |> se.blank_line()
@@ -1042,6 +1058,20 @@ fn generate_properties_count_guard(
     None, None -> sb
     _, _ -> {
       let fn_name = guard_function_name(schema_name, prop_name, "properties")
+      let min_failure = fn(min) {
+        validation_failure_literal(
+          prop_name,
+          "minProperties",
+          "must have at least " <> int.to_string(min) <> " properties",
+        )
+      }
+      let max_failure = fn(max) {
+        validation_failure_literal(
+          prop_name,
+          "maxProperties",
+          "must have at most " <> int.to_string(max) <> " properties",
+        )
+      }
       let sb =
         sb
         |> se.line(
@@ -1053,50 +1083,30 @@ fn generate_properties_count_guard(
         |> se.line(
           "pub fn "
           <> fn_name
-          <> "(value: Dict(k, v)) -> Result(Dict(k, v), String) {",
+          <> "(value: Dict(k, v)) -> Result(Dict(k, v), ValidationFailure) {",
         )
         |> se.indent(1, "let count = dict.size(value)")
       let sb = case min_properties, max_properties {
         Some(min), Some(max) ->
           sb
           |> se.indent(1, "case count < " <> int.to_string(min) <> " {")
-          |> se.indent(
-            2,
-            "True -> Error(\"must have at least "
-              <> int.to_string(min)
-              <> " properties\")",
-          )
+          |> se.indent(2, "True -> " <> min_failure(min))
           |> se.indent(2, "False ->")
           |> se.indent(3, "case count > " <> int.to_string(max) <> " {")
-          |> se.indent(
-            4,
-            "True -> Error(\"must have at most "
-              <> int.to_string(max)
-              <> " properties\")",
-          )
+          |> se.indent(4, "True -> " <> max_failure(max))
           |> se.indent(4, "False -> Ok(value)")
           |> se.indent(3, "}")
           |> se.indent(1, "}")
         Some(min), None ->
           sb
           |> se.indent(1, "case count < " <> int.to_string(min) <> " {")
-          |> se.indent(
-            2,
-            "True -> Error(\"must have at least "
-              <> int.to_string(min)
-              <> " properties\")",
-          )
+          |> se.indent(2, "True -> " <> min_failure(min))
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
         None, Some(max) ->
           sb
           |> se.indent(1, "case count > " <> int.to_string(max) <> " {")
-          |> se.indent(
-            2,
-            "True -> Error(\"must have at most "
-              <> int.to_string(max)
-              <> " properties\")",
-          )
+          |> se.indent(2, "True -> " <> max_failure(max))
           |> se.indent(2, "False -> Ok(value)")
           |> se.indent(1, "}")
         None, None -> sb
@@ -1147,6 +1157,72 @@ fn gleam_string_literal(value: String) -> String {
   "\"" <> escaped <> "\""
 }
 
+/// Emit the `ValidationFailure` type and its JSON encoder. Always
+/// generated when guards.gleam is generated (i.e. whenever any schema
+/// has constraints), so that routers and clients can rely on the
+/// structured shape.
+fn emit_validation_failure_type(sb: se.StringBuilder) -> se.StringBuilder {
+  sb
+  |> se.doc_comment("A single field-level validation failure.")
+  |> se.doc_comment(
+    "Composite validators return `List(ValidationFailure)` so callers can build structured 422 bodies and clients can branch per-field instead of parsing prose messages. `field` is the JSON property name (empty for top-level constraints), `code` is a JSON Schema keyword like `minLength` / `maximum` / `pattern`, and `message` is human-readable.",
+  )
+  |> se.line("pub type ValidationFailure {")
+  |> se.indent(
+    1,
+    "ValidationFailure(field: String, code: String, message: String)",
+  )
+  |> se.line("}")
+  |> se.blank_line()
+  |> se.doc_comment(
+    "Encode a `ValidationFailure` as JSON for emitting 422 response bodies.",
+  )
+  |> se.line(
+    "pub fn validation_failure_to_json(failure: ValidationFailure) -> json.Json {",
+  )
+  |> se.indent(1, "json.object([")
+  |> se.indent(2, "#(\"field\", json.string(failure.field)),")
+  |> se.indent(2, "#(\"code\", json.string(failure.code)),")
+  |> se.indent(2, "#(\"message\", json.string(failure.message)),")
+  |> se.indent(1, "])")
+  |> se.line("}")
+  |> se.blank_line()
+}
+
+/// Build a Gleam source expression that constructs a
+/// `Error(ValidationFailure(...))` with the given field / code / message.
+fn validation_failure_literal(
+  field: String,
+  code: String,
+  message: String,
+) -> String {
+  "Error(ValidationFailure(field: "
+  <> gleam_string_literal(field)
+  <> ", code: "
+  <> gleam_string_literal(code)
+  <> ", message: "
+  <> gleam_string_literal(message)
+  <> "))"
+}
+
+/// Like `validation_failure_literal` but the `message` is an arbitrary
+/// Gleam source expression evaluated at runtime (e.g. a string-concat
+/// pulling the regex compile error). Caller is responsible for the
+/// expression already being valid Gleam source.
+fn validation_failure_dynamic(
+  field: String,
+  code: String,
+  message_expr: String,
+) -> String {
+  "Error(ValidationFailure(field: "
+  <> gleam_string_literal(field)
+  <> ", code: "
+  <> gleam_string_literal(code)
+  <> ", message: "
+  <> message_expr
+  <> "))"
+}
+
 /// Generate a composite validate function for a schema that calls all
 /// individual field validators. This enables auto-validation by calling
 /// a single function rather than individual field guards.
@@ -1167,7 +1243,7 @@ fn generate_composite_validator(
         sb
         |> se.doc_comment("Validate all constraints for " <> type_name <> ".")
         |> se.doc_comment(
-          "Auto-calls all field validators and collects errors.",
+          "Auto-calls all field validators and collects failures.",
         )
         |> se.line(
           "pub fn "
@@ -1176,7 +1252,7 @@ fn generate_composite_validator(
           <> gleam_type
           <> ") -> Result("
           <> gleam_type
-          <> ", List(String)) {",
+          <> ", List(ValidationFailure)) {",
         )
         |> se.indent(1, "let errors = []")
       let sb =
@@ -1190,14 +1266,14 @@ fn generate_composite_validator(
                 "let errors = case " <> guard_fn <> "(" <> accessor <> ") {",
               )
               |> se.indent(2, "Ok(_) -> errors")
-              |> se.indent(2, "Error(msg) -> [msg, ..errors]")
+              |> se.indent(2, "Error(failure) -> [failure, ..errors]")
               |> se.indent(1, "}")
             False ->
               sb
               |> se.indent(1, "let errors = case " <> accessor <> " {")
               |> se.indent(2, "option.Some(v) -> case " <> guard_fn <> "(v) {")
               |> se.indent(3, "Ok(_) -> errors")
-              |> se.indent(3, "Error(msg) -> [msg, ..errors]")
+              |> se.indent(3, "Error(failure) -> [failure, ..errors]")
               |> se.indent(2, "}")
               |> se.indent(2, "option.None -> errors")
               |> se.indent(1, "}")

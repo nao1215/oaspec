@@ -35,7 +35,7 @@ pub type ClientError {
   DecodeError(detail: String)
   InvalidUrl(detail: String)
   UnexpectedStatus(status: Int, body: String)
-  ValidationError(errors: List(String))
+  ValidationError(errors: List(guards.ValidationFailure))
 }
 
 /// Create a new client configuration.

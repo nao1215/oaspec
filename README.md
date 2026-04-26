@@ -11,7 +11,7 @@ Generate usable Gleam code from OpenAPI 3.x specifications.
 - Generate client and server-side modules from a single spec
 - Produce readable Gleam types, encoders, decoders, request types, and response types
 - Handle real-world OpenAPI patterns: unions, nullable fields, `additionalProperties`, form bodies, multipart, and security
-- Backed by 758 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 234 test fixtures (including 94 OSS-derived edge-case specs)
+- Backed by 759 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 234 test fixtures (including 94 OSS-derived edge-case specs)
 
 ## Why oaspec?
 
@@ -302,6 +302,17 @@ oaspec generate --config=oaspec.yaml --validate
 ```
 
 When enabled, generated routers validate request bodies against schema constraints and return 422 on failure. Generated clients validate request bodies before sending.
+
+The 422 response body is a JSON array of `ValidationFailure` objects with the violating field, the JSON Schema keyword that failed, and a human-readable message:
+
+```json
+[
+  {"field": "name", "code": "minLength", "message": "must be at least 1 character"},
+  {"field": "age", "code": "maximum", "message": "must be at most 150"}
+]
+```
+
+Generated clients surface the same failures via `ClientError.ValidationError(errors: List(guards.ValidationFailure))`.
 
 ### CI integration
 

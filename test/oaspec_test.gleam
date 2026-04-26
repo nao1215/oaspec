@@ -2488,6 +2488,101 @@ components:
   |> should.be_true()
 }
 
+/// Issue #269: helpers and composite validators must surface
+/// structured `ValidationFailure(field, code, message)` values rather
+/// than bare strings, and the type and JSON encoder must be emitted in
+/// the same module so routers / clients can consume them.
+pub fn validate_constraints_emit_structured_failures_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    User:
+      type: object
+      required: [username, age]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 50
+          pattern: '^[a-zA-Z0-9]+$'
+        age:
+          type: integer
+          minimum: 0
+          maximum: 150
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let assert [guard_file] = guards.generate(ctx)
+
+  // ValidationFailure type and JSON encoder are emitted up-front.
+  string.contains(guard_file.content, "import gleam/json")
+  |> should.be_true()
+  string.contains(guard_file.content, "pub type ValidationFailure {")
+  |> should.be_true()
+  string.contains(
+    guard_file.content,
+    "ValidationFailure(field: String, code: String, message: String)",
+  )
+  |> should.be_true()
+  string.contains(
+    guard_file.content,
+    "pub fn validation_failure_to_json(failure: ValidationFailure)",
+  )
+  |> should.be_true()
+
+  // Helpers return `Result(_, ValidationFailure)` (single failure).
+  // Match the suffix loosely — the formatter may break the signature
+  // across lines for longer types.
+  string.contains(guard_file.content, "validate_user_username_length")
+  |> should.be_true()
+  string.contains(guard_file.content, "Result(String, ValidationFailure)")
+  |> should.be_true()
+  string.contains(guard_file.content, "validate_user_age_range")
+  |> should.be_true()
+  string.contains(guard_file.content, "Result(Int, ValidationFailure)")
+  |> should.be_true()
+
+  // Codes are JSON Schema keywords (camelCase) and field carries the
+  // OpenAPI property name (camelCase preserved).
+  string.contains(guard_file.content, "code: \"minLength\"")
+  |> should.be_true()
+  string.contains(guard_file.content, "code: \"maxLength\"")
+  |> should.be_true()
+  string.contains(guard_file.content, "code: \"pattern\"")
+  |> should.be_true()
+  string.contains(guard_file.content, "code: \"minimum\"")
+  |> should.be_true()
+  string.contains(guard_file.content, "code: \"maximum\"")
+  |> should.be_true()
+  string.contains(guard_file.content, "field: \"username\"")
+  |> should.be_true()
+  string.contains(guard_file.content, "field: \"age\"")
+  |> should.be_true()
+
+  // Composite validator returns `List(ValidationFailure)` and folds via
+  // `[failure, ..errors]` (no more `[msg, ..errors]`).
+  string.contains(
+    guard_file.content,
+    "Result(types.User, List(ValidationFailure))",
+  )
+  |> should.be_true()
+  string.contains(guard_file.content, "Error(failure) -> [failure, ..errors]")
+  |> should.be_true()
+  string.contains(guard_file.content, "Error(msg) -> [msg, ..errors]")
+  |> should.be_false()
+}
+
 pub fn client_emits_with_request_wrappers_test() {
   let yaml =
     "
@@ -12456,8 +12551,12 @@ pub fn guard_integration_server_router_validates_body_test() {
   string.contains(router_file.content, "status: 422")
   |> should.be_true()
 
-  // Should include errors in JSON response body
-  string.contains(router_file.content, "json.array(errors, json.string)")
+  // Should include errors in JSON response body via the structured
+  // ValidationFailure encoder (Issue #269).
+  string.contains(
+    router_file.content,
+    "json.array(errors, guards.validation_failure_to_json)",
+  )
   |> should.be_true()
 
   // Decode error path should still return 400 (distinct from 422 validation)
@@ -12509,8 +12608,12 @@ pub fn guard_integration_client_validates_body_test() {
   string.contains(client_file.content, "api/guards")
   |> should.be_true()
 
-  // Should include ValidationError variant
-  string.contains(client_file.content, "ValidationError(errors: List(String))")
+  // Should include ValidationError variant carrying structured failures
+  // (Issue #269 — `errors` is `List(guards.ValidationFailure)`).
+  string.contains(
+    client_file.content,
+    "ValidationError(errors: List(guards.ValidationFailure))",
+  )
   |> should.be_true()
 
   // Should call guards.validate_create_pet_request

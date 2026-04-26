@@ -33,7 +33,6 @@ pub type ClientError {
   DecodeError(detail: String)
   InvalidUrl(detail: String)
   UnexpectedStatus(status: Int, body: String)
-  ValidationError(errors: List(String))
 }
 
 /// Create a new client configuration.

@@ -1272,7 +1272,7 @@ fn generate_safe_request_and_dispatch(
       |> se.indent(4, "}")
       |> se.indent(
         4,
-        "Error(errors) -> ServerResponse(status: 422, body: json.to_string(json.array(errors, json.string)), headers: [#(\"content-type\", \"application/json\")])",
+        "Error(errors) -> ServerResponse(status: 422, body: json.to_string(json.array(errors, guards.validation_failure_to_json)), headers: [#(\"content-type\", \"application/json\")])",
       )
       |> se.indent(3, "}")
     False -> sb

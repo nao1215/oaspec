@@ -84,7 +84,10 @@ pub fn route(
             Error(errors) ->
               ServerResponse(
                 status: 422,
-                body: json.to_string(json.array(errors, json.string)),
+                body: json.to_string(json.array(
+                  errors,
+                  guards.validation_failure_to_json,
+                )),
                 headers: [#("content-type", "application/json")],
               )
           }
