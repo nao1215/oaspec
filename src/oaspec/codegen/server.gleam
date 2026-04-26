@@ -80,6 +80,14 @@ fn generate_handlers(
       config.package(context.config(ctx)) <> "/request_types",
       config.package(context.config(ctx)) <> "/response_types",
     ])
+    |> se.doc_comment("Application state passed to every handler.")
+    |> se.doc_comment(
+      "Add fields here for DB connections, config, loggers, etc. Construct a value of this type in your `main` and pass it to `router.route` as the first argument.",
+    )
+    |> se.line("pub type State {")
+    |> se.indent(1, "State")
+    |> se.line("}")
+    |> se.blank_line()
 
   let sb =
     list.fold(operations, sb, fn(sb, op) {
@@ -142,21 +150,25 @@ fn generate_handler_delegator(
       |> se.line(
         "pub fn "
         <> fn_name
-        <> "(req: request_types."
+        <> "(state: handlers.State, req: request_types."
         <> request_type
         <> ") -> response_types."
         <> response_type
         <> " {",
       )
-      |> se.indent(1, "handlers." <> fn_name <> "(req)")
+      |> se.indent(1, "handlers." <> fn_name <> "(state, req)")
       |> se.line("}")
       |> se.blank_line()
     False ->
       sb
       |> se.line(
-        "pub fn " <> fn_name <> "() -> response_types." <> response_type <> " {",
+        "pub fn "
+        <> fn_name
+        <> "(state: handlers.State) -> response_types."
+        <> response_type
+        <> " {",
       )
-      |> se.indent(1, "handlers." <> fn_name <> "()")
+      |> se.indent(1, "handlers." <> fn_name <> "(state)")
       |> se.line("}")
       |> se.blank_line()
   }
@@ -192,7 +204,7 @@ fn generate_handler(
       |> se.line(
         "pub fn "
         <> fn_name
-        <> "(req: request_types."
+        <> "(state: State, req: request_types."
         <> request_type
         <> ") -> response_types."
         <> response_type
@@ -201,10 +213,15 @@ fn generate_handler(
     False ->
       sb
       |> se.line(
-        "pub fn " <> fn_name <> "() -> response_types." <> response_type <> " {",
+        "pub fn "
+        <> fn_name
+        <> "(state: State) -> response_types."
+        <> response_type
+        <> " {",
       )
   }
 
+  let sb = sb |> se.indent(1, "let _ = state")
   let sb = case has_params {
     True -> sb |> se.indent(1, "let _ = req")
     False -> sb
@@ -562,7 +579,10 @@ fn generate_router(
   // handlers module. handlers_generated.gleam forwards every call to
   // handlers.<op_name>, so the router stays in lock-step with the spec
   // without ever touching user code.
+  // Issue #264: also import handlers itself so the route signature can
+  // reference `handlers.State` for the threaded application state.
   let pkg_imports = [
+    config.package(context.config(ctx)) <> "/handlers",
     config.package(context.config(ctx)) <> "/handlers_generated",
   ]
   let pkg_imports = case
@@ -866,12 +886,16 @@ fn generate_router(
     False -> sb
   }
 
-  // Generate route function
+  // Generate route function. Issue #264 threads `app_state: handlers.State`
+  // through to handler delegators. The argument is named `app_state` (not
+  // `state`) because OpenAPI specs occasionally have a parameter named
+  // `state` (e.g. OAuth2 flows), which would otherwise shadow the route
+  // argument inside the case body.
   let sb =
     sb
     |> se.doc_comment("Route an incoming request to the appropriate handler.")
     |> se.line(
-      "pub fn route(method: String, path: List(String), "
+      "pub fn route(app_state: handlers.State, method: String, path: List(String), "
       <> route_arg_name("query", uses_query)
       <> ": Dict(String, List(String)), "
       <> route_arg_name("headers", uses_headers)
@@ -963,7 +987,10 @@ fn generate_route_body(
     False -> {
       // No parameters: call handler directly, convert response
       sb
-      |> se.indent(3, "let response = handlers_generated." <> fn_name <> "()")
+      |> se.indent(
+        3,
+        "let response = handlers_generated." <> fn_name <> "(app_state)",
+      )
       |> generate_response_conversion(response_type_name, operation, ctx)
     }
     True -> {
@@ -1261,7 +1288,7 @@ fn generate_safe_request_and_dispatch(
     sb
     |> se.indent(
       3,
-      "let response = handlers_generated." <> fn_name <> "(request)",
+      "let response = handlers_generated." <> fn_name <> "(app_state, request)",
     )
     |> generate_response_conversion(response_type_name, operation, ctx)
 

@@ -17,6 +17,7 @@
 //// example runs without starting a real HTTP server. Replace
 //// `canned_request` with a real adapter in production.
 
+import api/handlers
 import api/router
 import gleam/dict
 import gleam/int
@@ -24,12 +25,17 @@ import gleam/io
 import gleam/list
 
 pub fn main() {
-  // 1. Build a canned request. In production this would come from
+  // 1. Build the application state once. Real applications would put
+  //    DB connection pools, configuration, loggers, etc. here.
+  let state = handlers.State
+
+  // 2. Build a canned request. In production this would come from
   //    `wisp.Request` / `mist.Request` / similar.
   let #(method, path, query, headers, body) = canned_request()
 
-  // 2. Delegate routing + dispatch to the generated router.
-  let response = router.route(method, path, query, headers, body)
+  // 3. Delegate routing + dispatch to the generated router. The state
+  //    is threaded into every handler invocation.
+  let response = router.route(state, method, path, query, headers, body)
 
   // 3. Render the response. A real adapter would turn `ServerResponse`
   //    into the framework's response value; here we just print it.

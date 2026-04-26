@@ -251,7 +251,7 @@ pub fn unknown_enum_returns_error_test() {
 
 pub fn handler_list_pets_test() {
   let req = request_types.ListPetsRequest(limit: Some(10), offset: None)
-  let resp = handlers.list_pets(req)
+  let resp = handlers.list_pets(handlers.State, req)
   case resp {
     response_types.ListPetsResponseOk(pets) -> {
       should.be_true(list_length(pets) > 0)
@@ -270,7 +270,7 @@ pub fn handler_create_pet_test() {
       tag: None,
     )
   let req = request_types.CreatePetRequest(body:)
-  let resp = handlers.create_pet(req)
+  let resp = handlers.create_pet(handlers.State, req)
   case resp {
     response_types.CreatePetResponseCreated(pet) -> {
       pet.id |> should.equal(100)
@@ -282,7 +282,7 @@ pub fn handler_create_pet_test() {
 
 pub fn handler_get_pet_found_test() {
   let req = request_types.GetPetRequest(pet_id: 1)
-  let resp = handlers.get_pet(req)
+  let resp = handlers.get_pet(handlers.State, req)
   case resp {
     response_types.GetPetResponseOk(pet) -> pet.name |> should.equal("Fido")
     _ -> should.fail()
@@ -291,7 +291,7 @@ pub fn handler_get_pet_found_test() {
 
 pub fn handler_get_pet_not_found_test() {
   let req = request_types.GetPetRequest(pet_id: 999)
-  let resp = handlers.get_pet(req)
+  let resp = handlers.get_pet(handlers.State, req)
   case resp {
     response_types.GetPetResponseNotFound -> should.be_true(True)
     _ -> should.fail()
@@ -300,7 +300,7 @@ pub fn handler_get_pet_not_found_test() {
 
 pub fn handler_delete_pet_found_test() {
   let req = request_types.DeletePetRequest(pet_id: 1)
-  let resp = handlers.delete_pet(req)
+  let resp = handlers.delete_pet(handlers.State, req)
   case resp {
     response_types.DeletePetResponseNoContent -> should.be_true(True)
     _ -> should.fail()
@@ -309,7 +309,7 @@ pub fn handler_delete_pet_found_test() {
 
 pub fn handler_delete_pet_not_found_test() {
   let req = request_types.DeletePetRequest(pet_id: 999)
-  let resp = handlers.delete_pet(req)
+  let resp = handlers.delete_pet(handlers.State, req)
   case resp {
     response_types.DeletePetResponseNotFound -> should.be_true(True)
     _ -> should.fail()
@@ -326,7 +326,7 @@ pub fn e2e_request_response_cycle_test() {
   let req = request_types.GetPetRequest(pet_id: 1)
 
   // 2. Call handler (simulating server)
-  let resp = handlers.get_pet(req)
+  let resp = handlers.get_pet(handlers.State, req)
 
   // 3. Verify response type
   case resp {

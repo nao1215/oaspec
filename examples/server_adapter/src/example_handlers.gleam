@@ -7,14 +7,17 @@
 //// enough to restore the two-line body of each stub below.
 
 import api/guards
+import api/handlers.{type State}
 import api/request_types
 import api/response_types
 import api/types
 import gleam/option.{None, Some}
 
 pub fn list_pets(
+  state: State,
   req: request_types.ListPetsRequest,
 ) -> response_types.ListPetsResponse {
+  let _ = state
   let _ = req
   response_types.ListPetsResponseOk([
     types.Pet(
@@ -33,8 +36,10 @@ pub fn list_pets(
 }
 
 pub fn create_pet(
+  state: State,
   req: request_types.CreatePetRequest,
 ) -> response_types.CreatePetResponse {
+  let _ = state
   // Run the generated validation guard before constructing the response.
   // A well-formed OpenAPI spec will reject out-of-range values at the
   // guard layer; returning 400 is the idiomatic mapping.
@@ -51,8 +56,10 @@ pub fn create_pet(
 }
 
 pub fn get_pet(
+  state: State,
   req: request_types.GetPetRequest,
 ) -> response_types.GetPetResponse {
+  let _ = state
   case req.pet_id {
     1 ->
       response_types.GetPetResponseOk(types.Pet(
@@ -66,8 +73,10 @@ pub fn get_pet(
 }
 
 pub fn delete_pet(
+  state: State,
   req: request_types.DeletePetRequest,
 ) -> response_types.DeletePetResponse {
+  let _ = state
   case req.pet_id {
     1 -> response_types.DeletePetResponseNoContent
     _ -> response_types.DeletePetResponseNotFound

@@ -49,8 +49,14 @@ import api/response_types
 import api/types
 import gleam/option.{None, Some}
 
+/// Application state passed to every handler. Empty for this fixture.
+pub type State {
+  State
+}
+
 /// List all pets - returns hardcoded test data.
-pub fn list_pets(req: request_types.ListPetsRequest) -> response_types.ListPetsResponse {
+pub fn list_pets(state: State, req: request_types.ListPetsRequest) -> response_types.ListPetsResponse {
+  let _ = state
   let _ = req
   let pets = [
     types.Pet(id: 1, name: "Fido", status: types.PetStatusAvailable, tag: Some("dog")),
@@ -60,7 +66,8 @@ pub fn list_pets(req: request_types.ListPetsRequest) -> response_types.ListPetsR
 }
 
 /// Create a pet - returns the created pet.
-pub fn create_pet(req: request_types.CreatePetRequest) -> response_types.CreatePetResponse {
+pub fn create_pet(state: State, req: request_types.CreatePetRequest) -> response_types.CreatePetResponse {
+  let _ = state
   let pet = types.Pet(
     id: 100,
     name: req.body.name,
@@ -71,7 +78,8 @@ pub fn create_pet(req: request_types.CreatePetRequest) -> response_types.CreateP
 }
 
 /// Get a pet by ID.
-pub fn get_pet(req: request_types.GetPetRequest) -> response_types.GetPetResponse {
+pub fn get_pet(state: State, req: request_types.GetPetRequest) -> response_types.GetPetResponse {
+  let _ = state
   case req.pet_id {
     1 -> response_types.GetPetResponseOk(
       types.Pet(id: 1, name: "Fido", status: types.PetStatusAvailable, tag: Some("dog")),
@@ -81,7 +89,8 @@ pub fn get_pet(req: request_types.GetPetRequest) -> response_types.GetPetRespons
 }
 
 /// Delete a pet by ID.
-pub fn delete_pet(req: request_types.DeletePetRequest) -> response_types.DeletePetResponse {
+pub fn delete_pet(state: State, req: request_types.DeletePetRequest) -> response_types.DeletePetResponse {
+  let _ = state
   case req.pet_id {
     1 -> response_types.DeletePetResponseNoContent
     _ -> response_types.DeletePetResponseNotFound
@@ -203,22 +212,30 @@ cat > "$COMPLEX_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
 import api/request_types
 import api/response_types
 
-pub fn get_user(req: request_types.GetUserRequest) -> response_types.GetUserResponse {
+pub type State {
+  State
+}
+
+pub fn get_user(state: State, req: request_types.GetUserRequest) -> response_types.GetUserResponse {
+  let _ = state
   let _ = req
   panic as "complex_test stub"
 }
 
-pub fn post_search(req: request_types.PostSearchRequest) -> response_types.PostSearchResponse {
+pub fn post_search(state: State, req: request_types.PostSearchRequest) -> response_types.PostSearchResponse {
+  let _ = state
   let _ = req
   panic as "complex_test stub"
 }
 
-pub fn post_webhook(req: request_types.PostWebhookRequest) -> response_types.PostWebhookResponse {
+pub fn post_webhook(state: State, req: request_types.PostWebhookRequest) -> response_types.PostWebhookResponse {
+  let _ = state
   let _ = req
   panic as "complex_test stub"
 }
 
-pub fn get_required_params(req: request_types.GetRequiredParamsRequest) -> response_types.GetRequiredParamsResponse {
+pub fn get_required_params(state: State, req: request_types.GetRequiredParamsRequest) -> response_types.GetRequiredParamsResponse {
+  let _ = state
   let _ = req
   panic as "complex_test stub"
 }
@@ -393,7 +410,12 @@ cat > "$FORM_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
 import api/request_types
 import api/response_types
 
-pub fn submit_form(req: request_types.SubmitFormRequest) -> response_types.SubmitFormResponse {
+pub type State {
+  State
+}
+
+pub fn submit_form(state: State, req: request_types.SubmitFormRequest) -> response_types.SubmitFormResponse {
+  let _ = state
   let _ = req
   response_types.SubmitFormResponseOk
 }
@@ -457,7 +479,12 @@ cat > "$MULTI_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
 import api/request_types
 import api/response_types
 
-pub fn upload_multipart(req: request_types.UploadMultipartRequest) -> response_types.UploadMultipartResponse {
+pub type State {
+  State
+}
+
+pub fn upload_multipart(state: State, req: request_types.UploadMultipartRequest) -> response_types.UploadMultipartResponse {
+  let _ = state
   let _ = req
   response_types.UploadMultipartResponseOk
 }
@@ -521,7 +548,12 @@ cat > "$CALLBACK_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
 import api/request_types
 import api/response_types
 
-pub fn register_webhook(req: request_types.RegisterWebhookRequest) -> response_types.RegisterWebhookResponse {
+pub type State {
+  State
+}
+
+pub fn register_webhook(state: State, req: request_types.RegisterWebhookRequest) -> response_types.RegisterWebhookResponse {
+  let _ = state
   let _ = req
   response_types.RegisterWebhookResponseCreated
 }
@@ -629,7 +661,12 @@ import api/request_types
 import api/response_types
 import api/types
 
-pub fn list_items(req: request_types.ListItemsRequest) -> response_types.ListItemsResponse {
+pub type State {
+  State
+}
+
+pub fn list_items(state: State, req: request_types.ListItemsRequest) -> response_types.ListItemsResponse {
+  let _ = state
   let _ = req
   response_types.ListItemsResponseOk(types.ItemList(items: ["item1"]))
 }
@@ -693,7 +730,12 @@ cat > "$DEEP_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
 import api/request_types
 import api/response_types
 
-pub fn search_items(req: request_types.SearchItemsRequest) -> response_types.SearchItemsResponse {
+pub type State {
+  State
+}
+
+pub fn search_items(state: State, req: request_types.SearchItemsRequest) -> response_types.SearchItemsResponse {
+  let _ = state
   let _ = req
   response_types.SearchItemsResponseOk
 }
@@ -873,8 +915,12 @@ cat > "$GUARD_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
 import api/request_types
 import api/response_types
 
-pub fn create_item(req: request_types.CreateItemRequest) -> response_types.CreateItemResponse {
-  let _ = req
+pub type State {
+  State
+}
+
+pub fn create_item(state: State, req: request_types.CreateItemRequest) -> response_types.CreateItemResponse {
+  let _ = state
   response_types.CreateItemResponseCreated(req.body)
 }
 GLEAM_EOF
@@ -1134,8 +1180,12 @@ cat > "$GUARD_V_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
 import api/request_types
 import api/response_types
 
-pub fn create_item(req: request_types.CreateItemRequest) -> response_types.CreateItemResponse {
-  let _ = req
+pub type State {
+  State
+}
+
+pub fn create_item(state: State, req: request_types.CreateItemRequest) -> response_types.CreateItemResponse {
+  let _ = state
   response_types.CreateItemResponseCreated(req.body)
 }
 GLEAM_EOF
@@ -1247,7 +1297,12 @@ cat > "$REQ_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
 import api/request_types
 import api/response_types
 
-pub fn search(req: request_types.SearchRequest) -> response_types.SearchResponse {
+pub type State {
+  State
+}
+
+pub fn search(state: State, req: request_types.SearchRequest) -> response_types.SearchResponse {
+  let _ = state
   let _ = req
   response_types.SearchResponseOk
 }
@@ -1278,6 +1333,7 @@ cat > "$REQ_DIR/test/required_params_test_test.gleam" << 'GLEAM_EOF'
 // `let assert`. The happy path verifies the router still reaches the
 // handler and returns 200 when every required parameter is supplied.
 
+import api/handlers
 import api/router
 import gleam/dict
 import gleeunit
@@ -1300,39 +1356,39 @@ fn full_headers() {
 
 pub fn happy_path_returns_200_test() {
   let resp =
-    router.route("GET", ["search"], full_query(), full_headers(), "")
+    router.route(handlers.State, "GET", ["search"], full_query(), full_headers(), "")
   resp.status |> should.equal(200)
 }
 
 pub fn missing_required_string_query_returns_400_test() {
   let query = dict.from_list([#("limit", ["10"])])
-  let resp = router.route("GET", ["search"], query, full_headers(), "")
+  let resp = router.route(handlers.State, "GET", ["search"], query, full_headers(), "")
   resp.status |> should.equal(400)
   resp.body |> should.equal("Bad Request")
 }
 
 pub fn missing_required_integer_query_returns_400_test() {
   let query = dict.from_list([#("q", ["hello"])])
-  let resp = router.route("GET", ["search"], query, full_headers(), "")
+  let resp = router.route(handlers.State, "GET", ["search"], query, full_headers(), "")
   resp.status |> should.equal(400)
 }
 
 pub fn unparseable_integer_query_returns_400_test() {
   // limit=not-a-number must NOT crash the BEAM via `let assert`.
   let query = dict.from_list([#("q", ["hello"]), #("limit", ["abc"])])
-  let resp = router.route("GET", ["search"], query, full_headers(), "")
+  let resp = router.route(handlers.State, "GET", ["search"], query, full_headers(), "")
   resp.status |> should.equal(400)
 }
 
 pub fn missing_required_header_returns_400_test() {
   let headers = dict.from_list([#("cookie", "session=opaque")])
-  let resp = router.route("GET", ["search"], full_query(), headers, "")
+  let resp = router.route(handlers.State, "GET", ["search"], full_query(), headers, "")
   resp.status |> should.equal(400)
 }
 
 pub fn missing_required_cookie_returns_400_test() {
   let headers = dict.from_list([#("x-trace-id", "abc")])
-  let resp = router.route("GET", ["search"], full_query(), headers, "")
+  let resp = router.route(handlers.State, "GET", ["search"], full_query(), headers, "")
   resp.status |> should.equal(400)
 }
 
@@ -1340,7 +1396,7 @@ pub fn empty_query_list_returns_400_test() {
   // dict.get returns Ok([]) when a key is present but holds no value;
   // a router that pattern-matched only `Ok([_, ..])` would crash here.
   let query = dict.from_list([#("q", []), #("limit", ["10"])])
-  let resp = router.route("GET", ["search"], query, full_headers(), "")
+  let resp = router.route(handlers.State, "GET", ["search"], query, full_headers(), "")
   resp.status |> should.equal(400)
 }
 GLEAM_EOF

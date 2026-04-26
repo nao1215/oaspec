@@ -5,25 +5,29 @@ import api/request_types
 import api/response_types
 
 pub fn list_pets(
+  state: handlers.State,
   req: request_types.ListPetsRequest,
 ) -> response_types.ListPetsResponse {
-  handlers.list_pets(req)
+  handlers.list_pets(state, req)
 }
 
 pub fn create_pet(
+  state: handlers.State,
   req: request_types.CreatePetRequest,
 ) -> response_types.CreatePetResponse {
-  handlers.create_pet(req)
+  handlers.create_pet(state, req)
 }
 
 pub fn get_pet(
+  state: handlers.State,
   req: request_types.GetPetRequest,
 ) -> response_types.GetPetResponse {
-  handlers.get_pet(req)
+  handlers.get_pet(state, req)
 }
 
 pub fn delete_pet(
+  state: handlers.State,
   req: request_types.DeletePetRequest,
 ) -> response_types.DeletePetResponse {
-  handlers.delete_pet(req)
+  handlers.delete_pet(state, req)
 }

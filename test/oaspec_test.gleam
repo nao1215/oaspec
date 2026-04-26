@@ -5001,16 +5001,17 @@ paths:
   string.contains(router.content, "\"OK\"")
   |> should.be_false()
   // Router must actually call the handler (via the sealed delegator,
-  // Issue #247).
-  string.contains(router.content, "handlers_generated.get_items()")
+  // Issue #247) and thread the application state (Issue #264).
+  string.contains(router.content, "handlers_generated.get_items(app_state)")
   |> should.be_true()
   // Router must have ServerResponse type
   string.contains(router.content, "pub type ServerResponse")
   |> should.be_true()
-  // Router must have proper route signature with query/headers/body
+  // Router must have proper route signature with state/query/headers/body
+  // (Issue #264: `app_state: handlers.State` is the first argument).
   string.contains(
     router.content,
-    "pub fn route(method: String, path: List(String), _query: Dict(String, List(String)), _headers: Dict(String, String), _body: String) -> ServerResponse",
+    "pub fn route(app_state: handlers.State, method: String, path: List(String), _query: Dict(String, List(String)), _headers: Dict(String, String), _body: String) -> ServerResponse",
   )
   |> should.be_true()
   // Router must convert response to ServerResponse
@@ -8267,7 +8268,7 @@ paths:
   let assert Ok(router) = router_file
   string.contains(
     router.content,
-    "pub fn route(method: String, path: List(String), _query: Dict(String, List(String)), _headers: Dict(String, String), _body: String) -> ServerResponse",
+    "pub fn route(app_state: handlers.State, method: String, path: List(String), _query: Dict(String, List(String)), _headers: Dict(String, String), _body: String) -> ServerResponse",
   )
   |> should.be_true()
 }
@@ -8566,7 +8567,7 @@ paths:
 
   string.contains(
     content,
-    "pub fn route(method: String, path: List(String), query: Dict(String, List(String)), _headers: Dict(String, String), _body: String) -> ServerResponse",
+    "pub fn route(app_state: handlers.State, method: String, path: List(String), query: Dict(String, List(String)), _headers: Dict(String, String), _body: String) -> ServerResponse",
   )
   |> should.be_true()
   // Required explode=true array now opens its own `case dict.get(...) { Ok([_, ..] as <raw>) ->`

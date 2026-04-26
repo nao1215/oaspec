@@ -2,6 +2,7 @@
 
 import api/decode
 import api/encode
+import api/handlers
 import api/handlers_generated
 import api/request_types
 import api/response_types
@@ -20,6 +21,7 @@ pub type ServerResponse {
 
 /// Route an incoming request to the appropriate handler.
 pub fn route(
+  app_state: handlers.State,
   method: String,
   path: List(String),
   query: Dict(String, List(String)),
@@ -46,7 +48,10 @@ pub fn route(
                               session: session_raw,
                             )
                           let response =
-                            handlers_generated.get_required_params(request)
+                            handlers_generated.get_required_params(
+                              app_state,
+                              request,
+                            )
                           case response {
                             response_types.GetRequiredParamsResponseOk ->
                               ServerResponse(status: 200, body: "", headers: [])
@@ -89,7 +94,7 @@ pub fn route(
             }
           }
         })
-      let response = handlers_generated.post_search(request)
+      let response = handlers_generated.post_search(app_state, request)
       case response {
         response_types.PostSearchResponseOk(data) ->
           ServerResponse(
@@ -103,7 +108,7 @@ pub fn route(
     }
     "GET", ["users", user_id] -> {
       let request = request_types.GetUserRequest(user_id: user_id)
-      let response = handlers_generated.get_user(request)
+      let response = handlers_generated.get_user(app_state, request)
       case response {
         response_types.GetUserResponseOk(data) ->
           ServerResponse(
@@ -130,7 +135,7 @@ pub fn route(
             }
           }
         })
-      let response = handlers_generated.post_webhook(request)
+      let response = handlers_generated.post_webhook(app_state, request)
       case response {
         response_types.PostWebhookResponseOk ->
           ServerResponse(status: 200, body: "", headers: [])

@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **BREAKING**: generated handlers now thread an application `State`
+  value. `handlers.gleam` (user-owned) gains a `pub type State { State }`
+  placeholder at the top of the file, and every handler signature
+  becomes `pub fn <op>(state: State, req: ...) -> ...`. The sealed
+  `handlers_generated.gleam` and `router.gleam` are updated to match,
+  and `pub fn route` now takes `app_state: handlers.State` as its first
+  argument: `route(app_state, method, path, query, headers, body)`.
+  Construct a `handlers.State` value once in your `main` (extending the
+  type with DB connections, configuration, loggers, etc. as you go) and
+  pass it to `route`. Migration for projects with existing
+  `handlers.gleam`: add `pub type State { State }` near the top, add
+  `state: State,` as the first parameter to each handler, and
+  `let _ = state` if the handler doesn't yet use it. The route argument
+  is named `app_state` (not `state`) so OpenAPI specs that have a
+  parameter literally called `state` (OAuth2 flows, etc.) do not shadow
+  it. (#264)
 - **BREAKING**: generated `guards.gleam` validators now return
   structured `ValidationFailure(field, code, message)` values instead of
   bare strings. Helper signatures change from `Result(_, String)` to

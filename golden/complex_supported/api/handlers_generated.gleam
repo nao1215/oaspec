@@ -5,25 +5,29 @@ import api/request_types
 import api/response_types
 
 pub fn get_required_params(
+  state: handlers.State,
   req: request_types.GetRequiredParamsRequest,
 ) -> response_types.GetRequiredParamsResponse {
-  handlers.get_required_params(req)
+  handlers.get_required_params(state, req)
 }
 
 pub fn post_search(
+  state: handlers.State,
   req: request_types.PostSearchRequest,
 ) -> response_types.PostSearchResponse {
-  handlers.post_search(req)
+  handlers.post_search(state, req)
 }
 
 pub fn get_user(
+  state: handlers.State,
   req: request_types.GetUserRequest,
 ) -> response_types.GetUserResponse {
-  handlers.get_user(req)
+  handlers.get_user(state, req)
 }
 
 pub fn post_webhook(
+  state: handlers.State,
   req: request_types.PostWebhookRequest,
 ) -> response_types.PostWebhookResponse {
-  handlers.post_webhook(req)
+  handlers.post_webhook(state, req)
 }
