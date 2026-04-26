@@ -12980,3 +12980,44 @@ pub fn request_body_encoding_warning_is_surfaced_test() {
     })
   has_encoding_warning |> should.be_true()
 }
+
+/// Spec where the 200 response is a top-level array of primitive items.
+/// (Issue #266: previously emitted `json.string(data)` which fails to type-check
+/// against `List(String)`.)
+const top_level_array_spec = "
+openapi: 3.0.3
+info:
+  title: Top Level Array
+  version: 1.0.0
+servers:
+  - url: https://example.com
+paths:
+  /blobs:
+    get:
+      operationId: listBlobs
+      responses:
+        '200':
+          description: list of blob ids
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+"
+
+pub fn top_level_array_response_uses_json_array_test() {
+  let ctx = make_validate_ctx_from_yaml(top_level_array_spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+
+  // Should wrap the List in json.array, not pass it to json.string directly.
+  string.contains(router_file.content, "json.array(items, json.string)")
+  |> should.be_true()
+
+  // Should NOT emit the buggy json.string(data) shape from the report
+  // (where `data: List(String)` is fed directly into the scalar encoder).
+  string.contains(router_file.content, "json.string(data)")
+  |> should.be_false()
+}
