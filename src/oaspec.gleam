@@ -54,9 +54,9 @@ fn do_normalize(arguments: List(String), acc: List(String)) -> List(String) {
   case arguments {
     [] -> list.reverse(acc)
     [arg, value, ..rest] -> {
-      use <- bool.guard(
+      use <- bool.lazy_guard(
         !{ is_value_long_flag(arg) && value_is_value(value) },
-        do_normalize([value, ..rest], [arg, ..acc]),
+        fn() { do_normalize([value, ..rest], [arg, ..acc]) },
       )
       do_normalize(rest, [arg <> "=" <> value, ..acc])
     }
