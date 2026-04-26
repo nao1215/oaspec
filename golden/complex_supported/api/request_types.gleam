@@ -3,6 +3,15 @@
 import api/types
 import gleam/option.{type Option}
 
+pub type GetRequiredParamsRequest {
+  GetRequiredParamsRequest(
+    tenant: String,
+    page: Int,
+    x_trace_id: String,
+    session: String,
+  )
+}
+
 pub type PostSearchRequest {
   PostSearchRequest(body: Option(types.PostSearchRequest))
 }

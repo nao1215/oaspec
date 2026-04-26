@@ -7,6 +7,8 @@ import api/response_types
 import api/types
 import gleam/http
 import gleam/http/request
+import gleam/int
+import gleam/list
 import gleam/result
 import gleam/string
 import gleam/uri
@@ -45,6 +47,58 @@ pub fn new(
 /// Build the base URL from server template variables.
 pub fn default_base_url() -> String {
   "https://api.example.com/v1"
+}
+
+/// Demonstrate required query / header / cookie params
+pub fn get_required_params(
+  config: ClientConfig,
+  tenant: String,
+  page: Int,
+  x_trace_id: String,
+  session: String,
+) -> Result(response_types.GetRequiredParamsResponse, ClientError) {
+  let path = "/required-params"
+  let query_parts = []
+  let query_parts = ["tenant=" <> uri.percent_encode(tenant), ..query_parts]
+  let query_parts = [
+    "page=" <> uri.percent_encode(int.to_string(page)),
+    ..query_parts
+  ]
+  let query_string = string.join(list.reverse(query_parts), "&")
+  let path = case query_string {
+    "" -> path
+    _ -> path <> "?" <> query_string
+  }
+  let full_url = config.base_url <> path
+  use req <- result.try(
+    request.to(full_url)
+    |> result.map_error(fn(_) { InvalidUrl(detail: full_url) }),
+  )
+  let req = request.set_method(req, http.Get)
+  let req = request.set_header(req, "x-trace-id", x_trace_id)
+  let cookie_parts = []
+  let cookie_parts = ["session=" <> uri.percent_encode(session), ..cookie_parts]
+  let req = case cookie_parts {
+    [] -> req
+    _ -> request.set_header(req, "cookie", string.join(cookie_parts, "; "))
+  }
+  case config.send(req) {
+    Error(e) -> Error(e)
+    Ok(resp) -> {
+      case resp.status {
+        200 -> Ok(response_types.GetRequiredParamsResponseOk)
+        _ -> Error(UnexpectedStatus(status: resp.status, body: resp.body))
+      }
+    }
+  }
+}
+
+/// Request-object wrapper. Delegates to get_required_params/N with fields unpacked from the request record.
+pub fn get_required_params_with_request(
+  config: ClientConfig,
+  req: request_types.GetRequiredParamsRequest,
+) -> Result(response_types.GetRequiredParamsResponse, ClientError) {
+  get_required_params(config, req.tenant, req.page, req.x_trace_id, req.session)
 }
 
 /// Complex search

@@ -6,6 +6,14 @@
 import api/request_types
 import api/response_types
 
+/// Demonstrate required query / header / cookie params
+pub fn get_required_params(
+  req: request_types.GetRequiredParamsRequest,
+) -> response_types.GetRequiredParamsResponse {
+  let _ = req
+  panic as "unimplemented: get_required_params"
+}
+
 /// Complex search
 pub fn post_search(
   req: request_types.PostSearchRequest,

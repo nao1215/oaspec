@@ -4,6 +4,12 @@ import api/handlers
 import api/request_types
 import api/response_types
 
+pub fn get_required_params(
+  req: request_types.GetRequiredParamsRequest,
+) -> response_types.GetRequiredParamsResponse {
+  handlers.get_required_params(req)
+}
+
 pub fn post_search(
   req: request_types.PostSearchRequest,
 ) -> response_types.PostSearchResponse {

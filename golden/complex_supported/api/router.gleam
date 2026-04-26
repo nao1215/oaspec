@@ -6,8 +6,12 @@ import api/handlers_generated
 import api/request_types
 import api/response_types
 import gleam/dict.{type Dict}
+import gleam/int
 import gleam/json
+import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
+import gleam/uri
 
 /// A server response with status code, body, and headers.
 pub type ServerResponse {
@@ -18,11 +22,62 @@ pub type ServerResponse {
 pub fn route(
   method: String,
   path: List(String),
-  _query: Dict(String, List(String)),
-  _headers: Dict(String, String),
+  query: Dict(String, List(String)),
+  headers: Dict(String, String),
   body: String,
 ) -> ServerResponse {
   case method, path {
+    "GET", ["required-params"] -> {
+      case dict.get(query, "tenant") {
+        Ok([tenant_raw, ..]) -> {
+          case dict.get(query, "page") {
+            Ok([page_raw, ..]) -> {
+              case int.parse(page_raw) {
+                Ok(page_raw_parsed) -> {
+                  case dict.get(headers, "x-trace-id") {
+                    Ok(x_trace_id_raw) -> {
+                      case cookie_lookup(headers, "session") {
+                        Ok(session_raw) -> {
+                          let request =
+                            request_types.GetRequiredParamsRequest(
+                              tenant: tenant_raw,
+                              page: page_raw_parsed,
+                              x_trace_id: x_trace_id_raw,
+                              session: session_raw,
+                            )
+                          let response =
+                            handlers_generated.get_required_params(request)
+                          case response {
+                            response_types.GetRequiredParamsResponseOk ->
+                              ServerResponse(status: 200, body: "", headers: [])
+                          }
+                        }
+                        _ ->
+                          ServerResponse(
+                            status: 400,
+                            body: "Bad Request",
+                            headers: [],
+                          )
+                      }
+                    }
+                    _ ->
+                      ServerResponse(
+                        status: 400,
+                        body: "Bad Request",
+                        headers: [],
+                      )
+                  }
+                }
+                _ ->
+                  ServerResponse(status: 400, body: "Bad Request", headers: [])
+              }
+            }
+            _ -> ServerResponse(status: 400, body: "Bad Request", headers: [])
+          }
+        }
+        _ -> ServerResponse(status: 400, body: "Bad Request", headers: [])
+      }
+    }
     "POST", ["search"] -> {
       let request =
         request_types.PostSearchRequest(body: case body {
@@ -82,5 +137,27 @@ pub fn route(
       }
     }
     _, _ -> ServerResponse(status: 404, body: "Not Found", headers: [])
+  }
+}
+
+/// Extract a cookie value from the Cookie header.
+fn cookie_lookup(
+  headers: Dict(String, String),
+  key: String,
+) -> Result(String, Nil) {
+  case dict.get(headers, "cookie") {
+    Ok(raw) ->
+      list.find_map(string.split(raw, ";"), fn(part) {
+        let trimmed = string.trim(part)
+        case string.split_once(trimmed, on: "=") {
+          Ok(#(cookie_key, cookie_value)) ->
+            case string.trim(cookie_key) == key {
+              True -> uri.percent_decode(string.trim(cookie_value))
+              False -> Error(Nil)
+            }
+          Error(_) -> Error(Nil)
+        }
+      })
+    Error(_) -> Error(Nil)
   }
 }

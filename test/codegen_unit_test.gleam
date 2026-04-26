@@ -342,6 +342,73 @@ pub fn server_request_decode_param_parse_expr_float_test() {
   |> should.equal("float.parse(price_val)")
 }
 
+// Issue #263: required query / header / cookie value expressions must
+// never embed `let assert`. The router opens an enclosing `case` for
+// the lookup and the int/float parse, so these helpers only return the
+// already-bound variable name (or a plain non-failing transform).
+
+pub fn server_request_decode_query_required_expr_int_returns_bound_var_test() {
+  let param = test_helpers.simple_param("page", True, test_helpers.int_schema())
+  let expr = server_request_decode.query_required_expr("page_raw", param)
+  expr |> should.equal("page_raw_parsed")
+  string.contains(expr, "let assert") |> should.be_false()
+}
+
+pub fn server_request_decode_query_required_expr_float_returns_bound_var_test() {
+  let param =
+    test_helpers.simple_param("ratio", True, test_helpers.float_schema())
+  let expr = server_request_decode.query_required_expr("ratio_raw", param)
+  expr |> should.equal("ratio_raw_parsed")
+  string.contains(expr, "let assert") |> should.be_false()
+}
+
+pub fn server_request_decode_query_required_expr_string_returns_bound_var_test() {
+  let param =
+    test_helpers.simple_param("name", True, test_helpers.string_schema())
+  let expr = server_request_decode.query_required_expr("name_raw", param)
+  expr |> should.equal("name_raw")
+  string.contains(expr, "let assert") |> should.be_false()
+}
+
+pub fn server_request_decode_query_required_expr_bool_has_no_let_assert_test() {
+  let param =
+    test_helpers.simple_param("active", True, test_helpers.bool_schema())
+  let expr = server_request_decode.query_required_expr("active_raw", param)
+  string.contains(expr, "let assert") |> should.be_false()
+  string.contains(expr, "active_raw") |> should.be_true()
+}
+
+pub fn server_request_decode_header_required_expr_int_returns_bound_var_test() {
+  let param =
+    test_helpers.simple_param("X-Limit", True, test_helpers.int_schema())
+  let expr = server_request_decode.header_required_expr("x_limit_raw", param)
+  expr |> should.equal("x_limit_raw_parsed")
+  string.contains(expr, "let assert") |> should.be_false()
+}
+
+pub fn server_request_decode_header_required_expr_string_has_no_let_assert_test() {
+  let param =
+    test_helpers.simple_param("X-Trace", True, test_helpers.string_schema())
+  let expr = server_request_decode.header_required_expr("x_trace_raw", param)
+  expr |> should.equal("x_trace_raw")
+}
+
+pub fn server_request_decode_cookie_required_expr_string_returns_bound_var_test() {
+  let param =
+    test_helpers.simple_param("session", True, test_helpers.string_schema())
+  let expr = server_request_decode.cookie_required_expr("session_raw", param)
+  expr |> should.equal("session_raw")
+  string.contains(expr, "let assert") |> should.be_false()
+}
+
+pub fn server_request_decode_cookie_required_expr_int_returns_bound_var_test() {
+  let param =
+    test_helpers.simple_param("page_size", True, test_helpers.int_schema())
+  let expr = server_request_decode.cookie_required_expr("page_size_raw", param)
+  expr |> should.equal("page_size_raw_parsed")
+  string.contains(expr, "let assert") |> should.be_false()
+}
+
 pub fn server_request_decode_request_body_uses_form_urlencoded_test() {
   let rb =
     spec.RequestBody(

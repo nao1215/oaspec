@@ -8261,19 +8261,31 @@ paths:
     list.find(files, fn(f) { f.path == "router.gleam" })
   let content = router_file.content
 
-  string.contains(
-    content,
-    "ratio: { let assert Ok([v, ..]) = dict.get(query, \"ratio\") let assert Ok(n) = float.parse(v) n },",
-  )
+  // Issue #263: required scalar query/header params now flow through nested
+  // `case dict.get(...) { Ok(...) -> { case <parse>(...) { Ok(<bound>) -> ...`
+  // scaffolds, so the value expression at the field site is just the bound
+  // variable name and the failure modes return 400 instead of crashing.
+  string.contains(content, "case dict.get(query, \"ratio\") {")
+  |> should.be_true()
+  string.contains(content, "Ok([ratio_raw, ..]) ->")
+  |> should.be_true()
+  string.contains(content, "case float.parse(ratio_raw) {")
+  |> should.be_true()
+  string.contains(content, "ratio: ratio_raw_parsed,")
+  |> should.be_true()
+  string.contains(content, "case dict.get(headers, \"x-threshold\") {")
+  |> should.be_true()
+  string.contains(content, "Ok(x_threshold_raw) ->")
+  |> should.be_true()
+  string.contains(content, "case float.parse(x_threshold_raw) {")
+  |> should.be_true()
+  string.contains(content, "x_threshold: x_threshold_raw_parsed,")
+  |> should.be_true()
+  string.contains(content, "x_enabled: case dict.get(headers, \"x-enabled\") {")
   |> should.be_true()
   string.contains(
     content,
-    "x_enabled: case dict.get(headers, \"x-enabled\") { Ok(v) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None },",
-  )
-  |> should.be_true()
-  string.contains(
-    content,
-    "x_threshold: { let assert Ok(v) = dict.get(headers, \"x-threshold\") let assert Ok(n) = float.parse(v) n },",
+    "_ -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
   )
   |> should.be_true()
 }
@@ -8357,19 +8369,31 @@ paths:
 
   string.contains(content, "import gleam/list")
   |> should.be_true()
+  // Required header arrays now go through `case dict.get(headers, ...) { Ok(<raw>) -> ... }`
+  // so a missing header returns 400 instead of crashing the BEAM (Issue #263).
+  string.contains(content, "case dict.get(headers, \"x-tags\") {")
+  |> should.be_true()
+  string.contains(content, "Ok(x_tags_raw) ->")
+  |> should.be_true()
   string.contains(
     content,
-    "x_tags: { let assert Ok(v) = dict.get(headers, \"x-tags\") list.map(string.split(v, \",\"), fn(item) { string.trim(item) }) },",
+    "x_tags: list.map(string.split(x_tags_raw, \",\"), fn(item) { string.trim(item) }),",
   )
   |> should.be_true()
+  // Optional header array still uses the legacy inline `let assert` for now;
+  // it cannot be missing-required so it does not affect Issue #263.
   string.contains(
     content,
     "x_scores: case dict.get(headers, \"x-scores\") { Ok(v) -> Some(list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n })) _ -> None },",
   )
   |> should.be_true()
+  string.contains(content, "case dict.get(headers, \"x-flags\") {")
+  |> should.be_true()
+  string.contains(content, "Ok(x_flags_raw) ->")
+  |> should.be_true()
   string.contains(
     content,
-    "x_flags: { let assert Ok(v) = dict.get(headers, \"x-flags\") list.map(string.split(v, \",\"), fn(item) { let v = string.trim(item) case string.lowercase(v) { \"true\" -> True _ -> False } }) },",
+    "x_flags: list.map(string.split(x_flags_raw, \",\"), fn(item) { let v = string.trim(item) case string.lowercase(v) { \"true\" -> True _ -> False } }),",
   )
   |> should.be_true()
 }
@@ -8450,9 +8474,15 @@ paths:
     "pub fn route(method: String, path: List(String), query: Dict(String, List(String)), _headers: Dict(String, String), _body: String) -> ServerResponse",
   )
   |> should.be_true()
+  // Required explode=true array now opens its own `case dict.get(...) { Ok([_, ..] as <raw>) ->`
+  // so an empty / missing list returns 400 (Issue #263).
+  string.contains(content, "case dict.get(query, \"tags\") {")
+  |> should.be_true()
+  string.contains(content, "Ok([_, ..] as tags_raw) ->")
+  |> should.be_true()
   string.contains(
     content,
-    "tags: { let assert Ok(vs) = dict.get(query, \"tags\") list.map(vs, fn(item) { string.trim(item) }) },",
+    "tags: list.map(tags_raw, fn(item) { string.trim(item) }),",
   )
   |> should.be_true()
   string.contains(

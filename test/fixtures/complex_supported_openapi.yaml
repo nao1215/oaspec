@@ -77,6 +77,35 @@ paths:
         '200':
           description: OK
 
+  /required-params:
+    get:
+      operationId: getRequiredParams
+      summary: Demonstrate required query / header / cookie params
+      parameters:
+        - name: tenant
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: x-trace-id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: session
+          in: cookie
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+
 components:
   responses:
     NotFound:

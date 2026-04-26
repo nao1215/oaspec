@@ -2,6 +2,10 @@
 
 import api/types
 
+pub type GetRequiredParamsResponse {
+  GetRequiredParamsResponseOk
+}
+
 pub type PostSearchResponse {
   PostSearchResponseOk(types.PostSearchResponseOk)
 }

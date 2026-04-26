@@ -143,83 +143,62 @@ pub fn param_needs_result_unwrap(param: spec.Parameter(Resolved)) -> Bool {
 }
 
 /// Generate expression for a required query parameter.
+///
+/// `bound_var` is the name of a variable that the router has already bound
+/// in an enclosing case expression. For scalar params (string/bool/int/float)
+/// this is the raw String value pulled out of the query dict. For array
+/// params with `explode=true` this is the `List(String)` from the dict; with
+/// `explode=false` it is the single raw String that still needs splitting.
+///
+/// The router opens a `case dict.get(query, key) { Ok([raw, ..]) -> ...`
+/// (or `Ok(raw_list) -> ...` for explode-true arrays) **before** asking this
+/// helper for the value expression, so the lookup never `let assert`s.
+///
+/// For numeric scalar/array parameters the router additionally opens a
+/// `case int.parse(...)` / `float.parse(...)` (or `list.try_map(..., int.parse)`)
+/// case, binding `<bound_var>_parsed` (or `<bound_var>_parsed_list`) on
+/// success — that's the variable name the helper returns here.
 pub fn query_required_expr(
-  key: String,
+  bound_var: String,
   param: spec.Parameter(Resolved),
 ) -> String {
   query_required_expr_with_schema(
-    key,
+    bound_var,
     spec.parameter_schema(param),
     Some(operation_ir.effective_explode(param)),
     param.style,
   )
 }
 
-fn query_required_expr_with_schema(
+/// Legacy lookup-based required-query expression preserved for deep object
+/// constructor fields. Top-level required query params now go through the
+/// safer `query_required_expr` + router-side case scaffolding (Issue #263);
+/// deep object support is intentionally still on the old `let assert` path
+/// pending its own fix.
+fn deep_object_required_field_expr(
   key: String,
   schema_ref: Option(SchemaRef),
-  explode: Option(Bool),
-  style: Option(spec.ParameterStyle),
 ) -> String {
-  let delim = operation_ir.delimiter_for_style(style)
   let base = "{ let assert Ok([v, ..]) = dict.get(query, \"" <> key <> "\") v }"
   case schema_ref {
     Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
-      case explode {
-        Some(False) ->
-          "{ let assert Ok([v, ..]) = dict.get(query, \""
-          <> key
-          <> "\") list.map(string.split(v, \""
-          <> delim
-          <> "\"), fn(item) { string.trim(item) }) }"
-        _ ->
-          "{ let assert Ok(vs) = dict.get(query, \""
-          <> key
-          <> "\") list.map(vs, fn(item) { string.trim(item) }) }"
-      }
+      "{ let assert Ok(vs) = dict.get(query, \""
+      <> key
+      <> "\") list.map(vs, fn(item) { string.trim(item) }) }"
     Some(Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..))) ->
-      case explode {
-        Some(False) ->
-          "{ let assert Ok([v, ..]) = dict.get(query, \""
-          <> key
-          <> "\") list.map(string.split(v, \""
-          <> delim
-          <> "\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n }) }"
-        _ ->
-          "{ let assert Ok(vs) = dict.get(query, \""
-          <> key
-          <> "\") list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n }) }"
-      }
+      "{ let assert Ok(vs) = dict.get(query, \""
+      <> key
+      <> "\") list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n }) }"
     Some(Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..))) ->
-      case explode {
-        Some(False) ->
-          "{ let assert Ok([v, ..]) = dict.get(query, \""
-          <> key
-          <> "\") list.map(string.split(v, \""
-          <> delim
-          <> "\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = float.parse(trimmed) n }) }"
-        _ ->
-          "{ let assert Ok(vs) = dict.get(query, \""
-          <> key
-          <> "\") list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = float.parse(trimmed) n }) }"
-      }
+      "{ let assert Ok(vs) = dict.get(query, \""
+      <> key
+      <> "\") list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = float.parse(trimmed) n }) }"
     Some(Inline(schema.ArraySchema(items: Inline(schema.BooleanSchema(..)), ..))) ->
-      case explode {
-        Some(False) ->
-          "{ let assert Ok([v, ..]) = dict.get(query, \""
-          <> key
-          <> "\") list.map(string.split(v, \""
-          <> delim
-          <> "\"), fn(item) { let v = string.trim(item) "
-          <> bool_parse_expr
-          <> " }) }"
-        _ ->
-          "{ let assert Ok(vs) = dict.get(query, \""
-          <> key
-          <> "\") list.map(vs, fn(item) { let v = string.trim(item) "
-          <> bool_parse_expr
-          <> " }) }"
-      }
+      "{ let assert Ok(vs) = dict.get(query, \""
+      <> key
+      <> "\") list.map(vs, fn(item) { let v = string.trim(item) "
+      <> bool_parse_expr
+      <> " }) }"
     Some(Inline(schema.IntegerSchema(..))) ->
       "{ let assert Ok([v, ..]) = dict.get(query, \""
       <> key
@@ -235,6 +214,56 @@ fn query_required_expr_with_schema(
       <> bool_parse_expr
       <> " }"
     _ -> base
+  }
+}
+
+fn query_required_expr_with_schema(
+  bound_var: String,
+  schema_ref: Option(SchemaRef),
+  explode: Option(Bool),
+  style: Option(spec.ParameterStyle),
+) -> String {
+  let delim = operation_ir.delimiter_for_style(style)
+  case schema_ref {
+    Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
+      case explode {
+        Some(False) ->
+          "list.map(string.split("
+          <> bound_var
+          <> ", \""
+          <> delim
+          <> "\"), fn(item) { string.trim(item) })"
+        _ -> "list.map(" <> bound_var <> ", fn(item) { string.trim(item) })"
+      }
+    Some(Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..))) ->
+      // The router opens a `case list.try_map(..., int.parse)` and binds
+      // `<bound_var>_parsed_list` on Ok, so the value expression is just
+      // that bound name.
+      bound_var <> "_parsed_list"
+    Some(Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..))) ->
+      bound_var <> "_parsed_list"
+    Some(Inline(schema.ArraySchema(items: Inline(schema.BooleanSchema(..)), ..))) ->
+      case explode {
+        Some(False) ->
+          "list.map(string.split("
+          <> bound_var
+          <> ", \""
+          <> delim
+          <> "\"), fn(item) { let v = string.trim(item) "
+          <> bool_parse_expr
+          <> " })"
+        _ ->
+          "list.map("
+          <> bound_var
+          <> ", fn(item) { let v = string.trim(item) "
+          <> bool_parse_expr
+          <> " })"
+      }
+    Some(Inline(schema.IntegerSchema(..))) -> bound_var <> "_parsed"
+    Some(Inline(schema.NumberSchema(..))) -> bound_var <> "_parsed"
+    Some(Inline(schema.BooleanSchema(..))) ->
+      "{ let v = " <> bound_var <> " " <> bool_parse_expr <> " }"
+    _ -> bound_var
   }
 }
 
@@ -430,13 +459,11 @@ fn deep_object_constructor_expr(
     |> list.map(fn(prop) {
       let prop_key = key <> "[" <> prop.name <> "]"
       let value_expr = case prop.required {
-        True ->
-          query_required_expr_with_schema(
-            prop_key,
-            Some(prop.schema_ref),
-            Some(True),
-            None,
-          )
+        // Deep object property handling intentionally retains the legacy
+        // `let assert`-based lookup. Issue #263 narrowed the safety fix to
+        // top-level query/header/cookie params; deep object follow-up is
+        // tracked separately.
+        True -> deep_object_required_field_expr(prop_key, Some(prop.schema_ref))
         False ->
           query_optional_expr_with_schema(
             prop_key,
@@ -1249,12 +1276,16 @@ fn array_item_bool_parse(trim: Bool) -> String {
 }
 
 /// Generate expression for a required header parameter.
+///
+/// `bound_var` is the raw header String the router has already pulled
+/// out of the headers dict in an enclosing `case dict.get(...) { Ok(<var>) ->`.
+/// The router additionally opens a numeric parse case for int/float scalar
+/// params, binding `<bound_var>_parsed` on success.
 pub fn header_required_expr(
-  key: String,
+  bound_var: String,
   param: spec.Parameter(Resolved),
 ) -> String {
-  let lookup = "dict.get(headers, \"" <> key <> "\")"
-  single_value_required_expr(lookup, "v", spec.parameter_schema(param))
+  single_value_required_expr(bound_var, spec.parameter_schema(param))
 }
 
 /// Generate expression for an optional header parameter.
@@ -1267,12 +1298,15 @@ pub fn header_optional_expr(
 }
 
 /// Generate expression for a required cookie parameter.
+///
+/// `bound_var` is the raw cookie String the router has already pulled out
+/// via `case cookie_lookup(...) { Ok(<var>) ->`. As with the header helper
+/// the router pre-binds `<bound_var>_parsed` for numeric scalar types.
 pub fn cookie_required_expr(
-  key: String,
+  bound_var: String,
   param: spec.Parameter(Resolved),
 ) -> String {
-  let lookup = "cookie_lookup(headers, \"" <> key <> "\")"
-  single_value_required_expr(lookup, "v", spec.parameter_schema(param))
+  single_value_required_expr(bound_var, spec.parameter_schema(param))
 }
 
 /// Generate expression for an optional cookie parameter.
@@ -1289,79 +1323,39 @@ pub fn cookie_optional_expr(
   )
 }
 
-/// Generate a required expression for a source that returns a single value.
-/// Used for headers (dict.get returns single string) and cookies.
-/// Header arrays are comma-separated in a single string value.
+/// Generate a required value expression for a source that returns a single
+/// String value. Used for headers (dict.get returns single string) and
+/// cookies. Header / cookie arrays are comma-separated in a single string.
+///
+/// The lookup itself (and any int/float parse) is wrapped in an enclosing
+/// case in the router, which binds `bound_var` (and `<bound_var>_parsed`
+/// for numeric scalars). This helper just produces the value expression
+/// that consumes those bound names — it never emits `let assert`.
 fn single_value_required_expr(
-  lookup: String,
-  var: String,
+  bound_var: String,
   schema_ref: Option(SchemaRef),
 ) -> String {
-  let base = "{ let assert Ok(" <> var <> ") = " <> lookup <> " " <> var <> " }"
   case schema_ref {
     Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
-      "{ let assert Ok("
-      <> var
-      <> ") = "
-      <> lookup
-      <> " list.map(string.split("
-      <> var
-      <> ", \",\"), fn(item) { string.trim(item) }) }"
+      "list.map(string.split("
+      <> bound_var
+      <> ", \",\"), fn(item) { string.trim(item) })"
     Some(Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..))) ->
-      "{ let assert Ok("
-      <> var
-      <> ") = "
-      <> lookup
-      <> " list.map(string.split("
-      <> var
-      <> ", \",\"), fn(item) { "
-      <> array_item_int_parse(True)
-      <> " }) }"
+      // Router pre-parses to a List(Int) and binds <bound_var>_parsed_list.
+      bound_var <> "_parsed_list"
     Some(Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..))) ->
-      "{ let assert Ok("
-      <> var
-      <> ") = "
-      <> lookup
-      <> " list.map(string.split("
-      <> var
-      <> ", \",\"), fn(item) { "
-      <> array_item_float_parse(True)
-      <> " }) }"
+      bound_var <> "_parsed_list"
     Some(Inline(schema.ArraySchema(items: Inline(schema.BooleanSchema(..)), ..))) ->
-      "{ let assert Ok("
-      <> var
-      <> ") = "
-      <> lookup
-      <> " list.map(string.split("
-      <> var
+      "list.map(string.split("
+      <> bound_var
       <> ", \",\"), fn(item) { "
       <> array_item_bool_parse(True)
-      <> " }) }"
-    Some(Inline(schema.IntegerSchema(..))) ->
-      "{ let assert Ok("
-      <> var
-      <> ") = "
-      <> lookup
-      <> " let assert Ok(n) = int.parse("
-      <> var
-      <> ") n }"
-    Some(Inline(schema.NumberSchema(..))) ->
-      "{ let assert Ok("
-      <> var
-      <> ") = "
-      <> lookup
-      <> " let assert Ok(n) = float.parse("
-      <> var
-      <> ") n }"
+      <> " })"
+    Some(Inline(schema.IntegerSchema(..))) -> bound_var <> "_parsed"
+    Some(Inline(schema.NumberSchema(..))) -> bound_var <> "_parsed"
     Some(Inline(schema.BooleanSchema(..))) ->
-      "{ let assert Ok("
-      <> var
-      <> ") = "
-      <> lookup
-      <> " "
-      <> bool_parse_expr
-      <> " }"
-    _ -> base
+      "{ let v = " <> bound_var <> " " <> bool_parse_expr <> " }"
+    _ -> bound_var
   }
 }
 

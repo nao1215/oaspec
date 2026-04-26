@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Generated `router.gleam` no longer crashes the BEAM process when a
+  required query, header, or cookie parameter is missing or a required
+  integer/number parameter fails to parse. The router now returns
+  `ServerResponse(status: 400, body: "Bad Request", headers: [])`
+  instead of triggering supervisor restarts via `let assert`. Deep
+  object parameters retain the previous behaviour pending a separate
+  follow-up. (#263)
+
 ## [0.20.0] - 2026-04-26
 
 ### Fixed

@@ -1174,4 +1174,190 @@ rm -rf "$GUARD_V_DIR"
 
 info "Guard constraint integration tests passed."
 
+# -------------------------------------------------------
+# Step 17: Issue #263 — required query/header/cookie/numeric parse
+# failures must return 400 instead of crashing the BEAM via let assert.
+# This step compiles a tiny spec with one required string query, one
+# required integer query, one required header, and one required cookie,
+# then drives the generated router with both the happy path and each
+# failure mode. A regression that re-introduces `let assert` panics
+# would surface here as a test failure (not a compile failure).
+# -------------------------------------------------------
+info "Testing Issue #263 required-param 400 handling..."
+
+REQ_DIR="$SCRIPT_DIR/required_params_test"
+rm -rf "$REQ_DIR"
+mkdir -p "$REQ_DIR/src/api" "$REQ_DIR/test"
+
+cat > "$REQ_DIR/required_params.yaml" << 'YAML_EOF'
+openapi: "3.0.3"
+info:
+  title: Required Params Test API
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: search
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: x-trace-id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: session
+          in: cookie
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+YAML_EOF
+
+cat > "$REQ_DIR/oaspec-req.yaml" << 'YAML_EOF'
+input: ./integration_test/required_params_test/required_params.yaml
+output:
+  server: ./integration_test/required_params_test/src/api
+package: api
+validate: false
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$REQ_DIR/oaspec-req.yaml" \
+  --mode=server
+
+cat > "$REQ_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
+import api/request_types
+import api/response_types
+
+pub fn search(req: request_types.SearchRequest) -> response_types.SearchResponse {
+  let _ = req
+  response_types.SearchResponseOk
+}
+GLEAM_EOF
+
+cat > "$REQ_DIR/gleam.toml" << 'TOML_EOF'
+name = "required_params_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$REQ_DIR/src/required_params_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cat > "$REQ_DIR/test/required_params_test_test.gleam" << 'GLEAM_EOF'
+// Issue #263 — drive the generated router and check each failure mode
+// returns ServerResponse(status: 400) instead of crashing the BEAM via
+// `let assert`. The happy path verifies the router still reaches the
+// handler and returns 200 when every required parameter is supplied.
+
+import api/router
+import gleam/dict
+import gleeunit
+import gleeunit/should
+
+pub fn main() {
+  gleeunit.main()
+}
+
+fn full_query() {
+  dict.from_list([#("q", ["hello"]), #("limit", ["10"])])
+}
+
+fn full_headers() {
+  dict.from_list([
+    #("x-trace-id", "abc"),
+    #("cookie", "session=opaque"),
+  ])
+}
+
+pub fn happy_path_returns_200_test() {
+  let resp =
+    router.route("GET", ["search"], full_query(), full_headers(), "")
+  resp.status |> should.equal(200)
+}
+
+pub fn missing_required_string_query_returns_400_test() {
+  let query = dict.from_list([#("limit", ["10"])])
+  let resp = router.route("GET", ["search"], query, full_headers(), "")
+  resp.status |> should.equal(400)
+  resp.body |> should.equal("Bad Request")
+}
+
+pub fn missing_required_integer_query_returns_400_test() {
+  let query = dict.from_list([#("q", ["hello"])])
+  let resp = router.route("GET", ["search"], query, full_headers(), "")
+  resp.status |> should.equal(400)
+}
+
+pub fn unparseable_integer_query_returns_400_test() {
+  // limit=not-a-number must NOT crash the BEAM via `let assert`.
+  let query = dict.from_list([#("q", ["hello"]), #("limit", ["abc"])])
+  let resp = router.route("GET", ["search"], query, full_headers(), "")
+  resp.status |> should.equal(400)
+}
+
+pub fn missing_required_header_returns_400_test() {
+  let headers = dict.from_list([#("cookie", "session=opaque")])
+  let resp = router.route("GET", ["search"], full_query(), headers, "")
+  resp.status |> should.equal(400)
+}
+
+pub fn missing_required_cookie_returns_400_test() {
+  let headers = dict.from_list([#("x-trace-id", "abc")])
+  let resp = router.route("GET", ["search"], full_query(), headers, "")
+  resp.status |> should.equal(400)
+}
+
+pub fn empty_query_list_returns_400_test() {
+  // dict.get returns Ok([]) when a key is present but holds no value;
+  // a router that pattern-matched only `Ok([_, ..])` would crash here.
+  let query = dict.from_list([#("q", []), #("limit", ["10"])])
+  let resp = router.route("GET", ["search"], query, full_headers(), "")
+  resp.status |> should.equal(400)
+}
+GLEAM_EOF
+
+cd "$REQ_DIR"
+gleam deps download
+
+if gleam build --warnings-as-errors 2>&1; then
+  info "PASS: Required-param test code compiles."
+else
+  fail "Required-param test code failed to compile."
+fi
+
+if gleam test 2>&1; then
+  info "PASS: Required-param 400 handling verified."
+else
+  fail "Required-param 400 handling integration tests failed."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$REQ_DIR"
+
+info "Issue #263 required-param integration tests passed."
+
 info "All integration tests passed!"

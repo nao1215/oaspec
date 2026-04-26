@@ -1013,6 +1013,22 @@ fn generate_safe_request_and_dispatch(
       p.in_ == spec.InPath && decode_helpers.param_needs_result_unwrap(p)
     })
 
+  // Required query / header / cookie params. Issue #263: each of these
+  // becomes its own enclosing case expression so that a missing value
+  // returns 400 instead of crashing the BEAM via `let assert`. Deep
+  // object query params keep their legacy `let assert`-based path for
+  // now (tracked separately).
+  let required_query_params =
+    list.filter(params, fn(p) {
+      p.in_ == spec.InQuery
+      && p.required
+      && !decode_helpers.is_deep_object_param(p, ctx)
+    })
+  let required_header_params =
+    list.filter(params, fn(p) { p.in_ == spec.InHeader && p.required })
+  let required_cookie_params =
+    list.filter(params, fn(p) { p.in_ == spec.InCookie && p.required })
+
   // Check if the request body needs safe decoding (required JSON body)
   let needs_body_guard = case operation.request_body {
     Some(Value(rb)) ->
@@ -1023,7 +1039,7 @@ fn generate_safe_request_and_dispatch(
     _ -> False
   }
 
-  // Open nested case expressions for each param that needs parsing
+  // Open nested case expressions for each path param that needs parsing.
   let sb =
     list.fold(path_params_needing_parse, sb, fn(sb, p) {
       let var_name = naming.to_snake_case(p.name)
@@ -1031,6 +1047,57 @@ fn generate_safe_request_and_dispatch(
       sb
       |> se.indent(3, "case " <> parse_expr <> " {")
       |> se.indent(4, "Ok(" <> var_name <> "_parsed) -> {")
+    })
+
+  // Open lookup cases for required query params. The router pulls the
+  // raw value(s) out of `query` first; numeric parsing happens in a
+  // second pass below so that a parse failure also returns 400.
+  let sb =
+    list.fold(required_query_params, sb, fn(sb, p) {
+      let raw_var = naming.to_snake_case(p.name) <> "_raw"
+      let pattern = case query_param_explode_array(p) {
+        True -> "Ok([_, ..] as " <> raw_var <> ")"
+        False -> "Ok([" <> raw_var <> ", ..])"
+      }
+      sb
+      |> se.indent(3, "case dict.get(query, \"" <> p.name <> "\") {")
+      |> se.indent(4, pattern <> " -> {")
+    })
+
+  // Open numeric-parse cases for required query params (scalar int/float
+  // and explode=true int/float arrays). Bool / string don't need this.
+  let sb =
+    list.fold(required_query_params, sb, fn(sb, p) {
+      query_required_open_parse_case(sb, p)
+    })
+
+  // Open lookup cases for required header params.
+  let sb =
+    list.fold(required_header_params, sb, fn(sb, p) {
+      let raw_var = naming.to_snake_case(p.name) <> "_raw"
+      let key = string.lowercase(p.name)
+      sb
+      |> se.indent(3, "case dict.get(headers, \"" <> key <> "\") {")
+      |> se.indent(4, "Ok(" <> raw_var <> ") -> {")
+    })
+
+  let sb =
+    list.fold(required_header_params, sb, fn(sb, p) {
+      single_value_required_open_parse_case(sb, p)
+    })
+
+  // Open lookup cases for required cookie params.
+  let sb =
+    list.fold(required_cookie_params, sb, fn(sb, p) {
+      let raw_var = naming.to_snake_case(p.name) <> "_raw"
+      sb
+      |> se.indent(3, "case cookie_lookup(headers, \"" <> p.name <> "\") {")
+      |> se.indent(4, "Ok(" <> raw_var <> ") -> {")
+    })
+
+  let sb =
+    list.fold(required_cookie_params, sb, fn(sb, p) {
+      single_value_required_open_parse_case(sb, p)
     })
 
   // Determine the body schema reference name (used for decode and guard validation)
@@ -1143,26 +1210,29 @@ fn generate_safe_request_and_dispatch(
         }
         spec.InQuery -> {
           let key = param.name
+          let raw_var = naming.to_snake_case(param.name) <> "_raw"
           case decode_helpers.is_deep_object_param(param, ctx), param.required {
             True, True ->
               decode_helpers.deep_object_required_expr(key, param, op_id, ctx)
             True, False ->
               decode_helpers.deep_object_optional_expr(key, param, op_id, ctx)
-            False, True -> decode_helpers.query_required_expr(key, param)
+            False, True -> decode_helpers.query_required_expr(raw_var, param)
             False, False -> decode_helpers.query_optional_expr(key, param)
           }
         }
         spec.InHeader -> {
           let key = string.lowercase(param.name)
+          let raw_var = naming.to_snake_case(param.name) <> "_raw"
           case param.required {
-            True -> decode_helpers.header_required_expr(key, param)
+            True -> decode_helpers.header_required_expr(raw_var, param)
             False -> decode_helpers.header_optional_expr(key, param)
           }
         }
         spec.InCookie -> {
           let key = param.name
+          let raw_var = naming.to_snake_case(param.name) <> "_raw"
           case param.required {
-            True -> decode_helpers.cookie_required_expr(key, param)
+            True -> decode_helpers.cookie_required_expr(raw_var, param)
             False -> decode_helpers.cookie_optional_expr(key, param)
           }
         }
@@ -1221,7 +1291,30 @@ fn generate_safe_request_and_dispatch(
     False -> sb
   }
 
-  // Close path param case expressions (in reverse order)
+  // Close required-param case expressions in LIFO (reverse) order:
+  // cookie parse, cookie lookup, header parse, header lookup, query parse,
+  // query lookup, then finally the path int/float parse cases. The
+  // catch-all `_ ->` arm covers `Ok([])` (empty query lists) along with
+  // `Error(_)` so all failure modes return 400.
+  let sb =
+    list.fold(required_cookie_params, sb, fn(sb, p) {
+      close_single_value_required_parse_case(sb, p)
+    })
+  let sb =
+    list.fold(required_cookie_params, sb, fn(sb, _p) { close_lookup_case(sb) })
+  let sb =
+    list.fold(required_header_params, sb, fn(sb, p) {
+      close_single_value_required_parse_case(sb, p)
+    })
+  let sb =
+    list.fold(required_header_params, sb, fn(sb, _p) { close_lookup_case(sb) })
+  let sb =
+    list.fold(required_query_params, sb, fn(sb, p) {
+      close_query_required_parse_case(sb, p)
+    })
+  let sb =
+    list.fold(required_query_params, sb, fn(sb, _p) { close_lookup_case(sb) })
+
   list.fold(path_params_needing_parse, sb, fn(sb, _p) {
     sb
     |> se.indent(4, "}")
@@ -1231,6 +1324,211 @@ fn generate_safe_request_and_dispatch(
     )
     |> se.indent(3, "}")
   })
+}
+
+/// True when this query param is treated as a list (explode=true array).
+/// Matches the helper used by `query_required_expr` so the open/close
+/// scaffolding stays in sync with the value expression.
+fn query_param_explode_array(p: spec.Parameter(Resolved)) -> Bool {
+  case spec.parameter_schema(p) {
+    Some(schema.Inline(schema.ArraySchema(..))) -> {
+      case p.explode {
+        Some(False) -> False
+        _ -> True
+      }
+    }
+    _ -> False
+  }
+}
+
+/// Open the secondary parse case for required query params that need it.
+/// - scalar Integer/Number → `case int.parse(<raw>) { Ok(<raw>_parsed) -> {`
+/// - array of Integer/Number with explode=true → `case list.try_map(<raw>, int.parse) { Ok(<raw>_parsed_list) -> {`
+/// - array of Integer/Number with explode=false → split first, then try_map.
+/// String / Bool / array-of-string / array-of-bool need no extra case.
+fn query_required_open_parse_case(
+  sb: se.StringBuilder,
+  p: spec.Parameter(Resolved),
+) -> se.StringBuilder {
+  let raw_var = naming.to_snake_case(p.name) <> "_raw"
+  let delim = case p.style {
+    Some(spec.PipeDelimitedStyle) -> "|"
+    Some(spec.SpaceDelimitedStyle) -> " "
+    _ -> ","
+  }
+  case spec.parameter_schema(p) {
+    Some(schema.Inline(schema.IntegerSchema(..))) ->
+      sb
+      |> se.indent(3, "case int.parse(" <> raw_var <> ") {")
+      |> se.indent(4, "Ok(" <> raw_var <> "_parsed) -> {")
+    Some(schema.Inline(schema.NumberSchema(..))) ->
+      sb
+      |> se.indent(3, "case float.parse(" <> raw_var <> ") {")
+      |> se.indent(4, "Ok(" <> raw_var <> "_parsed) -> {")
+    Some(schema.Inline(schema.ArraySchema(
+      items: Inline(schema.IntegerSchema(..)),
+      ..,
+    ))) -> {
+      let parse_expr = array_int_parse_expr(raw_var, p, delim)
+      sb
+      |> se.indent(3, "case " <> parse_expr <> " {")
+      |> se.indent(4, "Ok(" <> raw_var <> "_parsed_list) -> {")
+    }
+    Some(schema.Inline(schema.ArraySchema(
+      items: Inline(schema.NumberSchema(..)),
+      ..,
+    ))) -> {
+      let parse_expr = array_float_parse_expr(raw_var, p, delim)
+      sb
+      |> se.indent(3, "case " <> parse_expr <> " {")
+      |> se.indent(4, "Ok(" <> raw_var <> "_parsed_list) -> {")
+    }
+    _ -> sb
+  }
+}
+
+fn array_int_parse_expr(
+  raw_var: String,
+  p: spec.Parameter(Resolved),
+  delim: String,
+) -> String {
+  case p.explode {
+    Some(False) ->
+      "list.try_map(list.map(string.split("
+      <> raw_var
+      <> ", \""
+      <> delim
+      <> "\"), string.trim), int.parse)"
+    _ -> "list.try_map(list.map(" <> raw_var <> ", string.trim), int.parse)"
+  }
+}
+
+fn array_float_parse_expr(
+  raw_var: String,
+  p: spec.Parameter(Resolved),
+  delim: String,
+) -> String {
+  case p.explode {
+    Some(False) ->
+      "list.try_map(list.map(string.split("
+      <> raw_var
+      <> ", \""
+      <> delim
+      <> "\"), string.trim), float.parse)"
+    _ -> "list.try_map(list.map(" <> raw_var <> ", string.trim), float.parse)"
+  }
+}
+
+/// Close the matching parse case for a required query param.
+fn close_query_required_parse_case(
+  sb: se.StringBuilder,
+  p: spec.Parameter(Resolved),
+) -> se.StringBuilder {
+  case spec.parameter_schema(p) {
+    Some(schema.Inline(schema.IntegerSchema(..)))
+    | Some(schema.Inline(schema.NumberSchema(..)))
+    | Some(schema.Inline(schema.ArraySchema(
+        items: Inline(schema.IntegerSchema(..)),
+        ..,
+      )))
+    | Some(schema.Inline(schema.ArraySchema(
+        items: Inline(schema.NumberSchema(..)),
+        ..,
+      ))) ->
+      sb
+      |> se.indent(4, "}")
+      |> se.indent(
+        4,
+        "_ -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
+      )
+      |> se.indent(3, "}")
+    _ -> sb
+  }
+}
+
+/// For headers / cookies, open a numeric parse case if the param schema is a
+/// scalar Integer/Number. (Header/cookie array parsing is currently a single
+/// inline `list.map(string.split(...))` expression and stays unsafe; that's
+/// out of scope for the Issue #263 fix and tracked separately.)
+fn single_value_required_open_parse_case(
+  sb: se.StringBuilder,
+  p: spec.Parameter(Resolved),
+) -> se.StringBuilder {
+  let raw_var = naming.to_snake_case(p.name) <> "_raw"
+  case spec.parameter_schema(p) {
+    Some(schema.Inline(schema.IntegerSchema(..))) ->
+      sb
+      |> se.indent(3, "case int.parse(" <> raw_var <> ") {")
+      |> se.indent(4, "Ok(" <> raw_var <> "_parsed) -> {")
+    Some(schema.Inline(schema.NumberSchema(..))) ->
+      sb
+      |> se.indent(3, "case float.parse(" <> raw_var <> ") {")
+      |> se.indent(4, "Ok(" <> raw_var <> "_parsed) -> {")
+    Some(schema.Inline(schema.ArraySchema(
+      items: Inline(schema.IntegerSchema(..)),
+      ..,
+    ))) ->
+      sb
+      |> se.indent(
+        3,
+        "case list.try_map(list.map(string.split("
+          <> raw_var
+          <> ", \",\"), string.trim), int.parse) {",
+      )
+      |> se.indent(4, "Ok(" <> raw_var <> "_parsed_list) -> {")
+    Some(schema.Inline(schema.ArraySchema(
+      items: Inline(schema.NumberSchema(..)),
+      ..,
+    ))) ->
+      sb
+      |> se.indent(
+        3,
+        "case list.try_map(list.map(string.split("
+          <> raw_var
+          <> ", \",\"), string.trim), float.parse) {",
+      )
+      |> se.indent(4, "Ok(" <> raw_var <> "_parsed_list) -> {")
+    _ -> sb
+  }
+}
+
+fn close_single_value_required_parse_case(
+  sb: se.StringBuilder,
+  p: spec.Parameter(Resolved),
+) -> se.StringBuilder {
+  case spec.parameter_schema(p) {
+    Some(schema.Inline(schema.IntegerSchema(..)))
+    | Some(schema.Inline(schema.NumberSchema(..)))
+    | Some(schema.Inline(schema.ArraySchema(
+        items: Inline(schema.IntegerSchema(..)),
+        ..,
+      )))
+    | Some(schema.Inline(schema.ArraySchema(
+        items: Inline(schema.NumberSchema(..)),
+        ..,
+      ))) ->
+      sb
+      |> se.indent(4, "}")
+      |> se.indent(
+        4,
+        "_ -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
+      )
+      |> se.indent(3, "}")
+    _ -> sb
+  }
+}
+
+/// Close a required-param lookup case (`case dict.get(...) { Ok(...) -> { ... }`).
+/// The catch-all `_ ->` arm covers both `Error(_)` and `Ok([])` (empty list)
+/// for query params, plus the bare `Error(_)` for header/cookie lookups.
+fn close_lookup_case(sb: se.StringBuilder) -> se.StringBuilder {
+  sb
+  |> se.indent(4, "}")
+  |> se.indent(
+    4,
+    "_ -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
+  )
+  |> se.indent(3, "}")
 }
 
 /// Check if an operation's request body needs guard validation.
