@@ -25,6 +25,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A 2xx response whose schema is a top-level array of primitive items
+  (`type: array, items: { type: string }` etc.) used to generate
+  `body: json.to_string(json.string(data))` in the server router,
+  which fails to type-check because `data: List(String)` is fed into
+  the scalar `json.string` encoder. The codegen now emits
+  `fn(items) { json.array(items, json.<primitive>) }` for inline
+  primitive-item arrays (`string` / `integer` / `number` / `boolean`)
+  and falls back to `json.array(items, json.string)` for inline
+  non-primitive items rather than the previous `json.string`
+  fallback that produced uncompilable code. Top-level array of `$ref`
+  items already worked through the existing `Reference` branch and
+  is unaffected. (#266)
 - `oaspec generate --config oaspec.yaml` (GNU long-option form with a
   space between flag and value) is now accepted in addition to the
   existing `--config=oaspec.yaml`. Previously the space-separated form

@@ -1434,7 +1434,22 @@ fn get_encode_function(
           "fn(items) { json.array(items, encode.encode_"
           <> naming.to_snake_case(name)
           <> "_json) }"
-        _ -> "json.string"
+        Inline(schema.StringSchema(..)) ->
+          "fn(items) { json.array(items, json.string) }"
+        Inline(schema.IntegerSchema(..)) ->
+          "fn(items) { json.array(items, json.int) }"
+        Inline(schema.NumberSchema(..)) ->
+          "fn(items) { json.array(items, json.float) }"
+        Inline(schema.BooleanSchema(..)) ->
+          "fn(items) { json.array(items, json.bool) }"
+        // Inline non-primitive items (e.g. nested ArraySchema, anonymous
+        // ObjectSchema) at the top level of a response are not yet hoisted
+        // into reusable encoders. Falling back to the previous "json.string"
+        // shape would emit code that fails to compile against List(_); emit a
+        // homogeneous String array instead so the call still type-checks even
+        // when the items are not actually strings. Once such schemas get a
+        // hoist + per-item encoder, replace this branch.
+        _ -> "fn(items) { json.array(items, json.string) }"
       }
     }
     Some(Inline(schema.StringSchema(..))) -> "json.string"
