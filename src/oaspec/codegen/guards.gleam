@@ -4,6 +4,7 @@ import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/set.{type Set}
 import gleam/string
 import oaspec/codegen/allof_merge
 import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
@@ -172,16 +173,41 @@ fn collect_constraint_types(
     ConstraintTypes(False, False, False, False, False, False, False),
     fn(acc, entry) {
       let #(_name, schema_ref) = entry
-      collect_schema_constraint_types(acc, schema_ref, ctx)
+      collect_schema_constraint_types(acc, schema_ref, ctx, set.new())
     },
   )
 }
 
 /// Collect constraint types from a single schema ref.
+/// Issue #297: `seen` tracks visited $ref names to break circular references.
 fn collect_schema_constraint_types(
   acc: ConstraintTypes,
   schema_ref: SchemaRef,
   ctx: Context,
+  seen: Set(String),
+) -> ConstraintTypes {
+  // Short-circuit on circular $ref to prevent infinite recursion.
+  case schema_ref {
+    Reference(name:, ..) ->
+      case set.contains(seen, name) {
+        True -> acc
+        False ->
+          collect_schema_constraint_types_inner(
+            acc,
+            schema_ref,
+            ctx,
+            set.insert(seen, name),
+          )
+      }
+    _ -> collect_schema_constraint_types_inner(acc, schema_ref, ctx, seen)
+  }
+}
+
+fn collect_schema_constraint_types_inner(
+  acc: ConstraintTypes,
+  schema_ref: SchemaRef,
+  ctx: Context,
+  seen: Set(String),
 ) -> ConstraintTypes {
   let schema = case schema_ref {
     Inline(s) -> Ok(s)
@@ -224,12 +250,12 @@ fn collect_schema_constraint_types(
       dict.to_list(properties)
       |> list.fold(acc, fn(a, prop) {
         let #(_, prop_ref) = prop
-        collect_schema_constraint_types(a, prop_ref, ctx)
+        collect_schema_constraint_types(a, prop_ref, ctx, seen)
       })
     }
     Ok(AllOfSchema(schemas:, ..)) ->
       list.fold(schemas, acc, fn(a, s) {
-        collect_schema_constraint_types(a, s, ctx)
+        collect_schema_constraint_types(a, s, ctx, seen)
       })
     _ -> acc
   }

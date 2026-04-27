@@ -8480,7 +8480,7 @@ paths:
   // it cannot be missing-required so it does not affect Issue #263.
   string.contains(
     content,
-    "x_scores: case dict.get(headers, \"x-scores\") { Ok(v) -> Some(list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n })) _ -> None },",
+    "x_scores: case dict.get(headers, \"x-scores\") { Ok(v) -> Some(list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } })) _ -> None },",
   )
   |> should.be_true()
   string.contains(content, "case dict.get(headers, \"x-flags\") {")
@@ -8583,7 +8583,7 @@ paths:
   |> should.be_true()
   string.contains(
     content,
-    "scores: case dict.get(query, \"scores\") { Ok([v, ..]) -> Some(list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n })) _ -> None },",
+    "scores: case dict.get(query, \"scores\") { Ok([v, ..]) -> Some(list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } })) _ -> None },",
   )
   |> should.be_true()
 }
@@ -8616,7 +8616,7 @@ pub fn server_deep_object_params_are_parsed_test() {
   |> should.be_true()
   string.contains(
     content,
-    "scores: { let assert Ok(vs) = dict.get(query, \"filter[scores]\") list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n }) }",
+    "scores: { let assert Ok(vs) = dict.get(query, \"filter[scores]\") list.map(vs, fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } }) }",
   )
   |> should.be_true()
   string.contains(
@@ -8709,7 +8709,7 @@ pub fn server_form_urlencoded_body_is_parsed_test() {
   |> should.be_true()
   string.contains(
     content,
-    "scores: { let assert Ok(vs) = dict.get(form_body, \"scores\") list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n }) }",
+    "scores: { let assert Ok(vs) = dict.get(form_body, \"scores\") list.map(vs, fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } }) }",
   )
   |> should.be_true()
   string.contains(
@@ -8848,7 +8848,7 @@ pub fn server_form_urlencoded_ref_fields_are_parsed_test() {
   |> should.be_true()
   string.contains(
     content,
-    "scores: { let assert Ok(vs) = dict.get(form_body, \"scores\") list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n }) }",
+    "scores: { let assert Ok(vs) = dict.get(form_body, \"scores\") list.map(vs, fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } }) }",
   )
   |> should.be_true()
   string.contains(content, "profile: types.Profile(")

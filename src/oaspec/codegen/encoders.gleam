@@ -320,14 +320,17 @@ fn generate_encoder(
               prop_name,
             )
 
-          case is_required {
-            True ->
+          // Issue #296: required+nullable properties have Gleam type
+          // Option(T) and must use json.nullable, not the bare encoder.
+          let is_nullable = schema_ref_is_nullable(prop_ref)
+          case is_required, is_nullable {
+            True, False ->
               sb
               |> se.indent(
                 2,
                 "#(\"" <> prop_name <> "\", " <> encoder_expr <> ")" <> trailing,
               )
-            False ->
+            _, _ ->
               sb
               |> se.indent(
                 2,
@@ -484,7 +487,13 @@ fn generate_encoder(
           }
         })
       case all_refs {
-        False -> sb
+        False ->
+          panic as {
+            "oaspec: oneOf schema '"
+            <> name
+            <> "' contains inline variant(s) which are not supported for encoder generation. "
+            <> "Move all oneOf variants to components/schemas and use $ref instead."
+          }
         True -> {
           let sb =
             sb
@@ -547,7 +556,13 @@ fn generate_encoder(
           }
         })
       case all_refs {
-        False -> sb
+        False ->
+          panic as {
+            "oaspec: anyOf schema '"
+            <> name
+            <> "' contains inline variant(s) which are not supported for encoder generation. "
+            <> "Move all anyOf variants to components/schemas and use $ref instead."
+          }
         True -> {
           let variant_fields =
             list.map(schemas, fn(s_ref) {
@@ -748,6 +763,16 @@ fn schema_ref_to_json_encoder_fn(
       "fn(items) { json.array(items, " <> inner <> ") }"
     }
     _ -> schema_dispatch.json_encoder_fn(ref)
+  }
+}
+
+/// Check if a SchemaRef is nullable (inline schemas only — references are
+/// assumed non-nullable here since the ref target's nullability is baked
+/// into the generated type elsewhere).
+fn schema_ref_is_nullable(ref: SchemaRef) -> Bool {
+  case ref {
+    Inline(inline_schema) -> schema.is_nullable(inline_schema)
+    Reference(..) -> False
   }
 }
 
