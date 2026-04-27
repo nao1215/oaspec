@@ -1143,7 +1143,12 @@ fn generate_safe_request_and_dispatch(
     _ -> None
   }
 
-  // Check if guard validation should be emitted for this body
+  // Check if guard validation should be emitted for this body.
+  // Issue #292: guard validation currently only fires for $ref schemas
+  // because guards.gleam generates validators keyed by component name.
+  // Inline request body schemas with constraints are decoded but NOT
+  // guard-validated; extending guards.gleam to synthesise validators for
+  // anonymous inline schemas is tracked as a follow-up.
   let needs_guard_validation =
     config.validate(context.config(ctx))
     && needs_body_guard
@@ -1561,6 +1566,11 @@ fn close_lookup_case(sb: se.StringBuilder) -> se.StringBuilder {
 /// Check if an operation's request body needs guard validation.
 /// True when the body is required, JSON-compatible, references a named schema,
 /// and that schema has constraint-based validators.
+///
+/// Issue #292: inline request body schemas with constraints are NOT covered
+/// here because guards.gleam only generates validators for named component
+/// schemas. Extending guard generation to anonymous inline schemas is
+/// tracked as a follow-up.
 fn operation_needs_guard_validation(
   operation: spec.Operation(Resolved),
   ctx: Context,
