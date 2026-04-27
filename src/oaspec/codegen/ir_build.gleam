@@ -276,12 +276,14 @@ fn build_response_header_records(
 }
 
 /// Convert a header schema to a Gleam type string.
+/// Handles both inline primitive schemas and `$ref` references (#294).
 fn header_schema_to_type(schema_opt: option.Option(schema.SchemaRef)) -> String {
   case schema_opt {
     Some(Inline(IntegerSchema(..))) -> "Int"
     Some(Inline(NumberSchema(..))) -> "Float"
     Some(Inline(BooleanSchema(..))) -> "Bool"
     Some(Inline(StringSchema(..))) -> "String"
+    Some(Reference(name:, ..)) -> "types." <> naming.schema_to_type_name(name)
     _ -> "String"
   }
 }
