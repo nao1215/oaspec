@@ -1086,6 +1086,7 @@ fn validate_unique_schema_names(ctx: Context) -> List(Diagnostic) {
       let key = naming.schema_to_type_name(name)
       case dict.get(acc, key) {
         Ok(existing) -> dict.insert(acc, key, [name, ..existing])
+        // nolint: thrown_away_error -- dict.get's Error signals absence; we start a new list for the first name
         Error(_) -> dict.insert(acc, key, [name])
       }
     })
