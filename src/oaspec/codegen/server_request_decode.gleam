@@ -188,11 +188,11 @@ fn deep_object_required_field_expr(
     Some(Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..))) ->
       "{ let assert Ok(vs) = dict.get(query, \""
       <> key
-      <> "\") list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n }) }"
+      <> "\") list.map(vs, fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } }) }"
     Some(Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..))) ->
       "{ let assert Ok(vs) = dict.get(query, \""
       <> key
-      <> "\") list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = float.parse(trimmed) n }) }"
+      <> "\") list.map(vs, fn(item) { let trimmed = string.trim(item) case float.parse(trimmed) { Ok(n) -> n _ -> 0.0 } }) }"
     Some(Inline(schema.ArraySchema(items: Inline(schema.BooleanSchema(..)), ..))) ->
       "{ let assert Ok(vs) = dict.get(query, \""
       <> key
@@ -308,11 +308,11 @@ fn query_optional_expr_with_schema(
           <> key
           <> "\") { Ok([v, ..]) -> Some(list.map(string.split(v, \""
           <> delim
-          <> "\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n })) _ -> None }"
+          <> "\"), fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } })) _ -> None }"
         _ ->
           "case dict.get(query, \""
           <> key
-          <> "\") { Ok(vs) -> Some(list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n })) _ -> None }"
+          <> "\") { Ok(vs) -> Some(list.map(vs, fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } })) _ -> None }"
       }
     Some(Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..))) ->
       case explode {
@@ -321,11 +321,11 @@ fn query_optional_expr_with_schema(
           <> key
           <> "\") { Ok([v, ..]) -> Some(list.map(string.split(v, \""
           <> delim
-          <> "\"), fn(item) { let trimmed = string.trim(item) let assert Ok(n) = float.parse(trimmed) n })) _ -> None }"
+          <> "\"), fn(item) { let trimmed = string.trim(item) case float.parse(trimmed) { Ok(n) -> n _ -> 0.0 } })) _ -> None }"
         _ ->
           "case dict.get(query, \""
           <> key
-          <> "\") { Ok(vs) -> Some(list.map(vs, fn(item) { let trimmed = string.trim(item) let assert Ok(n) = float.parse(trimmed) n })) _ -> None }"
+          <> "\") { Ok(vs) -> Some(list.map(vs, fn(item) { let trimmed = string.trim(item) case float.parse(trimmed) { Ok(n) -> n _ -> 0.0 } })) _ -> None }"
       }
     Some(Inline(schema.ArraySchema(items: Inline(schema.BooleanSchema(..)), ..))) ->
       case explode {
@@ -1256,15 +1256,19 @@ fn body_optional_expr(
 }
 
 /// Parse expression for array items: int, with optional trimming.
+/// Uses a case expression instead of `let assert` to avoid panicking on
+/// malformed input — bad values fall back to 0 (#291).
 fn array_item_int_parse(trim: Bool) -> String {
-  use <- bool.guard(!trim, "let assert Ok(n) = int.parse(item) n")
-  "let trimmed = string.trim(item) let assert Ok(n) = int.parse(trimmed) n"
+  use <- bool.guard(!trim, "case int.parse(item) { Ok(n) -> n _ -> 0 }")
+  "let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 }"
 }
 
 /// Parse expression for array items: float, with optional trimming.
+/// Uses a case expression instead of `let assert` to avoid panicking on
+/// malformed input — bad values fall back to 0.0 (#291).
 fn array_item_float_parse(trim: Bool) -> String {
-  use <- bool.guard(!trim, "let assert Ok(n) = float.parse(item) n")
-  "let trimmed = string.trim(item) let assert Ok(n) = float.parse(trimmed) n"
+  use <- bool.guard(!trim, "case float.parse(item) { Ok(n) -> n _ -> 0.0 }")
+  "let trimmed = string.trim(item) case float.parse(trimmed) { Ok(n) -> n _ -> 0.0 }"
 }
 
 /// Parse expression for array items: bool, with optional trimming.
