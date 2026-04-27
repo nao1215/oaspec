@@ -31,12 +31,14 @@ pub fn validate(ctx: Context) -> List(Diagnostic) {
   let op_errors = validate_operations(ctx, operations)
   let opid_errors = validate_unique_operation_ids(operations)
   let schema_errors = validate_component_schemas(ctx)
+  let schema_collision_errors = validate_unique_schema_names(ctx)
   let security_errors = validate_security_schemes(ctx, operations)
   let list_decoder_errors = validate_decode_list_collisions(ctx)
   list.flatten([
     op_errors,
     opid_errors,
     schema_errors,
+    schema_collision_errors,
     security_errors,
     list_decoder_errors,
   ])
@@ -1071,6 +1073,41 @@ fn validate_responses(
 }
 
 /// Validate component schemas recursively.
+/// Detect schema names that differ only in case and would collide when
+/// mapped to the same Gleam type name via `schema_to_type_name` (#293).
+fn validate_unique_schema_names(ctx: Context) -> List(Diagnostic) {
+  let schemas = case context.spec(ctx).components {
+    Some(components) -> dict.keys(components.schemas)
+    None -> []
+  }
+  // Group by the generated Gleam type name — collisions appear as groups of 2+.
+  let by_type_name =
+    list.fold(schemas, dict.new(), fn(acc, name) {
+      let key = naming.schema_to_type_name(name)
+      case dict.get(acc, key) {
+        Ok(existing) -> dict.insert(acc, key, [name, ..existing])
+        Error(_) -> dict.insert(acc, key, [name])
+      }
+    })
+  dict.to_list(by_type_name)
+  |> list.filter_map(fn(entry) {
+    let #(type_name, names) = entry
+    case names {
+      [_, _, ..] ->
+        Ok(diagnostic.invalid_value(
+          path: "components.schemas",
+          detail: "Schema names "
+            <> string.join(list.map(names, fn(n) { "\"" <> n <> "\"" }), ", ")
+            <> " all map to Gleam type `"
+            <> type_name
+            <> "` — rename one to avoid the collision",
+          loc: diagnostic.NoSourceLoc,
+        ))
+      _ -> Error(Nil)
+    }
+  })
+}
+
 fn validate_component_schemas(ctx: Context) -> List(Diagnostic) {
   let schemas = case context.spec(ctx).components {
     Some(components) -> dict.to_list(components.schemas)
