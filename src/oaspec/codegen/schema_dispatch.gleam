@@ -95,6 +95,12 @@ pub fn schema_ref_to_string_expr(
 
 /// Map a schema ref to its decoder expression (for inline primitives)
 /// or decoder function name (for references).
+///
+/// Inline complex schemas (object, allOf, oneOf, anyOf) are not
+/// supported here — they must be defined under `components/schemas`
+/// and referenced via `$ref`. The catch-all panics so unsupported
+/// patterns fail fast instead of silently generating broken code
+/// (#290).
 pub fn decoder_expr(ref: SchemaRef) -> String {
   case ref {
     Inline(StringSchema(..)) -> "decode.string"
@@ -102,7 +108,13 @@ pub fn decoder_expr(ref: SchemaRef) -> String {
     Inline(NumberSchema(..)) -> "decode.float"
     Inline(BooleanSchema(..)) -> "decode.bool"
     Reference(name:, ..) -> naming.to_snake_case(name) <> "_decoder()"
-    Inline(_) -> "decode.string"
+    Inline(schema) ->
+      panic as {
+        "oaspec: inline "
+        <> schema_kind(schema)
+        <> " schema is not supported in decoder_expr. "
+        <> "Move the schema to components/schemas and use a $ref instead."
+      }
   }
 }
 
@@ -115,7 +127,13 @@ pub fn json_encoder_expr(ref: SchemaRef, value: String) -> String {
     Inline(BooleanSchema(..)) -> "json.bool(" <> value <> ")"
     Reference(name:, ..) ->
       "encode_" <> naming.to_snake_case(name) <> "_json(" <> value <> ")"
-    Inline(_) -> "json.string(" <> value <> ")"
+    Inline(schema) ->
+      panic as {
+        "oaspec: inline "
+        <> schema_kind(schema)
+        <> " schema is not supported in json_encoder_expr. "
+        <> "Move the schema to components/schemas and use a $ref instead."
+      }
   }
 }
 
@@ -127,7 +145,13 @@ pub fn json_encoder_fn(ref: SchemaRef) -> String {
     Inline(NumberSchema(..)) -> "json.float"
     Inline(BooleanSchema(..)) -> "json.bool"
     Reference(name:, ..) -> "encode_" <> naming.to_snake_case(name) <> "_json"
-    Inline(_) -> "json.string"
+    Inline(schema) ->
+      panic as {
+        "oaspec: inline "
+        <> schema_kind(schema)
+        <> " schema is not supported in json_encoder_fn. "
+        <> "Move the schema to components/schemas and use a $ref instead."
+      }
   }
 }
 
@@ -147,7 +171,28 @@ pub fn to_string_fn(ref: SchemaRef, spec: OpenApiSpec(Resolved)) -> String {
         Error(_) -> "fn(x) { x }"
       }
     }
-    Inline(_) -> "fn(x) { x }"
+    Inline(schema) ->
+      panic as {
+        "oaspec: inline "
+        <> schema_kind(schema)
+        <> " schema is not supported in to_string_fn. "
+        <> "Move the schema to components/schemas and use a $ref instead."
+      }
+  }
+}
+
+/// Human-readable name for a schema variant (for error messages).
+fn schema_kind(schema: SchemaObject) -> String {
+  case schema {
+    StringSchema(..) -> "string"
+    IntegerSchema(..) -> "integer"
+    NumberSchema(..) -> "number"
+    BooleanSchema(..) -> "boolean"
+    ArraySchema(..) -> "array"
+    ObjectSchema(..) -> "object"
+    AllOfSchema(..) -> "allOf"
+    OneOfSchema(..) -> "oneOf"
+    AnyOfSchema(..) -> "anyOf"
   }
 }
 
