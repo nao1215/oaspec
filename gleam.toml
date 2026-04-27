@@ -85,6 +85,9 @@ unwrap_used = "error"
 "src/oaspec/capability.gleam" = ["label_possible"]
 "src/oaspec/formatter.gleam" = ["label_possible"]
 "src/oaspec/generate.gleam" = ["label_possible", "deep_nesting"]
-"src/oaspec/codegen/*.gleam" = ["label_possible", "deep_nesting"]
+# schema_dispatch.gleam uses panic for unsupported inline complex schemas
+# (object/allOf/oneOf/anyOf) in decoder/encoder dispatch — these patterns
+# must fail fast instead of silently generating broken code (#290).
+"src/oaspec/codegen/*.gleam" = ["label_possible", "deep_nesting", "avoid_panic"]
 "src/oaspec/openapi/*.gleam" = ["label_possible", "deep_nesting"]
 "src/oaspec/util/*.gleam" = ["label_possible", "deep_nesting"]
