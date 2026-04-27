@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-04-27
+
+### Fixed
+
+- **codegen**: Inline complex schemas (object, allOf, oneOf, anyOf) in
+  decoder/encoder dispatch now panic with a clear message instead of
+  silently generating `decode.string` (runtime crash). (#290, #298)
+- **codegen**: Optional integer/float array query parameters and body
+  fields no longer crash the server on malformed input — `let assert`
+  replaced with safe `case` fallback. (#291, #301)
+- **codegen**: oneOf/anyOf encoders now panic clearly when any variant
+  is inline instead of silently skipping generation. (#295, #301)
+- **codegen**: Required nullable properties now encode with
+  `json.nullable` instead of generating a type mismatch. (#296, #301)
+- **codegen**: Circular schema `$ref` chains no longer cause infinite
+  recursion — cycle detection added to constraint traversal. (#297, #301)
+- **codegen**: Response header `$ref` schemas now resolve to the
+  correct type instead of falling back to `String`. (#294, #299)
+- **validate**: Schema names that differ only in case (e.g. `Foo` and
+  `foo`) are now detected at generation time with a clear diagnostic
+  instead of causing a post-codegen compile failure. (#293, #300)
+
+### Documentation
+
+- Guard validation currently only fires for `$ref` body schemas;
+  inline schema limitation documented as a tracked follow-up. (#292)
+
 ## [0.22.0] - 2026-04-27
 
 ### Fixed
