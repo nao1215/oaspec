@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **codegen/encoders**: the `encode_dynamic` helper emitted by the
+  encoder generator no longer uses `let assert Ok(_) = decode.run(...)`
+  inside its `dynamic.classify` branches. The String / Int / Float /
+  Bool branches now pattern-match the `Result` and fall back to
+  `json.null()` on `Error(_)`, matching the existing catch-all
+  policy. Adversarial Dynamic values (e.g. a value whose runtime
+  classification disagrees with the typed extractor) no longer
+  crash the BEAM process inside the generated encoder. Golden
+  tests (`golden/petstore`, `golden/complex_supported`) are
+  unaffected because neither schema requires the helper. Partial
+  fix toward #327 — the deep-object decoder rewrite in
+  `server_request_decode.gleam` is its own follow-up. (#327)
+
 ## [0.25.0] - 2026-04-28
 
 ### Fixed
