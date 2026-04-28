@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-04-28
+
 ### Fixed
 
 - **codegen/encoders**: the `encode_dynamic` helper emitted by the
