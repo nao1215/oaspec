@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **codegen (BREAKING)**: A required, inline `type: string, enum:
+  [<single-value>]` property is now treated as a constant. The generated
+  Gleam record drops the field, no tautological one-variant `*Kind` enum
+  is emitted, the encoder inlines `json.string("<value>")` without
+  reading a record field, and the decoder validates the wire value
+  matches and discards it. Optional single-value enums (the
+  `Some(theOnlyVariant) | None` case) are unchanged because the
+  presence/absence distinction is still meaningful. Multi-value enums,
+  `$ref`'d enum components, and standalone enum schemas are also
+  unchanged. Constructors that previously had to restate
+  `kind: TextPostRequestKindText` lose that argument; spec violations
+  on the wire (`kind: "media"` where only `kind: "text"` is legal) now
+  surface as decode errors instead of silently passing through. (#309)
 - **codegen (BREAKING)**: Spec-declared response headers now reach the
   wire. When a response declares `headers:`, the generated
   `response_types.<Op>Response<Status>` constructor grows a typed

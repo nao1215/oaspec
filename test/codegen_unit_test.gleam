@@ -2420,3 +2420,183 @@ paths:
   string.contains(router_file.content, "status: 204, body: \"\"")
   |> should.be_false()
 }
+
+// ===================================================================
+// Single-value enum properties are elided as constants (issue #309)
+// ===================================================================
+
+/// A required, inline `type: string, enum: [<single-value>]` property
+/// must be treated as a constant — fully determined by the schema.
+/// The generated record drops the field, no tautological `*Kind`
+/// enum is emitted, the encoder inlines `json.string("<value>")`
+/// without reading a record field, and the decoder validates the
+/// wire value matches and discards it.
+pub fn types_constant_property_is_elided_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    TextPostRequest:
+      type: object
+      required: [kind, body]
+      properties:
+        kind:
+          type: string
+          enum: [text]
+        body:
+          type: string
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let type_files = types_gen.generate(ctx)
+  let assert Ok(types_file) =
+    list.find(type_files, fn(f) { f.path == "types.gleam" })
+
+  // The record drops the constant `kind` field.
+  string.contains(types_file.content, "TextPostRequest(body: String)")
+  |> should.be_true()
+  // The tautological `*Kind` enum is not emitted.
+  string.contains(types_file.content, "TextPostRequestKind")
+  |> should.be_false()
+  // No constructor for the absent enum either.
+  string.contains(types_file.content, "TextPostRequestKindText")
+  |> should.be_false()
+}
+
+pub fn encoders_constant_property_emits_literal_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    TextPostRequest:
+      type: object
+      required: [kind, body]
+      properties:
+        kind:
+          type: string
+          enum: [text]
+        body:
+          type: string
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let encoder_files = encoders.generate(ctx)
+  let assert Ok(encode_file) =
+    list.find(encoder_files, fn(f) { f.path == "encode.gleam" })
+
+  // The encoder emits the constant inline — no `value.kind` access.
+  string.contains(encode_file.content, "json.string(\"text\")")
+  |> should.be_true()
+  string.contains(encode_file.content, "value.kind") |> should.be_false()
+  // The record's body field is still accessed normally.
+  string.contains(encode_file.content, "value.body") |> should.be_true()
+  // No orphan `encode_text_post_request_kind` function survives — the
+  // matching `*Kind` type was elided so emitting an encoder for it
+  // would produce a reference to a non-existent type.
+  string.contains(encode_file.content, "encode_text_post_request_kind")
+  |> should.be_false()
+}
+
+pub fn decoders_constant_property_validates_and_discards_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    TextPostRequest:
+      type: object
+      required: [kind, body]
+      properties:
+        kind:
+          type: string
+          enum: [text]
+        body:
+          type: string
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let decoder_files = decoders.generate(ctx)
+  let assert Ok(decode_file) =
+    list.find(decoder_files, fn(f) { f.path == "decode.gleam" })
+
+  // The decoder reads and validates the constant, discarding via `_`.
+  string.contains(decode_file.content, "use _ <- decode.field(\"kind\",")
+  |> should.be_true()
+  // Validation is via decode.then on a string decoder — we accept the
+  // single legal value and fail otherwise so spec violations surface
+  // as decode errors rather than silently passing through.
+  string.contains(decode_file.content, "decode.then(decode.string,")
+  |> should.be_true()
+  string.contains(decode_file.content, "\"text\" -> decode.success(Nil)")
+  |> should.be_true()
+  string.contains(decode_file.content, "expected kind=\\\"text\\\"")
+  |> should.be_true()
+  // The success constructor must NOT pass `kind:` — the record has
+  // no slot for it.
+  string.contains(decode_file.content, "kind: kind") |> should.be_false()
+  // The matching record constructor still receives `body`.
+  string.contains(decode_file.content, "body: body") |> should.be_true()
+  // No orphan `text_post_request_kind_decoder` survives — the
+  // matching `*Kind` type was elided.
+  string.contains(decode_file.content, "text_post_request_kind_decoder")
+  |> should.be_false()
+}
+
+/// Optional single-value enum properties are NOT elided. The
+/// difference between `None` and `Some(theOnlyVariant)` is still
+/// meaningful (presence vs. absence on the wire), so the field
+/// stays as `Option(<Kind>)` and the `*Kind` enum is still emitted.
+pub fn types_optional_single_value_enum_is_kept_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Note:
+      type: object
+      required: [body]
+      properties:
+        kind:
+          type: string
+          enum: [text]
+        body:
+          type: string
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let type_files = types_gen.generate(ctx)
+  let assert Ok(types_file) =
+    list.find(type_files, fn(f) { f.path == "types.gleam" })
+
+  // Optional means the field is `Option(NoteKind)` and the enum is
+  // still emitted.
+  string.contains(types_file.content, "kind: Option(NoteKind)")
+  |> should.be_true()
+  string.contains(types_file.content, "NoteKindText") |> should.be_true()
+}

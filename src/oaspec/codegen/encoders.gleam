@@ -17,6 +17,7 @@ import oaspec/codegen/allof_merge
 import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
 import oaspec/codegen/ir_build
 import oaspec/codegen/schema_dispatch
+import oaspec/codegen/schema_utils
 import oaspec/codegen/types as type_gen
 import oaspec/config
 import oaspec/openapi/dedup
@@ -207,24 +208,35 @@ fn generate_inline_enum_encoders(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> se.StringBuilder {
-  let props = case schema_ref {
-    Inline(ObjectSchema(properties:, ..)) -> ir_build.sorted_entries(properties)
-    Inline(AllOfSchema(schemas:, ..)) ->
-      ir_build.sorted_entries(
-        allof_merge.merge_allof_schemas(schemas, ctx).properties,
-      )
-    _ -> []
+  let #(props, required) = case schema_ref {
+    Inline(ObjectSchema(properties:, required:, ..)) -> #(
+      ir_build.sorted_entries(properties),
+      required,
+    )
+    Inline(AllOfSchema(schemas:, ..)) -> {
+      let merged = allof_merge.merge_allof_schemas(schemas, ctx)
+      #(ir_build.sorted_entries(merged.properties), merged.required)
+    }
+    _ -> #([], [])
   }
   list.fold(props, sb, fn(sb, entry) {
     let #(prop_name, prop_ref) = entry
-    case prop_ref {
-      Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
-        let enum_name =
-          naming.schema_to_type_name(parent_name)
-          <> naming.schema_to_type_name(prop_name)
-        generate_encoder(sb, enum_name, prop_ref, ctx)
-      }
-      _ -> sb
+    // Issue #309: a required inline single-value string-enum has no
+    // matching type in `types.gleam`, so generating an encoder for it
+    // would reference a non-existent type. Skip it; the parent
+    // object's encoder inlines the constant `json.string("...")`.
+    case schema_utils.constant_property_value(prop_ref, prop_name, required) {
+      Some(_) -> sb
+      None ->
+        case prop_ref {
+          Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
+            let enum_name =
+              naming.schema_to_type_name(parent_name)
+              <> naming.schema_to_type_name(prop_name)
+            generate_encoder(sb, enum_name, prop_ref, ctx)
+          }
+          _ -> sb
+        }
     }
   })
 }
@@ -362,13 +374,28 @@ fn generate_encoder(
             False -> ","
           }
 
-          let encoder_expr =
-            schema_ref_to_json_encoder(
-              "value." <> field_name,
-              prop_ref,
-              name,
-              prop_name,
-            )
+          // Issue #309: a required inline single-value string-enum
+          // property is elided from the generated record; the wire
+          // value is fixed at codegen time. Inline `json.string(...)`
+          // here so the encoder never tries to read a field that does
+          // not exist on the Gleam record. The downstream `case`
+          // branches still pick the right tuple/list-of-lists shape
+          // because the property is required and non-nullable.
+          let encoder_expr = case
+            schema_utils.constant_property_value(prop_ref, prop_name, required)
+          {
+            Some(constant_value) ->
+              "json.string(\""
+              <> escape_for_string_literal(constant_value)
+              <> "\")"
+            None ->
+              schema_ref_to_json_encoder(
+                "value." <> field_name,
+                prop_ref,
+                name,
+                prop_name,
+              )
+          }
 
           // Issue #296: required+nullable properties have Gleam type
           // Option(T) and must use json.nullable, not the bare encoder.
@@ -889,6 +916,17 @@ fn schema_ref_is_nullable(ref: SchemaRef) -> Bool {
 fn ensure_import(imports: List(String), name: String) -> List(String) {
   use <- bool.guard(list.contains(imports, name), imports)
   list.append(imports, [name])
+}
+
+/// Escape a spec-derived string so it can be safely interpolated
+/// inside a generated Gleam string literal (e.g. `json.string("...")`).
+/// Constant property values from issue #309 land here — practical
+/// values are simple identifiers (`text`, `media`, …) but a spec
+/// could in principle declare an enum value containing `"` or `\`.
+fn escape_for_string_literal(value: String) -> String {
+  value
+  |> string.replace(each: "\\", with: "\\\\")
+  |> string.replace(each: "\"", with: "\\\"")
 }
 
 /// Get element at index from a list, or return a default.

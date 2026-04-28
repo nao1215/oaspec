@@ -6,6 +6,7 @@ import oaspec/codegen/allof_merge
 import oaspec/codegen/context.{type Context, type GeneratedFile, GeneratedFile}
 import oaspec/codegen/ir_build
 import oaspec/codegen/schema_dispatch
+import oaspec/codegen/schema_utils
 import oaspec/codegen/types as type_gen
 import oaspec/config
 import oaspec/openapi/dedup
@@ -240,24 +241,36 @@ fn generate_inline_enum_decoders(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> se.StringBuilder {
-  let props = case schema_ref {
-    Inline(ObjectSchema(properties:, ..)) -> ir_build.sorted_entries(properties)
-    Inline(AllOfSchema(schemas:, ..)) ->
-      ir_build.sorted_entries(
-        allof_merge.merge_allof_schemas(schemas, ctx).properties,
-      )
-    _ -> []
+  let #(props, required) = case schema_ref {
+    Inline(ObjectSchema(properties:, required:, ..)) -> #(
+      ir_build.sorted_entries(properties),
+      required,
+    )
+    Inline(AllOfSchema(schemas:, ..)) -> {
+      let merged = allof_merge.merge_allof_schemas(schemas, ctx)
+      #(ir_build.sorted_entries(merged.properties), merged.required)
+    }
+    _ -> #([], [])
   }
   list.fold(props, sb, fn(sb, entry) {
     let #(prop_name, prop_ref) = entry
-    case prop_ref {
-      Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
-        let enum_name =
-          naming.schema_to_type_name(parent_name)
-          <> naming.schema_to_type_name(prop_name)
-        generate_decoder(sb, enum_name, prop_ref, ctx)
-      }
-      _ -> sb
+    // Issue #309: a required inline single-value string-enum has no
+    // corresponding type in `types.gleam` (the IR pass elided it), so
+    // emitting a decoder for it would produce orphan code that
+    // references a missing type. Skip it; the constant value is
+    // validated inline by the parent object decoder instead.
+    case schema_utils.constant_property_value(prop_ref, prop_name, required) {
+      Some(_) -> sb
+      None ->
+        case prop_ref {
+          Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
+            let enum_name =
+              naming.schema_to_type_name(parent_name)
+              <> naming.schema_to_type_name(prop_name)
+            generate_decoder(sb, enum_name, prop_ref, ctx)
+          }
+          _ -> sb
+        }
     }
   })
 }
@@ -449,46 +462,59 @@ fn generate_object_decoder(
         False -> field_decoder
       }
 
-      case is_required {
-        True ->
+      // Issue #309: a required, inline single-value string-enum
+      // property is elided from the generated record. The decoder
+      // must still observe the wire value and reject mismatches —
+      // otherwise a spec violation would silently slip through. The
+      // emitted decoder reads the field as a string, validates it
+      // against the codegen-time constant via `decode.then`, and
+      // discards the value (the record has no slot for it).
+      case schema_utils.constant_property_value(prop_ref, prop_name, required) {
+        Some(constant_value) ->
           sb
-          |> se.indent(
-            1,
-            "use "
-              <> field_name
-              <> " <- decode.field(\""
-              <> prop_name
-              <> "\", "
-              <> effective_decoder
-              <> ")",
-          )
-        False ->
-          case is_nullable_schema {
+          |> emit_constant_field_decoder(prop_name, constant_value)
+        None ->
+          case is_required {
             True ->
-              // Type is Option(T), default is None
               sb
               |> se.indent(
                 1,
                 "use "
                   <> field_name
-                  <> " <- decode.optional_field(\""
+                  <> " <- decode.field(\""
                   <> prop_name
-                  <> "\", option.None, "
+                  <> "\", "
                   <> effective_decoder
                   <> ")",
               )
             False ->
-              sb
-              |> se.indent(
-                1,
-                "use "
-                  <> field_name
-                  <> " <- decode.optional_field(\""
-                  <> prop_name
-                  <> "\", option.None, decode.optional("
-                  <> field_decoder
-                  <> "))",
-              )
+              case is_nullable_schema {
+                True ->
+                  // Type is Option(T), default is None
+                  sb
+                  |> se.indent(
+                    1,
+                    "use "
+                      <> field_name
+                      <> " <- decode.optional_field(\""
+                      <> prop_name
+                      <> "\", option.None, "
+                      <> effective_decoder
+                      <> ")",
+                  )
+                False ->
+                  sb
+                  |> se.indent(
+                    1,
+                    "use "
+                      <> field_name
+                      <> " <- decode.optional_field(\""
+                      <> prop_name
+                      <> "\", option.None, decode.optional("
+                      <> field_decoder
+                      <> "))",
+                  )
+              }
           }
       }
     })
@@ -566,9 +592,24 @@ fn generate_object_decoder(
 
   let param_names =
     list.index_map(props, fn(entry, idx) {
-      let #(prop_name, _) = entry
+      let #(prop_name, prop_ref) = entry
       let field_name =
         list_at_or(deduped_names, idx, naming.to_snake_case(prop_name))
+      #(prop_name, prop_ref, field_name)
+    })
+    // Issue #309: constant properties are elided from the record, so
+    // their decoder consumed-and-discarded the wire value above. They
+    // must NOT appear in the success constructor's argument list.
+    |> list.filter(fn(entry) {
+      let #(prop_name, prop_ref, _) = entry
+      option.is_none(schema_utils.constant_property_value(
+        prop_ref,
+        prop_name,
+        required,
+      ))
+    })
+    |> list.map(fn(entry) {
+      let #(_, _, field_name) = entry
       field_name <> ": " <> field_name
     })
 
@@ -1191,4 +1232,50 @@ fn maybe_doc_comment(
     Some(desc) -> sb |> se.doc_comment(desc)
     None -> sb
   }
+}
+
+/// Emit the decoder snippet for a constant (issue #309) field.
+///
+/// The wire value is required and fully determined at codegen time
+/// (an inline `enum: [<single>]`). The decoder reads it as a string
+/// and chains a `decode.then` that fails fast on any other value.
+/// `_` discards the binding because the surrounding record has no
+/// slot for the field. Failing on mismatch keeps the discriminator
+/// contract honest — silently accepting `kind: "media"` where only
+/// `kind: "text"` is legal would defeat the purpose of the enum.
+fn emit_constant_field_decoder(
+  sb: se.StringBuilder,
+  prop_name: String,
+  constant_value: String,
+) -> se.StringBuilder {
+  let escaped = escape_for_string_literal(constant_value)
+  sb
+  |> se.indent(
+    1,
+    "use _ <- decode.field(\""
+      <> prop_name
+      <> "\", decode.then(decode.string, fn(constant_value) {",
+  )
+  |> se.indent(2, "case constant_value {")
+  |> se.indent(3, "\"" <> escaped <> "\" -> decode.success(Nil)")
+  |> se.indent(
+    3,
+    "other -> decode.failure(Nil, \"expected "
+      <> prop_name
+      <> "=\\\""
+      <> escaped
+      <> "\\\", got \\\"\" <> other <> \"\\\"\")",
+  )
+  |> se.indent(2, "}")
+  |> se.indent(1, "}))")
+}
+
+/// Escape a spec-derived string so it can be safely interpolated
+/// inside a generated Gleam string literal. Mirrors the helper in
+/// `encoders.gleam` — extracted here to keep the decoder module
+/// self-contained for issue #309.
+fn escape_for_string_literal(value: String) -> String {
+  value
+  |> string.replace(each: "\\", with: "\\\\")
+  |> string.replace(each: "\"", with: "\\\"")
 }

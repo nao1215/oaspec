@@ -1754,4 +1754,155 @@ rm -rf "$HDR_DIR"
 
 info "Issue #306 response header integration tests passed."
 
+# -------------------------------------------------------
+# Step 20: Issue #309 — required, inline single-value string-enum
+# properties are constants and must be elided from the generated
+# record. The encoder still emits the constant on the wire, the
+# decoder validates it. This step generates a spec with a `kind:
+# enum: [text]` discriminator-shaped property, drives an encode →
+# decode round-trip, and verifies a wire mismatch fails decoding.
+# -------------------------------------------------------
+info "Testing Issue #309 single-value enum elision..."
+
+CONST_DIR="$SCRIPT_DIR/constant_property_test"
+rm -rf "$CONST_DIR"
+mkdir -p "$CONST_DIR/src/api" "$CONST_DIR/test"
+
+cat > "$CONST_DIR/constant_property.yaml" << 'YAML_EOF'
+openapi: "3.0.3"
+info:
+  title: Constant Property Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    TextPostRequest:
+      type: object
+      required: [kind, body]
+      properties:
+        kind:
+          type: string
+          enum: [text]
+        body:
+          type: string
+YAML_EOF
+
+cat > "$CONST_DIR/oaspec-const.yaml" << 'YAML_EOF'
+input: ./integration_test/constant_property_test/constant_property.yaml
+output:
+  client: ./integration_test/constant_property_test/src/api
+package: api
+validate: false
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$CONST_DIR/oaspec-const.yaml" \
+  --mode=client
+
+cat > "$CONST_DIR/gleam.toml" << 'TOML_EOF'
+name = "constant_property_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$CONST_DIR/src/constant_property_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cat > "$CONST_DIR/test/constant_property_test_test.gleam" << 'GLEAM_EOF'
+// Issue #309 — a required inline single-value string-enum property
+// is fully determined by the schema, so the generated record drops
+// the field and the codec emits / validates the constant on the
+// wire. The handler-facing surface stops needing a tautological
+// `kind: TextPostRequestKindText` argument at every call site.
+
+import api/decode as api_decode
+import api/encode as api_encode
+import api/types
+import gleeunit
+import gleeunit/should
+
+pub fn main() {
+  gleeunit.main()
+}
+
+pub fn record_constructor_takes_no_kind_argument_test() {
+  // The generated record only exposes the meaningful field. If the
+  // codegen regressed and re-introduced a `kind:` argument, this
+  // module would fail to compile.
+  let req = types.TextPostRequest(body: "hello")
+  req.body |> should.equal("hello")
+}
+
+pub fn encoder_emits_kind_constant_test() {
+  let req = types.TextPostRequest(body: "hello")
+  let json = api_encode.encode_text_post_request(req)
+  // The wire still carries `"kind":"text"` even though the record
+  // has no `kind` field — the encoder inlines the constant at
+  // codegen time.
+  case json {
+    "{\"body\":\"hello\",\"kind\":\"text\"}" -> Nil
+    "{\"kind\":\"text\",\"body\":\"hello\"}" -> Nil
+    other -> {
+      should.equal(other, "{\"body\":\"hello\",\"kind\":\"text\"}")
+      Nil
+    }
+  }
+}
+
+pub fn decoder_round_trips_valid_kind_test() {
+  let assert Ok(decoded) =
+    api_decode.decode_text_post_request(
+      "{\"kind\":\"text\",\"body\":\"hello\"}",
+    )
+  decoded.body |> should.equal("hello")
+}
+
+pub fn decoder_rejects_wire_mismatch_test() {
+  // A wire payload claiming a different discriminator value must
+  // fail — silent acceptance would defeat the purpose of the
+  // single-value enum constraint.
+  let result =
+    api_decode.decode_text_post_request(
+      "{\"kind\":\"media\",\"body\":\"hello\"}",
+    )
+  case result {
+    Ok(_) -> should.fail()
+    Error(_) -> Nil
+  }
+}
+GLEAM_EOF
+
+cd "$CONST_DIR"
+gleam deps download
+
+if gleam build; then
+  info "PASS: Constant-property test code compiles."
+else
+  fail "Constant-property test code failed to compile."
+fi
+
+if gleam test; then
+  info "PASS: Constant-property elision verified."
+else
+  fail "Constant-property integration tests failed."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$CONST_DIR"
+
+info "Issue #309 constant-property integration tests passed."
+
 info "All integration tests passed!"

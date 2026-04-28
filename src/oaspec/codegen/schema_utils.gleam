@@ -3,11 +3,12 @@
 /// to mirror these helpers from types.gleam.
 import gleam/dict
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import oaspec/codegen/context.{type Context}
 import oaspec/openapi/resolver
 import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, Inline, ObjectSchema,
-  Reference, Typed, Untyped,
+  Reference, StringSchema, Typed, Untyped,
 }
 
 /// Check if a schema has typed or untyped additionalProperties that would need Dict.
@@ -73,6 +74,30 @@ pub fn schema_has_optional_fields(schema_ref: SchemaRef, ctx: Context) -> Bool {
         Error(_) -> False
       }
     _ -> False
+  }
+}
+
+/// Issue #309: detect a property that is fully determined by the
+/// schema — an inline string-enum with exactly one allowed value that
+/// the parent schema lists as required. Such a property is a constant
+/// marker on the wire (e.g. a `kind: type: string, enum: [text]`
+/// discriminator on a oneOf variant): the only legal value is known
+/// at codegen time, so the generated record drops the field, the
+/// encoder emits the constant, and the decoder validates it.
+///
+/// Returns `Some(value)` for an elidable constant property; `None`
+/// otherwise (including `$ref`s, multi-value enums, optional
+/// properties, and non-string schemas — those keep their current
+/// record-field shape).
+pub fn constant_property_value(
+  prop_ref: SchemaRef,
+  prop_name: String,
+  required: List(String),
+) -> Option(String) {
+  case list.contains(required, prop_name), prop_ref {
+    True, Inline(StringSchema(enum_values: [single_value], ..)) ->
+      Some(single_value)
+    _, _ -> None
   }
 }
 

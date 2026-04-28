@@ -614,11 +614,16 @@ fn inline_enums_for_schema(
   ctx: Context,
 ) -> List(Declaration) {
   case schema_ref {
-    Inline(ObjectSchema(properties:, ..)) ->
-      inline_enums_from_properties(parent_name, properties, ctx)
+    Inline(ObjectSchema(properties:, required:, ..)) ->
+      inline_enums_from_properties(parent_name, properties, required, ctx)
     Inline(AllOfSchema(schemas:, ..)) -> {
       let merged = allof_merge.merge_allof_schemas(schemas, ctx)
-      inline_enums_from_properties(parent_name, merged.properties, ctx)
+      inline_enums_from_properties(
+        parent_name,
+        merged.properties,
+        merged.required,
+        ctx,
+      )
     }
     _ -> []
   }
@@ -627,29 +632,41 @@ fn inline_enums_for_schema(
 fn inline_enums_from_properties(
   parent_name: String,
   properties: dict.Dict(String, SchemaRef),
+  required: List(String),
   _ctx: Context,
 ) -> List(Declaration) {
   let entries = sorted_entries(properties)
   list.filter_map(entries, fn(entry) {
     let #(prop_name, prop_ref) = entry
-    case prop_ref {
-      Inline(StringSchema(metadata:, enum_values:, ..)) if enum_values != [] -> {
-        let type_name =
-          naming.schema_to_type_name(parent_name)
-          <> naming.schema_to_type_name(prop_name)
-        let deduped_variants = dedup.dedup_enum_variants(enum_values)
-        let variants =
-          list.zip(enum_values, deduped_variants)
-          |> list.map(fn(pair) {
-            let #(_, variant_suffix) = pair
-            naming.schema_to_type_name(type_name) <> variant_suffix
-          })
-        Ok(ir.declaration(
-          doc: metadata.description,
-          type_def: EnumType(name: type_name, variants: variants),
-        ))
-      }
-      _ -> Error(Nil)
+    // Issue #309: a required property whose schema is an inline
+    // string-enum with exactly one allowed value is fully determined
+    // — the dispatching union variant or the single legal wire value
+    // already carries the choice. Skip emitting a tautological
+    // one-variant `*Kind` enum for it.
+    case schema_utils.constant_property_value(prop_ref, prop_name, required) {
+      Some(_) -> Error(Nil)
+      None ->
+        case prop_ref {
+          Inline(StringSchema(metadata:, enum_values:, ..))
+            if enum_values != []
+          -> {
+            let type_name =
+              naming.schema_to_type_name(parent_name)
+              <> naming.schema_to_type_name(prop_name)
+            let deduped_variants = dedup.dedup_enum_variants(enum_values)
+            let variants =
+              list.zip(enum_values, deduped_variants)
+              |> list.map(fn(pair) {
+                let #(_, variant_suffix) = pair
+                naming.schema_to_type_name(type_name) <> variant_suffix
+              })
+            Ok(ir.declaration(
+              doc: metadata.description,
+              type_def: EnumType(name: type_name, variants: variants),
+            ))
+          }
+          _ -> Error(Nil)
+        }
     }
   })
 }
@@ -686,7 +703,21 @@ fn schema_type_decls(
 ) -> List(Declaration) {
   case schema {
     ObjectSchema(metadata:, properties:, required:, additional_properties:, ..) -> {
-      let props = sorted_entries(properties)
+      // Issue #309: drop constant properties (required, inline,
+      // single-value string enums) from the generated record. The
+      // value is fixed at codegen time, so encoder emits the literal
+      // and decoder validates it — keeping the field would force
+      // every constructor call to restate `kind: KindOnly`.
+      let props =
+        sorted_entries(properties)
+        |> list.filter(fn(entry) {
+          let #(prop_name, prop_ref) = entry
+          option.is_none(schema_utils.constant_property_value(
+            prop_ref,
+            prop_name,
+            required,
+          ))
+        })
       let deduped_names =
         dedup.dedup_property_names(list.map(props, fn(e) { e.0 }))
 
