@@ -348,32 +348,36 @@ pub fn server_request_decode_param_parse_expr_float_test() {
 // already-bound variable name (or a plain non-failing transform).
 
 pub fn server_request_decode_query_required_expr_int_returns_bound_var_test() {
+  let ctx = test_helpers.make_minimal_ctx()
   let param = test_helpers.simple_param("page", True, test_helpers.int_schema())
-  let expr = server_request_decode.query_required_expr("page_raw", param)
+  let expr = server_request_decode.query_required_expr("page_raw", param, ctx)
   expr |> should.equal("page_raw_parsed")
   string.contains(expr, "let assert") |> should.be_false()
 }
 
 pub fn server_request_decode_query_required_expr_float_returns_bound_var_test() {
+  let ctx = test_helpers.make_minimal_ctx()
   let param =
     test_helpers.simple_param("ratio", True, test_helpers.float_schema())
-  let expr = server_request_decode.query_required_expr("ratio_raw", param)
+  let expr = server_request_decode.query_required_expr("ratio_raw", param, ctx)
   expr |> should.equal("ratio_raw_parsed")
   string.contains(expr, "let assert") |> should.be_false()
 }
 
 pub fn server_request_decode_query_required_expr_string_returns_bound_var_test() {
+  let ctx = test_helpers.make_minimal_ctx()
   let param =
     test_helpers.simple_param("name", True, test_helpers.string_schema())
-  let expr = server_request_decode.query_required_expr("name_raw", param)
+  let expr = server_request_decode.query_required_expr("name_raw", param, ctx)
   expr |> should.equal("name_raw")
   string.contains(expr, "let assert") |> should.be_false()
 }
 
 pub fn server_request_decode_query_required_expr_bool_has_no_let_assert_test() {
+  let ctx = test_helpers.make_minimal_ctx()
   let param =
     test_helpers.simple_param("active", True, test_helpers.bool_schema())
-  let expr = server_request_decode.query_required_expr("active_raw", param)
+  let expr = server_request_decode.query_required_expr("active_raw", param, ctx)
   string.contains(expr, "let assert") |> should.be_false()
   string.contains(expr, "active_raw") |> should.be_true()
 }
@@ -1753,6 +1757,136 @@ components:
   let assert [client_file] = files
   // Should use JSON decode (not string passthrough)
   string.contains(client_file.content, "decode.decode_problem(resp.body)")
+  |> should.be_true()
+}
+
+// ===================================================================
+// Enum query parameter codegen (issue #305)
+// ===================================================================
+
+/// Optional `$ref` enum query parameter must emit a string→variant
+/// match returning Option(<EnumType>) — not a raw String.
+pub fn server_optional_enum_query_param_emits_inline_match_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - in: query
+          name: visibility
+          required: false
+          schema:
+            $ref: '#/components/schemas/Visibility'
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  schemas:
+    Visibility:
+      type: string
+      enum: [public, unlisted, private]
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+
+  // Optional enum query: inline String→Variant match returns Option.
+  string.contains(
+    router_file.content,
+    "\"public\" -> Some(types.VisibilityPublic)",
+  )
+  |> should.be_true()
+  string.contains(
+    router_file.content,
+    "\"unlisted\" -> Some(types.VisibilityUnlisted)",
+  )
+  |> should.be_true()
+  string.contains(
+    router_file.content,
+    "\"private\" -> Some(types.VisibilityPrivate)",
+  )
+  |> should.be_true()
+  // Default arm produces None for unknown values.
+  string.contains(router_file.content, "_ -> None") |> should.be_true()
+  // The broken-default fallback must not survive: there is no remaining
+  // `Some(v)` that would assign a raw String into the enum slot.
+  string.contains(router_file.content, "Ok([v, ..]) -> Some(v)")
+  |> should.be_false()
+}
+
+/// Required `$ref` enum query parameter must emit the same Result
+/// scaffold as int / float (open `case`, bind `<raw>_parsed`, close
+/// `_ -> 400`) so unknown values fall through to a Bad Request.
+pub fn server_required_enum_query_param_emits_result_scaffold_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - in: query
+          name: priority
+          required: true
+          schema:
+            $ref: '#/components/schemas/Priority'
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  schemas:
+    Priority:
+      type: string
+      enum: [low, medium, high]
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+
+  // Inline String→Result match for each variant.
+  string.contains(router_file.content, "\"low\" -> Ok(types.PriorityLow)")
+  |> should.be_true()
+  string.contains(router_file.content, "\"medium\" -> Ok(types.PriorityMedium)")
+  |> should.be_true()
+  string.contains(router_file.content, "\"high\" -> Ok(types.PriorityHigh)")
+  |> should.be_true()
+  // Result scaffold binds <raw>_parsed on Ok.
+  string.contains(router_file.content, "Ok(priority_raw_parsed) -> {")
+  |> should.be_true()
+  // The handler body uses the typed bound variable.
+  string.contains(router_file.content, "priority: priority_raw_parsed,")
+  |> should.be_true()
+  // Unknown values return 400.
+  string.contains(
+    router_file.content,
+    "_ -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
+  )
   |> should.be_true()
 }
 

@@ -1092,10 +1092,11 @@ fn generate_safe_request_and_dispatch(
     })
 
   // Open numeric-parse cases for required query params (scalar int/float
-  // and explode=true int/float arrays). Bool / string don't need this.
+  // and explode=true int/float arrays, plus `$ref` to string-enum schemas
+  // per issue #305). Bool / string don't need this.
   let sb =
     list.fold(required_query_params, sb, fn(sb, p) {
-      query_required_open_parse_case(sb, p)
+      query_required_open_parse_case(sb, p, ctx)
     })
 
   // Open lookup cases for required header params.
@@ -1248,8 +1249,9 @@ fn generate_safe_request_and_dispatch(
               decode_helpers.deep_object_required_expr(key, param, op_id, ctx)
             True, False ->
               decode_helpers.deep_object_optional_expr(key, param, op_id, ctx)
-            False, True -> decode_helpers.query_required_expr(raw_var, param)
-            False, False -> decode_helpers.query_optional_expr(key, param)
+            False, True ->
+              decode_helpers.query_required_expr(raw_var, param, ctx)
+            False, False -> decode_helpers.query_optional_expr(key, param, ctx)
           }
         }
         spec.InHeader -> {
@@ -1330,19 +1332,19 @@ fn generate_safe_request_and_dispatch(
   // `Error(_)` so all failure modes return 400.
   let sb =
     list.fold(required_cookie_params, sb, fn(sb, p) {
-      close_single_value_required_parse_case(sb, p)
+      close_single_value_required_parse_case(sb, p, ctx)
     })
   let sb =
     list.fold(required_cookie_params, sb, fn(sb, _p) { close_lookup_case(sb) })
   let sb =
     list.fold(required_header_params, sb, fn(sb, p) {
-      close_single_value_required_parse_case(sb, p)
+      close_single_value_required_parse_case(sb, p, ctx)
     })
   let sb =
     list.fold(required_header_params, sb, fn(sb, _p) { close_lookup_case(sb) })
   let sb =
     list.fold(required_query_params, sb, fn(sb, p) {
-      close_query_required_parse_case(sb, p)
+      close_query_required_parse_case(sb, p, ctx)
     })
   let sb =
     list.fold(required_query_params, sb, fn(sb, _p) { close_lookup_case(sb) })
@@ -1381,6 +1383,7 @@ fn query_param_explode_array(p: spec.Parameter(Resolved)) -> Bool {
 fn query_required_open_parse_case(
   sb: se.StringBuilder,
   p: spec.Parameter(Resolved),
+  ctx: Context,
 ) -> se.StringBuilder {
   let raw_var = naming.to_snake_case(p.name) <> "_raw"
   let delim = case p.style {
@@ -1415,6 +1418,27 @@ fn query_required_open_parse_case(
       |> se.indent(3, "case " <> parse_expr <> " {")
       |> se.indent(4, "Ok(" <> raw_var <> "_parsed_list) -> {")
     }
+    Some(ref) ->
+      // Issue #305: required `$ref` to a string-enum schema needs the
+      // same Result-based open/close scaffolding as int / float so an
+      // unknown enum value falls through to the `_ -> 400` arm in
+      // `close_single_value_required_parse_case` below.
+      case decode_helpers.schema_ref_string_enum(ref, ctx) {
+        Some(#(type_name, values)) ->
+          sb
+          |> se.indent(
+            3,
+            "case "
+              <> decode_helpers.enum_match_result_expr(
+              raw_var,
+              type_name,
+              values,
+            )
+              <> " {",
+          )
+          |> se.indent(4, "Ok(" <> raw_var <> "_parsed) -> {")
+        None -> sb
+      }
     _ -> sb
   }
 }
@@ -1455,7 +1479,17 @@ fn array_float_parse_expr(
 fn close_query_required_parse_case(
   sb: se.StringBuilder,
   p: spec.Parameter(Resolved),
+  ctx: Context,
 ) -> se.StringBuilder {
+  let close = fn(sb: se.StringBuilder) -> se.StringBuilder {
+    sb
+    |> se.indent(4, "}")
+    |> se.indent(
+      4,
+      "_ -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
+    )
+    |> se.indent(3, "}")
+  }
   case spec.parameter_schema(p) {
     Some(schema.Inline(schema.IntegerSchema(..)))
     | Some(schema.Inline(schema.NumberSchema(..)))
@@ -1466,14 +1500,15 @@ fn close_query_required_parse_case(
     | Some(schema.Inline(schema.ArraySchema(
         items: Inline(schema.NumberSchema(..)),
         ..,
-      ))) ->
-      sb
-      |> se.indent(4, "}")
-      |> se.indent(
-        4,
-        "_ -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
-      )
-      |> se.indent(3, "}")
+      ))) -> close(sb)
+    Some(ref) ->
+      // Issue #305: matches the open emitted in
+      // `query_required_open_parse_case` for required `$ref` to string
+      // enum schemas.
+      case decode_helpers.schema_ref_string_enum(ref, ctx) {
+        Some(_) -> close(sb)
+        None -> sb
+      }
     _ -> sb
   }
 }
@@ -1527,7 +1562,17 @@ fn single_value_required_open_parse_case(
 fn close_single_value_required_parse_case(
   sb: se.StringBuilder,
   p: spec.Parameter(Resolved),
+  ctx: Context,
 ) -> se.StringBuilder {
+  let close = fn(sb: se.StringBuilder) -> se.StringBuilder {
+    sb
+    |> se.indent(4, "}")
+    |> se.indent(
+      4,
+      "_ -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
+    )
+    |> se.indent(3, "}")
+  }
   case spec.parameter_schema(p) {
     Some(schema.Inline(schema.IntegerSchema(..)))
     | Some(schema.Inline(schema.NumberSchema(..)))
@@ -1538,14 +1583,15 @@ fn close_single_value_required_parse_case(
     | Some(schema.Inline(schema.ArraySchema(
         items: Inline(schema.NumberSchema(..)),
         ..,
-      ))) ->
-      sb
-      |> se.indent(4, "}")
-      |> se.indent(
-        4,
-        "_ -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
-      )
-      |> se.indent(3, "}")
+      ))) -> close(sb)
+    Some(ref) ->
+      // Issue #305: matches the open emitted in
+      // `query_required_open_parse_case` for required `$ref` to string
+      // enum schemas. Non-enum refs fall through unchanged.
+      case decode_helpers.schema_ref_string_enum(ref, ctx) {
+        Some(_) -> close(sb)
+        None -> sb
+      }
     _ -> sb
   }
 }

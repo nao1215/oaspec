@@ -161,12 +161,14 @@ pub fn param_needs_result_unwrap(param: spec.Parameter(Resolved)) -> Bool {
 pub fn query_required_expr(
   bound_var: String,
   param: spec.Parameter(Resolved),
+  ctx: Context,
 ) -> String {
   query_required_expr_with_schema(
     bound_var,
     spec.parameter_schema(param),
     Some(operation_ir.effective_explode(param)),
     param.style,
+    ctx,
   )
 }
 
@@ -222,6 +224,7 @@ fn query_required_expr_with_schema(
   schema_ref: Option(SchemaRef),
   explode: Option(Bool),
   style: Option(spec.ParameterStyle),
+  ctx: Context,
 ) -> String {
   let delim = operation_ir.delimiter_for_style(style)
   case schema_ref {
@@ -263,7 +266,17 @@ fn query_required_expr_with_schema(
     Some(Inline(schema.NumberSchema(..))) -> bound_var <> "_parsed"
     Some(Inline(schema.BooleanSchema(..))) ->
       "{ let v = " <> bound_var <> " " <> bool_parse_expr <> " }"
-    _ -> bound_var
+    Some(ref) ->
+      case schema_ref_string_enum(ref, ctx) {
+        // Issue #305: required enum query params rely on the router-side
+        // open/close scaffolding (see `query_required_open_parse_case` /
+        // `close_single_value_required_parse_case` in server.gleam) to
+        // bind `<bound_var>_parsed` on a successful match and emit a 400
+        // on unknown values. The expression here is just the bound name.
+        Some(_) -> bound_var <> "_parsed"
+        None -> bound_var
+      }
+    None -> bound_var
   }
 }
 
@@ -271,13 +284,83 @@ fn query_required_expr_with_schema(
 pub fn query_optional_expr(
   key: String,
   param: spec.Parameter(Resolved),
+  ctx: Context,
 ) -> String {
   query_optional_expr_with_schema(
     key,
     spec.parameter_schema(param),
     Some(operation_ir.effective_explode(param)),
     param.style,
+    ctx,
   )
+}
+
+/// If `schema_ref` is a `$ref` to a string enum schema, return the
+/// generated Gleam type name and the list of enum values (in spec
+/// order). Used by query parameter codegen to emit a string→variant
+/// match for `$ref`-based enum query parameters (issue #305).
+pub fn schema_ref_string_enum(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Option(#(String, List(String))) {
+  case schema_ref {
+    Reference(name: ref_name, ..) ->
+      case resolver.resolve_schema_ref(schema_ref, context.spec(ctx)) {
+        Ok(schema.StringSchema(enum_values: values, ..)) ->
+          case values {
+            [_, ..] -> Some(#(naming.schema_to_type_name(ref_name), values))
+            [] -> None
+          }
+        _ -> None
+      }
+    _ -> None
+  }
+}
+
+/// Render the inline Gleam expression that converts a raw query-string
+/// `<bound_var>` into `Result(types.<TypeName><Variant>, Nil)`. Used by
+/// the required-enum query path (server.gleam opens a case on this
+/// expression; the Ok arm binds `<bound_var>_parsed`).
+pub fn enum_match_result_expr(
+  bound_var: String,
+  type_name: String,
+  values: List(String),
+) -> String {
+  let arms =
+    values
+    |> list.map(fn(v) {
+      "\""
+      <> v
+      <> "\" -> Ok(types."
+      <> type_name
+      <> naming.to_pascal_case(v)
+      <> ")"
+    })
+    |> string.join(" ")
+  "case " <> bound_var <> " { " <> arms <> " _ -> Error(Nil) }"
+}
+
+/// Render the inline Gleam expression that converts a raw query-string
+/// `<v_var>` into `Option(types.<TypeName><Variant>)` for an optional
+/// enum query parameter. Unknown values map to `None`, matching the
+/// permissive behaviour of Int / Float optional query handling.
+fn enum_match_option_expr(
+  v_var: String,
+  type_name: String,
+  values: List(String),
+) -> String {
+  let arms =
+    values
+    |> list.map(fn(v) {
+      "\""
+      <> v
+      <> "\" -> Some(types."
+      <> type_name
+      <> naming.to_pascal_case(v)
+      <> ")"
+    })
+    |> string.join(" ")
+  "case " <> v_var <> " { " <> arms <> " _ -> None }"
 }
 
 fn query_optional_expr_with_schema(
@@ -285,6 +368,7 @@ fn query_optional_expr_with_schema(
   schema_ref: Option(SchemaRef),
   explode: Option(Bool),
   style: Option(spec.ParameterStyle),
+  ctx: Context,
 ) -> String {
   let delim = operation_ir.delimiter_for_style(style)
   case schema_ref {
@@ -358,7 +442,25 @@ fn query_optional_expr_with_schema(
       <> "\") { Ok([v, ..]) -> Some("
       <> bool_parse_expr
       <> ") _ -> None }"
-    _ ->
+    Some(ref) ->
+      case schema_ref_string_enum(ref, ctx) {
+        Some(#(type_name, values)) -> {
+          // Issue #305: enum-typed query params need string→variant
+          // conversion. Unknown values fall through to None, matching
+          // the permissive handling of malformed Int / Float optional
+          // query params.
+          "case dict.get(query, \""
+          <> key
+          <> "\") { Ok([v, ..]) -> "
+          <> enum_match_option_expr("v", type_name, values)
+          <> " _ -> None }"
+        }
+        None ->
+          "case dict.get(query, \""
+          <> key
+          <> "\") { Ok([v, ..]) -> Some(v) _ -> None }"
+      }
+    None ->
       "case dict.get(query, \""
       <> key
       <> "\") { Ok([v, ..]) -> Some(v) _ -> None }"
@@ -470,6 +572,7 @@ fn deep_object_constructor_expr(
             Some(prop.schema_ref),
             Some(True),
             None,
+            ctx,
           )
       }
       prop.field_name <> ": " <> value_expr

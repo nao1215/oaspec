@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **codegen**: Query parameters whose schema `$ref`s a string-enum
+  component now generate compilable Gleam. Previously the router tried
+  to assign the raw `String` from `dict.get(query, key)` directly into
+  the enum-typed field, producing a type mismatch. Optional enum query
+  params now emit an inline `String → Some(<Variant>) | None` match;
+  required ones get the same `Result`-based open/close scaffold as
+  numeric params (unknown values yield 400 Bad Request). (#305)
 - **codegen**: Discriminated `oneOf` decoders no longer surface a misleading
   inner-variant decode error when the discriminator value is unknown. The
   catch-all branch now short-circuits with a discriminator-specific
