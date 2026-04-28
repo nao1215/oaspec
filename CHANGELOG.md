@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **codegen**: An optional + `nullable: true` property whose schema
+  type is a `$ref` (which `hoist` produces for any non-trivial inline
+  shape — for example, an object with `additionalProperties: ...`) is
+  now wrapped in `Option(...)` in the generated types module. Previously
+  the types module declared the field as the bare ref name (e.g.
+  `attributes: EventAttributes`) while the decoder emitted
+  `decode.optional_field(..., decode.optional(...))` and the encoder
+  pattern-matched `case value.field { None -> [] Some(x) -> ... }` —
+  both of those treat the field as `Option(EventAttributes)`. The
+  resulting type-level disagreement caused 6 compile errors in the
+  generated module. With the fix the three modules agree. Closes #321.
+
 - **codegen**: The encoder for an object schema with `additionalProperties:
   { type: <T> }` no longer emits a `;`-separated lambda body. The previous
   output (`fn(entry) { let #(k, v) = entry; #(k, ...) }`) was a deprecated

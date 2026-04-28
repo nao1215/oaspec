@@ -736,6 +736,23 @@ fn schema_type_decls(
           let is_required = list.contains(required, prop_name)
           let is_already_optional =
             schema_utils.schema_ref_is_nullable(prop_ref, ctx)
+          // Issue #321: for an inline nullable schema, `field_type`
+          // already includes the `Option(...)` wrapper (added inside
+          // `schema_dispatch.schema_type`). For a $ref to a nullable
+          // schema (which `hoist` produces for any non-trivial inline
+          // shape, e.g. a `nullable: true` object with
+          // `additionalProperties: ...`), the type renderer drops the
+          // Option, but the matching decoder/encoder treat the field
+          // as `Option(T)`. Detect that case and wrap explicitly so
+          // the three modules agree.
+          let field_type = case prop_ref, is_already_optional {
+            Reference(..), True ->
+              case string.starts_with(field_type, "Option(") {
+                True -> field_type
+                False -> "Option(" <> field_type <> ")"
+              }
+            _, _ -> field_type
+          }
           let final_type = case is_required, is_already_optional {
             True, _ -> field_type
             False, True -> field_type

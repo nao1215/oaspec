@@ -2080,6 +2080,65 @@ components:
   |> should.be_true()
 }
 
+/// Issue #321: an optional + `nullable: true` property whose schema
+/// resolves through a `$ref` (which `hoist` produces for any
+/// non-trivial inline shape, e.g. an object with
+/// `additionalProperties`) must be wrapped in `Option(...)` in the
+/// generated types module. The decoder and encoder both already treat
+/// the field as `Option(...)`; this asserts the types module agrees.
+pub fn types_optional_nullable_ref_field_is_wrapped_in_option_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /e:
+    get:
+      operationId: getE
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+components:
+  schemas:
+    Event:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        attributes:
+          type: object
+          additionalProperties:
+            type: string
+          nullable: true
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let type_files = types_gen.generate(ctx)
+  let assert Ok(types_file) =
+    list.find(type_files, fn(f) { f.path == "types.gleam" })
+
+  // The types module must declare `attributes` as Option(EventAttributes)
+  // so the decoder's `optional_field(... decode.optional(...))` and the
+  // encoder's `case value.attributes { None -> [] Some(x) -> ... }`
+  // both type-check.
+  string.contains(types_file.content, "attributes: Option(EventAttributes)")
+  |> should.be_true()
+  // The buggy shape that #321 surfaced — bare `EventAttributes` — must
+  // not survive. Use a contains-check on the negative form to lock the
+  // regression.
+  string.contains(types_file.content, "attributes: EventAttributes,")
+  |> should.be_false()
+}
+
 /// Issue #318: enum-ref header parameter must also trigger the
 /// `import <pkg>/types` line in router.gleam, since the same emitter
 /// (`enum_match_*_expr`) is used for `in: header` parameters.
