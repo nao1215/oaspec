@@ -306,6 +306,73 @@ fn basename(path: String) -> String {
   |> result.unwrap("")
 }
 
+/// Validate the on-disk layout implied by `output.dir`.
+///
+/// Issue #319: when `output.dir` is something like `./src/gen`, generated
+/// code lands at `src/gen/<pkg>/types.gleam` whose Gleam module path is
+/// `gen/<pkg>/types` — but oaspec emits `import <pkg>/types`, which the
+/// compiler can't resolve. Catch this at config time so the user sees a
+/// clear error instead of a wall of `Unknown module ...` from
+/// `gleam build`.
+///
+/// Heuristic: in the path leading up to the package directory, `src`
+/// must either be the immediate parent of the package (the "<dir> is
+/// the project's src/" pattern) or be absent (the standalone-Gleam-
+/// project pattern). `src` in any other position is the foot-gun.
+pub fn validate_output_dir_layout(config: Config) -> Result(Nil, ConfigError) {
+  case config.mode {
+    Server | Both ->
+      case path_has_misplaced_src(config.output_server) {
+        False -> Ok(Nil)
+        True ->
+          Error(misplaced_src_error("output.server", config.output_server))
+      }
+    Client -> Ok(Nil)
+  }
+  |> result.try(fn(_) {
+    case config.mode {
+      Client | Both ->
+        case path_has_misplaced_src(config.output_client) {
+          False -> Ok(Nil)
+          True ->
+            Error(misplaced_src_error("output.client", config.output_client))
+        }
+      Server -> Ok(Nil)
+    }
+  })
+}
+
+fn misplaced_src_error(field: String, path: String) -> ConfigError {
+  InvalidValue(
+    field: field,
+    detail: "'"
+      <> path
+      <> "' contains a 'src' segment that is not the immediate parent of the package directory. Generated code lands inside src/.../<package>/, but oaspec emits imports as `<package>/...`, which the Gleam compiler resolves relative to src/, not relative to <dir>. Either set the path so that 'src' is the direct parent of the package directory (e.g. './src'), or move the output outside any 'src/' tree (e.g. './gen') and treat that directory as a standalone Gleam project root with its own gleam.toml.",
+  )
+}
+
+fn path_has_misplaced_src(path: String) -> Bool {
+  let segments =
+    path
+    |> string.split("/")
+    |> list.filter(fn(s) { s != "" && s != "." })
+  case list.reverse(segments) {
+    // Strip the final segment (the package directory). Inspect what's
+    // left — the "directory chain" leading up to the package.
+    [_pkg, ..rest_reversed] -> {
+      let parent_segments = list.reverse(rest_reversed)
+      case list.last(parent_segments) {
+        // 'src' is the immediate parent of the package — correct shape.
+        Ok("src") -> False
+        // No parent segment, or some other parent: foot-gun iff 'src'
+        // appears anywhere earlier in the path.
+        _ -> list.any(parent_segments, fn(s) { s == "src" })
+      }
+    }
+    [] -> False
+  }
+}
+
 /// Convert config error to a human-readable string.
 pub fn error_to_string(error: ConfigError) -> String {
   case error {
