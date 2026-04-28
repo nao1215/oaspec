@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **codegen**: The encoder for an object schema with `additionalProperties:
+  { type: <T> }` no longer emits a `;`-separated lambda body. The previous
+  output (`fn(entry) { let #(k, v) = entry; #(k, ...) }`) was a deprecated
+  pre-1.0 syntax that the current Gleam parser rejects with `Semicolons used
+  to be whitespace and did nothing`. `oaspec generate` would then run
+  `gleam format` over the freshly written file and exit with `Error: gleam
+  format failed with exit code 1` — masking the real cause. The replacement
+  emits a multi-line lambda body that the parser accepts and `gleam format`
+  is free to re-fold. Closes #320.
+
 - **config**: oaspec now refuses an `output.dir` value that places the
   package directory underneath a `src/` subdirectory (e.g.
   `./src/gen`). The previous behaviour silently emitted files at

@@ -479,13 +479,18 @@ fn generate_encoder(
         Typed(ap_ref) -> {
           let inner_encoder_fn =
             schema_ref_to_json_encoder_fn(ap_ref, name, "additional_properties")
+          // Issue #320: emit a multi-line lambda body. The previous
+          // form used a `;` between the destructure and the tuple
+          // expression, which the Gleam parser rejects (semicolons
+          // were removed). `gleam format` then runs over the file and
+          // re-folds short bodies onto one line where appropriate.
           sb
           |> se.indent(1, close_props_list)
           |> se.indent(
             1,
-            "let extra_props = dict.to_list(value.additional_properties) |> list.map(fn(entry) { let #(k, v) = entry; #(k, "
+            "let extra_props = dict.to_list(value.additional_properties) |> list.map(fn(entry) {\n      let #(k, v) = entry\n      #(k, "
               <> inner_encoder_fn
-              <> "(v)) })",
+              <> "(v))\n    })",
           )
           |> se.indent(1, "json.object(list.append(base_props, extra_props))")
         }
@@ -496,7 +501,7 @@ fn generate_encoder(
           |> se.indent(1, close_props_list)
           |> se.indent(
             1,
-            "let extra_props = dict.to_list(value.additional_properties) |> list.map(fn(entry) { let #(k, v) = entry\n  #(k, encode_dynamic(v)) })",
+            "let extra_props = dict.to_list(value.additional_properties) |> list.map(fn(entry) {\n      let #(k, v) = entry\n      #(k, encode_dynamic(v))\n    })",
           )
           |> se.indent(1, "json.object(list.append(base_props, extra_props))")
         }
