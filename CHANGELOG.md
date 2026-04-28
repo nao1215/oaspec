@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-04-28
+
 ### Changed
 
 - **codegen (BREAKING)**: A required, inline `type: string, enum:
