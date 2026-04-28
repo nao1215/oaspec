@@ -1973,6 +1973,113 @@ components:
   |> should.be_true()
 }
 
+/// Issue #320: `additionalProperties: { type: string }` schemas used
+/// to emit a `let ... ;` lambda body that the Gleam parser rejects
+/// (`Semicolons used to be whitespace and did nothing`). The fix
+/// emits a multi-line lambda body. Assert the emitted encoder contains
+/// the modern shape and does not contain the legacy semicolon form.
+pub fn server_typed_additional_properties_encoder_has_no_semicolons_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /e:
+    get:
+      operationId: getE
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+components:
+  schemas:
+    Event:
+      type: object
+      required: [id, attributes]
+      properties:
+        id:
+          type: string
+        attributes:
+          type: object
+          additionalProperties:
+            type: string
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let files = encoders.generate(ctx)
+  let assert Ok(encode_file) =
+    list.find(files, fn(f) { f.path == "encode.gleam" })
+
+  // Legacy form (the bug) used `;` between the destructure and the
+  // tuple expression. It must not survive.
+  string.contains(encode_file.content, "let #(k, v) = entry; #(k,")
+  |> should.be_false()
+  // The replacement form uses a multi-line lambda. Assert the body
+  // contains the destructure + tuple shape on separate steps.
+  string.contains(encode_file.content, "let #(k, v) = entry")
+  |> should.be_true()
+  string.contains(encode_file.content, "#(k, json.string(v))")
+  |> should.be_true()
+}
+
+/// Companion to the Typed regression: cover the `additionalProperties:
+/// true` (Untyped) branch too. It went through the same fix, so the
+/// same legacy `;`-separated form must be absent and the same
+/// multi-step builder body must be present (with `encode_dynamic` in
+/// place of the Typed branch's `json.<scalar>`).
+pub fn server_untyped_additional_properties_encoder_has_no_semicolons_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /e:
+    get:
+      operationId: getE
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+components:
+  schemas:
+    Event:
+      type: object
+      required: [id, attributes]
+      properties:
+        id:
+          type: string
+        attributes:
+          type: object
+          additionalProperties: true
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let files = encoders.generate(ctx)
+  let assert Ok(encode_file) =
+    list.find(files, fn(f) { f.path == "encode.gleam" })
+
+  string.contains(encode_file.content, "let #(k, v) = entry; #(k,")
+  |> should.be_false()
+  string.contains(encode_file.content, "let #(k, v) = entry")
+  |> should.be_true()
+  string.contains(encode_file.content, "#(k, encode_dynamic(v))")
+  |> should.be_true()
+}
+
 /// Issue #318: enum-ref header parameter must also trigger the
 /// `import <pkg>/types` line in router.gleam, since the same emitter
 /// (`enum_match_*_expr`) is used for `in: header` parameters.
