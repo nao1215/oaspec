@@ -222,6 +222,79 @@ pub fn config_package_dir_match_test() {
   should.be_ok(result)
 }
 
+// Issue #319: output.dir layout validation. `src/<sub>/<package>` is the
+// foot-gun pattern; `src/<package>` and `<gen-root>/<package>` are fine.
+
+pub fn config_output_dir_under_src_subdir_is_rejected_test() {
+  let cfg =
+    config.new(
+      input: "openapi.yaml",
+      output_server: "./src/gen/api",
+      output_client: "./src/gen/api_client",
+      package: "api",
+      mode: config.Both,
+      validate: False,
+    )
+  let result = config.validate_output_dir_layout(cfg)
+  should.be_error(result)
+}
+
+pub fn config_output_dir_directly_under_src_is_accepted_test() {
+  let cfg =
+    config.new(
+      input: "openapi.yaml",
+      output_server: "./src/api",
+      output_client: "./src/api_client",
+      package: "api",
+      mode: config.Both,
+      validate: False,
+    )
+  let result = config.validate_output_dir_layout(cfg)
+  should.be_ok(result)
+}
+
+pub fn config_output_dir_outside_src_is_accepted_test() {
+  let cfg =
+    config.new(
+      input: "openapi.yaml",
+      output_server: "./gen/api",
+      output_client: "./gen/api_client",
+      package: "api",
+      mode: config.Both,
+      validate: False,
+    )
+  let result = config.validate_output_dir_layout(cfg)
+  should.be_ok(result)
+}
+
+pub fn config_output_dir_deep_under_src_is_rejected_test() {
+  let cfg =
+    config.new(
+      input: "openapi.yaml",
+      output_server: "./pkg/src/gen/api",
+      output_client: "./pkg/src/gen/api_client",
+      package: "api",
+      mode: config.Both,
+      validate: False,
+    )
+  let result = config.validate_output_dir_layout(cfg)
+  should.be_error(result)
+}
+
+pub fn config_output_dir_client_only_under_src_subdir_is_rejected_test() {
+  let cfg =
+    config.new(
+      input: "openapi.yaml",
+      output_server: "./gen/api",
+      output_client: "./src/gen/api_client",
+      package: "api",
+      mode: config.Both,
+      validate: False,
+    )
+  let result = config.validate_output_dir_layout(cfg)
+  should.be_error(result)
+}
+
 // --- Parser Tests ---
 
 pub fn parse_petstore_test() {

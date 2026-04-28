@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **config**: oaspec now refuses an `output.dir` value that places the
+  package directory underneath a `src/` subdirectory (e.g.
+  `./src/gen`). The previous behaviour silently emitted files at
+  `src/gen/<pkg>/types.gleam` while imports inside those files said
+  `import <pkg>/types` — paths the Gleam compiler can't resolve, so
+  `gleam build` failed with a wall of `Unknown module ...` errors and
+  no diagnostic from oaspec. The check accepts both `./src` (generated
+  modules live directly under the project's `src/`) and any path
+  outside an existing `src/` tree (treated as a standalone Gleam
+  project root). Closes #319.
+
 - **codegen**: Generated `router.gleam` now imports the package's
   `types` module when an OpenAPI operation has an `$ref`-based string
   enum query, header, or cookie parameter. Previously the router body

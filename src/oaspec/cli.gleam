@@ -542,7 +542,11 @@ fn load_config(
     None -> cfg
     Some(path) -> config.with_output(cfg, Some(path))
   }
-  config.validate_output_package_match(cfg)
+  use _ <- result.try(
+    config.validate_output_package_match(cfg)
+    |> result.map_error(OutputValidationError),
+  )
+  config.validate_output_dir_layout(cfg)
   |> result.map(fn(_) { cfg })
   |> result.map_error(OutputValidationError)
 }
