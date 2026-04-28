@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-04-28
+
 ### Fixed
 
 - **codegen**: An optional + `nullable: true` property whose schema
