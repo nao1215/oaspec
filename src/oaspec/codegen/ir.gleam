@@ -96,6 +96,16 @@ pub type Variant {
   VariantWithType(name: String, inner_type: String)
   /// Variant with no payload: `FooNone`
   VariantEmpty(name: String)
+  /// Response variant carrying a body and a typed headers record:
+  /// `FooBar(Bar, FooBarHeaders)` (issue #306).
+  VariantWithTypeAndHeaders(
+    name: String,
+    inner_type: String,
+    headers_type: String,
+  )
+  /// Response variant carrying only a typed headers record (no body):
+  /// `FooBar(FooBarHeaders)` (issue #306).
+  VariantWithHeaders(name: String, headers_type: String)
 }
 
 /// A typed record for response headers.

@@ -6,7 +6,8 @@ import gleam/string
 import oaspec/codegen/context
 import oaspec/codegen/ir.{
   type Declaration, type Module, type TypeDef, EnumType, RecordType, TypeAlias,
-  UnionType, VariantEmpty, VariantWithType,
+  UnionType, VariantEmpty, VariantWithHeaders, VariantWithType,
+  VariantWithTypeAndHeaders,
 }
 import oaspec/util/string_extra as se
 
@@ -68,6 +69,14 @@ fn render_type_def(sb: se.StringBuilder, type_def: TypeDef) -> se.StringBuilder 
             VariantWithType(name: vname, inner_type:) ->
               sb |> se.indent(1, vname <> "(" <> inner_type <> ")")
             VariantEmpty(name: vname) -> sb |> se.indent(1, vname)
+            VariantWithTypeAndHeaders(name: vname, inner_type:, headers_type:) ->
+              sb
+              |> se.indent(
+                1,
+                vname <> "(" <> inner_type <> ", " <> headers_type <> ")",
+              )
+            VariantWithHeaders(name: vname, headers_type:) ->
+              sb |> se.indent(1, vname <> "(" <> headers_type <> ")")
           }
         })
       sb

@@ -342,6 +342,8 @@ fn generate_router(
         _ -> False
       }
     })
+    // Issue #306: integer response headers stringify via int.to_string.
+    || operations_have_response_header_of_type(operations, "Int")
 
   let needs_float =
     list.any(operations, fn(op) {
@@ -364,6 +366,13 @@ fn generate_router(
         _ -> False
       }
     })
+    // Issue #306: float response headers stringify via float.to_string.
+    || operations_have_response_header_of_type(operations, "Float")
+
+  // Issue #306: boolean response headers stringify via bool.to_string —
+  // generated routers had no prior need for `gleam/bool`, so this is a
+  // brand new import condition.
+  let needs_bool = operations_have_response_header_of_type(operations, "Bool")
 
   let needs_string =
     has_form_urlencoded_body
@@ -412,6 +421,9 @@ fn generate_router(
     || has_deep_object
     || has_form_urlencoded_body
     || has_multipart_body
+    // Issue #306: responses that declare headers materialise the
+    // ServerResponse `headers:` slot via `list.flatten([...])`.
+    || operations_have_response_headers(operations)
     || list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
@@ -455,6 +467,10 @@ fn generate_router(
       || has_optional_form_urlencoded_fields
       || has_optional_multipart_fields
     })
+    // Issue #306: optional response headers pattern-match `Some(v) | None`,
+    // which needs `gleam/option` even on operations whose request side
+    // has no Option-typed parameters.
+    || operations_have_optional_response_header(operations)
 
   let needs_json =
     list.any(operations, fn(op) {
@@ -550,6 +566,10 @@ fn generate_router(
   }
   let std_imports = case needs_float {
     True -> list.append(std_imports, ["gleam/float"])
+    False -> std_imports
+  }
+  let std_imports = case needs_bool {
+    True -> list.append(std_imports, ["gleam/bool"])
     False -> std_imports
   }
   let std_imports = case needs_option {
@@ -1714,18 +1734,21 @@ fn generate_response_conversion(
                 response_type_name <> http.status_code_suffix(status_code)
               let status_int = http.status_code_to_int(status_code)
               let content_entries = dict.to_list(response.content)
+              let header_specs = sorted_header_specs(response.headers)
+              let has_headers = !list.is_empty(header_specs)
 
               case content_entries {
                 [] ->
                   // No content body variant
-                  sb
-                  |> se.indent(
-                    4,
-                    "response_types."
-                      <> variant_name
-                      <> " -> ServerResponse(status: "
-                      <> status_int
-                      <> ", body: EmptyBody, headers: [])",
+                  emit_response_arm(
+                    sb,
+                    variant_name,
+                    status_int,
+                    has_data: False,
+                    has_headers: has_headers,
+                    body_expr: "EmptyBody",
+                    content_type_header: None,
+                    header_specs: header_specs,
                   )
                 [#(media_type_name, media_type)] ->
                   case content_type.from_string(media_type_name) {
@@ -1734,29 +1757,29 @@ fn generate_response_conversion(
                         Some(_) -> {
                           let encode_fn =
                             get_encode_function(media_type.schema, ctx)
-                          sb
-                          |> se.indent(
-                            4,
-                            "response_types."
-                              <> variant_name
-                              <> "(data) -> ServerResponse(status: "
-                              <> status_int
-                              <> ", body: TextBody(json.to_string("
+                          emit_response_arm(
+                            sb,
+                            variant_name,
+                            status_int,
+                            has_data: True,
+                            has_headers: has_headers,
+                            body_expr: "TextBody(json.to_string("
                               <> encode_fn
-                              <> "(data))), headers: [#(\"content-type\", \""
-                              <> media_type_name
-                              <> "\")])",
+                              <> "(data)))",
+                            content_type_header: Some(media_type_name),
+                            header_specs: header_specs,
                           )
                         }
                         None ->
-                          sb
-                          |> se.indent(
-                            4,
-                            "response_types."
-                              <> variant_name
-                              <> " -> ServerResponse(status: "
-                              <> status_int
-                              <> ", body: EmptyBody, headers: [])",
+                          emit_response_arm(
+                            sb,
+                            variant_name,
+                            status_int,
+                            has_data: False,
+                            has_headers: has_headers,
+                            body_expr: "EmptyBody",
+                            content_type_header: None,
+                            header_specs: header_specs,
                           )
                       }
                     content_type.TextPlain
@@ -1764,26 +1787,26 @@ fn generate_response_conversion(
                     | content_type.TextXml ->
                       case media_type.schema {
                         Some(_) ->
-                          sb
-                          |> se.indent(
-                            4,
-                            "response_types."
-                              <> variant_name
-                              <> "(data) -> ServerResponse(status: "
-                              <> status_int
-                              <> ", body: TextBody(data), headers: [#(\"content-type\", \""
-                              <> media_type_name
-                              <> "\")])",
+                          emit_response_arm(
+                            sb,
+                            variant_name,
+                            status_int,
+                            has_data: True,
+                            has_headers: has_headers,
+                            body_expr: "TextBody(data)",
+                            content_type_header: Some(media_type_name),
+                            header_specs: header_specs,
                           )
                         None ->
-                          sb
-                          |> se.indent(
-                            4,
-                            "response_types."
-                              <> variant_name
-                              <> " -> ServerResponse(status: "
-                              <> status_int
-                              <> ", body: EmptyBody, headers: [])",
+                          emit_response_arm(
+                            sb,
+                            variant_name,
+                            status_int,
+                            has_data: False,
+                            has_headers: has_headers,
+                            body_expr: "EmptyBody",
+                            content_type_header: None,
+                            header_specs: header_specs,
                           )
                       }
                     content_type.ApplicationOctetStream ->
@@ -1793,26 +1816,26 @@ fn generate_response_conversion(
                       // variant carries `BitArray` (see ir_build).
                       case media_type.schema {
                         Some(_) ->
-                          sb
-                          |> se.indent(
-                            4,
-                            "response_types."
-                              <> variant_name
-                              <> "(data) -> ServerResponse(status: "
-                              <> status_int
-                              <> ", body: BytesBody(data), headers: [#(\"content-type\", \""
-                              <> media_type_name
-                              <> "\")])",
+                          emit_response_arm(
+                            sb,
+                            variant_name,
+                            status_int,
+                            has_data: True,
+                            has_headers: has_headers,
+                            body_expr: "BytesBody(data)",
+                            content_type_header: Some(media_type_name),
+                            header_specs: header_specs,
                           )
                         None ->
-                          sb
-                          |> se.indent(
-                            4,
-                            "response_types."
-                              <> variant_name
-                              <> " -> ServerResponse(status: "
-                              <> status_int
-                              <> ", body: EmptyBody, headers: [])",
+                          emit_response_arm(
+                            sb,
+                            variant_name,
+                            status_int,
+                            has_data: False,
+                            has_headers: has_headers,
+                            body_expr: "EmptyBody",
+                            content_type_header: None,
+                            header_specs: header_specs,
                           )
                       }
                     _ ->
@@ -1820,45 +1843,44 @@ fn generate_response_conversion(
                         Some(_) -> {
                           let encode_fn =
                             get_encode_function(media_type.schema, ctx)
-                          sb
-                          |> se.indent(
-                            4,
-                            "response_types."
-                              <> variant_name
-                              <> "(data) -> ServerResponse(status: "
-                              <> status_int
-                              <> ", body: TextBody(json.to_string("
+                          emit_response_arm(
+                            sb,
+                            variant_name,
+                            status_int,
+                            has_data: True,
+                            has_headers: has_headers,
+                            body_expr: "TextBody(json.to_string("
                               <> encode_fn
-                              <> "(data))), headers: [#(\"content-type\", \""
-                              <> media_type_name
-                              <> "\")])",
+                              <> "(data)))",
+                            content_type_header: Some(media_type_name),
+                            header_specs: header_specs,
                           )
                         }
                         None ->
-                          sb
-                          |> se.indent(
-                            4,
-                            "response_types."
-                              <> variant_name
-                              <> " -> ServerResponse(status: "
-                              <> status_int
-                              <> ", body: EmptyBody, headers: [])",
+                          emit_response_arm(
+                            sb,
+                            variant_name,
+                            status_int,
+                            has_data: False,
+                            has_headers: has_headers,
+                            body_expr: "EmptyBody",
+                            content_type_header: None,
+                            header_specs: header_specs,
                           )
                       }
                   }
                 // Multiple content types: variant wraps String.
                 // Use the first content type as default content-type header.
                 [#(first_media_type, _), _, ..] ->
-                  sb
-                  |> se.indent(
-                    4,
-                    "response_types."
-                      <> variant_name
-                      <> "(data) -> ServerResponse(status: "
-                      <> status_int
-                      <> ", body: TextBody(data), headers: [#(\"content-type\", \""
-                      <> first_media_type
-                      <> "\")])",
+                  emit_response_arm(
+                    sb,
+                    variant_name,
+                    status_int,
+                    has_data: True,
+                    has_headers: has_headers,
+                    body_expr: "TextBody(data)",
+                    content_type_header: Some(first_media_type),
+                    header_specs: header_specs,
                   )
               }
             }
@@ -1868,6 +1890,237 @@ fn generate_response_conversion(
 
       sb |> se.indent(3, "}")
     }
+  }
+}
+
+/// True if any response of any operation declares at least one header.
+fn operations_have_response_headers(
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+) -> Bool {
+  list.any(operations, fn(op) {
+    let #(_, operation, _, _) = op
+    list.any(dict.to_list(operation.responses), fn(entry) {
+      let #(_, ref_or) = entry
+      case ref_or {
+        Value(response) -> !dict.is_empty(response.headers)
+        _ -> False
+      }
+    })
+  })
+}
+
+/// True if any response header field has the given Gleam type.
+/// Used to decide which primitive `gleam/<type>` import the generated
+/// router needs for header value stringification (issue #306).
+fn operations_have_response_header_of_type(
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  type_name: String,
+) -> Bool {
+  list.any(operations, fn(op) {
+    let #(_, operation, _, _) = op
+    list.any(dict.to_list(operation.responses), fn(entry) {
+      let #(_, ref_or) = entry
+      case ref_or {
+        Value(response) ->
+          list.any(sorted_header_specs(response.headers), fn(spec) {
+            spec.field_type == type_name
+          })
+        _ -> False
+      }
+    })
+  })
+}
+
+/// True if any response header is optional. Optional headers emit
+/// `case hdrs.<field> { Some(v) -> ... None -> [] }` and need `gleam/option`.
+fn operations_have_optional_response_header(
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+) -> Bool {
+  list.any(operations, fn(op) {
+    let #(_, operation, _, _) = op
+    list.any(dict.to_list(operation.responses), fn(entry) {
+      let #(_, ref_or) = entry
+      case ref_or {
+        Value(response) ->
+          list.any(sorted_header_specs(response.headers), fn(spec) {
+            !spec.required
+          })
+        _ -> False
+      }
+    })
+  })
+}
+
+/// Compact spec for a single declared response header, used to render
+/// the `headers:` slot of `ServerResponse` when issue #306 plumbing is
+/// active. The pair (header_name, field_name) keeps the wire-form name
+/// (e.g. "Pagination-Cursor") distinct from the Gleam record field
+/// (`pagination_cursor`); `field_type` decides how the value is
+/// stringified; `required` decides whether to emit a Some/None case.
+type HeaderSpec {
+  HeaderSpec(
+    header_name: String,
+    field_name: String,
+    field_type: String,
+    required: Bool,
+  )
+}
+
+fn sorted_header_specs(
+  headers: dict.Dict(String, spec.Header),
+) -> List(HeaderSpec) {
+  headers
+  |> dict.to_list
+  |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
+  |> list.map(fn(entry) {
+    let #(header_name, header) = entry
+    let field_name = naming.to_snake_case(header_name)
+    let field_type = response_header_field_type(header.schema)
+    HeaderSpec(
+      header_name: header_name,
+      field_name: field_name,
+      field_type: field_type,
+      required: header.required,
+    )
+  })
+}
+
+/// Mirror of `header_schema_to_type` in ir_build — kept here so the
+/// router emission and the response_types record stay in sync without a
+/// cross-module dependency on the IR layer.
+fn response_header_field_type(
+  schema_opt: option.Option(schema.SchemaRef),
+) -> String {
+  case schema_opt {
+    Some(Inline(schema.IntegerSchema(..))) -> "Int"
+    Some(Inline(schema.NumberSchema(..))) -> "Float"
+    Some(Inline(schema.BooleanSchema(..))) -> "Bool"
+    Some(Inline(schema.StringSchema(..))) -> "String"
+    Some(Reference(name:, ..)) -> "types." <> naming.schema_to_type_name(name)
+    _ -> "String"
+  }
+}
+
+/// Emit one arm of the response dispatch `case` block.
+///
+/// Issue #306 introduces the headers plumbing: when `has_headers` is
+/// True the variant pattern grows an `hdrs` binding and the headers
+/// list is materialised via `list.flatten` so spec-declared response
+/// headers are appended to the implicit `content-type` tuple.
+fn emit_response_arm(
+  sb: se.StringBuilder,
+  variant_name: String,
+  status_int: String,
+  has_data has_data: Bool,
+  has_headers has_headers: Bool,
+  body_expr body_expr: String,
+  content_type_header content_type_header: option.Option(String),
+  header_specs header_specs: List(HeaderSpec),
+) -> se.StringBuilder {
+  let pattern_args = case has_data, has_headers {
+    True, True -> "(data, hdrs)"
+    True, False -> "(data)"
+    False, True -> "(hdrs)"
+    False, False -> ""
+  }
+  let headers_expr = headers_slot_expr(content_type_header, header_specs)
+  sb
+  |> se.indent(
+    4,
+    "response_types."
+      <> variant_name
+      <> pattern_args
+      <> " -> ServerResponse(status: "
+      <> status_int
+      <> ", body: "
+      <> body_expr
+      <> ", headers: "
+      <> headers_expr
+      <> ")",
+  )
+}
+
+/// Build the `headers:` argument for a `ServerResponse(...)` call.
+///
+/// - No content-type, no declared headers → `[]`
+/// - Content-type only → `[#("content-type", "<type>")]`
+/// - Declared headers (with or without content-type) → `list.flatten([...])`
+///   so optional headers can contribute `[]` and required ones a
+///   one-tuple list without repeated allocation. The fold keeps the
+///   spec-declared order (alphabetised by `sorted_header_specs`) so
+///   regenerated routers stay deterministic.
+fn headers_slot_expr(
+  content_type_header: option.Option(String),
+  header_specs: List(HeaderSpec),
+) -> String {
+  let content_type_chunk = case content_type_header {
+    Some(media_type_name) -> [
+      "[#(\"content-type\", \"" <> media_type_name <> "\")]",
+    ]
+    None -> []
+  }
+  let header_chunks =
+    list.map(header_specs, fn(spec) { header_chunk_expr(spec) })
+  case content_type_chunk, header_chunks {
+    [], [] -> "[]"
+    [single_chunk], [] -> single_chunk
+    _, _ ->
+      "list.flatten(["
+      <> string.join(content_type_chunk, ", ")
+      |> append_chunks(header_chunks)
+      <> "])"
+  }
+}
+
+fn append_chunks(prefix: String, header_chunks: List(String)) -> String {
+  case header_chunks {
+    [] -> prefix
+    _ ->
+      case prefix {
+        "" -> string.join(header_chunks, ", ")
+        _ -> prefix <> ", " <> string.join(header_chunks, ", ")
+      }
+  }
+}
+
+/// Render one declared response header into a chunk that contributes
+/// to the `headers:` `list.flatten` call.
+///
+/// Required: `[#("Pagination-Cursor", hdrs.pagination_cursor)]`
+/// Optional: `case hdrs.pagination_cursor { Some(v) -> [#(...)] None -> [] }`
+/// Non-string types are stringified via `int.to_string` /
+/// `float.to_string` / `bool.to_string` (the necessary imports are
+/// added by the import-analysis pass).
+fn header_chunk_expr(spec: HeaderSpec) -> String {
+  let render_value = fn(value_expr: String) -> String {
+    "[#(\""
+    <> spec.header_name
+    <> "\", "
+    <> stringify_header_value(spec.field_type, value_expr)
+    <> ")]"
+  }
+  case spec.required {
+    True -> render_value("hdrs." <> spec.field_name)
+    False ->
+      "case hdrs."
+      <> spec.field_name
+      <> " { Some(v) -> "
+      <> render_value("v")
+      <> " None -> [] }"
+  }
+}
+
+/// Convert a typed header value into a `String` for the wire. Header
+/// fields are limited to primitives (Int / Float / Bool / String) and
+/// `types.<X>` aliases (which the codegen treats as String-compatible
+/// — non-string aliases would fail to compile and signal the user
+/// that header value coercion is unsupported for that schema).
+fn stringify_header_value(field_type: String, value_expr: String) -> String {
+  case field_type {
+    "Int" -> "int.to_string(" <> value_expr <> ")"
+    "Float" -> "float.to_string(" <> value_expr <> ")"
+    "Bool" -> "bool.to_string(" <> value_expr <> ")"
+    _ -> value_expr
   }
 }
 

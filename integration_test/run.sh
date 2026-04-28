@@ -1587,4 +1587,171 @@ rm -rf "$BIN_DIR"
 
 info "Issue #304 binary response integration tests passed."
 
+# -------------------------------------------------------
+# Step 19: Issue #306 — typed response headers must reach the wire.
+# A spec declaring `responses.<code>.headers` is generated; the handler
+# returns body + a populated headers struct; the test asserts the
+# router emits both the implicit content-type tuple AND the spec-
+# declared header values (skipping None for optional headers).
+# -------------------------------------------------------
+info "Testing Issue #306 response header plumbing..."
+
+HDR_DIR="$SCRIPT_DIR/response_headers_test"
+rm -rf "$HDR_DIR"
+mkdir -p "$HDR_DIR/src/api" "$HDR_DIR/test"
+
+cat > "$HDR_DIR/response_headers.yaml" << 'YAML_EOF'
+openapi: "3.0.3"
+info:
+  title: Response Headers Test API
+  version: 1.0.0
+paths:
+  /v1/posts:
+    get:
+      operationId: listPosts
+      responses:
+        "200":
+          description: page of posts
+          headers:
+            Pagination-Cursor:
+              schema:
+                type: string
+            Pagination-Limit:
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+        "204":
+          description: no posts
+          headers:
+            X-Cache-Hit:
+              required: true
+              schema:
+                type: boolean
+YAML_EOF
+
+cat > "$HDR_DIR/oaspec-hdr.yaml" << 'YAML_EOF'
+input: ./integration_test/response_headers_test/response_headers.yaml
+output:
+  server: ./integration_test/response_headers_test/src/api
+package: api
+validate: false
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$HDR_DIR/oaspec-hdr.yaml" \
+  --mode=server
+
+cat > "$HDR_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
+import api/response_types
+import api/types
+import gleam/option.{Some}
+
+pub type State {
+  State
+}
+
+pub fn list_posts(state: State) -> response_types.ListPostsResponse {
+  let _ = state
+  response_types.ListPostsResponseOk(
+    types.ListPostsResponseOk(total: Some(2)),
+    response_types.ListPostsResponseOkHeaders(
+      pagination_cursor: Some("opaque-cursor"),
+      pagination_limit: 25,
+    ),
+  )
+}
+GLEAM_EOF
+
+cat > "$HDR_DIR/gleam.toml" << 'TOML_EOF'
+name = "response_headers_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$HDR_DIR/src/response_headers_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cat > "$HDR_DIR/test/response_headers_test_test.gleam" << 'GLEAM_EOF'
+// Issue #306 — a spec declaring response headers must wire those
+// values through `response_types.<Variant>(data, hdrs)` and onto the
+// `ServerResponse.headers` list. This test drives a handler that
+// returns body + headers and asserts the router lifts both onto the
+// wire alongside the implicit content-type tuple.
+
+import api/handlers
+import api/router
+import gleam/dict
+import gleam/list
+import gleeunit
+import gleeunit/should
+
+pub fn main() {
+  gleeunit.main()
+}
+
+pub fn declared_response_headers_reach_wire_test() {
+  let resp =
+    router.route(
+      handlers.State,
+      "GET",
+      ["v1", "posts"],
+      dict.new(),
+      dict.new(),
+      "",
+    )
+  resp.status |> should.equal(200)
+
+  // The spec-declared headers must appear in the returned headers
+  // list. Required Int (Pagination-Limit) is stringified; optional
+  // String (Pagination-Cursor) is present because the handler set
+  // Some(...). Order is whatever list.flatten produces — assert
+  // membership, not position.
+  list.contains(resp.headers, #("content-type", "application/json"))
+  |> should.be_true()
+  list.contains(resp.headers, #("Pagination-Cursor", "opaque-cursor"))
+  |> should.be_true()
+  list.contains(resp.headers, #("Pagination-Limit", "25"))
+  |> should.be_true()
+}
+GLEAM_EOF
+
+cd "$HDR_DIR"
+gleam deps download
+
+if gleam build; then
+  info "PASS: Response-headers test code compiles."
+else
+  fail "Response-headers test code failed to compile."
+fi
+
+if gleam test; then
+  info "PASS: Response-headers wire plumbing verified."
+else
+  fail "Response-headers integration tests failed."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$HDR_DIR"
+
+info "Issue #306 response header integration tests passed."
+
 info "All integration tests passed!"

@@ -2221,6 +2221,164 @@ paths:
   |> should.be_true()
 }
 
+// ===================================================================
+// Response headers reach the wire (issue #306)
+// ===================================================================
+
+/// A response that declares typed `headers:` must:
+///   1. Grow the `response_types.<Variant>` constructor with the
+///      generated `*Headers` record so handlers can supply values.
+///   2. Pattern-match `Variant(data, hdrs)` in the router dispatcher.
+///   3. Materialise the spec-declared headers onto the wire alongside
+///      the implicit `content-type` tuple via `list.flatten([...])`.
+///
+/// Optional headers contribute a `case Some/None` chunk so they can
+/// be skipped at runtime; required Int headers are stringified via
+/// `int.to_string` (and the matching `gleam/int` import is added by
+/// the import-analysis pass).
+pub fn server_response_headers_reach_router_dispatch_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /v1/posts:
+    get:
+      operationId: listPosts
+      responses:
+        '200':
+          description: page of posts
+          headers:
+            Pagination-Cursor:
+              schema:
+                type: string
+            Pagination-Limit:
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let server_files = server_gen.generate(ctx)
+  let type_files = types_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(server_files, fn(f) { f.path == "router.gleam" })
+  let assert Ok(response_types_file) =
+    list.find(type_files, fn(f) { f.path == "response_types.gleam" })
+
+  // The response variant grows a headers slot — the handler can no
+  // longer construct it without supplying both body and headers.
+  string.contains(
+    response_types_file.content,
+    "ListPostsResponseOk(types.ListPostsResponseOk, ListPostsResponseOkHeaders)",
+  )
+  |> should.be_true()
+
+  // The dispatcher binds the headers via `(data, hdrs)` and merges
+  // the typed values with the implicit content-type tuple.
+  string.contains(router_file.content, "ListPostsResponseOk(data, hdrs) ->")
+  |> should.be_true()
+  string.contains(router_file.content, "list.flatten([") |> should.be_true()
+  string.contains(
+    router_file.content,
+    "[#(\"content-type\", \"application/json\")]",
+  )
+  |> should.be_true()
+
+  // Required Int header is emitted directly with int.to_string.
+  string.contains(
+    router_file.content,
+    "[#(\"Pagination-Limit\", int.to_string(hdrs.pagination_limit))]",
+  )
+  |> should.be_true()
+
+  // Optional String header is wrapped in a `case Some/None` chunk so
+  // None contributes the empty list (no header on the wire).
+  string.contains(router_file.content, "case hdrs.pagination_cursor {")
+  |> should.be_true()
+  string.contains(
+    router_file.content,
+    "Some(v) -> [#(\"Pagination-Cursor\", v)]",
+  )
+  |> should.be_true()
+  string.contains(router_file.content, "None -> []") |> should.be_true()
+
+  // Routers that emit response headers need `gleam/list` for flatten;
+  // this spec also needs `gleam/int` for the required Int header.
+  string.contains(router_file.content, "import gleam/list") |> should.be_true()
+  string.contains(router_file.content, "import gleam/int") |> should.be_true()
+}
+
+/// A no-content response (e.g. 204) that declares only headers must
+/// still dispatch via `Variant(hdrs)` — no body slot, but the typed
+/// header struct is required so the handler can supply values. The
+/// dispatcher emits `body: EmptyBody` and a `headers:` list built
+/// from the headers struct alone (no implicit content-type tuple).
+pub fn server_empty_response_with_headers_dispatches_via_headers_arg_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /v1/things:
+    delete:
+      operationId: deleteThing
+      responses:
+        '204':
+          description: deleted
+          headers:
+            X-Cache-Hit:
+              required: true
+              schema:
+                type: boolean
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let server_files = server_gen.generate(ctx)
+  let type_files = types_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(server_files, fn(f) { f.path == "router.gleam" })
+  let assert Ok(response_types_file) =
+    list.find(type_files, fn(f) { f.path == "response_types.gleam" })
+
+  // No-content variant grows a headers-only slot.
+  string.contains(
+    response_types_file.content,
+    "DeleteThingResponseNoContent(DeleteThingResponseNoContentHeaders)",
+  )
+  |> should.be_true()
+
+  // Dispatcher pattern-matches on `(hdrs)` (no `data` binding) and
+  // emits EmptyBody.
+  string.contains(router_file.content, "DeleteThingResponseNoContent(hdrs) ->")
+  |> should.be_true()
+  string.contains(router_file.content, "body: EmptyBody") |> should.be_true()
+
+  // Bool header is stringified via bool.to_string and gleam/bool is
+  // imported automatically.
+  string.contains(
+    router_file.content,
+    "[#(\"X-Cache-Hit\", bool.to_string(hdrs.x_cache_hit))]",
+  )
+  |> should.be_true()
+  string.contains(router_file.content, "import gleam/bool") |> should.be_true()
+}
+
 /// A response with no `content` block must dispatch to `EmptyBody`,
 /// preserving the previous "no body, just status" semantics without
 /// forcing handlers to invent a placeholder String.

@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **codegen (BREAKING)**: Spec-declared response headers now reach the
+  wire. When a response declares `headers:`, the generated
+  `response_types.<Op>Response<Status>` constructor grows a typed
+  headers slot (e.g. `ListPostsResponseOk(types.PostPage,
+  ListPostsResponseOkHeaders)`) so handlers must supply the values, and
+  the router's dispatch arm pattern-matches `(data, hdrs)` and merges
+  the typed values into `ServerResponse.headers` alongside the implicit
+  `content-type` tuple via `list.flatten([...])`. Required headers emit
+  `[#("Header-Name", value)]`; optional ones contribute `[]` when None.
+  Primitive non-string types (`Int`, `Float`, `Bool`) are stringified
+  via `int.to_string` / `float.to_string` / `bool.to_string` (with the
+  matching `gleam/<type>` import added automatically). The
+  `*Headers` types previously generated as dead code are now wired
+  through end-to-end. (#306)
 - **codegen (BREAKING)**: The generated `router.ServerResponse.body`
   field is now a `ResponseBody` sum type — `TextBody(String)`,
   `BytesBody(BitArray)`, or `EmptyBody` — instead of a fixed `String`.

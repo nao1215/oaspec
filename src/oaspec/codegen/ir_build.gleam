@@ -11,7 +11,8 @@ import oaspec/codegen/context.{type Context}
 import oaspec/codegen/import_analysis
 import oaspec/codegen/ir.{
   type Declaration, type Field, type Module, type Variant, EnumType, Field,
-  RecordType, TypeAlias, UnionType, VariantEmpty, VariantWithType,
+  RecordType, TypeAlias, UnionType, VariantEmpty, VariantWithHeaders,
+  VariantWithType, VariantWithTypeAndHeaders,
 }
 import oaspec/codegen/schema_dispatch
 import oaspec/codegen/schema_utils
@@ -368,17 +369,38 @@ fn response_variant(
 ) -> Variant {
   let variant_name = type_name <> http.status_code_suffix(status_code)
   let content_entries = sorted_entries(response.content)
+  // Issue #306: when the response declares headers, the variant carries
+  // an additional typed headers record so handlers can supply values
+  // and the router can serialise them onto the wire.
+  let headers_type_opt = case sorted_entries(response.headers) {
+    [] -> None
+    _ -> Some(variant_name <> "Headers")
+  }
   case content_entries {
-    [] -> VariantEmpty(name: variant_name)
-    [_, _, ..] -> VariantWithType(name: variant_name, inner_type: "String")
+    [] -> empty_variant_with_optional_headers(variant_name, headers_type_opt)
+    [_, _, ..] ->
+      typed_variant_with_optional_headers(
+        variant_name,
+        "String",
+        headers_type_opt,
+      )
     [#(media_type_name, media_type)] ->
       case content_type.from_string(media_type_name) {
         content_type.TextPlain
         | content_type.ApplicationXml
         | content_type.TextXml ->
           case media_type.schema {
-            Some(_) -> VariantWithType(name: variant_name, inner_type: "String")
-            None -> VariantEmpty(name: variant_name)
+            Some(_) ->
+              typed_variant_with_optional_headers(
+                variant_name,
+                "String",
+                headers_type_opt,
+              )
+            None ->
+              empty_variant_with_optional_headers(
+                variant_name,
+                headers_type_opt,
+              )
           }
         // Issue #304: binary response payloads ride a BitArray variant
         // so handlers can produce real bytes instead of forcing the
@@ -386,19 +408,64 @@ fn response_variant(
         content_type.ApplicationOctetStream ->
           case media_type.schema {
             Some(_) ->
-              VariantWithType(name: variant_name, inner_type: "BitArray")
-            None -> VariantEmpty(name: variant_name)
+              typed_variant_with_optional_headers(
+                variant_name,
+                "BitArray",
+                headers_type_opt,
+              )
+            None ->
+              empty_variant_with_optional_headers(
+                variant_name,
+                headers_type_opt,
+              )
           }
         _ ->
           case media_type.schema {
             Some(ref) -> {
               let suffix = "Response" <> http.status_code_suffix(status_code)
               let inner_type = schema_ref_to_type_qualified(ref, op_id, suffix)
-              VariantWithType(name: variant_name, inner_type: inner_type)
+              typed_variant_with_optional_headers(
+                variant_name,
+                inner_type,
+                headers_type_opt,
+              )
             }
-            None -> VariantEmpty(name: variant_name)
+            None ->
+              empty_variant_with_optional_headers(
+                variant_name,
+                headers_type_opt,
+              )
           }
       }
+  }
+}
+
+/// Pick the empty-body variant kind based on whether typed headers exist.
+fn empty_variant_with_optional_headers(
+  variant_name: String,
+  headers_type_opt: option.Option(String),
+) -> Variant {
+  case headers_type_opt {
+    Some(headers_type) ->
+      VariantWithHeaders(name: variant_name, headers_type: headers_type)
+    None -> VariantEmpty(name: variant_name)
+  }
+}
+
+/// Pick the body-bearing variant kind based on whether typed headers exist.
+fn typed_variant_with_optional_headers(
+  variant_name: String,
+  inner_type: String,
+  headers_type_opt: option.Option(String),
+) -> Variant {
+  case headers_type_opt {
+    Some(headers_type) ->
+      VariantWithTypeAndHeaders(
+        name: variant_name,
+        inner_type: inner_type,
+        headers_type: headers_type,
+      )
+    None -> VariantWithType(name: variant_name, inner_type: inner_type)
   }
 }
 

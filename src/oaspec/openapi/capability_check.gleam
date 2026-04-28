@@ -376,9 +376,14 @@ pub fn check_preserved(ctx: Context) -> List(Diagnostic) {
             severity: SeverityWarning,
             target: TargetBoth,
             path: "components.headers",
-            detail: "Component headers are parsed but not used by code generation.",
+            // Issue #306 wired response headers through to the
+            // generated router, so component headers `$ref`'d from a
+            // response.headers entry now reach the wire. Standalone
+            // component header definitions that aren't referenced by
+            // any response are still dropped on the floor.
+            detail: "Component headers are wired into generated code only when referenced from a response.headers entry; standalone definitions are not surfaced.",
             hint: Some(
-              "Component headers will not appear in generated code. No action needed.",
+              "If a component header should reach a client, reference it from the relevant response.headers entry.",
             ),
           ),
         ]
