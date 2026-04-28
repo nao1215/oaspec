@@ -1973,6 +1973,97 @@ components:
   |> should.be_true()
 }
 
+/// Issue #318: enum-ref header parameter must also trigger the
+/// `import <pkg>/types` line in router.gleam, since the same emitter
+/// (`enum_match_*_expr`) is used for `in: header` parameters.
+pub fn server_enum_ref_header_param_imports_types_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - in: header
+          name: X-Mode
+          required: false
+          schema:
+            $ref: '#/components/schemas/Mode'
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  schemas:
+    Mode:
+      type: string
+      enum: [auto, manual]
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+
+  // The router emits `types.Mode<Variant>` references for the inline
+  // header decode; the file must import the types module so it compiles.
+  string.contains(router_file.content, "import api/types")
+  |> should.be_true()
+}
+
+/// Issue #318: enum-ref cookie parameter must also trigger the
+/// `import <pkg>/types` line in router.gleam.
+pub fn server_enum_ref_cookie_param_imports_types_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - in: cookie
+          name: theme
+          required: false
+          schema:
+            $ref: '#/components/schemas/Theme'
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  schemas:
+    Theme:
+      type: string
+      enum: [light, dark]
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+
+  string.contains(router_file.content, "import api/types")
+  |> should.be_true()
+}
+
 // ===================================================================
 // Router error responses use Problem JSON (issue #307)
 // ===================================================================
