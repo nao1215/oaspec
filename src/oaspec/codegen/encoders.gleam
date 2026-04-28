@@ -479,30 +479,33 @@ fn generate_encoder(
         Typed(ap_ref) -> {
           let inner_encoder_fn =
             schema_ref_to_json_encoder_fn(ap_ref, name, "additional_properties")
-          // Issue #320: emit a multi-line lambda body. The previous
-          // form used a `;` between the destructure and the tuple
-          // expression, which the Gleam parser rejects (semicolons
-          // were removed). `gleam format` then runs over the file and
-          // re-folds short bodies onto one line where appropriate.
+          // Issue #320: each statement of the lambda body is emitted via
+          // a separate `se.indent` call rather than as embedded `\n`
+          // inside one string. The previous form was easy to misread
+          // (the older variant used `;` between statements, which the
+          // current Gleam parser rejects).
           sb
           |> se.indent(1, close_props_list)
-          |> se.indent(
-            1,
-            "let extra_props = dict.to_list(value.additional_properties) |> list.map(fn(entry) {\n      let #(k, v) = entry\n      #(k, "
-              <> inner_encoder_fn
-              <> "(v))\n    })",
-          )
+          |> se.indent(1, "let extra_props =")
+          |> se.indent(2, "dict.to_list(value.additional_properties)")
+          |> se.indent(2, "|> list.map(fn(entry) {")
+          |> se.indent(3, "let #(k, v) = entry")
+          |> se.indent(3, "#(k, " <> inner_encoder_fn <> "(v))")
+          |> se.indent(2, "})")
           |> se.indent(1, "json.object(list.append(base_props, extra_props))")
         }
         Untyped -> {
           // Untyped additional_properties (Dynamic) are re-encoded using
           // dynamic type inspection to preserve round-trip fidelity.
+          // Same multi-step builder shape as the Typed branch.
           sb
           |> se.indent(1, close_props_list)
-          |> se.indent(
-            1,
-            "let extra_props = dict.to_list(value.additional_properties) |> list.map(fn(entry) {\n      let #(k, v) = entry\n      #(k, encode_dynamic(v))\n    })",
-          )
+          |> se.indent(1, "let extra_props =")
+          |> se.indent(2, "dict.to_list(value.additional_properties)")
+          |> se.indent(2, "|> list.map(fn(entry) {")
+          |> se.indent(3, "let #(k, v) = entry")
+          |> se.indent(3, "#(k, encode_dynamic(v))")
+          |> se.indent(2, "})")
           |> se.indent(1, "json.object(list.append(base_props, extra_props))")
         }
         Forbidden | Unspecified ->
