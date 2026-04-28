@@ -8379,9 +8379,12 @@ paths:
   |> should.be_true()
   string.contains(content, "x_enabled: case dict.get(headers, \"x-enabled\") {")
   |> should.be_true()
+  // Issue #307: failure paths emit RFC 7807 Problem JSON, not plain text.
+  string.contains(content, "status: 400") |> should.be_true()
+  string.contains(content, "\"Bad Request\"") |> should.be_false()
   string.contains(
     content,
-    "_ -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
+    "[#(\"content-type\", \"application/problem+json\")]",
   )
   |> should.be_true()
 }

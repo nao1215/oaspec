@@ -95,7 +95,11 @@ pub fn route(
           }
         }
         Error(_) ->
-          ServerResponse(status: 400, body: "Bad Request", headers: [])
+          ServerResponse(
+            status: 400,
+            body: "{\"type\":\"about:blank\",\"title\":\"invalid request body\"}",
+            headers: [#("content-type", "application/problem+json")],
+          )
       }
     }
     "GET", ["pets", pet_id] -> {
@@ -117,7 +121,11 @@ pub fn route(
           }
         }
         Error(_) ->
-          ServerResponse(status: 400, body: "Bad Request", headers: [])
+          ServerResponse(
+            status: 400,
+            body: "{\"type\":\"about:blank\",\"title\":\"invalid path parameter\"}",
+            headers: [#("content-type", "application/problem+json")],
+          )
       }
     }
     "DELETE", ["pets", pet_id] -> {
@@ -135,9 +143,18 @@ pub fn route(
           }
         }
         Error(_) ->
-          ServerResponse(status: 400, body: "Bad Request", headers: [])
+          ServerResponse(
+            status: 400,
+            body: "{\"type\":\"about:blank\",\"title\":\"invalid path parameter\"}",
+            headers: [#("content-type", "application/problem+json")],
+          )
       }
     }
-    _, _ -> ServerResponse(status: 404, body: "Not Found", headers: [])
+    _, _ ->
+      ServerResponse(
+        status: 404,
+        body: "{\"type\":\"about:blank\",\"title\":\"not found\"}",
+        headers: [#("content-type", "application/problem+json")],
+      )
   }
 }

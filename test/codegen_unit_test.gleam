@@ -1947,12 +1947,85 @@ components:
   // The handler body uses the typed bound variable.
   string.contains(router_file.content, "priority: priority_raw_parsed,")
   |> should.be_true()
-  // Unknown values return 400.
+  // Unknown values return 400 with an RFC 7807-shaped Problem JSON body
+  // (issue #307 — replaced the previous plain-text "Bad Request").
+  string.contains(router_file.content, "status: 400") |> should.be_true()
   string.contains(
     router_file.content,
-    "_ -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
+    "\"{\\\"type\\\":\\\"about:blank\\\",\\\"title\\\":\\\"invalid query parameter\\\"}\"",
   )
   |> should.be_true()
+  string.contains(
+    router_file.content,
+    "[#(\"content-type\", \"application/problem+json\")]",
+  )
+  |> should.be_true()
+}
+
+// ===================================================================
+// Router error responses use Problem JSON (issue #307)
+// ===================================================================
+
+/// Body decode failures, path/query/header parameter parse failures, and
+/// unmatched routes must emit `application/problem+json` with an RFC 7807
+/// shape rather than plain `Bad Request` / `Not Found` text.
+pub fn server_error_paths_emit_problem_json_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /things:
+    post:
+      operationId: createThing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        '201':
+          description: created
+          content:
+            application/json:
+              schema:
+                type: object
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+
+  // The decode-fail branch emits a Problem JSON body, not plain text.
+  string.contains(router_file.content, "\"Bad Request\"") |> should.be_false()
+  string.contains(router_file.content, "\"Not Found\"") |> should.be_false()
+  string.contains(
+    router_file.content,
+    "[#(\"content-type\", \"application/problem+json\")]",
+  )
+  |> should.be_true()
+  // Body decode failure carries the spec-relevant title.
+  string.contains(
+    router_file.content,
+    "\\\"title\\\":\\\"invalid request body\\\"",
+  )
+  |> should.be_true()
+  // The unmatched-route catch-all uses the same Problem shape.
+  string.contains(router_file.content, "\\\"title\\\":\\\"not found\\\"")
+  |> should.be_true()
+  // Status codes are intact.
+  string.contains(router_file.content, "status: 400") |> should.be_true()
+  string.contains(router_file.content, "status: 404") |> should.be_true()
 }
 
 // ===================================================================

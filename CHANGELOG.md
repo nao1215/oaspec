@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **codegen**: Generated routers now respond with RFC 7807-shaped
+  `application/problem+json` JSON for every error path (request body
+  decode failure, path/query/header parameter parse failure, missing
+  required parameter, unmatched route) instead of the previous plain
+  `Bad Request` / `Not Found` text without a `Content-Type` header.
+  Status codes are unchanged. Bodies follow the form
+  `{"type":"about:blank","title":"<reason>"}`. (#307)
 - **codegen**: Optional non-nullable schema properties are now omitted
   from the encoded JSON object when their `Option` field is `None`.
   Previously the generator emitted `"<key>": null` via `json.nullable`,

@@ -60,27 +60,43 @@ pub fn route(
                         _ ->
                           ServerResponse(
                             status: 400,
-                            body: "Bad Request",
-                            headers: [],
+                            body: "{\"type\":\"about:blank\",\"title\":\"missing or invalid parameter\"}",
+                            headers: [
+                              #("content-type", "application/problem+json"),
+                            ],
                           )
                       }
                     }
                     _ ->
                       ServerResponse(
                         status: 400,
-                        body: "Bad Request",
-                        headers: [],
+                        body: "{\"type\":\"about:blank\",\"title\":\"missing or invalid parameter\"}",
+                        headers: [#("content-type", "application/problem+json")],
                       )
                   }
                 }
                 _ ->
-                  ServerResponse(status: 400, body: "Bad Request", headers: [])
+                  ServerResponse(
+                    status: 400,
+                    body: "{\"type\":\"about:blank\",\"title\":\"invalid query parameter\"}",
+                    headers: [#("content-type", "application/problem+json")],
+                  )
               }
             }
-            _ -> ServerResponse(status: 400, body: "Bad Request", headers: [])
+            _ ->
+              ServerResponse(
+                status: 400,
+                body: "{\"type\":\"about:blank\",\"title\":\"missing or invalid parameter\"}",
+                headers: [#("content-type", "application/problem+json")],
+              )
           }
         }
-        _ -> ServerResponse(status: 400, body: "Bad Request", headers: [])
+        _ ->
+          ServerResponse(
+            status: 400,
+            body: "{\"type\":\"about:blank\",\"title\":\"missing or invalid parameter\"}",
+            headers: [#("content-type", "application/problem+json")],
+          )
       }
     }
     "POST", ["search"] -> {
@@ -141,7 +157,12 @@ pub fn route(
           ServerResponse(status: 200, body: "", headers: [])
       }
     }
-    _, _ -> ServerResponse(status: 404, body: "Not Found", headers: [])
+    _, _ ->
+      ServerResponse(
+        status: 404,
+        body: "{\"type\":\"about:blank\",\"title\":\"not found\"}",
+        headers: [#("content-type", "application/problem+json")],
+      )
   }
 }
 

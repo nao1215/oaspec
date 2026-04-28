@@ -1364,7 +1364,11 @@ pub fn missing_required_string_query_returns_400_test() {
   let query = dict.from_list([#("limit", ["10"])])
   let resp = router.route(handlers.State, "GET", ["search"], query, full_headers(), "")
   resp.status |> should.equal(400)
-  resp.body |> should.equal("Bad Request")
+  // Issue #307: 400 responses are now RFC 7807-shaped Problem JSON.
+  resp.body
+  |> should.equal("{\"type\":\"about:blank\",\"title\":\"missing or invalid parameter\"}")
+  resp.headers
+  |> should.equal([#("content-type", "application/problem+json")])
 }
 
 pub fn missing_required_integer_query_returns_400_test() {

@@ -1,5 +1,6 @@
 import gleam/bool
 import gleam/dict
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
@@ -924,10 +925,7 @@ fn generate_router(
 
   let sb =
     sb
-    |> se.indent(
-      2,
-      "_, _ -> ServerResponse(status: 404, body: \"Not Found\", headers: [])",
-    )
+    |> se.indent(2, "_, _ -> " <> problem_response_expr(404, "not found"))
     |> se.indent(1, "}")
     |> se.line("}")
     |> se.blank_line()
@@ -1319,7 +1317,7 @@ fn generate_safe_request_and_dispatch(
       |> se.indent(4, "}")
       |> se.indent(
         4,
-        "Error(_) -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
+        "Error(_) -> " <> problem_response_expr(400, "invalid request body"),
       )
       |> se.indent(3, "}")
     False -> sb
@@ -1354,7 +1352,7 @@ fn generate_safe_request_and_dispatch(
     |> se.indent(4, "}")
     |> se.indent(
       4,
-      "Error(_) -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
+      "Error(_) -> " <> problem_response_expr(400, "invalid path parameter"),
     )
     |> se.indent(3, "}")
   })
@@ -1486,7 +1484,7 @@ fn close_query_required_parse_case(
     |> se.indent(4, "}")
     |> se.indent(
       4,
-      "_ -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
+      "_ -> " <> problem_response_expr(400, "invalid query parameter"),
     )
     |> se.indent(3, "}")
   }
@@ -1569,7 +1567,7 @@ fn close_single_value_required_parse_case(
     |> se.indent(4, "}")
     |> se.indent(
       4,
-      "_ -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
+      "_ -> " <> problem_response_expr(400, "invalid header or cookie"),
     )
     |> se.indent(3, "}")
   }
@@ -1596,6 +1594,30 @@ fn close_single_value_required_parse_case(
   }
 }
 
+/// Build the Gleam source expression for a `ServerResponse` carrying an
+/// RFC 7807-shaped `application/problem+json` body. Used by every
+/// router-side error-emit site so clients receive a structured JSON
+/// response instead of plain `Bad Request` / `Not Found` text — a
+/// schema-conformant default for specs that declare 4xx responses with
+/// `application/problem+json` content (issue #307).
+///
+/// The body is emitted as a literal JSON string at codegen time —
+/// stable, allocation-free, and safe to embed because `detail` is a
+/// short codegen-controlled phrase (no user input is interpolated).
+/// Specs that need a different Problem encoding can still override at
+/// the framework adapter layer.
+fn problem_response_expr(status: Int, detail: String) -> String {
+  let body =
+    "\"{\\\"type\\\":\\\"about:blank\\\",\\\"title\\\":\\\""
+    <> detail
+    <> "\\\"}\""
+  "ServerResponse(status: "
+  <> int.to_string(status)
+  <> ", body: "
+  <> body
+  <> ", headers: [#(\"content-type\", \"application/problem+json\")])"
+}
+
 /// Close a required-param lookup case (`case dict.get(...) { Ok(...) -> { ... }`).
 /// The catch-all `_ ->` arm covers both `Error(_)` and `Ok([])` (empty list)
 /// for query params, plus the bare `Error(_)` for header/cookie lookups.
@@ -1604,7 +1626,7 @@ fn close_lookup_case(sb: se.StringBuilder) -> se.StringBuilder {
   |> se.indent(4, "}")
   |> se.indent(
     4,
-    "_ -> ServerResponse(status: 400, body: \"Bad Request\", headers: [])",
+    "_ -> " <> problem_response_expr(400, "missing or invalid parameter"),
   )
   |> se.indent(3, "}")
 }
