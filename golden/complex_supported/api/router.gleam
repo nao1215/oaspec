@@ -14,9 +14,23 @@ import gleam/option.{None, Some}
 import gleam/string
 import gleam/uri
 
+/// Response body payload — text, raw bytes, or no body. The router
+/// emits `BytesBody` for `application/octet-stream` (and other binary
+/// content types) so adapters never have to round-trip bytes through a
+/// String.
+pub type ResponseBody {
+  TextBody(String)
+  BytesBody(BitArray)
+  EmptyBody
+}
+
 /// A server response with status code, body, and headers.
 pub type ServerResponse {
-  ServerResponse(status: Int, body: String, headers: List(#(String, String)))
+  ServerResponse(
+    status: Int,
+    body: ResponseBody,
+    headers: List(#(String, String)),
+  )
 }
 
 /// Route an incoming request to the appropriate handler.
@@ -54,13 +68,19 @@ pub fn route(
                             )
                           case response {
                             response_types.GetRequiredParamsResponseOk ->
-                              ServerResponse(status: 200, body: "", headers: [])
+                              ServerResponse(
+                                status: 200,
+                                body: EmptyBody,
+                                headers: [],
+                              )
                           }
                         }
                         _ ->
                           ServerResponse(
                             status: 400,
-                            body: "{\"type\":\"about:blank\",\"title\":\"missing or invalid parameter\"}",
+                            body: TextBody(
+                              "{\"type\":\"about:blank\",\"title\":\"missing or invalid parameter\"}",
+                            ),
                             headers: [
                               #("content-type", "application/problem+json"),
                             ],
@@ -70,7 +90,9 @@ pub fn route(
                     _ ->
                       ServerResponse(
                         status: 400,
-                        body: "{\"type\":\"about:blank\",\"title\":\"missing or invalid parameter\"}",
+                        body: TextBody(
+                          "{\"type\":\"about:blank\",\"title\":\"missing or invalid parameter\"}",
+                        ),
                         headers: [#("content-type", "application/problem+json")],
                       )
                   }
@@ -78,7 +100,9 @@ pub fn route(
                 _ ->
                   ServerResponse(
                     status: 400,
-                    body: "{\"type\":\"about:blank\",\"title\":\"invalid query parameter\"}",
+                    body: TextBody(
+                      "{\"type\":\"about:blank\",\"title\":\"invalid query parameter\"}",
+                    ),
                     headers: [#("content-type", "application/problem+json")],
                   )
               }
@@ -86,7 +110,9 @@ pub fn route(
             _ ->
               ServerResponse(
                 status: 400,
-                body: "{\"type\":\"about:blank\",\"title\":\"missing or invalid parameter\"}",
+                body: TextBody(
+                  "{\"type\":\"about:blank\",\"title\":\"missing or invalid parameter\"}",
+                ),
                 headers: [#("content-type", "application/problem+json")],
               )
           }
@@ -94,7 +120,9 @@ pub fn route(
         _ ->
           ServerResponse(
             status: 400,
-            body: "{\"type\":\"about:blank\",\"title\":\"missing or invalid parameter\"}",
+            body: TextBody(
+              "{\"type\":\"about:blank\",\"title\":\"missing or invalid parameter\"}",
+            ),
             headers: [#("content-type", "application/problem+json")],
           )
       }
@@ -115,9 +143,9 @@ pub fn route(
         response_types.PostSearchResponseOk(data) ->
           ServerResponse(
             status: 200,
-            body: json.to_string(encode.encode_post_search_response_ok_json(
-              data,
-            )),
+            body: TextBody(
+              json.to_string(encode.encode_post_search_response_ok_json(data)),
+            ),
             headers: [#("content-type", "application/json")],
           )
       }
@@ -129,13 +157,15 @@ pub fn route(
         response_types.GetUserResponseOk(data) ->
           ServerResponse(
             status: 200,
-            body: json.to_string(encode.encode_get_user_response_ok_json(data)),
+            body: TextBody(
+              json.to_string(encode.encode_get_user_response_ok_json(data)),
+            ),
             headers: [#("content-type", "application/json")],
           )
         response_types.GetUserResponseNotFound(data) ->
           ServerResponse(
             status: 404,
-            body: json.to_string(encode.encode_error_json(data)),
+            body: TextBody(json.to_string(encode.encode_error_json(data))),
             headers: [#("content-type", "application/json")],
           )
       }
@@ -154,13 +184,13 @@ pub fn route(
       let response = handlers_generated.post_webhook(app_state, request)
       case response {
         response_types.PostWebhookResponseOk ->
-          ServerResponse(status: 200, body: "", headers: [])
+          ServerResponse(status: 200, body: EmptyBody, headers: [])
       }
     }
     _, _ ->
       ServerResponse(
         status: 404,
-        body: "{\"type\":\"about:blank\",\"title\":\"not found\"}",
+        body: TextBody("{\"type\":\"about:blank\",\"title\":\"not found\"}"),
         headers: [#("content-type", "application/problem+json")],
       )
   }

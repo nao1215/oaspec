@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **codegen (BREAKING)**: The generated `router.ServerResponse.body`
+  field is now a `ResponseBody` sum type — `TextBody(String)`,
+  `BytesBody(BitArray)`, or `EmptyBody` — instead of a fixed `String`.
+  Specs that declare `application/octet-stream` (or other binary)
+  responses now round-trip real bytes end-to-end via
+  `BytesBody(BitArray)`; the matching `response_types.<Op>ResponseOk`
+  variant carries `BitArray` instead of `String`. Text responses move
+  from raw `body: data` to `body: TextBody(data)`, JSON responses move
+  from `body: json.to_string(...)` to `body: TextBody(json.to_string(...))`,
+  and no-content responses dispatch to `EmptyBody`. RFC 7807 problem
+  bodies are wrapped in `TextBody(...)`. Framework adapters must
+  pattern-match on `response.body` to call their text- or bytes-shaped
+  response constructor instead of treating it as a `String`. (#304)
+
 ### Fixed
 
 - **codegen**: Generated routers now respond with RFC 7807-shaped

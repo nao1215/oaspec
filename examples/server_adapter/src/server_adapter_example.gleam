@@ -19,6 +19,7 @@
 
 import api/handlers
 import api/router
+import gleam/bit_array
 import gleam/dict
 import gleam/int
 import gleam/io
@@ -56,5 +57,17 @@ fn print_response(response: router.ServerResponse) -> Nil {
   io.println("status: " <> int.to_string(response.status))
   let header_count = list.length(response.headers)
   io.println("headers: " <> int.to_string(header_count) <> " header(s)")
-  io.println("body: " <> response.body)
+  // The router emits a `ResponseBody` sum so binary endpoints
+  // (`application/octet-stream`, images, …) can carry real bytes
+  // through `BytesBody(BitArray)` without a String round-trip. A
+  // production adapter would dispatch to the framework's text- or
+  // bytes-shaped response constructor here; we just print.
+  case response.body {
+    router.TextBody(text) -> io.println("body: " <> text)
+    router.BytesBody(bytes) ->
+      io.println(
+        "body: <" <> int.to_string(bit_array.byte_size(bytes)) <> " bytes>",
+      )
+    router.EmptyBody -> io.println("body: <empty>")
+  }
 }

@@ -639,14 +639,32 @@ fn generate_router(
     se.file_header(context.version)
     |> se.imports(all_imports)
 
-  // Generate ServerResponse type
+  // Generate ResponseBody and ServerResponse types.
+  //
+  // `ResponseBody` keeps text and binary payloads distinct end-to-end so a
+  // spec that declares `application/octet-stream` or `image/*` responses
+  // round-trips real bytes instead of being smuggled through `String`
+  // (issue #304). Framework adapters pattern-match on the variant to call
+  // their text- or bytes-shaped response constructor.
   let sb =
     sb
+    |> se.doc_comment(
+      "Response body payload — text, raw bytes, or no body. The router
+emits `BytesBody` for `application/octet-stream` (and other binary
+content types) so adapters never have to round-trip bytes through a
+String.",
+    )
+    |> se.line("pub type ResponseBody {")
+    |> se.indent(1, "TextBody(String)")
+    |> se.indent(1, "BytesBody(BitArray)")
+    |> se.indent(1, "EmptyBody")
+    |> se.line("}")
+    |> se.blank_line()
     |> se.doc_comment("A server response with status code, body, and headers.")
     |> se.line("pub type ServerResponse {")
     |> se.indent(
       1,
-      "ServerResponse(status: Int, body: String, headers: List(#(String, String)))",
+      "ServerResponse(status: Int, body: ResponseBody, headers: List(#(String, String)))",
     )
     |> se.line("}")
     |> se.blank_line()
@@ -1304,7 +1322,7 @@ fn generate_safe_request_and_dispatch(
       |> se.indent(4, "}")
       |> se.indent(
         4,
-        "Error(errors) -> ServerResponse(status: 422, body: json.to_string(json.array(errors, guards.validation_failure_to_json)), headers: [#(\"content-type\", \"application/json\")])",
+        "Error(errors) -> ServerResponse(status: 422, body: TextBody(json.to_string(json.array(errors, guards.validation_failure_to_json))), headers: [#(\"content-type\", \"application/json\")])",
       )
       |> se.indent(3, "}")
     False -> sb
@@ -1613,9 +1631,9 @@ fn problem_response_expr(status: Int, detail: String) -> String {
     <> "\\\"}\""
   "ServerResponse(status: "
   <> int.to_string(status)
-  <> ", body: "
+  <> ", body: TextBody("
   <> body
-  <> ", headers: [#(\"content-type\", \"application/problem+json\")])"
+  <> "), headers: [#(\"content-type\", \"application/problem+json\")])"
 }
 
 /// Close a required-param lookup case (`case dict.get(...) { Ok(...) -> { ... }`).
@@ -1680,7 +1698,10 @@ fn generate_response_conversion(
   case list.is_empty(responses) {
     True ->
       sb
-      |> se.indent(3, "ServerResponse(status: 200, body: \"\", headers: [])")
+      |> se.indent(
+        3,
+        "ServerResponse(status: 200, body: EmptyBody, headers: [])",
+      )
     False -> {
       let sb = sb |> se.indent(3, "case response {")
 
@@ -1704,7 +1725,7 @@ fn generate_response_conversion(
                       <> variant_name
                       <> " -> ServerResponse(status: "
                       <> status_int
-                      <> ", body: \"\", headers: [])",
+                      <> ", body: EmptyBody, headers: [])",
                   )
                 [#(media_type_name, media_type)] ->
                   case content_type.from_string(media_type_name) {
@@ -1720,9 +1741,9 @@ fn generate_response_conversion(
                               <> variant_name
                               <> "(data) -> ServerResponse(status: "
                               <> status_int
-                              <> ", body: json.to_string("
+                              <> ", body: TextBody(json.to_string("
                               <> encode_fn
-                              <> "(data)), headers: [#(\"content-type\", \""
+                              <> "(data))), headers: [#(\"content-type\", \""
                               <> media_type_name
                               <> "\")])",
                           )
@@ -1735,13 +1756,12 @@ fn generate_response_conversion(
                               <> variant_name
                               <> " -> ServerResponse(status: "
                               <> status_int
-                              <> ", body: \"\", headers: [])",
+                              <> ", body: EmptyBody, headers: [])",
                           )
                       }
                     content_type.TextPlain
                     | content_type.ApplicationXml
-                    | content_type.TextXml
-                    | content_type.ApplicationOctetStream ->
+                    | content_type.TextXml ->
                       case media_type.schema {
                         Some(_) ->
                           sb
@@ -1751,7 +1771,7 @@ fn generate_response_conversion(
                               <> variant_name
                               <> "(data) -> ServerResponse(status: "
                               <> status_int
-                              <> ", body: data, headers: [#(\"content-type\", \""
+                              <> ", body: TextBody(data), headers: [#(\"content-type\", \""
                               <> media_type_name
                               <> "\")])",
                           )
@@ -1763,7 +1783,36 @@ fn generate_response_conversion(
                               <> variant_name
                               <> " -> ServerResponse(status: "
                               <> status_int
-                              <> ", body: \"\", headers: [])",
+                              <> ", body: EmptyBody, headers: [])",
+                          )
+                      }
+                    content_type.ApplicationOctetStream ->
+                      // Issue #304: binary responses thread bytes end-to-end
+                      // via `BytesBody(BitArray)` instead of being smuggled
+                      // through `String`. The matching response_types
+                      // variant carries `BitArray` (see ir_build).
+                      case media_type.schema {
+                        Some(_) ->
+                          sb
+                          |> se.indent(
+                            4,
+                            "response_types."
+                              <> variant_name
+                              <> "(data) -> ServerResponse(status: "
+                              <> status_int
+                              <> ", body: BytesBody(data), headers: [#(\"content-type\", \""
+                              <> media_type_name
+                              <> "\")])",
+                          )
+                        None ->
+                          sb
+                          |> se.indent(
+                            4,
+                            "response_types."
+                              <> variant_name
+                              <> " -> ServerResponse(status: "
+                              <> status_int
+                              <> ", body: EmptyBody, headers: [])",
                           )
                       }
                     _ ->
@@ -1778,9 +1827,9 @@ fn generate_response_conversion(
                               <> variant_name
                               <> "(data) -> ServerResponse(status: "
                               <> status_int
-                              <> ", body: json.to_string("
+                              <> ", body: TextBody(json.to_string("
                               <> encode_fn
-                              <> "(data)), headers: [#(\"content-type\", \""
+                              <> "(data))), headers: [#(\"content-type\", \""
                               <> media_type_name
                               <> "\")])",
                           )
@@ -1793,7 +1842,7 @@ fn generate_response_conversion(
                               <> variant_name
                               <> " -> ServerResponse(status: "
                               <> status_int
-                              <> ", body: \"\", headers: [])",
+                              <> ", body: EmptyBody, headers: [])",
                           )
                       }
                   }
@@ -1807,7 +1856,7 @@ fn generate_response_conversion(
                       <> variant_name
                       <> "(data) -> ServerResponse(status: "
                       <> status_int
-                      <> ", body: data, headers: [#(\"content-type\", \""
+                      <> ", body: TextBody(data), headers: [#(\"content-type\", \""
                       <> first_media_type
                       <> "\")])",
                   )

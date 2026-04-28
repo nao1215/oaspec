@@ -1365,8 +1365,10 @@ pub fn missing_required_string_query_returns_400_test() {
   let resp = router.route(handlers.State, "GET", ["search"], query, full_headers(), "")
   resp.status |> should.equal(400)
   // Issue #307: 400 responses are now RFC 7807-shaped Problem JSON.
+  // Issue #304: bodies are wrapped in `TextBody` so binary responses can
+  // ride a `BytesBody(BitArray)` variant on the same type.
   resp.body
-  |> should.equal("{\"type\":\"about:blank\",\"title\":\"missing or invalid parameter\"}")
+  |> should.equal(router.TextBody("{\"type\":\"about:blank\",\"title\":\"missing or invalid parameter\"}"))
   resp.headers
   |> should.equal([#("content-type", "application/problem+json")])
 }
@@ -1429,5 +1431,160 @@ cd "$PROJECT_ROOT"
 rm -rf "$REQ_DIR"
 
 info "Issue #263 required-param integration tests passed."
+
+# -------------------------------------------------------
+# Step 18: Issue #304 — binary response bodies must round-trip as
+# `BytesBody(BitArray)` instead of being smuggled through `String`.
+# A spec with an `application/octet-stream` 200 response is generated;
+# the handler returns a real PNG header byte sequence, and the test
+# asserts the router emits `BytesBody(<<...:bits>>)` with the right
+# content-type.
+# -------------------------------------------------------
+info "Testing Issue #304 binary response body handling..."
+
+BIN_DIR="$SCRIPT_DIR/binary_response_test"
+rm -rf "$BIN_DIR"
+mkdir -p "$BIN_DIR/src/api" "$BIN_DIR/test"
+
+cat > "$BIN_DIR/binary_response.yaml" << 'YAML_EOF'
+openapi: "3.0.3"
+info:
+  title: Binary Response Test API
+  version: 1.0.0
+paths:
+  /thumbnail:
+    get:
+      operationId: getThumbnail
+      responses:
+        "200":
+          description: PNG bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "204":
+          description: no thumbnail
+YAML_EOF
+
+cat > "$BIN_DIR/oaspec-bin.yaml" << 'YAML_EOF'
+input: ./integration_test/binary_response_test/binary_response.yaml
+output:
+  server: ./integration_test/binary_response_test/src/api
+package: api
+validate: false
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$BIN_DIR/oaspec-bin.yaml" \
+  --mode=server
+
+cat > "$BIN_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
+import api/response_types
+
+pub type State {
+  State
+}
+
+pub fn get_thumbnail(state: State) -> response_types.GetThumbnailResponse {
+  let _ = state
+  // PNG magic header — real binary, not UTF-8.
+  response_types.GetThumbnailResponseOk(<<137, 80, 78, 71, 13, 10, 26, 10>>)
+}
+GLEAM_EOF
+
+cat > "$BIN_DIR/gleam.toml" << 'TOML_EOF'
+name = "binary_response_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$BIN_DIR/src/binary_response_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cat > "$BIN_DIR/test/binary_response_test_test.gleam" << 'GLEAM_EOF'
+// Issue #304 — a spec with `application/octet-stream` responses must
+// emit `BytesBody(BitArray)` from the generated router so adapters can
+// stream real binary bytes (PNGs, file downloads, …) without forcing a
+// String round-trip. The matching response_types variant must wrap
+// `BitArray`, not `String`.
+
+import api/handlers
+import api/router
+import gleam/dict
+import gleeunit
+import gleeunit/should
+
+pub fn main() {
+  gleeunit.main()
+}
+
+pub fn binary_response_emits_bytes_body_test() {
+  let resp =
+    router.route(
+      handlers.State,
+      "GET",
+      ["thumbnail"],
+      dict.new(),
+      dict.new(),
+      "",
+    )
+  resp.status |> should.equal(200)
+  resp.body
+  |> should.equal(router.BytesBody(<<137, 80, 78, 71, 13, 10, 26, 10>>))
+  resp.headers
+  |> should.equal([#("content-type", "application/octet-stream")])
+}
+
+pub fn unknown_route_uses_text_body_problem_json_test() {
+  // Sanity: the same router still returns a TextBody-shaped Problem
+  // JSON for unknown routes, proving text and bytes coexist on the
+  // same `ResponseBody` type.
+  let resp =
+    router.route(
+      handlers.State,
+      "GET",
+      ["nope"],
+      dict.new(),
+      dict.new(),
+      "",
+    )
+  resp.status |> should.equal(404)
+  resp.body
+  |> should.equal(router.TextBody("{\"type\":\"about:blank\",\"title\":\"not found\"}"))
+}
+GLEAM_EOF
+
+cd "$BIN_DIR"
+gleam deps download
+
+if gleam build; then
+  info "PASS: Binary-response test code compiles."
+else
+  fail "Binary-response test code failed to compile."
+fi
+
+if gleam test; then
+  info "PASS: Binary-response BytesBody round-trip verified."
+else
+  fail "Binary-response integration tests failed."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$BIN_DIR"
+
+info "Issue #304 binary response integration tests passed."
 
 info "All integration tests passed!"

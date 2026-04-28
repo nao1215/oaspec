@@ -12,9 +12,23 @@ import gleam/int
 import gleam/json
 import gleam/option.{None, Some}
 
+/// Response body payload — text, raw bytes, or no body. The router
+/// emits `BytesBody` for `application/octet-stream` (and other binary
+/// content types) so adapters never have to round-trip bytes through a
+/// String.
+pub type ResponseBody {
+  TextBody(String)
+  BytesBody(BitArray)
+  EmptyBody
+}
+
 /// A server response with status code, body, and headers.
 pub type ServerResponse {
-  ServerResponse(status: Int, body: String, headers: List(#(String, String)))
+  ServerResponse(
+    status: Int,
+    body: ResponseBody,
+    headers: List(#(String, String)),
+  )
 }
 
 /// Route an incoming request to the appropriate handler.
@@ -54,13 +68,15 @@ pub fn route(
         response_types.ListPetsResponseOk(data) ->
           ServerResponse(
             status: 200,
-            body: json.to_string(fn(items) {
-              json.array(items, encode.encode_pet_json)
-            }(data)),
+            body: TextBody(
+              json.to_string(fn(items) {
+                json.array(items, encode.encode_pet_json)
+              }(data)),
+            ),
             headers: [#("content-type", "application/json")],
           )
         response_types.ListPetsResponseUnauthorized ->
-          ServerResponse(status: 401, body: "", headers: [])
+          ServerResponse(status: 401, body: EmptyBody, headers: [])
       }
     }
     "POST", ["pets"] -> {
@@ -74,22 +90,24 @@ pub fn route(
                 response_types.CreatePetResponseCreated(data) ->
                   ServerResponse(
                     status: 201,
-                    body: json.to_string(encode.encode_pet_json(data)),
+                    body: TextBody(json.to_string(encode.encode_pet_json(data))),
                     headers: [#("content-type", "application/json")],
                   )
                 response_types.CreatePetResponseBadRequest ->
-                  ServerResponse(status: 400, body: "", headers: [])
+                  ServerResponse(status: 400, body: EmptyBody, headers: [])
                 response_types.CreatePetResponseUnauthorized ->
-                  ServerResponse(status: 401, body: "", headers: [])
+                  ServerResponse(status: 401, body: EmptyBody, headers: [])
               }
             }
             Error(errors) ->
               ServerResponse(
                 status: 422,
-                body: json.to_string(json.array(
-                  errors,
-                  guards.validation_failure_to_json,
-                )),
+                body: TextBody(
+                  json.to_string(json.array(
+                    errors,
+                    guards.validation_failure_to_json,
+                  )),
+                ),
                 headers: [#("content-type", "application/json")],
               )
           }
@@ -97,7 +115,9 @@ pub fn route(
         Error(_) ->
           ServerResponse(
             status: 400,
-            body: "{\"type\":\"about:blank\",\"title\":\"invalid request body\"}",
+            body: TextBody(
+              "{\"type\":\"about:blank\",\"title\":\"invalid request body\"}",
+            ),
             headers: [#("content-type", "application/problem+json")],
           )
       }
@@ -111,19 +131,21 @@ pub fn route(
             response_types.GetPetResponseOk(data) ->
               ServerResponse(
                 status: 200,
-                body: json.to_string(encode.encode_pet_json(data)),
+                body: TextBody(json.to_string(encode.encode_pet_json(data))),
                 headers: [#("content-type", "application/json")],
               )
             response_types.GetPetResponseUnauthorized ->
-              ServerResponse(status: 401, body: "", headers: [])
+              ServerResponse(status: 401, body: EmptyBody, headers: [])
             response_types.GetPetResponseNotFound ->
-              ServerResponse(status: 404, body: "", headers: [])
+              ServerResponse(status: 404, body: EmptyBody, headers: [])
           }
         }
         Error(_) ->
           ServerResponse(
             status: 400,
-            body: "{\"type\":\"about:blank\",\"title\":\"invalid path parameter\"}",
+            body: TextBody(
+              "{\"type\":\"about:blank\",\"title\":\"invalid path parameter\"}",
+            ),
             headers: [#("content-type", "application/problem+json")],
           )
       }
@@ -135,17 +157,19 @@ pub fn route(
           let response = handlers_generated.delete_pet(app_state, request)
           case response {
             response_types.DeletePetResponseNoContent ->
-              ServerResponse(status: 204, body: "", headers: [])
+              ServerResponse(status: 204, body: EmptyBody, headers: [])
             response_types.DeletePetResponseUnauthorized ->
-              ServerResponse(status: 401, body: "", headers: [])
+              ServerResponse(status: 401, body: EmptyBody, headers: [])
             response_types.DeletePetResponseNotFound ->
-              ServerResponse(status: 404, body: "", headers: [])
+              ServerResponse(status: 404, body: EmptyBody, headers: [])
           }
         }
         Error(_) ->
           ServerResponse(
             status: 400,
-            body: "{\"type\":\"about:blank\",\"title\":\"invalid path parameter\"}",
+            body: TextBody(
+              "{\"type\":\"about:blank\",\"title\":\"invalid path parameter\"}",
+            ),
             headers: [#("content-type", "application/problem+json")],
           )
       }
@@ -153,7 +177,7 @@ pub fn route(
     _, _ ->
       ServerResponse(
         status: 404,
-        body: "{\"type\":\"about:blank\",\"title\":\"not found\"}",
+        body: TextBody("{\"type\":\"about:blank\",\"title\":\"not found\"}"),
         headers: [#("content-type", "application/problem+json")],
       )
   }

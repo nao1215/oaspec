@@ -375,10 +375,18 @@ fn response_variant(
       case content_type.from_string(media_type_name) {
         content_type.TextPlain
         | content_type.ApplicationXml
-        | content_type.TextXml
-        | content_type.ApplicationOctetStream ->
+        | content_type.TextXml ->
           case media_type.schema {
             Some(_) -> VariantWithType(name: variant_name, inner_type: "String")
+            None -> VariantEmpty(name: variant_name)
+          }
+        // Issue #304: binary response payloads ride a BitArray variant
+        // so handlers can produce real bytes instead of forcing the
+        // payload through `String`.
+        content_type.ApplicationOctetStream ->
+          case media_type.schema {
+            Some(_) ->
+              VariantWithType(name: variant_name, inner_type: "BitArray")
             None -> VariantEmpty(name: variant_name)
           }
         _ ->

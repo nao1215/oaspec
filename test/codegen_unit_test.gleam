@@ -15,6 +15,7 @@ import oaspec/codegen/encoders
 import oaspec/codegen/ir_build
 import oaspec/codegen/server as server_gen
 import oaspec/codegen/server_request_decode
+import oaspec/codegen/types as types_gen
 import oaspec/config
 import oaspec/openapi/hoist
 import oaspec/openapi/parser
@@ -2096,4 +2097,168 @@ components:
   // Valid values are sorted alphabetically for deterministic output.
   string.contains(decode_file.content, "(expected circle|square)")
   |> should.be_true()
+}
+
+// ===================================================================
+// Binary response bodies use BytesBody(BitArray) (issue #304)
+// ===================================================================
+
+/// `application/octet-stream` responses must round-trip real bytes via
+/// `BytesBody(BitArray)`. The router type definition introduces the
+/// `ResponseBody` sum (TextBody / BytesBody / EmptyBody), the matching
+/// response_types variant carries `BitArray`, and the dispatcher wraps
+/// the handler's payload in `BytesBody(data)`.
+pub fn server_octet_stream_response_emits_bytes_body_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /thumbnail:
+    get:
+      operationId: getThumbnail
+      responses:
+        '200':
+          description: PNG bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let server_files = server_gen.generate(ctx)
+  let type_files = types_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(server_files, fn(f) { f.path == "router.gleam" })
+  let assert Ok(response_types_file) =
+    list.find(type_files, fn(f) { f.path == "response_types.gleam" })
+
+  // The router emits a ResponseBody sum with the three documented variants.
+  string.contains(router_file.content, "pub type ResponseBody")
+  |> should.be_true()
+  string.contains(router_file.content, "TextBody(String)") |> should.be_true()
+  string.contains(router_file.content, "BytesBody(BitArray)")
+  |> should.be_true()
+  string.contains(router_file.content, "EmptyBody") |> should.be_true()
+
+  // ServerResponse threads the new sum (not raw String) as its body.
+  string.contains(router_file.content, "body: ResponseBody")
+  |> should.be_true()
+  string.contains(router_file.content, "body: String,") |> should.be_false()
+
+  // Octet-stream responses dispatch via BytesBody — the bytes are not
+  // smuggled through json.to_string or a String literal.
+  string.contains(router_file.content, "body: BytesBody(data)")
+  |> should.be_true()
+  string.contains(
+    router_file.content,
+    "[#(\"content-type\", \"application/octet-stream\")]",
+  )
+  |> should.be_true()
+
+  // The matching response_types variant carries BitArray (issue #304:
+  // ir_build.gleam emits "BitArray" for octet-stream variants instead
+  // of "String"). The fact that the variant is BitArray is what makes
+  // the BytesBody wrapping type-check.
+  string.contains(
+    response_types_file.content,
+    "GetThumbnailResponseOk(BitArray)",
+  )
+  |> should.be_true()
+}
+
+/// JSON responses keep using `TextBody(json.to_string(...))` so the
+/// existing String-based contract continues to work end-to-end. This
+/// guards against accidentally collapsing every body into BytesBody.
+pub fn server_json_response_uses_text_body_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+
+  // JSON dispatch wraps the encoded String in TextBody(...).
+  string.contains(router_file.content, "TextBody(json.to_string(")
+  |> should.be_true()
+  // No `body: BytesBody(...)` wrapping for a JSON-only spec — the
+  // ResponseBody type definition still names BytesBody (always present),
+  // but no dispatcher arm uses it.
+  string.contains(router_file.content, "body: BytesBody(") |> should.be_false()
+  // 404 fallback is still TextBody-shaped Problem JSON.
+  string.contains(
+    router_file.content,
+    "TextBody(\"{\\\"type\\\":\\\"about:blank\\\"",
+  )
+  |> should.be_true()
+}
+
+/// A response with no `content` block must dispatch to `EmptyBody`,
+/// preserving the previous "no body, just status" semantics without
+/// forcing handlers to invent a placeholder String.
+pub fn server_empty_response_emits_empty_body_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /pets/{id}:
+    delete:
+      operationId: deletePet
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: deleted
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+
+  // 204 must dispatch via EmptyBody, not body: "" or TextBody("").
+  string.contains(
+    router_file.content,
+    "status: 204, body: EmptyBody, headers: [])",
+  )
+  |> should.be_true()
+  string.contains(router_file.content, "status: 204, body: \"\"")
+  |> should.be_false()
 }
