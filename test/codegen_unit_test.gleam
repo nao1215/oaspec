@@ -1761,6 +1761,71 @@ components:
 }
 
 // ===================================================================
+// Encoder: optional non-nullable field omits key on None (issue #303)
+// ===================================================================
+
+/// A property that is optional (not in `required`) and not `nullable: true`
+/// must be omitted from the JSON object when its `Option(_)` field is
+/// `None` — emitting `"<key>": null` is schema-invalid per OpenAPI 3.0/3.1.
+pub fn encoders_optional_non_nullable_field_is_omitted_on_none_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        details:
+          type: array
+          items:
+            type: string
+        comment:
+          type: string
+          nullable: true
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let files = encoders.generate(ctx)
+  let assert Ok(encode_file) =
+    list.find(files, fn(f) { f.path == "encode.gleam" })
+
+  // Optional + non-nullable `details` must use the omit-on-None shape.
+  string.contains(encode_file.content, "case value.details {")
+  |> should.be_true()
+  string.contains(encode_file.content, "option.None -> []") |> should.be_true()
+  string.contains(
+    encode_file.content,
+    "option.Some(x) -> [#(\"details\", json.array(x, json.string))]",
+  )
+  |> should.be_true()
+
+  // Optional + nullable `comment` keeps the json.nullable shape
+  // (None → null on the wire is permitted because nullable: true).
+  string.contains(
+    encode_file.content,
+    "json.nullable(value.comment, json.string)",
+  )
+  |> should.be_true()
+
+  // The buggy fallback must not survive: no `json.nullable(value.details, ...)`.
+  string.contains(encode_file.content, "json.nullable(value.details")
+  |> should.be_false()
+
+  // The new shape uses list.flatten when any property is optional+non-nullable.
+  string.contains(encode_file.content, "list.flatten([") |> should.be_true()
+}
+
+// ===================================================================
 // Enum query parameter codegen (issue #305)
 // ===================================================================
 

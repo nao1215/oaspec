@@ -2,6 +2,8 @@
 
 import api/types
 import gleam/json
+import gleam/list
+import gleam/option
 
 pub fn encode_admin_user_type_json(value: types.AdminUserType) -> json.Json {
   let str = case value {
@@ -86,17 +88,20 @@ pub fn encode_user_type_to_string(value: types.UserType) -> String {
 }
 
 pub fn encode_admin_user_json(value: types.AdminUser) -> json.Json {
-  json.object([
-    #("id", json.string(value.id)),
-    #("name", json.string(value.name)),
-    #(
-      "permissions",
-      json.nullable(value.permissions, fn(items) {
-        json.array(items, json.string)
-      }),
-    ),
-    #("type", json.nullable(value.type_, encode_admin_user_type_json)),
-  ])
+  json.object(
+    list.flatten([
+      [#("id", json.string(value.id))],
+      [#("name", json.string(value.name))],
+      case value.permissions {
+        option.None -> []
+        option.Some(x) -> [#("permissions", json.array(x, json.string))]
+      },
+      case value.type_ {
+        option.None -> []
+        option.Some(x) -> [#("type", encode_admin_user_type_json(x))]
+      },
+    ]),
+  )
 }
 
 pub fn encode_admin_user(value: types.AdminUser) -> String {
@@ -104,14 +109,16 @@ pub fn encode_admin_user(value: types.AdminUser) -> String {
 }
 
 pub fn encode_error_json(value: types.Error) -> json.Json {
-  json.object([
-    #("code", json.int(value.code)),
-    #(
-      "details",
-      json.nullable(value.details, fn(items) { json.array(items, json.string) }),
-    ),
-    #("message", json.string(value.message)),
-  ])
+  json.object(
+    list.flatten([
+      [#("code", json.int(value.code))],
+      case value.details {
+        option.None -> []
+        option.Some(x) -> [#("details", json.array(x, json.string))]
+      },
+      [#("message", json.string(value.message))],
+    ]),
+  )
 }
 
 pub fn encode_error(value: types.Error) -> String {
@@ -143,10 +150,18 @@ pub fn encode_get_user_response_ok(value: types.GetUserResponseOk) -> String {
 }
 
 pub fn encode_pagination_json(value: types.Pagination) -> json.Json {
-  json.object([
-    #("page", json.nullable(value.page, json.int)),
-    #("per_page", json.nullable(value.per_page, json.int)),
-  ])
+  json.object(
+    list.flatten([
+      case value.page {
+        option.None -> []
+        option.Some(x) -> [#("page", json.int(x))]
+      },
+      case value.per_page {
+        option.None -> []
+        option.Some(x) -> [#("per_page", json.int(x))]
+      },
+    ]),
+  )
 }
 
 pub fn encode_pagination(value: types.Pagination) -> String {
@@ -156,17 +171,26 @@ pub fn encode_pagination(value: types.Pagination) -> String {
 pub fn encode_post_search_request_json(
   value: types.PostSearchRequest,
 ) -> json.Json {
-  json.object([
-    #(
-      "filters",
-      json.nullable(value.filters, fn(items) {
-        json.array(items, encode_filter_json)
-      }),
-    ),
-    #("page", json.nullable(value.page, json.int)),
-    #("per_page", json.nullable(value.per_page, json.int)),
-    #("query", json.nullable(value.query, json.string)),
-  ])
+  json.object(
+    list.flatten([
+      case value.filters {
+        option.None -> []
+        option.Some(x) -> [#("filters", json.array(x, encode_filter_json))]
+      },
+      case value.page {
+        option.None -> []
+        option.Some(x) -> [#("page", json.int(x))]
+      },
+      case value.per_page {
+        option.None -> []
+        option.Some(x) -> [#("per_page", json.int(x))]
+      },
+      case value.query {
+        option.None -> []
+        option.Some(x) -> [#("query", json.string(x))]
+      },
+    ]),
+  )
 }
 
 pub fn encode_post_search_request(value: types.PostSearchRequest) -> String {
@@ -176,15 +200,18 @@ pub fn encode_post_search_request(value: types.PostSearchRequest) -> String {
 pub fn encode_post_search_response_ok_json(
   value: types.PostSearchResponseOk,
 ) -> json.Json {
-  json.object([
-    #(
-      "results",
-      json.nullable(value.results, fn(items) {
-        json.array(items, encode_user_json)
-      }),
-    ),
-    #("total", json.nullable(value.total, json.int)),
-  ])
+  json.object(
+    list.flatten([
+      case value.results {
+        option.None -> []
+        option.Some(x) -> [#("results", json.array(x, encode_user_json))]
+      },
+      case value.total {
+        option.None -> []
+        option.Some(x) -> [#("total", json.int(x))]
+      },
+    ]),
+  )
 }
 
 pub fn encode_post_search_response_ok(
@@ -194,12 +221,17 @@ pub fn encode_post_search_response_ok(
 }
 
 pub fn encode_regular_user_json(value: types.RegularUser) -> json.Json {
-  json.object([
-    #("id", json.string(value.id)),
-    #("name", json.string(value.name)),
-    #("subscription", json.nullable(value.subscription, json.string)),
-    #("type", json.nullable(value.type_, encode_regular_user_type_json)),
-  ])
+  json.object(
+    list.flatten([
+      [#("id", json.string(value.id))],
+      [#("name", json.string(value.name))],
+      [#("subscription", json.nullable(value.subscription, json.string))],
+      case value.type_ {
+        option.None -> []
+        option.Some(x) -> [#("type", encode_regular_user_type_json(x))]
+      },
+    ]),
+  )
 }
 
 pub fn encode_regular_user(value: types.RegularUser) -> String {
@@ -207,11 +239,16 @@ pub fn encode_regular_user(value: types.RegularUser) -> String {
 }
 
 pub fn encode_user_json(value: types.User) -> json.Json {
-  json.object([
-    #("id", json.string(value.id)),
-    #("name", json.string(value.name)),
-    #("type", json.nullable(value.type_, encode_user_type_json)),
-  ])
+  json.object(
+    list.flatten([
+      [#("id", json.string(value.id))],
+      [#("name", json.string(value.name))],
+      case value.type_ {
+        option.None -> []
+        option.Some(x) -> [#("type", encode_user_type_json(x))]
+      },
+    ]),
+  )
 }
 
 pub fn encode_user(value: types.User) -> String {

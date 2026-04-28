@@ -2,15 +2,25 @@
 
 import api/types
 import gleam/json
+import gleam/list
+import gleam/option
 
 pub fn encode_create_pet_request_json(
   value: types.CreatePetRequest,
 ) -> json.Json {
-  json.object([
-    #("name", json.string(value.name)),
-    #("status", json.nullable(value.status, encode_pet_status_json)),
-    #("tag", json.nullable(value.tag, json.string)),
-  ])
+  json.object(
+    list.flatten([
+      [#("name", json.string(value.name))],
+      case value.status {
+        option.None -> []
+        option.Some(x) -> [#("status", encode_pet_status_json(x))]
+      },
+      case value.tag {
+        option.None -> []
+        option.Some(x) -> [#("tag", json.string(x))]
+      },
+    ]),
+  )
 }
 
 pub fn encode_create_pet_request(value: types.CreatePetRequest) -> String {
@@ -29,12 +39,17 @@ pub fn encode_error(value: types.Error) -> String {
 }
 
 pub fn encode_pet_json(value: types.Pet) -> json.Json {
-  json.object([
-    #("id", json.int(value.id)),
-    #("name", json.string(value.name)),
-    #("status", encode_pet_status_json(value.status)),
-    #("tag", json.nullable(value.tag, json.string)),
-  ])
+  json.object(
+    list.flatten([
+      [#("id", json.int(value.id))],
+      [#("name", json.string(value.name))],
+      [#("status", encode_pet_status_json(value.status))],
+      case value.tag {
+        option.None -> []
+        option.Some(x) -> [#("tag", json.string(x))]
+      },
+    ]),
+  )
 }
 
 pub fn encode_pet(value: types.Pet) -> String {

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **codegen**: Optional non-nullable schema properties are now omitted
+  from the encoded JSON object when their `Option` field is `None`.
+  Previously the generator emitted `"<key>": null` via `json.nullable`,
+  producing schema-invalid output (per OpenAPI 3.0/3.1 only fields
+  marked `nullable: true` may carry `null` on the wire). When at least
+  one property in a schema falls into this bucket, encoders now emit
+  `json.object(list.flatten([...]))` with each optional-non-nullable
+  field contributing either `[]` (None) or `[#(<key>, encode(x))]`
+  (Some). Required and nullable properties are unchanged. (#303)
 - **codegen**: Query parameters whose schema `$ref`s a string-enum
   component now generate compilable Gleam. Previously the router tried
   to assign the raw `String` from `dict.get(query, key)` directly into

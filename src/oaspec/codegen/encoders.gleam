@@ -8,6 +8,7 @@
 //// duplication is stable, and extracting a shared dispatch module is
 //// tracked as follow-up to #212.
 
+import gleam/bool
 import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
@@ -92,6 +93,26 @@ fn generate_encoders(
       }
     })
 
+  // Issue #303: object schemas with at least one optional non-nullable
+  // property emit `case value.<f> { option.None -> [] option.Some(x) -> ... }`
+  // wrapped in `list.flatten([...])`. Both the option module and the list
+  // module need to be imported for those modules to resolve.
+  let needs_option_and_list =
+    list.any(schemas, fn(entry) {
+      let #(_, schema_ref) = entry
+      case schema_ref {
+        Inline(ObjectSchema(properties:, required:, ..)) ->
+          properties
+          |> ir_build.sorted_entries
+          |> list.any(fn(p) {
+            let #(prop_name, prop_ref) = p
+            !list.contains(required, prop_name)
+            && !schema_ref_is_nullable(prop_ref)
+          })
+        _ -> False
+      }
+    })
+
   let base_imports = case needs_dict, needs_dynamic {
     True, True -> [
       "gleam/dict",
@@ -102,6 +123,13 @@ fn generate_encoders(
     ]
     True, False -> ["gleam/dict", "gleam/json", "gleam/list"]
     _, _ -> ["gleam/json"]
+  }
+  let base_imports = case needs_option_and_list {
+    True ->
+      base_imports
+      |> ensure_import("gleam/list")
+      |> ensure_import("gleam/option")
+    False -> base_imports
   }
   let imports = case needs_types {
     True ->
@@ -278,14 +306,6 @@ fn generate_encoder(
         Typed(_) | Untyped -> True
         Forbidden | Unspecified -> False
       }
-      let sb = case has_ap {
-        True ->
-          sb
-          |> se.indent(1, "let base_props = [")
-        False ->
-          sb
-          |> se.indent(1, "json.object([")
-      }
 
       // Filter out readOnly properties -- they should not be sent to the server
       let all_props = ir_build.sorted_entries(properties)
@@ -303,6 +323,36 @@ fn generate_encoder(
           let #(_, prop_ref, _) = entry
           !type_gen.schema_ref_is_read_only(prop_ref, ctx)
         })
+
+      // Issue #303: a property that is in `properties` but not in `required`
+      // and is not `nullable: true` MUST be omitted entirely from the JSON
+      // object when its `Option` field is `None` — emitting `"<key>": null`
+      // is schema-invalid (only `nullable: true` allows null on the wire).
+      // When any property falls into that bucket we switch the encoder
+      // shape from a static `[<pairs>]` literal to `list.flatten([<lists>])`
+      // so each optional-non-nullable property can contribute either an
+      // empty list (None) or a singleton pair list (Some).
+      let has_omittable =
+        list.any(props_with_names, fn(entry) {
+          let #(prop_name, prop_ref, _) = entry
+          !list.contains(required, prop_name)
+          && !schema_ref_is_nullable(prop_ref)
+        })
+
+      let sb = case has_ap, has_omittable {
+        True, False ->
+          sb
+          |> se.indent(1, "let base_props = [")
+        True, True ->
+          sb
+          |> se.indent(1, "let base_props = list.flatten([")
+        False, False ->
+          sb
+          |> se.indent(1, "json.object([")
+        False, True ->
+          sb
+          |> se.indent(1, "json.object(list.flatten([")
+      }
       let sb =
         list.index_fold(props_with_names, sb, fn(sb, entry, idx) {
           let #(prop_name, prop_ref, field_name) = entry
@@ -323,14 +373,16 @@ fn generate_encoder(
           // Issue #296: required+nullable properties have Gleam type
           // Option(T) and must use json.nullable, not the bare encoder.
           let is_nullable = schema_ref_is_nullable(prop_ref)
-          case is_required, is_nullable {
-            True, False ->
+          let is_omittable = !is_required && !is_nullable
+          case has_omittable, is_required, is_nullable, is_omittable {
+            // No optional-non-nullable in the schema → static list, current shape.
+            False, True, False, _ ->
               sb
               |> se.indent(
                 2,
                 "#(\"" <> prop_name <> "\", " <> encoder_expr <> ")" <> trailing,
               )
-            _, _ ->
+            False, _, _, _ ->
               sb
               |> se.indent(
                 2,
@@ -343,15 +395,65 @@ fn generate_encoder(
                   <> "))"
                   <> trailing,
               )
+            // Schema has at least one optional-non-nullable → list-of-lists.
+            True, _, _, True -> {
+              // Issue #303: omit the key when the value is None.
+              // Re-derive the encoder expression with `x` substituted for
+              // `value.<field>` so we encode the unwrapped Some value.
+              let some_encoder_expr =
+                schema_ref_to_json_encoder("x", prop_ref, name, prop_name)
+              sb
+              |> se.indent(2, "case value." <> field_name <> " {")
+              |> se.indent(3, "option.None -> []")
+              |> se.indent(
+                3,
+                "option.Some(x) -> [#(\""
+                  <> prop_name
+                  <> "\", "
+                  <> some_encoder_expr
+                  <> ")]",
+              )
+              |> se.indent(2, "}" <> trailing)
+            }
+            True, True, False, _ ->
+              sb
+              |> se.indent(
+                2,
+                "[#(\""
+                  <> prop_name
+                  <> "\", "
+                  <> encoder_expr
+                  <> ")]"
+                  <> trailing,
+              )
+            True, _, _, _ ->
+              // Required+nullable or optional+nullable: keep `json.nullable`
+              // (None → wire-format null is permitted because nullable: true).
+              sb
+              |> se.indent(
+                2,
+                "[#(\""
+                  <> prop_name
+                  <> "\", json.nullable(value."
+                  <> field_name
+                  <> ", "
+                  <> schema_ref_to_json_encoder_fn(prop_ref, name, prop_name)
+                  <> "))]"
+                  <> trailing,
+              )
           }
         })
 
+      let close_props_list = case has_omittable {
+        True -> "])"
+        False -> "]"
+      }
       let sb = case additional_properties {
         Typed(ap_ref) -> {
           let inner_encoder_fn =
             schema_ref_to_json_encoder_fn(ap_ref, name, "additional_properties")
           sb
-          |> se.indent(1, "]")
+          |> se.indent(1, close_props_list)
           |> se.indent(
             1,
             "let extra_props = dict.to_list(value.additional_properties) |> list.map(fn(entry) { let #(k, v) = entry; #(k, "
@@ -364,7 +466,7 @@ fn generate_encoder(
           // Untyped additional_properties (Dynamic) are re-encoded using
           // dynamic type inspection to preserve round-trip fidelity.
           sb
-          |> se.indent(1, "]")
+          |> se.indent(1, close_props_list)
           |> se.indent(
             1,
             "let extra_props = dict.to_list(value.additional_properties) |> list.map(fn(entry) { let #(k, v) = entry\n  #(k, encode_dynamic(v)) })",
@@ -373,7 +475,10 @@ fn generate_encoder(
         }
         Forbidden | Unspecified ->
           sb
-          |> se.indent(1, "])")
+          |> se.indent(1, case has_omittable {
+            True -> "]))"
+            False -> "])"
+          })
       }
 
       let sb =
@@ -774,6 +879,16 @@ fn schema_ref_is_nullable(ref: SchemaRef) -> Bool {
     Inline(inline_schema) -> schema.is_nullable(inline_schema)
     Reference(..) -> False
   }
+}
+
+/// Append `name` to `imports` if it isn't already there. Used by the
+/// import builder to keep the list deterministic when more than one
+/// codepath wants the same module (issue #303 wires `gleam/option` and
+/// `gleam/list` for optional-non-nullable encoding even when those
+/// modules were already pulled in by additionalProperties handling).
+fn ensure_import(imports: List(String), name: String) -> List(String) {
+  use <- bool.guard(list.contains(imports, name), imports)
+  list.append(imports, [name])
 }
 
 /// Get element at index from a list, or return a default.
