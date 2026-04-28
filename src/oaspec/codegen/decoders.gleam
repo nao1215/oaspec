@@ -925,9 +925,15 @@ fn generate_oneof_decoder(
               }
             })
 
-          // For unknown discriminator values, decode as the first variant
-          // then immediately fail. This avoids needing a placeholder value
-          // while maintaining the correct return type.
+          // For unknown discriminator values, fail immediately with a
+          // discriminator-specific error message. The second decode.then
+          // is unreachable at runtime — the leading decode.failure short-
+          // circuits decode.then, so the inner variant decoder is never
+          // invoked — but it's required at compile time to give the case
+          // branch the right Decoder(types.<TypeName>) type. Without this
+          // structure, an unknown discriminator whose body also fails to
+          // match the first variant would surface the *first variant's*
+          // decode error instead of the discriminator error (issue #308).
           let first_ref_decoder = case schemas {
             [Reference(name:, ..), ..] -> {
               let ref_name = name
@@ -944,9 +950,34 @@ fn generate_oneof_decoder(
             _ -> "types." <> type_name
           }
 
+          // Build the "expected" list mirroring the discriminator values
+          // each variant arm matches above. When the spec supplies an
+          // explicit `mapping`, those keys win; otherwise each variant
+          // falls back to its ref name (matching `get_discriminator_value`
+          // semantics on lines 1099-1119).
+          let valid_disc_values =
+            schemas
+            |> list.filter_map(fn(s_ref) {
+              case s_ref {
+                Reference(ref:, name:) ->
+                  Ok(get_discriminator_value(disc, ref, name))
+                _ -> Error(Nil)
+              }
+            })
+            |> list.sort(string.compare)
+            |> string.join("|")
+
           let sb =
             sb
             |> se.indent(2, "_ -> {")
+            |> se.indent(
+              3,
+              "use _ <- decode.then(decode.failure(Nil, \""
+                <> type_name
+                <> ": unknown discriminator '\" <> disc_value <> \"' (expected "
+                <> valid_disc_values
+                <> ")\"))",
+            )
             |> se.indent(3, "use v <- decode.then(" <> first_ref_decoder <> ")")
             |> se.indent(
               3,

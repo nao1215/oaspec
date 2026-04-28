@@ -174,6 +174,12 @@ pub fn get_user_response_ok_decoder() -> decode.Decoder(types.GetUserResponseOk)
       decode.success(types.GetUserResponseOkRegularUser(inner))
     }
     _ -> {
+      use _ <- decode.then(decode.failure(
+        Nil,
+        "GetUserResponseOk: unknown discriminator '"
+          <> disc_value
+          <> "' (expected AdminUser|RegularUser)",
+      ))
       use v <- decode.then(admin_user_decoder())
       decode.failure(types.GetUserResponseOkAdminUser(v), "GetUserResponseOk")
     }

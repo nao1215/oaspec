@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **codegen**: Discriminated `oneOf` decoders no longer surface a misleading
+  inner-variant decode error when the discriminator value is unknown. The
+  catch-all branch now short-circuits with a discriminator-specific
+  message (`<TypeName>: unknown discriminator '<value>' (expected
+  <valid|values>)`) before the first variant's decoder runs. (#308)
+
 ## [0.23.0] - 2026-04-27
 
 ### Fixed

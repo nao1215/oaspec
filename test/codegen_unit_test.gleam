@@ -1755,3 +1755,73 @@ components:
   string.contains(client_file.content, "decode.decode_problem(resp.body)")
   |> should.be_true()
 }
+
+// ===================================================================
+// oneOf with discriminator: unknown-value fallback (issue #308)
+// ===================================================================
+
+/// The unknown-discriminator branch must surface a discriminator-specific
+/// error message FIRST, before any inner variant decoder runs. The fix
+/// uses `decode.then(decode.failure(Nil, ...), ...)` to short-circuit
+/// the chain so the inner decoder is never invoked at runtime.
+pub fn decoders_unknown_discriminator_short_circuits_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Shape:
+      oneOf:
+        - $ref: '#/components/schemas/Circle'
+        - $ref: '#/components/schemas/Square'
+      discriminator:
+        propertyName: kind
+        mapping:
+          circle: '#/components/schemas/Circle'
+          square: '#/components/schemas/Square'
+    Circle:
+      type: object
+      required: [kind, radius]
+      properties:
+        kind:
+          type: string
+          enum: [circle]
+        radius:
+          type: number
+    Square:
+      type: object
+      required: [kind, side]
+      properties:
+        kind:
+          type: string
+          enum: [square]
+        side:
+          type: number
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let files = decoders.generate(ctx)
+  let assert Ok(decode_file) =
+    list.find(files, fn(f) { f.path == "decode.gleam" })
+
+  // The catch-all branch must lead with `decode.failure(Nil, ...)` so
+  // the inner variant decoder is never run on unknown discriminators.
+  string.contains(decode_file.content, "decode.failure(Nil,")
+  |> should.be_true()
+
+  // Error message must name the discriminator value at runtime and the
+  // valid alternatives at codegen time.
+  string.contains(decode_file.content, "unknown discriminator '")
+  |> should.be_true()
+  string.contains(decode_file.content, "<> disc_value <>")
+  |> should.be_true()
+  // Valid values are sorted alphabetically for deterministic output.
+  string.contains(decode_file.content, "(expected circle|square)")
+  |> should.be_true()
+}
