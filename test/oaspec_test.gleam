@@ -13487,6 +13487,67 @@ components:
   }
 }
 
+// --- Issue #337: oneOf decoders must enforce exactly-one-match
+//                 semantics, not first-match (anyOf) ---
+
+pub fn oneof_decoder_rejects_multi_branch_matches_test() {
+  // A non-discriminator `oneOf` whose two branches each accept a
+  // body that the other also accepts (no closed-schema enforcement
+  // in this fixture). The generated decoder must NOT compile down
+  // to `decode.one_of(first, [rest..])` — that is `anyOf`
+  // (first-match) semantics. JSON Schema 2020-12 §10.2.1.3 demands
+  // that exactly one branch validates; otherwise the decode must
+  // fail.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /uploads:
+    post:
+      operationId: createUpload
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    InlineUpload:
+      type: object
+      required: [content_b64]
+      properties:
+        content_b64: { type: string }
+    ReferencedUpload:
+      type: object
+      required: [source_url]
+      properties:
+        source_url: { type: string }
+    UploadEnvelope:
+      oneOf:
+        - $ref: '#/components/schemas/InlineUpload'
+        - $ref: '#/components/schemas/ReferencedUpload'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let assert Ok(decode_file) =
+    list.find(decoders.generate(ctx), fn(f) { f.path == "decode.gleam" })
+
+  // Strict-oneOf marker: the generator must emit per-branch
+  // independent runs (`decode.run`) so it can count successful
+  // matches, plus a multi-match rejection diagnostic. The exact
+  // wording is an implementation detail; the literal `oneOf` in
+  // the failure message is the canonical disambiguator vs.
+  // existing `additionalProperties` / discriminator failure paths.
+  let runs_each_branch = string.contains(decode_file.content, "decode.run(")
+  let multi_match_marker =
+    string.contains(decode_file.content, "matched multiple")
+    || string.contains(decode_file.content, "oneOf")
+  case runs_each_branch && multi_match_marker {
+    True -> Nil
+    False -> should.fail()
+  }
+}
+
 pub fn additional_properties_false_via_allof_emits_unknown_key_check_test() {
   // Same contract as the direct case, but the closedness signal
   // arrives through allOf composition: `Upload` itself does not

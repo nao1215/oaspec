@@ -110,6 +110,16 @@ pub fn schema_has_forbidden_additional_properties(
   schema_utils.schema_has_forbidden_additional_properties(schema_ref, ctx)
 }
 
+/// Check if a schema is — or contains — a non-discriminator `oneOf` whose
+/// strict decoder needs `gleam/list` + `gleam/result` imported in
+/// `decode.gleam`.
+pub fn schema_has_non_discriminator_oneof(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Bool {
+  schema_utils.schema_has_non_discriminator_oneof(schema_ref, ctx)
+}
+
 /// Check if a schema has any optional or nullable fields that would need Option.
 pub fn schema_has_optional_fields(schema_ref: SchemaRef, ctx: Context) -> Bool {
   schema_utils.schema_has_optional_fields(schema_ref, ctx)

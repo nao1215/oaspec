@@ -8,7 +8,7 @@ import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/openapi/resolver
 import oaspec/internal/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, Forbidden, Inline,
-  ObjectSchema, Reference, StringSchema, Typed, Untyped,
+  ObjectSchema, OneOfSchema, Reference, StringSchema, Typed, Untyped,
 }
 
 /// Check if a schema has typed or untyped additionalProperties that would need Dict.
@@ -50,6 +50,38 @@ pub fn schema_has_forbidden_additional_properties(
         Ok(schema_obj) ->
           schema_has_forbidden_additional_properties(Inline(schema_obj), ctx)
         // nolint: thrown_away_error -- unresolved refs are treated as not having forbidden additionalProperties; the resolver reports the ref error separately
+        Error(_) -> False
+      }
+    _ -> False
+  }
+}
+
+/// Check if a schema is — or transitively contains — a `oneOf` with at least
+/// one $ref variant and no discriminator. The strict-oneOf decoder body
+/// generated for that shape uses `list.filter_map` and `result.map`, so the
+/// generator must add `gleam/list` and `gleam/result` to the imports of
+/// `decode.gleam` when this returns True.
+pub fn schema_has_non_discriminator_oneof(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Bool {
+  case schema_ref {
+    Inline(OneOfSchema(schemas:, discriminator: option.None, ..)) ->
+      list.any(schemas, fn(s) {
+        case s {
+          Reference(..) -> True
+          _ -> False
+        }
+      })
+    Inline(OneOfSchema(schemas:, ..)) ->
+      list.any(schemas, fn(s) { schema_has_non_discriminator_oneof(s, ctx) })
+    Inline(AllOfSchema(schemas:, ..)) ->
+      list.any(schemas, fn(s) { schema_has_non_discriminator_oneof(s, ctx) })
+    Reference(..) ->
+      case resolver.resolve_schema_ref(schema_ref, context.spec(ctx)) {
+        Ok(schema_obj) ->
+          schema_has_non_discriminator_oneof(Inline(schema_obj), ctx)
+        // nolint: thrown_away_error -- unresolved refs are treated as not having strict-oneOf needs; the resolver reports the ref error separately
         Error(_) -> False
       }
     _ -> False
