@@ -1,6 +1,6 @@
 import gleeunit
 import gleeunit/should
-import oaspec/openapi/diagnostic_format
+import oaspec/internal/openapi/diagnostic_format
 
 pub fn main() {
   gleeunit.main()

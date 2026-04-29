@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **internal modules**: The codegen IR, OpenAPI traversal helpers
+  (resolve, normalize, hoist, dedup, capability check, location
+  index, schema and spec ASTs, parser_error, parser_schema,
+  diagnostic_format, external_loader, operations, provenance,
+  resolver, value), capability detection, formatter, CLI dispatch,
+  and util helpers all moved under `src/oaspec/internal/` and the
+  directory tree is now registered as `internal_modules` in
+  `gleam.toml`. The published Library API surface — the
+  `oaspec/openapi/parser`, `oaspec/openapi/diagnostic`,
+  `oaspec/config`, `oaspec/generate`, and `oaspec/codegen/writer`
+  modules — is unchanged. The Hex docs no longer publish the
+  internal modules, and downstream pins to the now-internal
+  identifiers will need to migrate to the curated facade. With
+  most of the IR / parser implementation behind an `internal/`
+  boundary, internal renames no longer require a major bump. (#328)
+
+### Fixed
+
+- **codegen/server_request_decode**: The deep-object query parameter
+  decoder no longer emits `let assert Ok([v, ..]) = dict.get(...)`
+  for required fields. The generator now emits a `case` expression
+  that falls back to a per-type zero default (`""` / `0` / `0.0` /
+  `False` / `[]` / `dynamic.nil()`) when the deep-object key is
+  absent, mirroring the existing optional-field policy. The same
+  rewrite applies to the required-body extractor: the body decoder
+  is no longer wrapped in `let assert Ok(_) = decode_fn` — the
+  generated handler now matches on the `Result` and falls back to a
+  zero-valued body if decoding fails. Generated server code can no
+  longer crash the BEAM process on adversarial query strings or
+  body payloads. Completes the partial fix from v0.26.0. (#327)
+
 ## [0.26.0] - 2026-04-28
 
 ### Fixed

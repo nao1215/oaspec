@@ -5,14 +5,14 @@ import gleam/option.{None, Some}
 import gleam/string
 import gleeunit
 import gleeunit/should
-import oaspec/codegen/context
 import oaspec/config
-import oaspec/formatter
 import oaspec/generate
+import oaspec/internal/codegen/context
+import oaspec/internal/formatter
+import oaspec/internal/openapi/resolve
+import oaspec/internal/openapi/spec
+import oaspec/internal/util/http
 import oaspec/openapi/parser
-import oaspec/openapi/resolve
-import oaspec/openapi/spec
-import oaspec/util/http
 import simplifile
 
 pub fn main() {

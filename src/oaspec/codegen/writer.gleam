@@ -1,7 +1,7 @@
 import gleam/list
 import gleam/result
-import oaspec/codegen/context.{type GeneratedFile}
 import oaspec/config.{Both, Client, Server}
+import oaspec/internal/codegen/context.{type GeneratedFile}
 import simplifile
 
 /// Errors that can occur during file writing.

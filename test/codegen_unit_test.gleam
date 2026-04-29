@@ -4,26 +4,26 @@ import gleam/option.{None, Some}
 import gleam/string
 import gleeunit
 import gleeunit/should
-import oaspec/codegen/allof_merge
-import oaspec/codegen/client as client_gen
-import oaspec/codegen/client_request
-import oaspec/codegen/client_response
-import oaspec/codegen/client_security
-import oaspec/codegen/context
-import oaspec/codegen/decoders
-import oaspec/codegen/encoders
-import oaspec/codegen/ir_build
-import oaspec/codegen/server as server_gen
-import oaspec/codegen/server_request_decode
-import oaspec/codegen/types as types_gen
 import oaspec/config
-import oaspec/openapi/hoist
+import oaspec/internal/codegen/allof_merge
+import oaspec/internal/codegen/client as client_gen
+import oaspec/internal/codegen/client_request
+import oaspec/internal/codegen/client_response
+import oaspec/internal/codegen/client_security
+import oaspec/internal/codegen/context
+import oaspec/internal/codegen/decoders
+import oaspec/internal/codegen/encoders
+import oaspec/internal/codegen/ir_build
+import oaspec/internal/codegen/server as server_gen
+import oaspec/internal/codegen/server_request_decode
+import oaspec/internal/codegen/types as types_gen
+import oaspec/internal/openapi/hoist
+import oaspec/internal/openapi/schema
+import oaspec/internal/openapi/spec
+import oaspec/internal/util/content_type
+import oaspec/internal/util/http
+import oaspec/internal/util/string_extra as se
 import oaspec/openapi/parser
-import oaspec/openapi/schema
-import oaspec/openapi/spec
-import oaspec/util/content_type
-import oaspec/util/http
-import oaspec/util/string_extra as se
 import test_helpers
 
 pub fn main() {

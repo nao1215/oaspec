@@ -2,12 +2,12 @@ import gleam/dict
 import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
-import oaspec/codegen/context
-import oaspec/codegen/import_analysis
 import oaspec/codegen/writer
 import oaspec/config
-import oaspec/openapi/schema
-import oaspec/openapi/spec
+import oaspec/internal/codegen/context
+import oaspec/internal/codegen/import_analysis
+import oaspec/internal/openapi/schema
+import oaspec/internal/openapi/spec
 
 pub fn main() {
   gleeunit.main()
