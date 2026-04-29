@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-04-28
+
 ### Changed
 
 - **internal modules**: The codegen IR, OpenAPI traversal helpers
