@@ -990,7 +990,6 @@ pub fn is_deep_object_param(
   operation_ir.is_deep_object_param(param, ctx)
 }
 
-
 /// Return a function expression that converts an array item to String.
 /// Used in generated code: `list.map(param, <fn>)`.
 fn array_item_to_string_fn(items: schema.SchemaRef, ctx: Context) -> String {

@@ -67,6 +67,10 @@ jobs:
         run: |
           cd examples/server_adapter && gleam deps download && gleam build --warnings-as-errors && gleam run
 
+      - name: Adapter — oaspec_httpc
+        run: |
+          cd adapters/httpc && gleam deps download && gleam build --warnings-as-errors
+
       - name: README library examples compile check
         run: bash scripts/check_readme_examples.sh
 
