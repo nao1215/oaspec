@@ -18,9 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   reason `"additionalProperties"` if any extras remain. The check
   happens in the decoder body because `gleam/dynamic/decode`
   consumes only declared fields, so a post-decode validator could
-  not recover the raw key set. Behavioural change for clients
+  not recover the raw key set. Behavioral change for clients
   already mishandling extras: their previously-passing JSON now
-  rejects, surfacing the spec violation. The shape `additional_properties: true` and `additionalProperties: { schema }`
+  rejects, surfacing the spec violation. The `additionalProperties: true` and `additionalProperties: { schema }`
   variants are unchanged. (#336)
 
 ### Changed
