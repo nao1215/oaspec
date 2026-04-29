@@ -350,15 +350,16 @@ Describe 'oaspec generate'
       The contents of file "$TEST_OUTPUT_DIR_CLIENT/api/client.gleam" should include 'pub fn delete_pet'
     End
 
-    It 'client uses http request construction'
-      The contents of file "$TEST_OUTPUT_DIR_CLIENT/api/client.gleam" should include 'import gleam/http/request'
-      The contents of file "$TEST_OUTPUT_DIR_CLIENT/api/client.gleam" should include 'request.to'
-      The contents of file "$TEST_OUTPUT_DIR_CLIENT/api/client.gleam" should include 'request.set_method'
+    It 'client uses oaspec/transport instead of gleam/http/request'
+      The contents of file "$TEST_OUTPUT_DIR_CLIENT/api/client.gleam" should include 'import oaspec/transport'
+      The contents of file "$TEST_OUTPUT_DIR_CLIENT/api/client.gleam" should include 'transport.Request('
+      The contents of file "$TEST_OUTPUT_DIR_CLIENT/api/client.gleam" should not include 'import gleam/http/request'
     End
 
-    It 'client has ClientConfig type'
-      The contents of file "$TEST_OUTPUT_DIR_CLIENT/api/client.gleam" should include 'pub type ClientConfig {'
-      The contents of file "$TEST_OUTPUT_DIR_CLIENT/api/client.gleam" should include 'pub fn new'
+    It 'client emits the build/decode/op trio'
+      The contents of file "$TEST_OUTPUT_DIR_CLIENT/api/client.gleam" should include 'pub fn build_list_pets_request'
+      The contents of file "$TEST_OUTPUT_DIR_CLIENT/api/client.gleam" should include 'pub fn decode_list_pets_response'
+      The contents of file "$TEST_OUTPUT_DIR_CLIENT/api/client.gleam" should include 'send send: transport.Send'
     End
 
     # --- Middleware ---
