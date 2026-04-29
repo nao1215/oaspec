@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **`oneOf` decoders now enforce exactly-one-match semantics**, per
+  JSON Schema 2020-12 §10.2.1.3. Generated non-discriminator
+  `oneOf` decoders previously emitted `decode.one_of(first,
+  [rest..])`, which is first-match (i.e. `anyOf`) semantics — a
+  body that validated against multiple branches was silently
+  accepted as the first-listed variant, with the other branches'
+  fields dropped. The generator now emits a body that runs every
+  branch independently against the raw `Dynamic` (via
+  `decode.run`), counts successes, and:
+  - succeeds with the matched variant when exactly one branch
+    matched,
+  - fails with `"<TypeName>: matched multiple oneOf branches;
+    expected exactly one"` when 2+ branches matched (the new
+    rejection — previously accepted),
+  - fails with `"<TypeName>: no oneOf branch matched"` when zero
+    branches matched (same as before, just with a clearer
+    message).
+  This adds `gleam/list` and `gleam/result` to the imports of any
+  generated `decode.gleam` that surfaces a non-discriminator
+  `oneOf`. Discriminator-based `oneOf` decoders are unchanged
+  (the discriminator already picks a single variant, so multi-
+  match is structurally impossible). Behavioral change for
+  clients sending bodies that match multiple branches: their
+  previously-passing JSON now rejects, which is the spec's
+  intended behavior. (#337)
+
 - **`additionalProperties: false` is now enforced at decode time.**
   Generated decoders for closed object schemas previously accepted
   JSON bodies containing unknown fields and silently dropped them —

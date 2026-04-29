@@ -1,4 +1,5 @@
 import gleam/dict
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
@@ -88,6 +89,18 @@ fn generate_decoders(
     })
   let needs_dict = component_needs_dict || operation_needs_dict
 
+  // Strict non-discriminator `oneOf` decoders use `list.filter_map` and
+  // `result.map` to count matches across branches per JSON Schema 2020-12
+  // §10.2.1.3 — they must reject when 2+ branches match (Issue #337).
+  let needs_strict_oneof_runtime =
+    list.any(schemas, fn(entry) {
+      let #(_, schema_ref) = entry
+      type_gen.schema_has_non_discriminator_oneof(schema_ref, ctx)
+    })
+    || list.any(operation_inline_schemas, fn(schema_ref) {
+      type_gen.schema_has_non_discriminator_oneof(schema_ref, ctx)
+    })
+
   // Check if types module is needed (any non-primitive schema)
   let needs_types =
     list.any(schemas, fn(entry) {
@@ -105,6 +118,10 @@ fn generate_decoders(
   let base_imports = case needs_dict {
     True -> ["gleam/dict", "gleam/dynamic/decode", "gleam/json"]
     False -> ["gleam/dynamic/decode", "gleam/json"]
+  }
+  let base_imports = case needs_strict_oneof_runtime {
+    True -> list.append(base_imports, ["gleam/list", "gleam/result"])
+    False -> base_imports
   }
   let base_imports = case needs_types {
     True ->
@@ -1149,7 +1166,13 @@ fn generate_oneof_decoder(
               <> ") {",
             )
 
-          // Build a chain of decode.one_of attempts
+          // Issue #337: emit a strict-oneOf body. The previous
+          // `decode.one_of(first, [rest..])` chain was first-match
+          // (anyOf semantics); JSON Schema 2020-12 §10.2.1.3 demands
+          // exactly-one-match for `oneOf`. Run each branch
+          // independently against the raw Dynamic, count successful
+          // matches, succeed iff exactly one matched, and emit a
+          // distinct failure diagnostic when 2+ branches matched.
           let sb = case ref_variants {
             [] ->
               sb
@@ -1161,35 +1184,72 @@ fn generate_oneof_decoder(
                   <> type_name
                   <> "\")",
               )
-            [first, ..rest] -> {
+            [first, ..] -> {
               let first_variant_type = naming.schema_to_type_name(first)
               let first_decoder = naming.to_snake_case(first) <> "_decoder()"
               let sb =
                 sb
-                |> se.indent(
-                  1,
-                  "decode.one_of("
-                    <> first_decoder
-                    <> " |> decode.map(types."
-                    <> type_name
-                    <> first_variant_type
-                    <> "), [",
-                )
+                |> se.indent(1, "use raw <- decode.then(decode.dynamic)")
               let sb =
-                list.fold(rest, sb, fn(sb, ref_name) {
+                list.index_fold(ref_variants, sb, fn(sb, ref_name, idx) {
                   let variant_type = naming.schema_to_type_name(ref_name)
                   let decoder = naming.to_snake_case(ref_name) <> "_decoder()"
                   sb
                   |> se.indent(
-                    2,
-                    decoder
-                      <> " |> decode.map(types."
+                    1,
+                    "let r"
+                      <> int.to_string(idx)
+                      <> " = decode.run(raw, "
+                      <> decoder
+                      <> ") |> result.map(types."
                       <> type_name
                       <> variant_type
-                      <> "),",
+                      <> ")",
                   )
                 })
-              sb |> se.indent(1, "])")
+              let attempts_list =
+                "["
+                <> se.join_with(
+                  list.index_map(ref_variants, fn(_, idx) {
+                    "r" <> int.to_string(idx)
+                  }),
+                  ", ",
+                )
+                <> "]"
+              sb
+              |> se.indent(
+                1,
+                "let oks = list.filter_map(" <> attempts_list <> ", fn(r) {",
+              )
+              |> se.indent(2, "case r {")
+              |> se.indent(3, "Ok(v) -> Ok(v)")
+              |> se.indent(3, "Error(_) -> Error(Nil)")
+              |> se.indent(2, "}")
+              |> se.indent(1, "})")
+              |> se.indent(1, "case oks {")
+              |> se.indent(2, "[single] -> decode.success(single)")
+              |> se.indent(
+                2,
+                "[first, _, ..] -> decode.failure(first, \""
+                  <> type_name
+                  <> ": matched multiple oneOf branches; expected exactly one\")",
+              )
+              |> se.indent(2, "[] -> {")
+              |> se.indent(
+                3,
+                "use fallback <- decode.then(" <> first_decoder <> ")",
+              )
+              |> se.indent(
+                3,
+                "decode.failure(types."
+                  <> type_name
+                  <> first_variant_type
+                  <> "(fallback), \""
+                  <> type_name
+                  <> ": no oneOf branch matched\")",
+              )
+              |> se.indent(2, "}")
+              |> se.indent(1, "}")
             }
           }
 
