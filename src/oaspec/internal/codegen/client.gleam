@@ -1,3 +1,4 @@
+import gleam/bool
 import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
@@ -302,10 +303,12 @@ fn generate_client(ctx: Context) -> String {
     False -> imports
   }
 
-  // uri only for path-parameter percent-encoding.
+  // uri for path-parameter percent-encoding, cookie value encoding, and
+  // form-urlencoded body assembly.
   let needs_uri =
-    list.any(all_params, fn(p) {
-      p.in_ == spec.InPath || p.in_ == spec.InCookie || p.in_ == spec.InQuery
+    has_form_urlencoded
+    || list.any(all_params, fn(p) {
+      p.in_ == spec.InPath || p.in_ == spec.InCookie
     })
   let imports = case needs_uri {
     True -> ["gleam/uri", ..imports]
@@ -437,14 +440,10 @@ fn generate_default_base_url(
       let sb = case defaults_doc {
         "" ->
           sb
-          |> se.doc_comment(
-            "Default base URL declared by the OpenAPI spec.",
-          )
+          |> se.doc_comment("Default base URL declared by the OpenAPI spec.")
         doc ->
           sb
-          |> se.doc_comment(
-            "Default base URL declared by the OpenAPI spec.",
-          )
+          |> se.doc_comment("Default base URL declared by the OpenAPI spec.")
           |> se.doc_comment(doc)
       }
       sb
@@ -461,7 +460,9 @@ fn generate_default_base_url(
 /// `transport.Body`, surfacing `InvalidResponse` for non-text bodies.
 fn generate_text_body_helper(sb: se.StringBuilder) -> se.StringBuilder {
   sb
-  |> se.line("fn text_body(body: transport.Body) -> Result(String, ClientError) {")
+  |> se.line(
+    "fn text_body(body: transport.Body) -> Result(String, ClientError) {",
+  )
   |> se.indent(1, "case body {")
   |> se.indent(2, "transport.TextBody(text) -> Ok(text)")
   |> se.indent(
@@ -496,6 +497,35 @@ fn generate_bytes_body_helper(sb: se.StringBuilder) -> se.StringBuilder {
   |> se.indent(1, "}")
   |> se.line("}")
   |> se.blank_line()
+}
+
+fn emit_simple_query_param(
+  sb: se.StringBuilder,
+  p: spec.Parameter(Resolved),
+  param_name: String,
+  ctx: Context,
+) -> se.StringBuilder {
+  case p.required {
+    True -> {
+      let to_str = client_request.param_to_string_expr(p, param_name, ctx)
+      sb
+      |> se.indent(
+        1,
+        "let query = [#(\"" <> p.name <> "\", " <> to_str <> "), ..query]",
+      )
+    }
+    False -> {
+      let to_str = client_request.to_str_for_optional_value(p, ctx)
+      sb
+      |> se.indent(1, "let query = case " <> param_name <> " {")
+      |> se.indent(
+        2,
+        "Some(v) -> [#(\"" <> p.name <> "\", " <> to_str <> "), ..query]",
+      )
+      |> se.indent(2, "None -> query")
+      |> se.indent(1, "}")
+    }
+  }
 }
 
 fn http_method_to_transport(method: spec.HttpMethod) -> String {
@@ -554,14 +584,15 @@ fn generate_client_function(
       ctx,
     )
 
-  let call_args = build_call_args(
-    path_params,
-    query_params,
-    header_params,
-    cookie_params,
-    operation,
-    ctx,
-  )
+  let call_args =
+    build_call_args(
+      path_params,
+      query_params,
+      header_params,
+      cookie_params,
+      operation,
+      ctx,
+    )
 
   // ------------------------------------------------------------
   // 1. The send-first composition function
@@ -636,18 +667,19 @@ fn generate_client_function(
       <> ") -> Result(transport.Request, ClientError) {",
     )
 
-  let sb = generate_build_body(
-    sb,
-    op_id,
-    operation,
-    path,
-    method,
-    path_params,
-    query_params,
-    header_params,
-    cookie_params,
-    ctx,
-  )
+  let sb =
+    generate_build_body(
+      sb,
+      op_id,
+      operation,
+      path,
+      method,
+      path_params,
+      query_params,
+      header_params,
+      cookie_params,
+      ctx,
+    )
 
   let sb = sb |> se.line("}") |> se.blank_line()
 
@@ -800,8 +832,8 @@ fn build_call_args(
 
   let names =
     list.map(all_params, fn(p) {
-      let n = client_request.field_name_for(field_names, p)
-      n <> ": " <> n
+      let field = client_request.field_name_for(field_names, p)
+      field <> ": " <> field
     })
 
   let body_args = case operation.request_body {
@@ -833,10 +865,8 @@ fn rebind_request_fields(extra: String) -> String {
 /// Trim a leading ", " from a parameter list snippet so it can stand on
 /// its own as the argument list of `build_<op>_request`.
 fn trim_leading_comma(s: String) -> String {
-  case string.starts_with(s, ", ") {
-    True -> string.drop_start(s, 2)
-    False -> s
-  }
+  use <- bool.guard(!string.starts_with(s, ", "), s)
+  string.drop_start(s, 2)
 }
 
 /// Body of `build_<op>_request`. Validates request body, builds path /
@@ -948,34 +978,26 @@ fn generate_build_body(
       let sb =
         list.fold(query_params, sb, fn(sb, p) {
           let param_name = client_request.field_name_for(field_names, p)
-          case p.required {
-            True -> {
-              let to_str = client_request.param_to_string_expr(p, param_name, ctx)
-              sb
-              |> se.indent(
-                1,
-                "let query = [#(\""
-                  <> p.name
-                  <> "\", "
-                  <> to_str
-                  <> "), ..query]",
+          case client_request.is_exploded_array_param(p, ctx) {
+            True ->
+              client_request.generate_exploded_array_query_param(
+                sb,
+                p,
+                param_name,
+                ctx,
               )
-            }
-            False -> {
-              let to_str = client_request.to_str_for_optional_value(p, ctx)
-              sb
-              |> se.indent(1, "let query = case " <> param_name <> " {")
-              |> se.indent(
-                2,
-                "Some(v) -> [#(\""
-                  <> p.name
-                  <> "\", "
-                  <> to_str
-                  <> "), ..query]",
-              )
-              |> se.indent(2, "None -> query")
-              |> se.indent(1, "}")
-            }
+            False ->
+              case client_request.is_delimited_array_param(p, ctx) {
+                Some(joiner) ->
+                  client_request.generate_delimited_array_query_param(
+                    sb,
+                    p,
+                    param_name,
+                    joiner,
+                    ctx,
+                  )
+                None -> emit_simple_query_param(sb, p, param_name, ctx)
+              }
           }
         })
       sb |> se.indent(1, "let query = list.reverse(query)")
@@ -1030,7 +1052,8 @@ fn generate_build_body(
           let param_name = client_request.field_name_for(field_names, p)
           case p.required {
             True -> {
-              let to_str = client_request.param_to_string_expr(p, param_name, ctx)
+              let to_str =
+                client_request.param_to_string_expr(p, param_name, ctx)
               sb
               |> se.indent(
                 1,
@@ -1094,8 +1117,7 @@ fn generate_build_body(
       case ct_expr {
         "" -> sb
         ct -> {
-          let header_line =
-            "[#(\"content-type\", " <> ct <> "), ..headers]"
+          let header_line = "[#(\"content-type\", " <> ct <> "), ..headers]"
           case rb.required {
             True -> sb |> se.indent(1, "let headers = " <> header_line)
             False ->
@@ -1185,16 +1207,19 @@ fn generate_body_emission(
               |> se.indent(2, "None -> transport.EmptyBody")
               |> se.indent(1, "}")
           }
-        "multipart/form-data" -> generate_multipart_body_emission(sb, rb, op_id, ctx)
+        "multipart/form-data" ->
+          generate_multipart_body_emission(sb, rb, op_id, ctx)
         "application/x-www-form-urlencoded" ->
           generate_form_urlencoded_body_emission(sb, rb, op_id, ctx)
         _ -> {
-          let encode_expr =
-            client_request.get_body_encode_expr(rb, op_id, ctx)
+          let encode_expr = client_request.get_body_encode_expr(rb, op_id, ctx)
           case rb.required {
             True ->
               sb
-              |> se.indent(1, "let body = transport.TextBody(" <> encode_expr <> ")")
+              |> se.indent(
+                1,
+                "let body = transport.TextBody(" <> encode_expr <> ")",
+              )
             False ->
               sb
               |> se.indent(1, "let body = case body {")

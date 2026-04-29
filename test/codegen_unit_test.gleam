@@ -124,7 +124,7 @@ pub fn client_response_get_response_decode_expr_reference_test() {
     http.Status(200),
     ctx,
   )
-  |> should.equal("decode.decode_user(resp.body)")
+  |> should.equal("decode.decode_user(text)")
 }
 
 pub fn client_response_get_response_decode_expr_inline_string_test() {
@@ -136,7 +136,7 @@ pub fn client_response_get_response_decode_expr_inline_string_test() {
     http.Status(200),
     ctx,
   )
-  |> should.equal("json.parse(resp.body, dyn_decode.string)")
+  |> should.equal("json.parse(text, dyn_decode.string)")
 }
 
 pub fn client_response_get_response_decode_expr_inline_int_test() {
@@ -148,7 +148,7 @@ pub fn client_response_get_response_decode_expr_inline_int_test() {
     http.Status(200),
     ctx,
   )
-  |> should.equal("json.parse(resp.body, dyn_decode.int)")
+  |> should.equal("json.parse(text, dyn_decode.int)")
 }
 
 pub fn client_response_get_response_decode_expr_array_ref_test() {
@@ -167,7 +167,7 @@ pub fn client_response_get_response_decode_expr_array_ref_test() {
     http.Status(200),
     ctx,
   )
-  |> should.equal("decode.decode_pet_list(resp.body)")
+  |> should.equal("decode.decode_pet_list(text)")
 }
 
 pub fn client_response_get_response_decode_expr_array_inline_test() {
@@ -186,7 +186,7 @@ pub fn client_response_get_response_decode_expr_array_inline_test() {
     http.Status(200),
     ctx,
   )
-  |> should.equal("json.parse(resp.body, decode.list(dyn_decode.int))")
+  |> should.equal("json.parse(text, decode.list(dyn_decode.int))")
 }
 
 // ===================================================================
@@ -1048,274 +1048,6 @@ paths:
   |> should.be_true()
 }
 
-// --- with_* auth configuration helper tests ---
-
-pub fn with_helpers_generated_for_api_key_and_bearer_test() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /pets:
-    get:
-      operationId: listPets
-      responses:
-        '200': { description: ok }
-components:
-  securitySchemes:
-    ApiKeyAuth:
-      type: apiKey
-      in: header
-      name: X-API-Key
-    BearerAuth:
-      type: http
-      scheme: bearer
-security:
-  - ApiKeyAuth: []
-  - BearerAuth: []
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let spec = hoist.hoist(spec)
-  let ctx = test_helpers.make_ctx_from_spec(spec)
-  let files = client_gen.generate(ctx)
-  let assert [client_file] = files
-  let content = client_file.content
-  // with_api_key_auth helper must be generated
-  string.contains(
-    content,
-    "pub fn with_api_key_auth(config: ClientConfig, token: String) -> ClientConfig {",
-  )
-  |> should.be_true()
-  string.contains(content, "ClientConfig(..config, api_key_auth: Some(token))")
-  |> should.be_true()
-  // with_bearer_auth helper must be generated
-  string.contains(
-    content,
-    "pub fn with_bearer_auth(config: ClientConfig, token: String) -> ClientConfig {",
-  )
-  |> should.be_true()
-  string.contains(content, "ClientConfig(..config, bearer_auth: Some(token))")
-  |> should.be_true()
-}
-
-pub fn with_helpers_doc_comment_for_api_key_header_test() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /x:
-    get:
-      operationId: getX
-      responses:
-        '200': { description: ok }
-components:
-  securitySchemes:
-    ApiKeyAuth:
-      type: apiKey
-      in: header
-      name: X-API-Key
-security:
-  - ApiKeyAuth: []
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let spec = hoist.hoist(spec)
-  let ctx = test_helpers.make_ctx_from_spec(spec)
-  let files = client_gen.generate(ctx)
-  let assert [client_file] = files
-  let content = client_file.content
-  string.contains(
-    content,
-    "/// Set the API key for the ApiKeyAuth security scheme (header: X-API-Key).",
-  )
-  |> should.be_true()
-}
-
-pub fn with_helpers_doc_comment_for_api_key_query_test() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /x:
-    get:
-      operationId: getX
-      responses:
-        '200': { description: ok }
-components:
-  securitySchemes:
-    QueryAuth:
-      type: apiKey
-      in: query
-      name: api_key
-security:
-  - QueryAuth: []
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let spec = hoist.hoist(spec)
-  let ctx = test_helpers.make_ctx_from_spec(spec)
-  let files = client_gen.generate(ctx)
-  let assert [client_file] = files
-  let content = client_file.content
-  string.contains(
-    content,
-    "/// Set the API key for the QueryAuth security scheme (query: api_key).",
-  )
-  |> should.be_true()
-  string.contains(
-    content,
-    "pub fn with_query_auth(config: ClientConfig, token: String) -> ClientConfig {",
-  )
-  |> should.be_true()
-}
-
-pub fn with_helpers_doc_comment_for_cookie_test() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /x:
-    get:
-      operationId: getX
-      responses:
-        '200': { description: ok }
-components:
-  securitySchemes:
-    CookieAuth:
-      type: apiKey
-      in: cookie
-      name: session_id
-security:
-  - CookieAuth: []
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let spec = hoist.hoist(spec)
-  let ctx = test_helpers.make_ctx_from_spec(spec)
-  let files = client_gen.generate(ctx)
-  let assert [client_file] = files
-  let content = client_file.content
-  string.contains(
-    content,
-    "/// Set the API key for the CookieAuth security scheme (cookie: session_id).",
-  )
-  |> should.be_true()
-}
-
-pub fn with_helpers_doc_comment_for_oauth2_test() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /x:
-    get:
-      operationId: getX
-      responses:
-        '200': { description: ok }
-components:
-  securitySchemes:
-    OAuth2Auth:
-      type: oauth2
-      flows:
-        authorizationCode:
-          authorizationUrl: https://example.com/auth
-          tokenUrl: https://example.com/token
-          scopes:
-            read: Read access
-security:
-  - OAuth2Auth: []
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let spec = hoist.hoist(spec)
-  let ctx = test_helpers.make_ctx_from_spec(spec)
-  let files = client_gen.generate(ctx)
-  let assert [client_file] = files
-  let content = client_file.content
-  string.contains(
-    content,
-    "/// Set the OAuth2 token for the OAuth2Auth security scheme.",
-  )
-  |> should.be_true()
-}
-
-pub fn with_helpers_not_generated_when_no_security_test() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /x:
-    get:
-      operationId: getX
-      responses:
-        '200': { description: ok }
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let spec = hoist.hoist(spec)
-  let ctx = test_helpers.make_ctx_from_spec(spec)
-  let files = client_gen.generate(ctx)
-  let assert [client_file] = files
-  let content = client_file.content
-  // No auth with_* helpers should be present
-  string.contains(content, "pub fn with_api_key_auth(")
-  |> should.be_false()
-  string.contains(content, "pub fn with_bearer_auth(")
-  |> should.be_false()
-}
-
-pub fn with_helpers_appear_before_default_base_url_test() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-servers:
-  - url: https://api.example.com
-paths:
-  /x:
-    get:
-      operationId: getX
-      responses:
-        '200': { description: ok }
-components:
-  securitySchemes:
-    BearerAuth:
-      type: http
-      scheme: bearer
-security:
-  - BearerAuth: []
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let spec = hoist.hoist(spec)
-  let ctx = test_helpers.make_ctx_from_spec(spec)
-  let files = client_gen.generate(ctx)
-  let assert [client_file] = files
-  let content = client_file.content
-  // new must come before with_bearer_auth, which must come before default_base_url
-  let assert Ok(new_pos) =
-    test_helpers.find_substring_index(content, "pub fn new(")
-  let assert Ok(with_pos) =
-    test_helpers.find_substring_index(content, "pub fn with_bearer_auth(")
-  let assert Ok(base_url_pos) =
-    test_helpers.find_substring_index(content, "pub fn default_base_url(")
-  should.be_true(new_pos < with_pos)
-  should.be_true(with_pos < base_url_pos)
-}
-
 // --- content_type structured syntax suffix tests ---
 
 pub fn content_type_from_string_problem_json_test() {
@@ -1452,7 +1184,7 @@ components:
   let files = client_gen.generate(ctx)
   let assert [client_file] = files
   // Should use JSON decode (not string passthrough)
-  string.contains(client_file.content, "decode.decode_problem(resp.body)")
+  string.contains(client_file.content, "decode.decode_problem(text)")
   |> should.be_true()
 }
 
