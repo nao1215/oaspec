@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`guards.gleam` codegen** no longer emits byte-identical per-field
+  validator function bodies for the same property repeated across
+  `allOf` children. The generator now post-processes the emitted
+  source: when several `validate_<schema>_<field>_<kind>` functions
+  share an identical body, the lex-first name keeps the canonical
+  body and the others are rewritten as 1-line delegating stubs that
+  forward to it. Composite validators are unchanged — they continue
+  to call per-field validators by their original names, so
+  call-site code stays the same. Net effect on a typical spec with
+  one `allOf` reuse: ~16 lines saved per redundant validator. (#339)
+
 ### Documentation
 
 - README "OpenAPI Support" now has an explicit section on
