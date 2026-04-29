@@ -118,7 +118,7 @@ pub fn build_param_list(
     list.map(all_params, fn(p) {
       let param_name = field_name_for(field_names, p)
       let param_type = param_to_type(p, ctx)
-      ", " <> param_name <> ": " <> param_type
+      ", " <> param_name <> " " <> param_name <> ": " <> param_type
     })
 
   let body_param = case operation.request_body {
@@ -131,8 +131,11 @@ pub fn build_param_list(
       let content_entries = ir_build.sorted_entries(rb.content)
       case content_entries {
         // Multi-content: add content_type param before body
-        [_, _, ..] -> [", content_type: String", ", body: " <> wrapped_type]
-        _ -> [", body: " <> wrapped_type]
+        [_, _, ..] -> [
+          ", content_type content_type: String",
+          ", body body: " <> wrapped_type,
+        ]
+        _ -> [", body body: " <> wrapped_type]
       }
     }
     _ -> []
@@ -192,15 +195,6 @@ pub fn param_to_string_expr(
     }
     _ -> param_name
   }
-}
-
-/// Convert a required param to string for query building.
-pub fn to_str_for_required(
-  param: spec.Parameter(Resolved),
-  param_name: String,
-  ctx: Context,
-) -> String {
-  param_to_string_expr(param, param_name, ctx)
 }
 
 /// Convert an optional param value (bound to `v`) to string.
@@ -390,9 +384,8 @@ pub fn generate_multipart_body(
   )
   |> se.indent(
     1,
-    "let req = request.set_header(req, \"content-type\", \"multipart/form-data; boundary=\" <> boundary)",
+    "let body_content_type = \"multipart/form-data; boundary=\" <> boundary",
   )
-  |> se.indent(1, "let req = request.set_body(req, body_str)")
 }
 
 pub fn multipart_field_is_binary(
@@ -835,9 +828,8 @@ pub fn generate_form_urlencoded_body(
   |> se.indent(1, "let body_str = string.join(form_parts, \"&\")")
   |> se.indent(
     1,
-    "let req = request.set_header(req, \"content-type\", \"application/x-www-form-urlencoded\")",
+    "let body_content_type = \"application/x-www-form-urlencoded\"",
   )
-  |> se.indent(1, "let req = request.set_body(req, body_str)")
 }
 
 /// Check if a parameter is an array with explode behavior.
@@ -908,12 +900,12 @@ pub fn generate_delimited_array_query_param(
       }
     _ -> "fn(x) { x }"
   }
-  // Empty arrays produce no query entry, matching the existing exploded path.
+  // Empty arrays produce no query entry, matching the exploded path.
   case param.required {
     True ->
       sb
-      |> se.indent(1, "let query_parts = case " <> param_name <> " {")
-      |> se.indent(2, "[] -> query_parts")
+      |> se.indent(1, "let query = case " <> param_name <> " {")
+      |> se.indent(2, "[] -> query")
       |> se.indent(2, "items -> {")
       |> se.indent(
         3,
@@ -923,18 +915,13 @@ pub fn generate_delimited_array_query_param(
           <> joiner
           <> "\")",
       )
-      |> se.indent(
-        3,
-        "[\""
-          <> param.name
-          <> "=\" <> uri.percent_encode(joined), ..query_parts]",
-      )
+      |> se.indent(3, "[#(\"" <> param.name <> "\", joined), ..query]")
       |> se.indent(2, "}")
       |> se.indent(1, "}")
     False ->
       sb
-      |> se.indent(1, "let query_parts = case " <> param_name <> " {")
-      |> se.indent(2, "Some([]) -> query_parts")
+      |> se.indent(1, "let query = case " <> param_name <> " {")
+      |> se.indent(2, "Some([]) -> query")
       |> se.indent(2, "Some(items) -> {")
       |> se.indent(
         3,
@@ -944,14 +931,9 @@ pub fn generate_delimited_array_query_param(
           <> joiner
           <> "\")",
       )
-      |> se.indent(
-        3,
-        "[\""
-          <> param.name
-          <> "=\" <> uri.percent_encode(joined), ..query_parts]",
-      )
+      |> se.indent(3, "[#(\"" <> param.name <> "\", joined), ..query]")
       |> se.indent(2, "}")
-      |> se.indent(2, "None -> query_parts")
+      |> se.indent(2, "None -> query")
       |> se.indent(1, "}")
   }
 }
@@ -979,36 +961,23 @@ pub fn generate_exploded_array_query_param(
       sb
       |> se.indent(
         1,
-        "let query_parts = list.fold("
-          <> param_name
-          <> ", query_parts, fn(acc, item) {",
+        "let query = list.fold(" <> param_name <> ", query, fn(acc, item) {",
       )
       |> se.indent(
         2,
-        "[\""
-          <> param.name
-          <> "=\" <> uri.percent_encode("
-          <> item_to_str
-          <> "(item)), ..acc]",
+        "[#(\"" <> param.name <> "\", " <> item_to_str <> "(item)), ..acc]",
       )
       |> se.indent(1, "})")
     False ->
       sb
-      |> se.indent(1, "let query_parts = case " <> param_name <> " {")
-      |> se.indent(
-        2,
-        "Some(items) -> list.fold(items, query_parts, fn(acc, item) {",
-      )
+      |> se.indent(1, "let query = case " <> param_name <> " {")
+      |> se.indent(2, "Some(items) -> list.fold(items, query, fn(acc, item) {")
       |> se.indent(
         3,
-        "[\""
-          <> param.name
-          <> "=\" <> uri.percent_encode("
-          <> item_to_str
-          <> "(item)), ..acc]",
+        "[#(\"" <> param.name <> "\", " <> item_to_str <> "(item)), ..acc]",
       )
       |> se.indent(2, "})")
-      |> se.indent(2, "None -> query_parts")
+      |> se.indent(2, "None -> query")
       |> se.indent(1, "}")
   }
 }
@@ -1021,237 +990,8 @@ pub fn is_deep_object_param(
   operation_ir.is_deep_object_param(param, ctx)
 }
 
-/// Generate deepObject-style query parameters: key[prop]=value for each property.
-pub fn generate_deep_object_query_param(
-  sb: se.StringBuilder,
-  param: spec.Parameter(Resolved),
-  param_name: String,
-  ctx: Context,
-) -> se.StringBuilder {
-  let properties = case param.payload {
-    ParameterSchema(Reference(..) as schema_ref) ->
-      case resolver.resolve_schema_ref(schema_ref, context.spec(ctx)) {
-        Ok(schema.ObjectSchema(properties:, required:, ..)) -> #(
-          ir_build.sorted_entries(properties),
-          required,
-        )
-        _ -> #([], [])
-      }
-    ParameterSchema(Inline(schema.ObjectSchema(properties:, required:, ..))) -> #(
-      ir_build.sorted_entries(properties),
-      required,
-    )
-    _ -> #([], [])
-  }
-  let #(props, required_fields) = properties
-  case param.required {
-    True ->
-      list.fold(props, sb, fn(sb, entry) {
-        let #(prop_name, prop_ref) = entry
-        let field_name = naming.to_snake_case(prop_name)
-        let accessor = param_name <> "." <> field_name
-        let is_required = list.contains(required_fields, prop_name)
-        let is_array = case prop_ref {
-          Inline(schema.ArraySchema(..)) -> True
-          _ -> False
-        }
-        case is_array, is_required {
-          // Array leaf: iterate items to produce key[prop]=item for each
-          True, True ->
-            sb
-            |> se.indent(
-              1,
-              "let query_parts = list.fold("
-                <> accessor
-                <> ", query_parts, fn(acc, item) {",
-            )
-            |> se.indent(
-              2,
-              "[\""
-                <> param.name
-                <> "["
-                <> prop_name
-                <> "]=\" <> uri.percent_encode("
-                <> deep_object_array_item_to_string(prop_ref, ctx)
-                <> "), ..acc]",
-            )
-            |> se.indent(1, "})")
-          True, False ->
-            sb
-            |> se.indent(1, "let query_parts = case " <> accessor <> " {")
-            |> se.indent(
-              2,
-              "Some(items) -> list.fold(items, query_parts, fn(acc, item) {",
-            )
-            |> se.indent(
-              3,
-              "[\""
-                <> param.name
-                <> "["
-                <> prop_name
-                <> "]=\" <> uri.percent_encode("
-                <> deep_object_array_item_to_string(prop_ref, ctx)
-                <> "), ..acc]",
-            )
-            |> se.indent(2, "})")
-            |> se.indent(2, "None -> query_parts")
-            |> se.indent(1, "}")
-          // Scalar: single key[prop]=value
-          False, True -> {
-            let to_str = schema_ref_to_string_expr(prop_ref, accessor, ctx)
-            sb
-            |> se.indent(
-              1,
-              "let query_parts = [\""
-                <> param.name
-                <> "["
-                <> prop_name
-                <> "]=\" <> uri.percent_encode("
-                <> to_str
-                <> "), ..query_parts]",
-            )
-          }
-          False, False -> {
-            sb
-            |> se.indent(1, "let query_parts = case " <> accessor <> " {")
-            |> se.indent(
-              2,
-              "Some(v) -> [\""
-                <> param.name
-                <> "["
-                <> prop_name
-                <> "]=\" <> uri.percent_encode("
-                <> schema_ref_to_string_expr(prop_ref, "v", ctx)
-                <> "), ..query_parts]",
-            )
-            |> se.indent(2, "None -> query_parts")
-            |> se.indent(1, "}")
-          }
-        }
-      })
-    False -> {
-      let sb =
-        sb |> se.indent(1, "let query_parts = case " <> param_name <> " {")
-      let sb = sb |> se.indent(2, "Some(obj) -> {")
-      let sb = sb |> se.indent(3, "let qp = query_parts")
-      let sb =
-        list.fold(props, sb, fn(sb, entry) {
-          let #(prop_name, prop_ref) = entry
-          let field_name = naming.to_snake_case(prop_name)
-          let accessor = "obj." <> field_name
-          let is_required = list.contains(required_fields, prop_name)
-          let is_array = case prop_ref {
-            Inline(schema.ArraySchema(..)) -> True
-            _ -> False
-          }
-          case is_array, is_required {
-            True, True ->
-              sb
-              |> se.indent(
-                3,
-                "let qp = list.fold(" <> accessor <> ", qp, fn(acc, item) {",
-              )
-              |> se.indent(
-                4,
-                "[\""
-                  <> param.name
-                  <> "["
-                  <> prop_name
-                  <> "]=\" <> uri.percent_encode("
-                  <> deep_object_array_item_to_string(prop_ref, ctx)
-                  <> "), ..acc]",
-              )
-              |> se.indent(3, "})")
-            True, False ->
-              sb
-              |> se.indent(3, "let qp = case " <> accessor <> " {")
-              |> se.indent(
-                4,
-                "Some(items) -> list.fold(items, qp, fn(acc, item) {",
-              )
-              |> se.indent(
-                5,
-                "[\""
-                  <> param.name
-                  <> "["
-                  <> prop_name
-                  <> "]=\" <> uri.percent_encode("
-                  <> deep_object_array_item_to_string(prop_ref, ctx)
-                  <> "), ..acc]",
-              )
-              |> se.indent(4, "})")
-              |> se.indent(4, "None -> qp")
-              |> se.indent(3, "}")
-            False, True -> {
-              let to_str = schema_ref_to_string_expr(prop_ref, accessor, ctx)
-              sb
-              |> se.indent(
-                3,
-                "let qp = [\""
-                  <> param.name
-                  <> "["
-                  <> prop_name
-                  <> "]=\" <> uri.percent_encode("
-                  <> to_str
-                  <> "), ..qp]",
-              )
-            }
-            False, False ->
-              sb
-              |> se.indent(3, "let qp = case " <> accessor <> " {")
-              |> se.indent(
-                4,
-                "Some(v) -> [\""
-                  <> param.name
-                  <> "["
-                  <> prop_name
-                  <> "]=\" <> uri.percent_encode("
-                  <> schema_ref_to_string_expr(prop_ref, "v", ctx)
-                  <> "), ..qp]",
-              )
-              |> se.indent(4, "None -> qp")
-              |> se.indent(3, "}")
-          }
-        })
-      let sb = sb |> se.indent(3, "qp")
-      let sb = sb |> se.indent(2, "}")
-      let sb = sb |> se.indent(2, "None -> query_parts")
-      sb |> se.indent(1, "}")
-    }
-  }
-}
-
-/// Convert a SchemaRef to a string expression for a given accessor.
-fn schema_ref_to_string_expr(
-  schema_ref: schema.SchemaRef,
-  accessor: String,
-  ctx: Context,
-) -> String {
-  schema_dispatch.schema_ref_to_string_expr(
-    schema_ref,
-    accessor,
-    context.spec(ctx),
-  )
-}
-
 /// Return a function expression that converts an array item to String.
 /// Used in generated code: `list.map(param, <fn>)`.
 fn array_item_to_string_fn(items: schema.SchemaRef, ctx: Context) -> String {
   schema_dispatch.to_string_fn(items, context.spec(ctx))
-}
-
-/// Convert a deepObject array item to a string expression.
-fn deep_object_array_item_to_string(
-  prop_ref: schema.SchemaRef,
-  ctx: Context,
-) -> String {
-  case prop_ref {
-    Inline(schema.ArraySchema(items:, ..)) ->
-      schema_dispatch.schema_ref_to_string_expr(
-        items,
-        "item",
-        context.spec(ctx),
-      )
-    _ -> "item"
-  }
 }

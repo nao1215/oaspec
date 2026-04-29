@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- New pure runtime modules `oaspec/transport` and `oaspec/mock`. Generated
+  client code depends on these instead of `gleam/http/request`. `transport`
+  defines `Method` / `Body` / `Request` / `Response` / `TransportError` /
+  `Send`, plus middleware for base URL override (`with_base_url`), default
+  headers (`with_default_header(s)`), and OpenAPI security
+  (`credentials() |> with_bearer_token / with_api_key / ... |>
+  with_security(send, _)`). `mock` provides one-liner test helpers
+  (`mock.text`, `mock.bytes`, `mock.empty`, `mock.timeout`, `mock.fail`,
+  `mock.from`).
+- New sibling Gleam package `adapters/httpc/` exporting `oaspec/httpc`,
+  a thin BEAM adapter backed by `gleam_httpc`. Root `oaspec` does not
+  depend on `gleam_httpc`; the adapter packaging keeps the runtime
+  concern isolated. The simplest usage is just `httpc.send` (a function
+  reference matching `transport.Send`); a `config() |> with_timeout(_)
+  |> build` builder is available for tuned configurations.
+- Generated clients now expose three public functions per operation —
+  `<op>(send, ...)`, `build_<op>_request(...)`, and
+  `decode_<op>_response(resp)` — so request building and response
+  decoding can be driven independently for testing or middleware.
+
+### Changed
+
+- **BREAKING**: Generated client API has been rebuilt around
+  `oaspec/transport`. (#333)
+  - `ClientConfig`, `ClientResponse`, and the per-scheme `with_*` helpers
+    are removed. Operations take `send: transport.Send` directly. Auth
+    flows through `transport.with_security` middleware on the user side.
+  - `ClientError` no longer carries `ConnectionError` / `TimeoutError` /
+    `DecodeError` / `InvalidUrl`. Their roles are covered by
+    `TransportError(transport.TransportError)` (runtime/network failure),
+    `DecodeFailure(detail:)` (body shape decode error),
+    `InvalidResponse(detail:)` (body-shape mismatch with the spec), and
+    a new `UnexpectedStatus { status: Int, headers: List(#(String,
+    String)), body: transport.Body }` (carries headers + body so callers
+    can drill into the unexpected response).
+  - Security requirements now flow through the request as a
+    `List(SecurityAlternative)` metadata list rather than being inlined
+    into operation bodies. `transport.with_security` evaluates the
+    OpenAPI OR-of-AND alternatives and applies the first one whose
+    required schemes have credentials.
+  - Body bytes flow as `transport.Body` (`TextBody` / `BytesBody` /
+    `EmptyBody`) end to end, matching the existing server-side
+    `BytesBody(BitArray)` contract for binary payloads.
+- `examples/petstore_client` rewritten to use the new send-first API
+  with `oaspec/mock` for its stub transport.
+
+### Migration
+
+Before:
+
+```gleam
+let config =
+  client.new(client.default_base_url(), my_send)
+  |> client.with_bearer_auth(token)
+
+client.get_pet(config, 1)
+```
+
+After:
+
+```gleam
+import oaspec/httpc
+import oaspec/transport
+
+let send =
+  httpc.send
+  |> transport.with_base_url(client.default_base_url())
+  |> transport.with_security(
+    transport.credentials()
+    |> transport.with_bearer_token("BearerAuth", token),
+  )
+
+client.get_pet(send, pet_id: 1)
+```
+
 ## [0.27.0] - 2026-04-28
 
 ### Changed

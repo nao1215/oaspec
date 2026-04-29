@@ -11,7 +11,7 @@ Generate usable Gleam code from OpenAPI 3.x specifications.
 - Generate client and server-side modules from a single spec
 - Produce readable Gleam types, encoders, decoders, request types, and response types
 - Handle real-world OpenAPI patterns: unions, nullable fields, `additionalProperties`, form bodies, multipart, and security
-- Backed by 786 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 235 test fixtures (including 94 OSS-derived edge-case specs)
+- Backed by 788 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 235 test fixtures (including 94 OSS-derived edge-case specs)
 
 ## Why oaspec?
 
@@ -191,6 +191,60 @@ Working examples live under [`examples/`](./examples):
 
 - [`examples/petstore_client`](./examples/petstore_client) — minimal client usage against a canned HTTP transport. Run it from the repo root with `just example-petstore`.
 - [`examples/server_adapter`](./examples/server_adapter) — wires the generated `router.route/5` to a framework-free adapter. Run it from the repo root with `just example-server-adapter`.
+
+### Client transport
+
+Generated clients depend on a tiny pure runtime (`oaspec/transport`)
+instead of any specific HTTP library. Operations take a `transport.Send`
+function value, so the same generated code runs against real HTTP, fakes,
+or any future runtime:
+
+```gleam
+import api/client
+import oaspec/httpc          // BEAM adapter (sibling package)
+import oaspec/transport
+
+let send =
+  httpc.send
+  |> transport.with_base_url(client.default_base_url())
+  |> transport.with_security(
+    transport.credentials()
+    |> transport.with_bearer_token("BearerAuth", token),
+  )
+
+let result = client.list_pets(send, limit: Some(10), offset: None)
+```
+
+Each operation also exposes `build_<op>_request` and
+`decode_<op>_response` helpers so callers can drive the request and
+response halves independently — useful for retry middleware, logging,
+or testing decoding in isolation.
+
+For tests, swap in `oaspec/mock`:
+
+```gleam
+import oaspec/mock
+
+let send = mock.text(200, "[{\"id\": 1, \"name\": \"Fido\"}]")
+let assert Ok(_) = client.list_pets(send, limit: None, offset: None)
+```
+
+The pure runtime supplies middleware for base URL override, default
+headers, and OpenAPI security (`with_security` walks the request's
+declared OR-of-AND alternatives and applies the first one whose
+required schemes have credentials).
+
+Adapters that bridge `transport.Send` to a real runtime live as
+sibling Gleam packages under [`adapters/`](./adapters), so the root
+`oaspec` package never depends on `gleam_httpc` or any specific
+HTTP runtime:
+
+- `oaspec_httpc` (`adapters/httpc/`) — BEAM adapter backed by
+  `gleam_httpc`.
+
+A JavaScript fetch adapter is tracked as a follow-up — JS `fetch` is
+Promise-based, which doesn't compose with the synchronous
+`transport.Send` shape without a separate async variant.
 
 ## Configuration
 
