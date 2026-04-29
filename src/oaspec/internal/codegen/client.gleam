@@ -108,6 +108,7 @@ fn generate_client(ctx: Context) -> String {
     || has_multi_content_response
     || list.any(all_params, fn(p) { p.in_ == spec.InQuery })
     || list.any(all_params, fn(p) { p.in_ == spec.InCookie })
+    || list.any(all_params, fn(p) { p.in_ == spec.InHeader })
     || list.any(all_params, fn(p) {
       case p.payload {
         ParameterSchema(Inline(schema.ArraySchema(..))) -> True
@@ -180,13 +181,28 @@ fn generate_client(ctx: Context) -> String {
   let needs_typed_schemas =
     import_analysis.operations_need_typed_schemas(operations)
 
-  let needs_option =
+  // `type Option` is only referenced in operation signatures when
+  // optional params / bodies exist; `Some` and `None` are also used
+  // for the `base_url` field of every emitted `transport.Request`
+  // literal, so we track them independently.
+  let needs_option_type =
     import_analysis.operations_have_optional_params(operations)
     || import_analysis.operations_have_optional_body(operations)
-    || any_operation_has_server(operations, ctx)
-    || True
-  // We always need Option for `base_url: Some(...)` / `None` in the
-  // generated `transport.Request` literals.
+  let needs_some_ctor =
+    needs_option_type || any_operation_has_server(operations, ctx)
+  let needs_none_ctor =
+    needs_option_type || any_operation_has_no_server(operations, ctx)
+  let option_import_items = case
+    needs_option_type,
+    needs_some_ctor,
+    needs_none_ctor
+  {
+    True, _, _ -> Some("gleam/option.{type Option, None, Some}")
+    False, True, True -> Some("gleam/option.{None, Some}")
+    False, True, False -> Some("gleam/option.{Some}")
+    False, False, True -> Some("gleam/option.{None}")
+    False, False, False -> None
+  }
 
   let needs_int =
     list.any(all_params, fn(p) {
@@ -257,9 +273,9 @@ fn generate_client(ctx: Context) -> String {
     True -> ["gleam/int", ..base_imports]
     False -> base_imports
   }
-  let base_imports = case needs_option {
-    True -> ["gleam/option.{type Option, None, Some}", ..base_imports]
-    False -> base_imports
+  let base_imports = case option_import_items {
+    Some(import_line) -> [import_line, ..base_imports]
+    None -> base_imports
   }
   let base_imports = case needs_typed_schemas {
     True ->
@@ -393,13 +409,30 @@ fn generate_client(ctx: Context) -> String {
 
 fn any_operation_has_server(
   operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
-  _ctx: Context,
+  ctx: Context,
 ) -> Bool {
   list.any(operations, fn(op) {
     let #(_, operation, _, _) = op
     case operation.servers {
-      [] -> False
+      [] ->
+        case context.spec(ctx).servers {
+          [] -> False
+          _ -> True
+        }
       _ -> True
+    }
+  })
+}
+
+fn any_operation_has_no_server(
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  ctx: Context,
+) -> Bool {
+  list.any(operations, fn(op) {
+    let #(_, operation, _, _) = op
+    case operation.servers {
+      [] -> list.is_empty(context.spec(ctx).servers)
+      _ -> False
     }
   })
 }
@@ -1092,7 +1125,14 @@ fn generate_build_body(
     }
   }
 
-  let sb = sb |> se.indent(1, "let headers = list.reverse(headers)")
+  // Reverse only when something was prepended; an empty list is a
+  // no-op for `list.reverse` but still requires the import.
+  let needs_reverse =
+    !list.is_empty(header_params) || !list.is_empty(cookie_params)
+  let sb = case needs_reverse {
+    True -> sb |> se.indent(1, "let headers = list.reverse(headers)")
+    False -> sb
+  }
 
   // Body.
   let sb = case operation.request_body {

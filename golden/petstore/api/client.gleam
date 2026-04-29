@@ -74,7 +74,6 @@ pub fn build_list_pets_request(
   }
   let query = list.reverse(query)
   let headers = []
-  let headers = list.reverse(headers)
   let body = transport.EmptyBody
   Ok(
     transport.Request(
@@ -144,7 +143,6 @@ pub fn build_create_pet_request(
       let path = "/pets"
       let query = []
       let headers = []
-      let headers = list.reverse(headers)
       let body = transport.TextBody(encode.encode_create_pet_request(body))
       let headers = [#("content-type", "application/json"), ..headers]
       Ok(
@@ -217,7 +215,6 @@ pub fn build_get_pet_request(
     string.replace(path, "{petId}", uri.percent_encode(int.to_string(pet_id)))
   let query = []
   let headers = []
-  let headers = list.reverse(headers)
   let body = transport.EmptyBody
   Ok(
     transport.Request(
@@ -287,7 +284,6 @@ pub fn build_delete_pet_request(
     string.replace(path, "{petId}", uri.percent_encode(int.to_string(pet_id)))
   let query = []
   let headers = []
-  let headers = list.reverse(headers)
   let body = transport.EmptyBody
   Ok(
     transport.Request(
