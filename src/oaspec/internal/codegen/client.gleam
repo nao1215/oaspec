@@ -1,0 +1,1222 @@
+import gleam/dict
+import gleam/list
+import gleam/option.{None, Some}
+import gleam/string
+import oaspec/config
+import oaspec/internal/codegen/client_request
+import oaspec/internal/codegen/client_response
+import oaspec/internal/codegen/client_security
+import oaspec/internal/codegen/context.{
+  type Context, type GeneratedFile, GeneratedFile,
+}
+import oaspec/internal/codegen/guards
+import oaspec/internal/codegen/import_analysis
+import oaspec/internal/codegen/ir_build
+import oaspec/internal/openapi/operations
+import oaspec/internal/openapi/resolver
+import oaspec/internal/openapi/schema.{Inline, Reference}
+import oaspec/internal/openapi/spec.{type Resolved, ParameterSchema, Value}
+import oaspec/internal/util/http
+import oaspec/internal/util/naming
+import oaspec/internal/util/string_extra as se
+
+/// Generate client SDK files.
+pub fn generate(ctx: Context) -> List(GeneratedFile) {
+  let client_content = generate_client(ctx)
+
+  [
+    GeneratedFile(
+      path: "client.gleam",
+      content: client_content,
+      target: context.ClientTarget,
+      write_mode: context.Overwrite,
+    ),
+  ]
+}
+
+/// Generate the client module with functions for each operation.
+fn generate_client(ctx: Context) -> String {
+  let operations = operations.collect_operations(ctx)
+
+  // Determine which imports are needed based on parameter types
+  let all_params =
+    list.flat_map(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.filter_map(operation.parameters, fn(ref_p) {
+        case ref_p {
+          Value(p) -> Ok(p)
+          _ -> Error(Nil)
+        }
+      })
+    })
+  let needs_bool =
+    list.any(all_params, fn(p) {
+      case p.payload {
+        ParameterSchema(Inline(schema.BooleanSchema(..))) -> True
+        _ -> False
+      }
+    })
+  let needs_float =
+    list.any(all_params, fn(p) {
+      case p.payload {
+        ParameterSchema(Inline(schema.NumberSchema(..))) -> True
+        _ -> False
+      }
+    })
+  let has_multi_content_response =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(dict.to_list(operation.responses), fn(entry) {
+        let #(_, ref_or) = entry
+        case ref_or {
+          Value(response) -> list.length(dict.to_list(response.content)) > 1
+          _ -> False
+        }
+      })
+    })
+
+  // Check if any operation has a form-urlencoded request body
+  let has_form_urlencoded =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      case operation.request_body {
+        Some(Value(rb)) ->
+          list.any(dict.to_list(rb.content), fn(ce) {
+            let #(key, _) = ce
+            key == "application/x-www-form-urlencoded"
+          })
+        _ -> False
+      }
+    })
+
+  let needs_list =
+    has_form_urlencoded
+    || has_multi_content_response
+    // Every operation with query parameters uses `list.reverse` before
+    // joining, so we need `gleam/list` whenever any query parameter exists.
+    || list.any(all_params, fn(p) { p.in_ == spec.InQuery })
+    || list.any(all_params, fn(p) {
+      case p.payload {
+        ParameterSchema(Inline(schema.ArraySchema(..))) -> True
+        ParameterSchema(Reference(..) as sr) ->
+          case resolver.resolve_schema_ref(sr, context.spec(ctx)) {
+            Ok(schema.ArraySchema(..)) -> True
+            _ -> False
+          }
+        _ -> False
+      }
+    })
+
+  // dyn_decode + json needed for inline primitive response decoding
+  let needs_dyn_decode =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(dict.to_list(operation.responses), fn(entry) {
+        let #(_, ref_or) = entry
+        case ref_or {
+          Value(response) ->
+            list.any(dict.to_list(response.content), fn(ce) {
+              let #(media_type_name, mt) = ce
+              // text/plain responses don't need dyn_decode (body returned directly)
+              case media_type_name {
+                "text/plain" -> False
+                _ ->
+                  case mt.schema {
+                    Some(Inline(schema.ArraySchema(items: Inline(_), ..))) ->
+                      True
+                    Some(Inline(schema.StringSchema(..))) -> True
+                    Some(Inline(schema.IntegerSchema(..))) -> True
+                    Some(Inline(schema.NumberSchema(..))) -> True
+                    Some(Inline(schema.BooleanSchema(..))) -> True
+                    _ -> False
+                  }
+              }
+            })
+          _ -> False
+        }
+      })
+    })
+
+  // json needed for inline primitive body encoding (without dyn_decode)
+  let needs_json =
+    needs_dyn_decode
+    || list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      case operation.request_body {
+        Some(Value(rb)) ->
+          list.any(dict.to_list(rb.content), fn(ce) {
+            let #(_, mt) = ce
+            case mt.schema {
+              Some(Inline(schema.StringSchema(..))) -> True
+              Some(Inline(schema.IntegerSchema(..))) -> True
+              Some(Inline(schema.NumberSchema(..))) -> True
+              Some(Inline(schema.BooleanSchema(..))) -> True
+              _ -> False
+            }
+          })
+        _ -> False
+      }
+    })
+
+  // string module needed for path/query/cookie parameter handling,
+  // security query apiKey, multipart/form-data body building,
+  // form-urlencoded body building, and multi-content-type response dispatch
+  let needs_string =
+    has_multi_content_response
+    || has_form_urlencoded
+    || list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      !list.is_empty(operation.parameters)
+    })
+    || list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      case operation.request_body {
+        Some(Value(rb)) ->
+          list.any(dict.to_list(rb.content), fn(ce) {
+            let #(key, _) = ce
+            key == "multipart/form-data"
+          })
+        _ -> False
+      }
+    })
+    || {
+      let security_schemes = case context.spec(ctx).components {
+        Some(c) -> dict.to_list(c.security_schemes)
+        _ -> []
+      }
+      list.any(security_schemes, fn(entry) {
+        case entry {
+          #(_, spec.Value(spec.ApiKeyScheme(in_: spec.SchemeInQuery, ..))) ->
+            True
+          _ -> False
+        }
+      })
+    }
+
+  // Check which modules are actually needed
+  let needs_typed_schemas =
+    import_analysis.operations_need_typed_schemas(operations)
+
+  let needs_option =
+    import_analysis.operations_have_optional_params(operations)
+    || {
+      let security_schemes = case context.spec(ctx).components {
+        Some(c) -> dict.to_list(c.security_schemes)
+        _ -> []
+      }
+      !list.is_empty(security_schemes)
+    }
+
+  // `gleam/int` is only needed when the generated client actually stringifies
+  // integers — integer path, query, header, or cookie parameters. Form /
+  // multipart bodies and responses handle integer encoding via the encoder
+  // / decoder modules, not directly in client.gleam.
+  let needs_int =
+    list.any(all_params, fn(p) {
+      case p.payload {
+        ParameterSchema(Inline(schema.IntegerSchema(..))) -> True
+        ParameterSchema(Inline(schema.ArraySchema(
+          items: Inline(schema.IntegerSchema(..)),
+          ..,
+        ))) -> True
+        ParameterSchema(Reference(..) as sr) ->
+          case resolver.resolve_schema_ref(sr, context.spec(ctx)) {
+            Ok(schema.IntegerSchema(..)) -> True
+            Ok(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..)) ->
+              True
+            _ -> False
+          }
+        _ -> False
+      }
+    })
+
+  let base_imports = [
+    "gleam/http/request",
+    "gleam/http",
+    // `gleam/result` is needed by the `use req <- result.try(...)` pattern
+    // that every generated operation emits for URL parsing.
+    "gleam/result",
+    config.package(context.config(ctx)) <> "/decode",
+    config.package(context.config(ctx)) <> "/response_types",
+  ]
+  let base_imports = case needs_int {
+    True -> ["gleam/int", ..base_imports]
+    False -> base_imports
+  }
+  let base_imports = case needs_option {
+    True -> ["gleam/option.{type Option, None, Some}", ..base_imports]
+    False -> base_imports
+  }
+  let base_imports = case needs_typed_schemas {
+    True ->
+      list.append(
+        [
+          config.package(context.config(ctx)) <> "/types",
+          config.package(context.config(ctx)) <> "/encode",
+        ],
+        base_imports,
+      )
+    False -> base_imports
+  }
+  // `request_types` is always needed now because every operation emits a
+  // `_with_request` wrapper that references `request_types.*Request`.
+  let base_imports = [
+    config.package(context.config(ctx)) <> "/request_types",
+    ..base_imports
+  ]
+  let base_imports = case needs_string {
+    True -> ["gleam/string", ..base_imports]
+    False -> base_imports
+  }
+  let imports = case needs_dyn_decode {
+    True -> ["gleam/dynamic/decode as dyn_decode", ..base_imports]
+    False -> base_imports
+  }
+  let imports = case needs_json {
+    True -> ["gleam/json", ..imports]
+    False -> imports
+  }
+  let imports = case needs_bool {
+    True -> ["gleam/bool", ..imports]
+    False -> imports
+  }
+  let imports = case needs_float {
+    True -> ["gleam/float", ..imports]
+    False -> imports
+  }
+  let imports = case needs_list {
+    True -> ["gleam/list", ..imports]
+    False -> imports
+  }
+
+  // uri module needed for percent-encoding parameter values and form-urlencoded bodies
+  let needs_uri =
+    has_form_urlencoded
+    || list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      !list.is_empty(operation.parameters)
+    })
+  let imports = case needs_uri {
+    True -> ["gleam/uri", ..imports]
+    False -> imports
+  }
+
+  // result module needed for cookie-based apiKey security (reading existing cookie header)
+  let has_cookie_api_key = case context.spec(ctx).components {
+    Some(c) ->
+      list.any(dict.to_list(c.security_schemes), fn(entry) {
+        case entry {
+          #(_, spec.Value(spec.ApiKeyScheme(in_: spec.SchemeInCookie, ..))) ->
+            True
+          _ -> False
+        }
+      })
+    _ -> False
+  }
+  let imports = case has_cookie_api_key {
+    True -> {
+      // Need gleam/list for list.key_find; gleam/result is already in
+      // base_imports unconditionally (used by every generated operation).
+      case needs_list {
+        True -> imports
+        False -> ["gleam/list", ..imports]
+      }
+    }
+    False -> imports
+  }
+  // Import guards module when validation is enabled and any operation body has validators
+  let needs_guards =
+    config.validate(context.config(ctx))
+    && list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      case operation.request_body {
+        Some(Value(rb)) -> {
+          let content_entries = dict.to_list(rb.content)
+          case content_entries {
+            [#(_, mt)] ->
+              case mt.schema {
+                Some(schema.Reference(name:, ..)) ->
+                  guards.schema_has_validator(name, ctx)
+                _ -> False
+              }
+            _ -> False
+          }
+        }
+        _ -> False
+      }
+    })
+  let imports = case needs_guards {
+    True -> [config.package(context.config(ctx)) <> "/guards", ..imports]
+    False -> imports
+  }
+
+  let sb =
+    se.file_header(context.version)
+    |> se.imports(imports)
+
+  // Collect security schemes
+  let security_schemes = case context.spec(ctx).components {
+    Some(components) -> ir_build.sorted_entries(components.security_schemes)
+    _ -> []
+  }
+
+  // Client configuration type
+  let sb =
+    sb
+    |> se.doc_comment("HTTP client configuration.")
+    |> se.line("pub type ClientConfig {")
+    |> se.indent(1, "ClientConfig(")
+    |> se.indent(2, "base_url: String,")
+    |> se.indent(
+      2,
+      "send: fn(request.Request(String)) -> Result(ClientResponse, ClientError),",
+    )
+
+  // Add security credential fields
+  let sb =
+    list.fold(security_schemes, sb, fn(sb, entry) {
+      let #(scheme_name, _scheme) = entry
+      let field_name = naming.to_snake_case(scheme_name)
+      sb |> se.indent(2, field_name <> ": Option(String),")
+    })
+
+  let sb =
+    sb
+    |> se.indent(1, ")")
+    |> se.line("}")
+    |> se.blank_line()
+
+  // HTTP response type
+  let sb =
+    sb
+    |> se.doc_comment("Raw HTTP response from the server.")
+    |> se.line("pub type ClientResponse {")
+    |> se.indent(1, "ClientResponse(")
+    |> se.indent(2, "status: Int,")
+    |> se.indent(2, "body: String,")
+    |> se.indent(1, ")")
+    |> se.line("}")
+    |> se.blank_line()
+
+  // Error type
+  let sb =
+    sb
+    |> se.doc_comment("HTTP client errors.")
+    |> se.line("pub type ClientError {")
+    |> se.indent(1, "ConnectionError(detail: String)")
+    |> se.indent(1, "TimeoutError")
+    |> se.indent(1, "DecodeError(detail: String)")
+    |> se.indent(1, "InvalidUrl(detail: String)")
+    |> se.indent(1, "UnexpectedStatus(status: Int, body: String)")
+  // ValidationError needs the guards module import for `guards.ValidationFailure`,
+  // so emit it only when guards.gleam itself is generated (= some schema has
+  // a validator). `needs_guards` already encodes that.
+  let sb = case needs_guards {
+    True ->
+      sb
+      |> se.indent(1, "ValidationError(errors: List(guards.ValidationFailure))")
+    False -> sb
+  }
+  let sb =
+    sb
+    |> se.line("}")
+    |> se.blank_line()
+
+  // Create default client
+  let sb =
+    sb
+    |> se.doc_comment("Create a new client configuration.")
+    |> se.line("pub fn new(")
+    |> se.indent(1, "base_url: String,")
+    |> se.indent(
+      1,
+      "send: fn(request.Request(String)) -> Result(ClientResponse, ClientError),",
+    )
+    |> se.line(") -> ClientConfig {")
+    |> se.indent(1, "ClientConfig(base_url:, send:,")
+
+  // Initialize security fields to None
+  let sb =
+    list.fold(security_schemes, sb, fn(sb, entry) {
+      let #(scheme_name, _scheme) = entry
+      let field_name = naming.to_snake_case(scheme_name)
+      sb |> se.indent(2, field_name <> ": None,")
+    })
+
+  let sb =
+    sb
+    |> se.indent(1, ")")
+    |> se.line("}")
+    |> se.blank_line()
+
+  // Generate with_* helpers for security scheme configuration
+  let sb = generate_with_helpers(sb, security_schemes)
+
+  // Generate default_base_url function from server template variables
+  let sb = generate_default_base_url(sb, ctx)
+
+  // Generate operation functions
+  let sb =
+    list.fold(operations, sb, fn(sb, op) {
+      let #(op_id, operation, path, method) = op
+      generate_client_function(sb, op_id, operation, path, method, ctx)
+    })
+
+  se.to_string(sb)
+}
+
+/// Substitute server variable placeholders in a URL template with their default values.
+fn substitute_server_variables(
+  url: String,
+  variables: List(#(String, spec.ServerVariable)),
+) -> String {
+  list.fold(variables, url, fn(acc, entry) {
+    let #(name, variable) = entry
+    string.replace(acc, "{" <> name <> "}", variable.default)
+  })
+}
+
+/// Generate the default_base_url function from the first server's template and variables.
+fn generate_default_base_url(
+  sb: se.StringBuilder,
+  ctx: Context,
+) -> se.StringBuilder {
+  case context.spec(ctx).servers {
+    [first_server, ..] -> {
+      let variables = ir_build.sorted_entries(first_server.variables)
+      let resolved_url =
+        substitute_server_variables(first_server.url, variables)
+      let defaults_doc = case variables {
+        [] -> ""
+        _ ->
+          "Defaults: "
+          <> string.join(
+            list.map(variables, fn(entry) {
+              let #(name, variable) = entry
+              name <> " = \"" <> variable.default <> "\""
+            }),
+            ", ",
+          )
+      }
+      let sb = case defaults_doc {
+        "" ->
+          sb
+          |> se.doc_comment(
+            "Build the base URL from server template variables.",
+          )
+        doc ->
+          sb
+          |> se.doc_comment(
+            "Build the base URL from server template variables.",
+          )
+          |> se.doc_comment(doc)
+      }
+      sb
+      |> se.line("pub fn default_base_url() -> String {")
+      |> se.indent(1, "\"" <> resolved_url <> "\"")
+      |> se.line("}")
+      |> se.blank_line()
+    }
+    [] -> sb
+  }
+}
+
+/// Generate a client function for a single operation.
+fn generate_client_function(
+  sb: se.StringBuilder,
+  op_id: String,
+  operation: spec.Operation(Resolved),
+  path: String,
+  method: spec.HttpMethod,
+  ctx: Context,
+) -> se.StringBuilder {
+  let fn_name = naming.operation_to_function_name(op_id)
+
+  let sb = case operation.summary {
+    Some(summary) -> sb |> se.doc_comment(summary)
+    _ -> sb
+  }
+  let sb = case operation.description {
+    Some(desc) -> sb |> se.doc_comment(desc)
+    _ -> sb
+  }
+  // Add doc comment listing supported content types for multi-content request bodies
+  let sb = case operation.request_body {
+    Some(Value(rb)) -> {
+      let content_entries = ir_build.sorted_entries(rb.content)
+      case content_entries {
+        [_, _, ..] -> {
+          let ct_names =
+            list.map(content_entries, fn(e) { e.0 })
+            |> string.join(", ")
+          sb
+          |> se.doc_comment("Supported content types: " <> ct_names)
+        }
+        _ -> sb
+      }
+    }
+    _ -> sb
+  }
+
+  let unwrapped_params =
+    list.filter_map(operation.parameters, fn(ref_p) {
+      case ref_p {
+        Value(p) -> Ok(p)
+        _ -> Error(Nil)
+      }
+    })
+
+  let field_names = client_request.build_param_field_names(operation)
+  let path_params =
+    list.filter(unwrapped_params, fn(p) {
+      case p.in_ {
+        spec.InPath -> True
+        _ -> False
+      }
+    })
+
+  let query_params =
+    list.filter(unwrapped_params, fn(p) {
+      case p.in_ {
+        spec.InQuery -> True
+        _ -> False
+      }
+    })
+
+  let header_params =
+    list.filter(unwrapped_params, fn(p) {
+      case p.in_ {
+        spec.InHeader -> True
+        _ -> False
+      }
+    })
+
+  let cookie_params =
+    list.filter(unwrapped_params, fn(p) {
+      case p.in_ {
+        spec.InCookie -> True
+        _ -> False
+      }
+    })
+
+  // Function signature
+  let response_type = naming.schema_to_type_name(op_id) <> "Response"
+  let params =
+    client_request.build_param_list(
+      path_params,
+      query_params,
+      header_params,
+      cookie_params,
+      operation,
+      op_id,
+      ctx,
+    )
+  let sb =
+    sb
+    |> se.line(
+      "pub fn "
+      <> fn_name
+      <> "(config: ClientConfig"
+      <> params
+      <> ") -> Result(response_types."
+      <> response_type
+      <> ", ClientError) {",
+    )
+
+  // Determine if client-side guard validation is needed for the body
+  let client_guard_schema_name = case
+    config.validate(context.config(ctx)),
+    operation.request_body
+  {
+    True, Some(Value(rb)) -> {
+      let content_entries = dict.to_list(rb.content)
+      case content_entries {
+        [#(_, mt)] ->
+          case mt.schema {
+            Some(schema.Reference(name:, ..)) ->
+              case guards.schema_has_validator(name, ctx) {
+                True -> Some(#(name, rb.required))
+                False -> None
+              }
+            _ -> None
+          }
+        _ -> None
+      }
+    }
+    _, _ -> None
+  }
+
+  // Open guard validation wrapper for required body
+  let sb = case client_guard_schema_name {
+    Some(#(name, True)) -> {
+      let validate_fn =
+        "guards.validate_" <> naming.to_snake_case(name) <> "(body)"
+      sb
+      |> se.indent(1, "case " <> validate_fn <> " {")
+      |> se.indent(2, "Error(errors) -> Error(ValidationError(errors:))")
+      |> se.indent(2, "Ok(_) -> {")
+    }
+    Some(#(name, False)) -> {
+      let validate_fn = "guards.validate_" <> naming.to_snake_case(name)
+      sb
+      |> se.indent(1, "let validation_errors = case body {")
+      |> se.indent(2, "Some(b) -> case " <> validate_fn <> "(b) {")
+      |> se.indent(3, "Error(errors) -> errors")
+      |> se.indent(3, "Ok(_) -> []")
+      |> se.indent(2, "}")
+      |> se.indent(2, "None -> []")
+      |> se.indent(1, "}")
+      |> se.indent(1, "case validation_errors {")
+      |> se.indent(
+        2,
+        "[_, ..] -> Error(ValidationError(errors: validation_errors))",
+      )
+      |> se.indent(2, "[] -> {")
+    }
+    None -> sb
+  }
+
+  // Determine effective base URL for this operation.
+  // OpenAPI precedence: operation.servers > path_item.servers > top-level servers.
+  // operation.servers is already populated with path-level servers by collect_operations.
+  let effective_server_url = case operation.servers {
+    [first_server, ..] -> {
+      let variables = ir_build.sorted_entries(first_server.variables)
+      let resolved = substitute_server_variables(first_server.url, variables)
+      Some(resolved)
+    }
+    [] -> None
+  }
+
+  // Add doc comment when this operation uses a server override
+  let sb = case effective_server_url {
+    Some(url) -> sb |> se.indent(1, "// Server override: " <> url)
+    None -> sb
+  }
+
+  // Build URL with path params
+  let sb = sb |> se.indent(1, "let path = \"" <> path <> "\"")
+  let sb =
+    list.fold(path_params, sb, fn(sb, p) {
+      let param_name = client_request.field_name_for(field_names, p)
+      let to_string_expr =
+        client_request.param_to_string_expr(p, param_name, ctx)
+      sb
+      |> se.indent(
+        1,
+        "let path = string.replace(path, \"{"
+          <> p.name
+          <> "}\", uri.percent_encode("
+          <> to_string_expr
+          <> "))",
+      )
+    })
+
+  // Build query string from query params
+  let sb = case list.is_empty(query_params) {
+    True -> sb
+    False -> {
+      let sb = sb |> se.indent(1, "let query_parts = []")
+      let sb =
+        list.fold(query_params, sb, fn(sb, p) {
+          let param_name = client_request.field_name_for(field_names, p)
+          // Check for deepObject style with object schema
+          case p.style, client_request.is_deep_object_param(p, ctx) {
+            Some(spec.DeepObjectStyle), True ->
+              client_request.generate_deep_object_query_param(
+                sb,
+                p,
+                param_name,
+                ctx,
+              )
+            _, _ ->
+              case client_request.is_exploded_array_param(p, ctx) {
+                True ->
+                  client_request.generate_exploded_array_query_param(
+                    sb,
+                    p,
+                    param_name,
+                    ctx,
+                  )
+                False ->
+                  case client_request.is_delimited_array_param(p, ctx) {
+                    Some(joiner) ->
+                      client_request.generate_delimited_array_query_param(
+                        sb,
+                        p,
+                        param_name,
+                        joiner,
+                        ctx,
+                      )
+                    None ->
+                      case p.required {
+                        True -> {
+                          let to_str =
+                            client_request.to_str_for_required(
+                              p,
+                              param_name,
+                              ctx,
+                            )
+                          let encoded =
+                            client_security.maybe_percent_encode(to_str, p)
+                          sb
+                          |> se.indent(
+                            1,
+                            "let query_parts = [\""
+                              <> p.name
+                              <> "=\" <> "
+                              <> encoded
+                              <> ", ..query_parts]",
+                          )
+                        }
+                        False -> {
+                          let to_str =
+                            client_request.to_str_for_optional_value(p, ctx)
+                          let encoded =
+                            client_security.maybe_percent_encode(to_str, p)
+                          sb
+                          |> se.indent(
+                            1,
+                            "let query_parts = case " <> param_name <> " {",
+                          )
+                          |> se.indent(
+                            2,
+                            "Some(v) -> [\""
+                              <> p.name
+                              <> "=\" <> "
+                              <> encoded
+                              <> ", ..query_parts]",
+                          )
+                          |> se.indent(2, "None -> query_parts")
+                          |> se.indent(1, "}")
+                        }
+                      }
+                  }
+              }
+          }
+        })
+      sb
+      |> se.indent(
+        1,
+        "let query_string = string.join(list.reverse(query_parts), \"&\")",
+      )
+      |> se.indent(1, "let path = case query_string {")
+      |> se.indent(2, "\"\" -> path")
+      |> se.indent(2, "_ -> path <> \"?\" <> query_string")
+      |> se.indent(1, "}")
+    }
+  }
+
+  // Build the request
+  let http_method = case method {
+    spec.Get -> "http.Get"
+    spec.Post -> "http.Post"
+    spec.Put -> "http.Put"
+    spec.Delete -> "http.Delete"
+    spec.Patch -> "http.Patch"
+    spec.Head -> "http.Head"
+    spec.Options -> "http.Options"
+    spec.Trace -> "http.Trace"
+  }
+
+  let base_url_expr = case effective_server_url {
+    Some(url) -> "\"" <> url <> "\""
+    None -> "config.base_url"
+  }
+  // Fail with InvalidUrl instead of panicking on malformed base_url or path.
+  // `gleam/result` is included in base_imports unconditionally, so the `use`
+  // form below always compiles.
+  let sb =
+    sb
+    |> se.indent(1, "let full_url = " <> base_url_expr <> " <> path")
+    |> se.indent(1, "use req <- result.try(")
+    |> se.indent(2, "request.to(full_url)")
+    |> se.indent(
+      2,
+      "|> result.map_error(fn(_) { InvalidUrl(detail: full_url) }),",
+    )
+    |> se.indent(1, ")")
+    |> se.indent(1, "let req = request.set_method(req, " <> http_method <> ")")
+
+  // Only set content-type for requests with body
+  let sb = case operation.request_body {
+    Some(Value(rb)) -> {
+      // For optional request bodies, unwrap the Option first
+      let sb = case rb.required {
+        True -> sb
+        False ->
+          sb
+          |> se.indent(1, "let req = case body {")
+          |> se.indent(2, "Some(body) -> {")
+      }
+      let content_entries = ir_build.sorted_entries(rb.content)
+      let sb = case content_entries {
+        // Multiple content types: accept pre-serialized String body
+        // with a content_type parameter
+        [_, _, ..] ->
+          sb
+          |> se.indent(
+            1,
+            "let req = request.set_header(req, \"content-type\", content_type)",
+          )
+          |> se.indent(1, "let req = request.set_body(req, body)")
+        // Single content type
+        [#(content_type_key, _)] ->
+          case content_type_key {
+            "multipart/form-data" ->
+              client_request.generate_multipart_body(sb, rb, op_id, ctx)
+            "application/x-www-form-urlencoded" ->
+              client_request.generate_form_urlencoded_body(sb, rb, op_id, ctx)
+            _ -> {
+              let body_encode_expr =
+                client_request.get_body_encode_expr(rb, op_id, ctx)
+              sb
+              |> se.indent(
+                1,
+                "let req = request.set_header(req, \"content-type\", \""
+                  <> content_type_key
+                  <> "\")",
+              )
+              |> se.indent(
+                1,
+                "let req = request.set_body(req, " <> body_encode_expr <> ")",
+              )
+            }
+          }
+        [] -> sb
+      }
+      // Close optional body case
+      case rb.required {
+        True -> sb
+        False ->
+          sb
+          |> se.indent(2, "req")
+          |> se.indent(1, "}")
+          |> se.indent(2, "None -> req")
+          |> se.indent(1, "}")
+      }
+    }
+    _ -> sb
+  }
+
+  // Set header parameters
+  let sb =
+    list.fold(header_params, sb, fn(sb, p) {
+      let param_name = client_request.field_name_for(field_names, p)
+      let header_name = string.lowercase(p.name)
+      case p.required {
+        True -> {
+          let to_str = client_request.param_to_string_expr(p, param_name, ctx)
+          sb
+          |> se.indent(
+            1,
+            "let req = request.set_header(req, \""
+              <> header_name
+              <> "\", "
+              <> to_str
+              <> ")",
+          )
+        }
+        False -> {
+          let to_str = client_request.to_str_for_optional_value(p, ctx)
+          sb
+          |> se.indent(1, "let req = case " <> param_name <> " {")
+          |> se.indent(
+            2,
+            "Some(v) -> request.set_header(req, \""
+              <> header_name
+              <> "\", "
+              <> to_str
+              <> ")",
+          )
+          |> se.indent(2, "None -> req")
+          |> se.indent(1, "}")
+        }
+      }
+    })
+
+  // Set cookie parameters: combine all into a single "cookie" header
+  let sb = case list.is_empty(cookie_params) {
+    True -> sb
+    False -> {
+      let sb = sb |> se.indent(1, "let cookie_parts = []")
+      let sb =
+        list.fold(cookie_params, sb, fn(sb, p) {
+          let param_name = client_request.field_name_for(field_names, p)
+          case p.required {
+            True -> {
+              let to_str =
+                client_request.param_to_string_expr(p, param_name, ctx)
+              sb
+              |> se.indent(
+                1,
+                "let cookie_parts = [\""
+                  <> p.name
+                  <> "=\" <> uri.percent_encode("
+                  <> to_str
+                  <> "), ..cookie_parts]",
+              )
+            }
+            False -> {
+              let to_str = client_request.to_str_for_optional_value(p, ctx)
+              sb
+              |> se.indent(1, "let cookie_parts = case " <> param_name <> " {")
+              |> se.indent(
+                2,
+                "Some(v) -> [\""
+                  <> p.name
+                  <> "=\" <> uri.percent_encode("
+                  <> to_str
+                  <> "), ..cookie_parts]",
+              )
+              |> se.indent(2, "None -> cookie_parts")
+              |> se.indent(1, "}")
+            }
+          }
+        })
+      sb
+      |> se.indent(1, "let req = case cookie_parts {")
+      |> se.indent(2, "[] -> req")
+      |> se.indent(
+        2,
+        "_ -> request.set_header(req, \"cookie\", string.join(cookie_parts, \"; \"))",
+      )
+      |> se.indent(1, "}")
+    }
+  }
+
+  // Apply security schemes with proper OR semantics.
+  // OpenAPI security is OR of alternatives; each alternative is AND of
+  // schemes. The generated code tries each alternative in order and
+  // applies only the first one whose credentials are all present.
+  let effective_security = case operation.security {
+    Some(sec) -> sec
+    None -> context.spec(ctx).security
+  }
+  let sb = case effective_security {
+    [] -> sb
+    alternatives -> {
+      // Emit scope comments for each security alternative
+      let sb =
+        list.fold(alternatives, sb, fn(sb, alt) {
+          let all_scopes = list.flat_map(alt.schemes, fn(s) { s.scopes })
+          case all_scopes {
+            [] -> sb
+            scopes ->
+              sb
+              |> se.indent(
+                1,
+                "// Required scopes: " <> string.join(scopes, ", "),
+              )
+          }
+        })
+      client_security.generate_security_or_chain(sb, ctx, alternatives, 1)
+    }
+  }
+
+  // Send request and decode response into typed variant
+  let sb =
+    sb
+    |> se.indent(1, "case config.send(req) {")
+    |> se.indent(2, "Error(e) -> Error(e)")
+    |> se.indent(2, "Ok(resp) -> {")
+
+  let responses = http.sort_response_entries(dict.to_list(operation.responses))
+  let sb =
+    sb
+    |> se.indent(3, "case resp.status {")
+
+  let sb =
+    list.fold(responses, sb, fn(sb, entry) {
+      let #(status_code, ref_or) = entry
+      case ref_or {
+        Value(response) -> {
+          let variant_name =
+            "response_types."
+            <> naming.schema_to_type_name(op_id)
+            <> "Response"
+            <> http.status_code_suffix(status_code)
+          let content_entries = ir_build.sorted_entries(response.content)
+          case content_entries {
+            [] ->
+              sb
+              |> se.indent(
+                4,
+                http.status_code_to_int_pattern(status_code)
+                  <> " -> Ok("
+                  <> variant_name
+                  <> ")",
+              )
+            [#(single_ct, single_mt)] ->
+              client_response.generate_single_content_response(
+                sb,
+                status_code,
+                variant_name,
+                single_ct,
+                single_mt,
+                op_id,
+                ctx,
+              )
+            multiple ->
+              client_response.generate_multi_content_response(
+                sb,
+                status_code,
+                variant_name,
+                multiple,
+                op_id,
+                ctx,
+              )
+          }
+        }
+        _ -> sb
+      }
+    })
+
+  // Only add a fallback _ branch if no "default" response exists
+  let has_default =
+    list.any(responses, fn(entry) {
+      let #(code, _) = entry
+      code == http.DefaultStatus
+    })
+  let sb = case has_default {
+    True -> sb
+    False ->
+      sb
+      |> se.indent(
+        4,
+        "_ -> Error(UnexpectedStatus(status: resp.status, body: resp.body))",
+      )
+  }
+  let sb =
+    sb
+    |> se.indent(3, "}")
+    |> se.indent(2, "}")
+    |> se.indent(1, "}")
+
+  // Close guard validation wrapper
+  let sb = case client_guard_schema_name {
+    Some(_) ->
+      sb
+      |> se.indent(1, "}")
+      |> se.indent(1, "}")
+    None -> sb
+  }
+
+  let sb =
+    sb
+    |> se.line("}")
+    |> se.blank_line()
+
+  // Emit a request-object wrapper that accepts a request_types.*Request
+  // value and delegates to the flat function above. Skipped for operations
+  // that take a multi-content body (they need an extra `content_type`
+  // argument the request type does not carry).
+  case
+    client_request.build_request_object_call_args(
+      path_params,
+      query_params,
+      header_params,
+      cookie_params,
+      operation,
+    )
+  {
+    Some(call_args) -> {
+      let request_type = naming.schema_to_type_name(op_id) <> "Request"
+      let extra = case call_args {
+        "" -> ""
+        _ -> ", " <> call_args
+      }
+      sb
+      |> se.doc_comment(
+        "Request-object wrapper. Delegates to "
+        <> fn_name
+        <> "/N with fields unpacked from the request record.",
+      )
+      |> se.line(
+        "pub fn "
+        <> fn_name
+        <> "_with_request(config: ClientConfig, req: request_types."
+        <> request_type
+        <> ") -> Result(response_types."
+        <> response_type
+        <> ", ClientError) {",
+      )
+      |> se.indent(1, fn_name <> "(config" <> extra <> ")")
+      |> se.line("}")
+      |> se.blank_line()
+    }
+    None -> sb
+  }
+}
+
+/// Generate with_* helper functions for security scheme configuration.
+fn generate_with_helpers(
+  sb: se.StringBuilder,
+  security_schemes: List(#(String, spec.RefOr(spec.SecurityScheme))),
+) -> se.StringBuilder {
+  list.fold(security_schemes, sb, fn(sb, entry) {
+    let #(scheme_name, scheme_ref) = entry
+    let field_name = naming.to_snake_case(scheme_name)
+    let doc = scheme_doc_comment(scheme_name, scheme_ref)
+    sb
+    |> se.doc_comment(doc)
+    |> se.line(
+      "pub fn with_"
+      <> field_name
+      <> "(config: ClientConfig, token: String) -> ClientConfig {",
+    )
+    |> se.indent(1, "ClientConfig(..config, " <> field_name <> ": Some(token))")
+    |> se.line("}")
+    |> se.blank_line()
+  })
+}
+
+/// Build a doc comment describing a security scheme helper.
+fn scheme_doc_comment(
+  scheme_name: String,
+  scheme_ref: spec.RefOr(spec.SecurityScheme),
+) -> String {
+  case scheme_ref {
+    spec.Value(spec.ApiKeyScheme(name: key_name, in_: spec.SchemeInHeader)) ->
+      "Set the API key for the "
+      <> scheme_name
+      <> " security scheme (header: "
+      <> key_name
+      <> ")."
+    spec.Value(spec.ApiKeyScheme(name: key_name, in_: spec.SchemeInQuery)) ->
+      "Set the API key for the "
+      <> scheme_name
+      <> " security scheme (query: "
+      <> key_name
+      <> ")."
+    spec.Value(spec.ApiKeyScheme(name: key_name, in_: spec.SchemeInCookie)) ->
+      "Set the API key for the "
+      <> scheme_name
+      <> " security scheme (cookie: "
+      <> key_name
+      <> ")."
+    spec.Value(spec.HttpScheme(scheme: "bearer", ..)) ->
+      "Set the bearer token for the " <> scheme_name <> " security scheme."
+    spec.Value(spec.HttpScheme(scheme: "basic", ..)) ->
+      "Set the basic auth credentials for the "
+      <> scheme_name
+      <> " security scheme."
+    spec.Value(spec.HttpScheme(scheme: "digest", ..)) ->
+      "Set the digest auth credentials for the "
+      <> scheme_name
+      <> " security scheme."
+    spec.Value(spec.HttpScheme(scheme: http_scheme, ..)) ->
+      "Set the token for the "
+      <> scheme_name
+      <> " security scheme ("
+      <> http_scheme
+      <> " auth)."
+    spec.Value(spec.OAuth2Scheme(..)) ->
+      "Set the OAuth2 token for the " <> scheme_name <> " security scheme."
+    spec.Value(spec.OpenIdConnectScheme(..)) ->
+      "Set the OpenID Connect token for the "
+      <> scheme_name
+      <> " security scheme."
+    _ -> "Set the credential for the " <> scheme_name <> " security scheme."
+  }
+}

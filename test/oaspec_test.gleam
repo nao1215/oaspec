@@ -4,36 +4,36 @@ import gleam/option.{None, Some}
 import gleam/string
 import gleeunit
 import gleeunit/should
-import oaspec/capability
-import oaspec/codegen/client as client_gen
-import oaspec/codegen/context
-import oaspec/codegen/decoders
-import oaspec/codegen/encoders
-import oaspec/codegen/guards
-import oaspec/codegen/ir
-import oaspec/codegen/ir_render
-import oaspec/codegen/schema_dispatch
-import oaspec/codegen/server as server_gen
-import oaspec/codegen/types
-import oaspec/codegen/validate
 import oaspec/config
 import oaspec/generate
-import oaspec/openapi/capability_check
-import oaspec/openapi/dedup
+import oaspec/internal/capability
+import oaspec/internal/codegen/client as client_gen
+import oaspec/internal/codegen/context
+import oaspec/internal/codegen/decoders
+import oaspec/internal/codegen/encoders
+import oaspec/internal/codegen/guards
+import oaspec/internal/codegen/ir
+import oaspec/internal/codegen/ir_render
+import oaspec/internal/codegen/schema_dispatch
+import oaspec/internal/codegen/server as server_gen
+import oaspec/internal/codegen/types
+import oaspec/internal/codegen/validate
+import oaspec/internal/openapi/capability_check
+import oaspec/internal/openapi/dedup
+import oaspec/internal/openapi/hoist
+import oaspec/internal/openapi/location_index
+import oaspec/internal/openapi/normalize
+import oaspec/internal/openapi/provenance
+import oaspec/internal/openapi/resolve
+import oaspec/internal/openapi/resolver
+import oaspec/internal/openapi/schema
+import oaspec/internal/openapi/spec
+import oaspec/internal/openapi/value
+import oaspec/internal/util/content_type
+import oaspec/internal/util/http
+import oaspec/internal/util/naming
 import oaspec/openapi/diagnostic.{Diagnostic, NoSourceLoc, SourceLoc}
-import oaspec/openapi/hoist
-import oaspec/openapi/location_index
-import oaspec/openapi/normalize
 import oaspec/openapi/parser
-import oaspec/openapi/provenance
-import oaspec/openapi/resolve
-import oaspec/openapi/resolver
-import oaspec/openapi/schema
-import oaspec/openapi/spec
-import oaspec/openapi/value
-import oaspec/util/content_type
-import oaspec/util/http
-import oaspec/util/naming
 import simplifile
 
 pub fn main() {
@@ -8677,7 +8677,7 @@ pub fn server_deep_object_params_are_parsed_test() {
   |> should.be_true()
   string.contains(
     content,
-    "name: { let assert Ok([v, ..]) = dict.get(query, \"filter[name]\") v }",
+    "name: case dict.get(query, \"filter[name]\") { Ok([v, ..]) -> v _ -> \"\" }",
   )
   |> should.be_true()
   string.contains(
@@ -8692,7 +8692,7 @@ pub fn server_deep_object_params_are_parsed_test() {
   |> should.be_true()
   string.contains(
     content,
-    "scores: { let assert Ok(vs) = dict.get(query, \"filter[scores]\") list.map(vs, fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } }) }",
+    "scores: case dict.get(query, \"filter[scores]\") { Ok(vs) -> list.map(vs, fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } }) _ -> [] }",
   )
   |> should.be_true()
   string.contains(
@@ -8770,7 +8770,7 @@ pub fn server_form_urlencoded_body_is_parsed_test() {
   |> should.be_true()
   string.contains(
     content,
-    "name: { let assert Ok([v, ..]) = dict.get(form_body, \"name\") v }",
+    "name: case dict.get(form_body, \"name\") { Ok([v, ..]) -> v _ -> \"\" }",
   )
   |> should.be_true()
   string.contains(
@@ -8785,7 +8785,7 @@ pub fn server_form_urlencoded_body_is_parsed_test() {
   |> should.be_true()
   string.contains(
     content,
-    "scores: { let assert Ok(vs) = dict.get(form_body, \"scores\") list.map(vs, fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } }) }",
+    "scores: case dict.get(form_body, \"scores\") { Ok(vs) -> list.map(vs, fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } }) _ -> [] }",
   )
   |> should.be_true()
   string.contains(
@@ -8818,7 +8818,7 @@ pub fn server_nested_form_urlencoded_body_is_parsed_test() {
   |> should.be_true()
   string.contains(
     content,
-    "username: { let assert Ok([v, ..]) = dict.get(form_body, \"profile[username]\") v }",
+    "username: case dict.get(form_body, \"profile[username]\") { Ok([v, ..]) -> v _ -> \"\" }",
   )
   |> should.be_true()
   string.contains(
@@ -8866,7 +8866,7 @@ pub fn server_multipart_body_is_parsed_test() {
   |> should.be_true()
   string.contains(
     content,
-    "name: { let assert Ok([v, ..]) = dict.get(multipart_body, \"name\") v }",
+    "name: case dict.get(multipart_body, \"name\") { Ok([v, ..]) -> v _ -> \"\" }",
   )
   |> should.be_true()
   string.contains(
@@ -8924,14 +8924,14 @@ pub fn server_form_urlencoded_ref_fields_are_parsed_test() {
   |> should.be_true()
   string.contains(
     content,
-    "scores: { let assert Ok(vs) = dict.get(form_body, \"scores\") list.map(vs, fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } }) }",
+    "scores: case dict.get(form_body, \"scores\") { Ok(vs) -> list.map(vs, fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } }) _ -> [] }",
   )
   |> should.be_true()
   string.contains(content, "profile: types.Profile(")
   |> should.be_true()
   string.contains(
     content,
-    "username: { let assert Ok([v, ..]) = dict.get(form_body, \"profile[username]\") v }",
+    "username: case dict.get(form_body, \"profile[username]\") { Ok([v, ..]) -> v _ -> \"\" }",
   )
   |> should.be_true()
   string.contains(

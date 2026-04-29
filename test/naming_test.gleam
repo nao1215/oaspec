@@ -1,7 +1,7 @@
 import gleam/list
 import gleeunit
 import gleeunit/should
-import oaspec/util/naming
+import oaspec/internal/util/naming
 
 pub fn main() {
   gleeunit.main()
@@ -9,7 +9,7 @@ pub fn main() {
 
 /// The complete list of Gleam reserved keywords that naming.escape_keyword
 /// must protect against. Kept in sync with the `case` branch in
-/// src/oaspec/util/naming.gleam. When a new keyword is added there, add
+/// src/oaspec/internal/util/naming.gleam. When a new keyword is added there, add
 /// it here too — the whole-list assertions below depend on this being
 /// exhaustive, not hand-picked.
 const gleam_keywords: List(String) = [
