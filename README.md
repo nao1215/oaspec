@@ -11,7 +11,7 @@ Generate usable Gleam code from OpenAPI 3.x specifications.
 - Generate client and server-side modules from a single spec
 - Produce readable Gleam types, encoders, decoders, request types, and response types
 - Handle real-world OpenAPI patterns: unions, nullable fields, `additionalProperties`, form bodies, multipart, and security
-- Backed by 789 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 235 test fixtures (including 94 OSS-derived edge-case specs)
+- Backed by 791 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 235 test fixtures (including 94 OSS-derived edge-case specs)
 
 ## Why oaspec?
 

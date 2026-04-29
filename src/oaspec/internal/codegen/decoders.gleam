@@ -66,12 +66,27 @@ fn generate_decoders(
       type_gen.schema_has_optional_fields(schema_ref, ctx)
     })
 
-  // Check if dict module is needed (any schema with typed or untyped additionalProperties)
-  let needs_dict =
+  // Check if dict module is needed (any schema with typed/untyped
+  // additionalProperties surfaces a Dict in the record; `additionalProperties:
+  // false` also needs Dict at decode time for the closed-schema unknown-key
+  // check, even though the field is suppressed from the record).
+  // Anonymous request/response schemas also reach the same code path via
+  // `generate_anonymous_decoders`, so they must be inspected too — otherwise
+  // `gleam/dict` is missing from the import header and the generated module
+  // fails to compile.
+  let operation_inline_schemas = collect_operation_inline_schemas(operations)
+  let component_needs_dict =
     list.any(schemas, fn(entry) {
       let #(_, schema_ref) = entry
       type_gen.schema_has_additional_properties(schema_ref, ctx)
+      || type_gen.schema_has_forbidden_additional_properties(schema_ref, ctx)
     })
+  let operation_needs_dict =
+    list.any(operation_inline_schemas, fn(schema_ref) {
+      type_gen.schema_has_additional_properties(schema_ref, ctx)
+      || type_gen.schema_has_forbidden_additional_properties(schema_ref, ctx)
+    })
+  let needs_dict = component_needs_dict || operation_needs_dict
 
   // Check if types module is needed (any non-primitive schema)
   let needs_types =
@@ -221,6 +236,46 @@ fn generate_anonymous_request_body_decoder(
     Some(spec.Ref(_)) -> sb
     None -> sb
   }
+}
+
+/// Collect every inline schema reachable via operations' request bodies and
+/// responses. Used by the `needs_*` import-decision pass so anonymous closed
+/// or open-with-additionalProperties object schemas don't slip through and
+/// leave `gleam/dict` un-imported when the body of the generated decoder
+/// references it.
+fn collect_operation_inline_schemas(
+  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+) -> List(SchemaRef) {
+  list.flat_map(operations, fn(op) {
+    let #(_op_id, operation, _path, _method) = op
+    let response_schemas =
+      list.flat_map(dict.to_list(operation.responses), fn(entry) {
+        let #(_status, ref_or_response) = entry
+        case ref_or_response {
+          Value(response) ->
+            list.filter_map(dict.to_list(response.content), fn(content_entry) {
+              let #(_, media_type) = content_entry
+              case media_type.schema {
+                Some(Inline(schema_obj)) -> Ok(Inline(schema_obj))
+                _ -> Error(Nil)
+              }
+            })
+          spec.Ref(_) -> []
+        }
+      })
+    let request_schemas = case operation.request_body {
+      Some(Value(rb)) ->
+        list.filter_map(dict.to_list(rb.content), fn(content_entry) {
+          let #(_, media_type) = content_entry
+          case media_type.schema {
+            Some(Inline(schema_obj)) -> Ok(Inline(schema_obj))
+            _ -> Error(Nil)
+          }
+        })
+      _ -> []
+    }
+    list.append(response_schemas, request_schemas)
+  })
 }
 
 /// Generate decoder for an anonymous schema with a composed name.
@@ -589,7 +644,26 @@ fn generate_object_decoder(
           <> ")",
       )
     }
-    Forbidden | Unspecified -> sb
+    // Closed schema: read every key, drop the declared ones, and reject
+    // the decode if anything remains. The check has to live in the decoder
+    // body because `gleam/dynamic/decode` consumes only declared fields,
+    // so a post-decode validator would have nothing to inspect.
+    Forbidden -> {
+      sb
+      |> se.indent(
+        1,
+        "use all_props <- decode.then(decode.dict(decode.string, decode.new_primitive_decoder(\"Dynamic\", fn(x) { Ok(x) })))",
+      )
+      |> se.indent(
+        1,
+        "let extra_props = dict.drop(all_props, " <> known_keys_expr <> ")",
+      )
+      |> se.indent(1, "use _ <- decode.then(case dict.is_empty(extra_props) {")
+      |> se.indent(2, "True -> decode.success(Nil)")
+      |> se.indent(2, "False -> decode.failure(Nil, \"additionalProperties\")")
+      |> se.indent(1, "})")
+    }
+    Unspecified -> sb
   }
 
   let param_names =

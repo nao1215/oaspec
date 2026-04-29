@@ -7,8 +7,8 @@ import gleam/option.{type Option, None, Some}
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/openapi/resolver
 import oaspec/internal/openapi/schema.{
-  type SchemaObject, type SchemaRef, AllOfSchema, Inline, ObjectSchema,
-  Reference, StringSchema, Typed, Untyped,
+  type SchemaObject, type SchemaRef, AllOfSchema, Forbidden, Inline,
+  ObjectSchema, Reference, StringSchema, Typed, Untyped,
 }
 
 /// Check if a schema has typed or untyped additionalProperties that would need Dict.
@@ -26,6 +26,30 @@ pub fn schema_has_additional_properties(
         Ok(schema_obj) ->
           schema_has_additional_properties(Inline(schema_obj), ctx)
         // nolint: thrown_away_error -- unresolved refs are treated as not having additionalProperties; the resolver reports the ref error separately
+        Error(_) -> False
+      }
+    _ -> False
+  }
+}
+
+/// Check if a schema has `additionalProperties: false` (needs Dict for the
+/// closed-schema unknown-key check at decode time). Recurses through allOf
+/// children and resolves `$ref` so nested closed schemas are surfaced too.
+pub fn schema_has_forbidden_additional_properties(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Bool {
+  case schema_ref {
+    Inline(ObjectSchema(additional_properties: Forbidden, ..)) -> True
+    Inline(AllOfSchema(schemas:, ..)) ->
+      list.any(schemas, fn(s) {
+        schema_has_forbidden_additional_properties(s, ctx)
+      })
+    Reference(..) ->
+      case resolver.resolve_schema_ref(schema_ref, context.spec(ctx)) {
+        Ok(schema_obj) ->
+          schema_has_forbidden_additional_properties(Inline(schema_obj), ctx)
+        // nolint: thrown_away_error -- unresolved refs are treated as not having forbidden additionalProperties; the resolver reports the ref error separately
         Error(_) -> False
       }
     _ -> False

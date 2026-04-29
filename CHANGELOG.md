@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`additionalProperties: false` is now enforced at decode time.**
+  Generated decoders for closed object schemas previously accepted
+  JSON bodies containing unknown fields and silently dropped them —
+  the strictest opt-in OpenAPI validation knob was a no-op. The
+  decoder now reads the raw JSON object as `Dict(String, Dynamic)`,
+  drops the declared property keys, and fails the decode with the
+  reason `"additionalProperties"` if any extras remain. The check
+  happens in the decoder body because `gleam/dynamic/decode`
+  consumes only declared fields, so a post-decode validator could
+  not recover the raw key set. Behavioral change for clients
+  already mishandling extras: their previously-passing JSON now
+  rejects, surfacing the spec violation. The `additionalProperties: true` and `additionalProperties: { schema }`
+  variants are unchanged. (#336)
+
 ### Changed
 
 - **`guards.gleam` codegen** no longer emits byte-identical per-field

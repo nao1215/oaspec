@@ -101,6 +101,15 @@ pub fn schema_has_additional_properties(
   schema_utils.schema_has_additional_properties(schema_ref, ctx)
 }
 
+/// Check if a schema has `additionalProperties: false` (needs Dict for the
+/// closed-schema unknown-key check at decode time).
+pub fn schema_has_forbidden_additional_properties(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Bool {
+  schema_utils.schema_has_forbidden_additional_properties(schema_ref, ctx)
+}
+
 /// Check if a schema has any optional or nullable fields that would need Option.
 pub fn schema_has_optional_fields(schema_ref: SchemaRef, ctx: Context) -> Bool {
   schema_utils.schema_has_optional_fields(schema_ref, ctx)
