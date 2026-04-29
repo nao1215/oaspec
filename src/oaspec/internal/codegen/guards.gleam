@@ -4,6 +4,8 @@ import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/order
+import gleam/result
 import gleam/set.{type Set}
 import gleam/string
 import oaspec/config
@@ -149,7 +151,245 @@ fn generate_guards(ctx: Context) -> String {
       generate_composite_validator(sb, name, schema_ref, ctx)
     })
 
+  // #339: when the same field appears in multiple schemas via allOf
+  // flattening, the per-field validators have byte-identical bodies.
+  // Collapse the duplicates: keep one canonical definition and
+  // rewrite the rest as 1-line delegating stubs that forward to it.
+  // The composite validators (which call the per-field validators by
+  // name) keep working unchanged because the duplicate names still
+  // exist — they just delegate now.
   se.to_string(sb)
+  |> dedupe_field_validator_definitions
+}
+
+// ---------------------------------------------------------------------------
+// #339: per-field validator de-duplication across allOf children.
+// ---------------------------------------------------------------------------
+
+/// Post-process a generated `guards.gleam` source string and collapse
+/// per-field validator definitions whose bodies are byte-identical
+/// (the case that arises when an allOf parent's constrained property
+/// is flattened into multiple children). One canonical definition is
+/// kept; the others are rewritten into one-line stubs that forward to
+/// the canonical one. The composite validators continue to call the
+/// per-field validators by the original names, so call-site code is
+/// unchanged.
+fn dedupe_field_validator_definitions(source: String) -> String {
+  // Split on the boundary between top-level pub functions. The first
+  // chunk is the file header (imports, type defs, helpers); each
+  // subsequent chunk is one `pub fn` definition (with the leading
+  // "pub fn " stripped by the split).
+  case string.split(source, on: "\npub fn ") {
+    [] -> source
+    [_only_header] -> source
+    [head, ..raw_chunks] -> {
+      // Parse each chunk into structured form. Chunks that don't
+      // match the expected per-field validator shape are passed
+      // through unchanged.
+      let parsed = list.map(raw_chunks, parse_function_chunk)
+      // Group eligible chunks by body and pick a canonical name per
+      // group (lex-first). Keys are body strings; values are the
+      // canonical function name.
+      let canonical_by_body = build_body_to_canonical_name_map(parsed)
+      // Rewrite each chunk: if the chunk is a duplicate (its name
+      // isn't the canonical for its body), emit a delegating stub.
+      let rewritten =
+        list.map(parsed, fn(p) {
+          rewrite_chunk_if_duplicate(p, canonical_by_body)
+        })
+      // Re-join with the original separator.
+      head <> string.concat(list.map(rewritten, fn(c) { "\npub fn " <> c }))
+    }
+  }
+}
+
+/// Lightweight parse of a single `pub fn` chunk. The chunk does NOT
+/// include the leading `pub fn `. `name` is everything up to the
+/// first `(`. `signature_and_body` keeps the full original text from
+/// after the name onward, used as-is when emission is unchanged.
+type ParsedChunk {
+  ParsedChunk(
+    /// Function name (e.g. `validate_inline_upload_title_length`).
+    name: String,
+    /// Parameter declaration block, e.g. `value: String`.
+    param_decl: String,
+    /// Return type, e.g. `Result(String, ValidationFailure)`.
+    return_type: String,
+    /// The function body, including surrounding whitespace —
+    /// everything between the first `{` (after the signature) and
+    /// the matching `}` of the function definition. Used as the
+    /// dedup key.
+    body: String,
+    /// Trailing text after the closing `}` (typically `\n` and any
+    /// blank-line separator before the next function). Preserved so
+    /// reconstruction keeps the original formatting.
+    trailing: String,
+    /// The full original chunk text. Used verbatim when the chunk
+    /// is the canonical / unique definition.
+    original: String,
+  )
+}
+
+fn parse_function_chunk(chunk: String) -> ParsedChunk {
+  // Try to extract `name(params) -> return_type {body}trailing`.
+  // When parsing fails (chunk doesn't match the expected per-field
+  // validator shape), fall back to a passthrough record with empty
+  // structured fields and the original text intact.
+  let fallback =
+    ParsedChunk(
+      name: "",
+      param_decl: "",
+      return_type: "",
+      body: "",
+      trailing: "",
+      original: chunk,
+    )
+  parse_function_chunk_strict(chunk)
+  |> result.unwrap(fallback)
+}
+
+fn parse_function_chunk_strict(chunk: String) -> Result(ParsedChunk, Nil) {
+  use #(name, after_open_paren) <- result.try(string.split_once(chunk, on: "("))
+  use #(param_decl, after_arrow) <- result.try(string.split_once(
+    after_open_paren,
+    on: ") -> ",
+  ))
+  use #(return_type, after_open_brace) <- result.try(string.split_once(
+    after_arrow,
+    on: " {\n",
+  ))
+  use #(body, trailing) <- result.try(rsplit_once_on_close_brace(
+    after_open_brace,
+  ))
+  Ok(ParsedChunk(
+    name: name,
+    param_decl: param_decl,
+    return_type: return_type,
+    body: body,
+    trailing: trailing,
+    original: chunk,
+  ))
+}
+
+/// Split a string at its LAST occurrence of `\n}\n`. Used to find
+/// the closing `}` of the function (the trailing `\n` after `}`
+/// always exists in the generator's output). Returns the portion
+/// before `\n}` (the body, excluding the closing brace itself) and
+/// the portion after `}\n` (the trailing formatting before the
+/// next function — typically a blank line plus the next function's
+/// doc-comment block).
+fn rsplit_once_on_close_brace(s: String) -> Result(#(String, String), Nil) {
+  let needle = "\n}\n"
+  case string.split(s, on: needle) {
+    [_only] -> Error(Nil)
+    parts -> {
+      // All but the last chunk belong to the body (including any
+      // intermediate `\n}\n` that legitimately appear inside nested
+      // case expressions — though in practice generated function
+      // bodies never contain bare `\n}\n` because case branches
+      // indent further).
+      case list.reverse(parts) {
+        [] -> Error(Nil)
+        [last_part, ..rev_rest] -> {
+          let body =
+            list.reverse(rev_rest)
+            |> string.join(needle)
+          // `last_part` is what came AFTER the final `\n}\n` —
+          // i.e. the inter-function whitespace + the next
+          // function's doc-comment lines (if any). Return body
+          // (without the closing brace) and last_part (the
+          // trailing block, which the caller is responsible for
+          // re-emitting verbatim after its own closing brace).
+          Ok(#(body, last_part))
+        }
+      }
+    }
+  }
+}
+
+/// Group eligible chunks (parsed successfully and whose name starts
+/// with the `validate_` per-field-validator prefix) by their body
+/// content. For each body that has multiple defining chunks, pick
+/// the lex-first name as canonical. Returns a Dict keyed by body.
+fn build_body_to_canonical_name_map(
+  parsed: List(ParsedChunk),
+) -> dict.Dict(String, String) {
+  list.fold(parsed, dict.new(), fn(acc, chunk) {
+    case is_dedupable(chunk) {
+      False -> acc
+      True ->
+        case dict.get(acc, chunk.body) {
+          Error(Nil) -> dict.insert(acc, chunk.body, chunk.name)
+          Ok(existing) ->
+            case string.compare(chunk.name, existing) {
+              order.Lt -> dict.insert(acc, chunk.body, chunk.name)
+              _ -> acc
+            }
+        }
+    }
+  })
+}
+
+/// A chunk is dedup-eligible if it's a per-field validator (its name
+/// starts with `validate_` and ends with one of the recognised
+/// constraint suffixes used by `generate_*_guard`). The composite
+/// `validate_<type>` functions are NOT dedup-eligible because their
+/// names are the public stable surface that downstream code calls.
+fn is_dedupable(chunk: ParsedChunk) -> Bool {
+  use <- bool.guard(
+    when: !string.starts_with(chunk.name, "validate_"),
+    return: False,
+  )
+  list.any(per_field_validator_suffixes(), fn(suffix) {
+    string.ends_with(chunk.name, suffix)
+  })
+}
+
+fn per_field_validator_suffixes() -> List(String) {
+  [
+    "_length", "_pattern", "_range", "_exclusive", "_multiple_of", "_count",
+    "_unique",
+  ]
+}
+
+/// If `chunk` is a duplicate of an earlier definition for the same
+/// body, emit a one-line delegator that forwards to the canonical
+/// name. Otherwise emit the chunk verbatim.
+fn rewrite_chunk_if_duplicate(
+  chunk: ParsedChunk,
+  canonical_by_body: dict.Dict(String, String),
+) -> String {
+  case dict.get(canonical_by_body, chunk.body) {
+    // Body has no canonical entry (chunk wasn't dedup-eligible) →
+    // pass through unchanged.
+    Error(Nil) -> chunk.original
+    Ok(canonical_name) ->
+      case canonical_name == chunk.name {
+        // This chunk IS the canonical → keep its full body.
+        True -> chunk.original
+        // This chunk is a duplicate → emit a delegating stub.
+        False -> emit_delegator(chunk, canonical_name)
+      }
+  }
+}
+
+fn emit_delegator(chunk: ParsedChunk, canonical_name: String) -> String {
+  // Per-field validators always take a single parameter named
+  // `value`, so the delegator just passes it through. The closing
+  // `}\n` here matches the `\n}\n` that `parse_function_chunk`
+  // stripped while extracting the body. The chunk's `trailing`
+  // (everything after the original `\n}\n` — typically a blank
+  // line plus the next function's doc-comment) is preserved
+  // verbatim so subsequent functions don't lose their docs.
+  chunk.name
+  <> "("
+  <> chunk.param_decl
+  <> ") -> "
+  <> chunk.return_type
+  <> " {\n  "
+  <> canonical_name
+  <> "(value)\n}\n"
+  <> chunk.trailing
 }
 
 /// Track which constraint types exist in the schema set.

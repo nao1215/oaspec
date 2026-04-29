@@ -13351,3 +13351,84 @@ pub fn top_level_array_response_uses_json_array_test() {
   string.contains(router_file.content, "json.string(data)")
   |> should.be_false()
 }
+
+// --- Issue #339: allOf-flattened children must not duplicate the
+//                 parent's per-field validators ---
+
+pub fn allof_validators_dedup_across_children_test() {
+  // UploadCommon carries a constrained `title` (minLength 3, maxLength
+  // 100). Two children allOf-mix it in. Without dedup, guards.gleam
+  // emits three byte-identical title-length validators (one per
+  // containing type). After dedup the parent's validator is the
+  // canonical one and any child-side per-field validator either
+  // delegates to it or is omitted entirely — either way the
+  // constraint message string ("must be at least 3 characters") must
+  // appear exactly ONCE in the file.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /uploads:
+    post:
+      operationId: createUpload
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    UploadCommon:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          minLength: 3
+          maxLength: 100
+    InlineUpload:
+      allOf:
+        - $ref: '#/components/schemas/UploadCommon'
+        - type: object
+          required: [content_b64]
+          properties:
+            content_b64: { type: string }
+    ReferencedUpload:
+      allOf:
+        - $ref: '#/components/schemas/UploadCommon'
+        - type: object
+          required: [source_url]
+          properties:
+            source_url: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let assert [guard_file] = guards.generate(ctx)
+
+  // All three names must still be present (composite validators
+  // continue to call by name; duplicates become 1-line delegating
+  // stubs but the names stay so call sites don't break).
+  string.contains(guard_file.content, "validate_inline_upload_title_length")
+  |> should.be_true()
+  string.contains(guard_file.content, "validate_referenced_upload_title_length")
+  |> should.be_true()
+  string.contains(guard_file.content, "validate_upload_common_title_length")
+  |> should.be_true()
+
+  // The dedup signal: the constraint message ("must be at least 3
+  // characters") used to be byte-duplicated across three function
+  // bodies. After dedup it appears exactly once — only in the
+  // canonical body. Which name is canonical (lex-first) is an
+  // implementation detail.
+  count_occurrences(guard_file.content, "must be at least 3 characters")
+  |> should.equal(1)
+}
+
+/// Count non-overlapping occurrences of `needle` in `haystack`.
+fn count_occurrences(haystack: String, needle: String) -> Int {
+  case string.split_once(haystack, on: needle) {
+    Error(Nil) -> 0
+    Ok(#(_, after)) -> 1 + count_occurrences(after, needle)
+  }
+}
