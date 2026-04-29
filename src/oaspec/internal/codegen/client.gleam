@@ -1077,41 +1077,25 @@ fn generate_build_body(
     _ -> sb |> se.indent(1, "let body = transport.EmptyBody")
   }
 
-  // Body content-type header. For multi-content, content_type is a
-  // function parameter. For single-content (non-empty), content type is
-  // known statically.
+  // Body content-type header.
   let sb = case operation.request_body {
     Some(Value(rb)) -> {
       let content_entries = ir_build.sorted_entries(rb.content)
-      case content_entries {
-        [_, _, ..] -> {
-          // Multi-content: prepend `content_type` parameter.
-          case rb.required {
-            True ->
-              sb
-              |> se.indent(
-                1,
-                "let headers = [#(\"content-type\", content_type), ..headers]",
-              )
-            False ->
-              sb
-              |> se.indent(1, "let headers = case body {")
-              |> se.indent(
-                2,
-                "transport.EmptyBody -> headers",
-              )
-              |> se.indent(
-                2,
-                "_ -> [#(\"content-type\", content_type), ..headers]",
-              )
-              |> se.indent(1, "}")
-          }
-        }
-        [#(content_type_key, _)] -> {
+      let ct_expr = case content_entries {
+        // Multi-content: user-provided value via `content_type:` arg.
+        [_, _, ..] -> "content_type"
+        // multipart/form-urlencoded: helper left `body_content_type`
+        // in scope (boundary-augmented for multipart).
+        [#("multipart/form-data", _)] -> "body_content_type"
+        [#("application/x-www-form-urlencoded", _)] -> "body_content_type"
+        [#(static_ct, _)] -> "\"" <> static_ct <> "\""
+        [] -> ""
+      }
+      case ct_expr {
+        "" -> sb
+        ct -> {
           let header_line =
-            "[#(\"content-type\", \""
-            <> content_type_key
-            <> "\"), ..headers]"
+            "[#(\"content-type\", " <> ct <> "), ..headers]"
           case rb.required {
             True -> sb |> se.indent(1, "let headers = " <> header_line)
             False ->
@@ -1122,7 +1106,6 @@ fn generate_build_body(
               |> se.indent(1, "}")
           }
         }
-        [] -> sb
       }
     }
     _ -> sb

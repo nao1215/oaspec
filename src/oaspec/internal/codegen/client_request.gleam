@@ -393,9 +393,8 @@ pub fn generate_multipart_body(
   )
   |> se.indent(
     1,
-    "let req = request.set_header(req, \"content-type\", \"multipart/form-data; boundary=\" <> boundary)",
+    "let body_content_type = \"multipart/form-data; boundary=\" <> boundary",
   )
-  |> se.indent(1, "let req = request.set_body(req, body_str)")
 }
 
 pub fn multipart_field_is_binary(
@@ -838,9 +837,8 @@ pub fn generate_form_urlencoded_body(
   |> se.indent(1, "let body_str = string.join(form_parts, \"&\")")
   |> se.indent(
     1,
-    "let req = request.set_header(req, \"content-type\", \"application/x-www-form-urlencoded\")",
+    "let body_content_type = \"application/x-www-form-urlencoded\"",
   )
-  |> se.indent(1, "let req = request.set_body(req, body_str)")
 }
 
 /// Check if a parameter is an array with explode behavior.
