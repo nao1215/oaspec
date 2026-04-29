@@ -402,6 +402,31 @@ Coverage is strongest in these areas:
 - Security: `apiKey` (header, query, cookie), HTTP auth (bearer, basic, digest), OAuth2, and OpenID Connect. For OAuth2 and OpenID Connect, the generated client attaches a bearer token to requests; token acquisition, refresh, and flow execution are outside the generated code.
 - Generation safety: name collision handling, keyword escaping, validation guards, and capability errors with clear failure modes
 
+### `format: byte` and `format: binary`
+
+The OpenAPI `format` keyword on a `string` schema is **passed through as
+metadata only** in the current release. Generated fields keep the Gleam
+type `String`; the encoded contract (`format: byte` = base64 per OAS 3.0
+§4.7.4 / OAS 3.1 alignment with JSON Schema, `format: binary` = raw
+bytes) is not enforced or materialised by the generator.
+
+Practical implications:
+
+- `format: byte`: the field is decoded and emitted as the literal
+  base64 character string. Callers that need the underlying bytes must
+  base64-decode themselves (e.g. with `yabase/facade.decode_base64`).
+  Invalid base64 input is **not rejected** at decode time.
+- `format: binary`: the field is decoded and emitted as a plain
+  `String`. For `multipart/form-data` request bodies, the higher-level
+  body codepath (`client_request`) already handles binary bodies
+  correctly via `BytesBody`; this caveat only applies when `binary`
+  appears as a field-level format on a string schema outside that
+  context.
+
+A future release may auto-decode `format: byte` to `BitArray` or emit
+a `format` docstring on the generated field; tracking issue
+[#338](https://github.com/nao1215/oaspec/issues/338).
+
 <!-- BEGIN GENERATED:BOUNDARIES -->
 ## Current Boundaries
 

@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.28.0] - 2026-04-29
+### Documentation
+
+- README "OpenAPI Support" now has an explicit section on
+  `format: byte` / `format: binary` documenting the current
+  pass-through-as-String behaviour and the implications for callers
+  (manual base64 decode required for `format: byte`, no validation
+  on invalid base64 input). Materialising `format: byte` as
+  `BitArray` automatically remains a future enhancement tracked on
+  #338. (#338)
 
 ### Added
 
