@@ -1,0 +1,15 @@
+name = "oaspec_httpc"
+version = "0.1.0"
+target = "erlang"
+description = "BEAM HTTP adapter for oaspec generated clients (gleam_httpc-backed)."
+licences = ["MIT"]
+repository = { type = "github", user = "nao1215", repo = "oaspec" }
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
+gleam_httpc = ">= 5.0.0 and < 6.0.0"
+oaspec = { path = "../.." }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"

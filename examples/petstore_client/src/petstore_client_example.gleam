@@ -1,29 +1,27 @@
 //// Runnable example: using the oaspec-generated Petstore client.
 ////
-//// This program builds a client configuration, calls `list_pets`, and
-//// prints the result. The `send` function is stubbed to return a canned
-//// HTTP response so the example runs without needing a live Petstore
-//// instance. In production code you would replace it with a real HTTP
-//// transport (e.g. `gleam_httpc`, `mist`, `wisp`).
+//// This program calls `list_pets` against a fake transport built with
+//// `oaspec/mock`, then prints the result. Replace `mock.from(...)` with
+//// a real transport adapter (e.g. `oaspec/httpc`) to talk to a live
+//// Petstore.
 
 import api/client
 import api/response_types
 import api/types
-import gleam/http/request
 import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
+import oaspec/mock
+import oaspec/transport
 
 pub fn main() {
-  // 1. Build a client config. The `send` function is where you plug in a
-  //    real HTTP transport. Here we return a canned JSON response so the
-  //    example stays self-contained.
-  let config = client.new(client.default_base_url(), stub_send)
+  // The transport.Send value is the only thing client functions need.
+  // Here we build a mock that returns a canned 200 response with two pets,
+  // so the example runs without needing a live Petstore instance.
+  let send = mock.from(stub_handler)
 
-  // 2. Call the generated `list_pets` client function.
-  //    Arguments match the OpenAPI parameters; option types are optional.
-  case client.list_pets(config, Some(10), None) {
+  case client.list_pets(send, Some(10), None) {
     Ok(response_types.ListPetsResponseOk(pets)) -> print_pets(pets)
     Ok(response_types.ListPetsResponseUnauthorized) ->
       io.println("server returned 401 Unauthorized")
@@ -40,27 +38,39 @@ fn print_pets(pets: List(types.Pet)) -> Nil {
 
 fn describe(err: client.ClientError) -> String {
   case err {
-    client.ConnectionError(detail) -> "connection: " <> detail
-    client.TimeoutError -> "timeout"
-    client.DecodeError(detail) -> "decode: " <> detail
-    client.InvalidUrl(detail) -> "invalid URL: " <> detail
-    client.UnexpectedStatus(status:, body: _) ->
+    client.TransportError(error: e) -> "transport: " <> describe_transport(e)
+    client.DecodeFailure(detail:) -> "decode: " <> detail
+    client.InvalidResponse(detail:) -> "invalid response: " <> detail
+    client.UnexpectedStatus(status:, headers: _, body: _) ->
       "unexpected status: " <> int.to_string(status)
   }
 }
 
-/// Canned HTTP send function — pretends the server returned two pets
-/// regardless of the path, method, or query string of the incoming request.
-/// This keeps the example self-contained; a real client would dispatch on
-/// `req.path`/`req.method` and issue a real HTTP call.
-fn stub_send(
-  req: request.Request(String),
-) -> Result(client.ClientResponse, client.ClientError) {
+fn describe_transport(err: transport.TransportError) -> String {
+  case err {
+    transport.ConnectionFailed(detail:) -> "connection: " <> detail
+    transport.Timeout -> "timeout"
+    transport.InvalidBaseUrl(detail:) -> "invalid base url: " <> detail
+    transport.TlsFailure(detail:) -> "tls: " <> detail
+    transport.Unsupported(detail:) -> "unsupported: " <> detail
+  }
+}
+
+/// Stub handler — pretends the server returned two pets regardless of
+/// path/method/query. A real transport would dispatch on `req.method`,
+/// `req.path`, etc., and issue an actual HTTP call.
+fn stub_handler(
+  req: transport.Request,
+) -> Result(transport.Response, transport.TransportError) {
   let _ = req
   let body =
     "[
       {\"id\": 1, \"name\": \"Fido\", \"status\": \"available\", \"tag\": \"dog\"},
       {\"id\": 2, \"name\": \"Whiskers\", \"status\": \"pending\"}
     ]"
-  Ok(client.ClientResponse(status: 200, body: body))
+  Ok(transport.Response(
+    status: 200,
+    headers: [#("content-type", "application/json")],
+    body: transport.TextBody(body),
+  ))
 }

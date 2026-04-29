@@ -4,13 +4,11 @@ import gleam/option.{None, Some}
 import gleam/string
 import gleeunit
 import gleeunit/should
-import oaspec/config
 import oaspec/internal/codegen/allof_merge
 import oaspec/internal/codegen/client as client_gen
 import oaspec/internal/codegen/client_request
 import oaspec/internal/codegen/client_response
 import oaspec/internal/codegen/client_security
-import oaspec/internal/codegen/context
 import oaspec/internal/codegen/decoders
 import oaspec/internal/codegen/encoders
 import oaspec/internal/codegen/ir_build
@@ -22,7 +20,6 @@ import oaspec/internal/openapi/schema
 import oaspec/internal/openapi/spec
 import oaspec/internal/util/content_type
 import oaspec/internal/util/http
-import oaspec/internal/util/string_extra as se
 import oaspec/openapi/parser
 import test_helpers
 
@@ -127,7 +124,7 @@ pub fn client_response_get_response_decode_expr_reference_test() {
     http.Status(200),
     ctx,
   )
-  |> should.equal("decode.decode_user(resp.body)")
+  |> should.equal("decode.decode_user(text)")
 }
 
 pub fn client_response_get_response_decode_expr_inline_string_test() {
@@ -139,7 +136,7 @@ pub fn client_response_get_response_decode_expr_inline_string_test() {
     http.Status(200),
     ctx,
   )
-  |> should.equal("json.parse(resp.body, dyn_decode.string)")
+  |> should.equal("json.parse(text, dyn_decode.string)")
 }
 
 pub fn client_response_get_response_decode_expr_inline_int_test() {
@@ -151,7 +148,7 @@ pub fn client_response_get_response_decode_expr_inline_int_test() {
     http.Status(200),
     ctx,
   )
-  |> should.equal("json.parse(resp.body, dyn_decode.int)")
+  |> should.equal("json.parse(text, dyn_decode.int)")
 }
 
 pub fn client_response_get_response_decode_expr_array_ref_test() {
@@ -170,7 +167,7 @@ pub fn client_response_get_response_decode_expr_array_ref_test() {
     http.Status(200),
     ctx,
   )
-  |> should.equal("decode.decode_pet_list(resp.body)")
+  |> should.equal("decode.decode_pet_list(text)")
 }
 
 pub fn client_response_get_response_decode_expr_array_inline_test() {
@@ -189,7 +186,7 @@ pub fn client_response_get_response_decode_expr_array_inline_test() {
     http.Status(200),
     ctx,
   )
-  |> should.equal("json.parse(resp.body, decode.list(dyn_decode.int))")
+  |> should.equal("json.parse(text, decode.list(dyn_decode.int))")
 }
 
 // ===================================================================
@@ -965,308 +962,6 @@ components:
 }
 
 // ===================================================================
-// client_security.generate_security_or_chain tests
-// ===================================================================
-
-fn make_security_ctx(
-  schemes: List(#(String, spec.SecurityScheme)),
-) -> context.Context {
-  let components =
-    spec.Components(
-      schemas: dict.new(),
-      parameters: dict.new(),
-      request_bodies: dict.new(),
-      responses: dict.new(),
-      security_schemes: dict.from_list(
-        list.map(schemes, fn(entry) {
-          let #(name, scheme) = entry
-          #(name, spec.Value(scheme))
-        }),
-      ),
-      path_items: dict.new(),
-      headers: dict.new(),
-      examples: dict.new(),
-      links: dict.new(),
-      callbacks: dict.new(),
-    )
-  let test_spec =
-    spec.OpenApiSpec(
-      openapi: "3.0.3",
-      info: spec.Info(
-        title: "Test",
-        description: None,
-        version: "1.0.0",
-        summary: None,
-        terms_of_service: None,
-        contact: None,
-        license: None,
-      ),
-      paths: dict.new(),
-      components: Some(components),
-      servers: [],
-      security: [],
-      webhooks: dict.new(),
-      tags: [],
-      external_docs: None,
-      json_schema_dialect: None,
-    )
-  let cfg =
-    config.new(
-      input: "test.yaml",
-      output_server: "./test_output/api",
-      output_client: "./test_output_client/api",
-      package: "api",
-      mode: config.Both,
-      validate: False,
-    )
-  context.new(test_spec, cfg)
-}
-
-fn run_security_chain(
-  ctx: context.Context,
-  alternatives: List(spec.SecurityRequirement),
-) -> String {
-  let sb = se.new()
-  let sb = client_security.generate_security_or_chain(sb, ctx, alternatives, 1)
-  se.to_string(sb)
-}
-
-pub fn security_chain_empty_alternatives_test() {
-  let ctx = make_security_ctx([])
-  let result = run_security_chain(ctx, [])
-  result |> should.equal("")
-}
-
-pub fn security_chain_single_api_key_header_test() {
-  let ctx =
-    make_security_ctx([
-      #(
-        "ApiKey",
-        spec.ApiKeyScheme(name: "X-API-Key", in_: spec.SchemeInHeader),
-      ),
-    ])
-  let alt =
-    spec.SecurityRequirement(schemes: [
-      spec.SecuritySchemeRef(scheme_name: "ApiKey", scopes: []),
-    ])
-  let result = run_security_chain(ctx, [alt])
-  string.contains(result, "config.api_key") |> should.be_true()
-  string.contains(result, "x-api-key") |> should.be_true()
-  string.contains(result, "set_header") |> should.be_true()
-  string.contains(result, "None -> req") |> should.be_true()
-}
-
-pub fn security_chain_single_bearer_test() {
-  let ctx =
-    make_security_ctx([
-      #(
-        "BearerAuth",
-        spec.HttpScheme(scheme: "bearer", bearer_format: Some("JWT")),
-      ),
-    ])
-  let alt =
-    spec.SecurityRequirement(schemes: [
-      spec.SecuritySchemeRef(scheme_name: "BearerAuth", scopes: []),
-    ])
-  let result = run_security_chain(ctx, [alt])
-  string.contains(result, "config.bearer_auth") |> should.be_true()
-  string.contains(result, "\"authorization\"") |> should.be_true()
-  string.contains(result, "\"Bearer \"") |> should.be_true()
-  string.contains(result, "None -> req") |> should.be_true()
-}
-
-pub fn security_chain_single_basic_test() {
-  let ctx =
-    make_security_ctx([
-      #("BasicAuth", spec.HttpScheme(scheme: "basic", bearer_format: None)),
-    ])
-  let alt =
-    spec.SecurityRequirement(schemes: [
-      spec.SecuritySchemeRef(scheme_name: "BasicAuth", scopes: []),
-    ])
-  let result = run_security_chain(ctx, [alt])
-  string.contains(result, "\"Basic \"") |> should.be_true()
-}
-
-pub fn security_chain_single_api_key_query_test() {
-  let ctx =
-    make_security_ctx([
-      #("ApiKey", spec.ApiKeyScheme(name: "api_key", in_: spec.SchemeInQuery)),
-    ])
-  let alt =
-    spec.SecurityRequirement(schemes: [
-      spec.SecuritySchemeRef(scheme_name: "ApiKey", scopes: []),
-    ])
-  let result = run_security_chain(ctx, [alt])
-  string.contains(result, "api_key=") |> should.be_true()
-  string.contains(result, "req.path") |> should.be_true()
-  string.contains(result, "None -> req") |> should.be_true()
-}
-
-pub fn security_chain_single_api_key_cookie_test() {
-  let ctx =
-    make_security_ctx([
-      #(
-        "SessionId",
-        spec.ApiKeyScheme(name: "session_id", in_: spec.SchemeInCookie),
-      ),
-    ])
-  let alt =
-    spec.SecurityRequirement(schemes: [
-      spec.SecuritySchemeRef(scheme_name: "SessionId", scopes: []),
-    ])
-  let result = run_security_chain(ctx, [alt])
-  string.contains(result, "session_id=") |> should.be_true()
-  string.contains(result, "cookie") |> should.be_true()
-  string.contains(result, "None -> req") |> should.be_true()
-}
-
-pub fn security_chain_or_two_alternatives_test() {
-  let ctx =
-    make_security_ctx([
-      #("BearerAuth", spec.HttpScheme(scheme: "bearer", bearer_format: None)),
-      #(
-        "ApiKey",
-        spec.ApiKeyScheme(name: "X-API-Key", in_: spec.SchemeInHeader),
-      ),
-    ])
-  let alt1 =
-    spec.SecurityRequirement(schemes: [
-      spec.SecuritySchemeRef(scheme_name: "BearerAuth", scopes: []),
-    ])
-  let alt2 =
-    spec.SecurityRequirement(schemes: [
-      spec.SecuritySchemeRef(scheme_name: "ApiKey", scopes: []),
-    ])
-  let result = run_security_chain(ctx, [alt1, alt2])
-  // First alternative tries BearerAuth
-  string.contains(result, "config.bearer_auth") |> should.be_true()
-  string.contains(result, "\"Bearer \"") |> should.be_true()
-  // None branch falls through to second alternative (ApiKey)
-  string.contains(result, "None -> {") |> should.be_true()
-  string.contains(result, "config.api_key") |> should.be_true()
-  string.contains(result, "x-api-key") |> should.be_true()
-}
-
-pub fn security_chain_and_multiple_schemes_test() {
-  let ctx =
-    make_security_ctx([
-      #(
-        "ApiKey",
-        spec.ApiKeyScheme(name: "X-API-Key", in_: spec.SchemeInHeader),
-      ),
-      #("BearerAuth", spec.HttpScheme(scheme: "bearer", bearer_format: None)),
-    ])
-  // AND requirement: both ApiKey AND BearerAuth must be present
-  let alt =
-    spec.SecurityRequirement(schemes: [
-      spec.SecuritySchemeRef(scheme_name: "ApiKey", scopes: []),
-      spec.SecuritySchemeRef(scheme_name: "BearerAuth", scopes: []),
-    ])
-  let result = run_security_chain(ctx, [alt])
-  // Tuple match pattern: case config.api_key, config.bearer_auth
-  string.contains(result, "config.api_key") |> should.be_true()
-  string.contains(result, "config.bearer_auth") |> should.be_true()
-  // Some(api_key_val), Some(bearer_auth_val) pattern
-  string.contains(result, "Some(api_key_val)") |> should.be_true()
-  string.contains(result, "Some(bearer_auth_val)") |> should.be_true()
-  // Wildcard fallback
-  string.contains(result, "_, _ -> req") |> should.be_true()
-}
-
-pub fn security_chain_oauth2_uses_bearer_test() {
-  let ctx =
-    make_security_ctx([
-      #("OAuth2", spec.OAuth2Scheme(description: None, flows: dict.new())),
-    ])
-  let alt =
-    spec.SecurityRequirement(schemes: [
-      spec.SecuritySchemeRef(scheme_name: "OAuth2", scopes: ["read"]),
-    ])
-  let result = run_security_chain(ctx, [alt])
-  string.contains(result, "\"Bearer \"") |> should.be_true()
-}
-
-pub fn security_chain_openid_connect_uses_bearer_test() {
-  let ctx =
-    make_security_ctx([
-      #(
-        "OidcAuth",
-        spec.OpenIdConnectScheme(
-          open_id_connect_url: "https://example.com/.well-known/openid-configuration",
-          description: None,
-        ),
-      ),
-    ])
-  let alt =
-    spec.SecurityRequirement(schemes: [
-      spec.SecuritySchemeRef(scheme_name: "OidcAuth", scopes: []),
-    ])
-  let result = run_security_chain(ctx, [alt])
-  string.contains(result, "\"Bearer \"") |> should.be_true()
-  string.contains(result, "config.oidc_auth") |> should.be_true()
-}
-
-pub fn security_chain_digest_test() {
-  let ctx =
-    make_security_ctx([
-      #("DigestAuth", spec.HttpScheme(scheme: "digest", bearer_format: None)),
-    ])
-  let alt =
-    spec.SecurityRequirement(schemes: [
-      spec.SecuritySchemeRef(scheme_name: "DigestAuth", scopes: []),
-    ])
-  let result = run_security_chain(ctx, [alt])
-  string.contains(result, "\"Digest \"") |> should.be_true()
-}
-
-pub fn security_chain_custom_http_scheme_test() {
-  let ctx =
-    make_security_ctx([
-      #("HmacAuth", spec.HttpScheme(scheme: "hoba", bearer_format: None)),
-    ])
-  let alt =
-    spec.SecurityRequirement(schemes: [
-      spec.SecuritySchemeRef(scheme_name: "HmacAuth", scopes: []),
-    ])
-  let result = run_security_chain(ctx, [alt])
-  // Custom scheme name should be capitalized
-  string.contains(result, "\"Hoba \"") |> should.be_true()
-}
-
-pub fn security_chain_or_with_and_fallback_test() {
-  let ctx =
-    make_security_ctx([
-      #(
-        "ApiKey",
-        spec.ApiKeyScheme(name: "X-API-Key", in_: spec.SchemeInHeader),
-      ),
-      #("BearerAuth", spec.HttpScheme(scheme: "bearer", bearer_format: None)),
-    ])
-  // First alternative: AND (both required)
-  let alt1 =
-    spec.SecurityRequirement(schemes: [
-      spec.SecuritySchemeRef(scheme_name: "ApiKey", scopes: []),
-      spec.SecuritySchemeRef(scheme_name: "BearerAuth", scopes: []),
-    ])
-  // Second alternative: single scheme fallback
-  let alt2 =
-    spec.SecurityRequirement(schemes: [
-      spec.SecuritySchemeRef(scheme_name: "ApiKey", scopes: []),
-    ])
-  let result = run_security_chain(ctx, [alt1, alt2])
-  // AND branch with tuple match
-  string.contains(result, "Some(api_key_val), Some(bearer_auth_val)")
-  |> should.be_true()
-  // Wildcard falls through to second alternative
-  string.contains(result, "_, _ -> {") |> should.be_true()
-  // Second alternative checks just ApiKey
-  // The output contains "config.api_key" at least twice (once per alternative)
-  let parts = string.split(result, "config.api_key")
-  { list.length(parts) >= 3 } |> should.be_true()
-}
-
-// ===================================================================
 // Regression: router imports decode module when request body exists
 // even if responses have no JSON schema (callback_api pattern)
 // ===================================================================
@@ -1351,274 +1046,6 @@ paths:
     "additional_properties: coerce_dict(deep_object_additional_properties(query, \"filter\", [\"name\"]))",
   )
   |> should.be_true()
-}
-
-// --- with_* auth configuration helper tests ---
-
-pub fn with_helpers_generated_for_api_key_and_bearer_test() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /pets:
-    get:
-      operationId: listPets
-      responses:
-        '200': { description: ok }
-components:
-  securitySchemes:
-    ApiKeyAuth:
-      type: apiKey
-      in: header
-      name: X-API-Key
-    BearerAuth:
-      type: http
-      scheme: bearer
-security:
-  - ApiKeyAuth: []
-  - BearerAuth: []
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let spec = hoist.hoist(spec)
-  let ctx = test_helpers.make_ctx_from_spec(spec)
-  let files = client_gen.generate(ctx)
-  let assert [client_file] = files
-  let content = client_file.content
-  // with_api_key_auth helper must be generated
-  string.contains(
-    content,
-    "pub fn with_api_key_auth(config: ClientConfig, token: String) -> ClientConfig {",
-  )
-  |> should.be_true()
-  string.contains(content, "ClientConfig(..config, api_key_auth: Some(token))")
-  |> should.be_true()
-  // with_bearer_auth helper must be generated
-  string.contains(
-    content,
-    "pub fn with_bearer_auth(config: ClientConfig, token: String) -> ClientConfig {",
-  )
-  |> should.be_true()
-  string.contains(content, "ClientConfig(..config, bearer_auth: Some(token))")
-  |> should.be_true()
-}
-
-pub fn with_helpers_doc_comment_for_api_key_header_test() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /x:
-    get:
-      operationId: getX
-      responses:
-        '200': { description: ok }
-components:
-  securitySchemes:
-    ApiKeyAuth:
-      type: apiKey
-      in: header
-      name: X-API-Key
-security:
-  - ApiKeyAuth: []
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let spec = hoist.hoist(spec)
-  let ctx = test_helpers.make_ctx_from_spec(spec)
-  let files = client_gen.generate(ctx)
-  let assert [client_file] = files
-  let content = client_file.content
-  string.contains(
-    content,
-    "/// Set the API key for the ApiKeyAuth security scheme (header: X-API-Key).",
-  )
-  |> should.be_true()
-}
-
-pub fn with_helpers_doc_comment_for_api_key_query_test() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /x:
-    get:
-      operationId: getX
-      responses:
-        '200': { description: ok }
-components:
-  securitySchemes:
-    QueryAuth:
-      type: apiKey
-      in: query
-      name: api_key
-security:
-  - QueryAuth: []
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let spec = hoist.hoist(spec)
-  let ctx = test_helpers.make_ctx_from_spec(spec)
-  let files = client_gen.generate(ctx)
-  let assert [client_file] = files
-  let content = client_file.content
-  string.contains(
-    content,
-    "/// Set the API key for the QueryAuth security scheme (query: api_key).",
-  )
-  |> should.be_true()
-  string.contains(
-    content,
-    "pub fn with_query_auth(config: ClientConfig, token: String) -> ClientConfig {",
-  )
-  |> should.be_true()
-}
-
-pub fn with_helpers_doc_comment_for_cookie_test() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /x:
-    get:
-      operationId: getX
-      responses:
-        '200': { description: ok }
-components:
-  securitySchemes:
-    CookieAuth:
-      type: apiKey
-      in: cookie
-      name: session_id
-security:
-  - CookieAuth: []
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let spec = hoist.hoist(spec)
-  let ctx = test_helpers.make_ctx_from_spec(spec)
-  let files = client_gen.generate(ctx)
-  let assert [client_file] = files
-  let content = client_file.content
-  string.contains(
-    content,
-    "/// Set the API key for the CookieAuth security scheme (cookie: session_id).",
-  )
-  |> should.be_true()
-}
-
-pub fn with_helpers_doc_comment_for_oauth2_test() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /x:
-    get:
-      operationId: getX
-      responses:
-        '200': { description: ok }
-components:
-  securitySchemes:
-    OAuth2Auth:
-      type: oauth2
-      flows:
-        authorizationCode:
-          authorizationUrl: https://example.com/auth
-          tokenUrl: https://example.com/token
-          scopes:
-            read: Read access
-security:
-  - OAuth2Auth: []
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let spec = hoist.hoist(spec)
-  let ctx = test_helpers.make_ctx_from_spec(spec)
-  let files = client_gen.generate(ctx)
-  let assert [client_file] = files
-  let content = client_file.content
-  string.contains(
-    content,
-    "/// Set the OAuth2 token for the OAuth2Auth security scheme.",
-  )
-  |> should.be_true()
-}
-
-pub fn with_helpers_not_generated_when_no_security_test() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /x:
-    get:
-      operationId: getX
-      responses:
-        '200': { description: ok }
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let spec = hoist.hoist(spec)
-  let ctx = test_helpers.make_ctx_from_spec(spec)
-  let files = client_gen.generate(ctx)
-  let assert [client_file] = files
-  let content = client_file.content
-  // No auth with_* helpers should be present
-  string.contains(content, "pub fn with_api_key_auth(")
-  |> should.be_false()
-  string.contains(content, "pub fn with_bearer_auth(")
-  |> should.be_false()
-}
-
-pub fn with_helpers_appear_before_default_base_url_test() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-servers:
-  - url: https://api.example.com
-paths:
-  /x:
-    get:
-      operationId: getX
-      responses:
-        '200': { description: ok }
-components:
-  securitySchemes:
-    BearerAuth:
-      type: http
-      scheme: bearer
-security:
-  - BearerAuth: []
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let spec = hoist.hoist(spec)
-  let ctx = test_helpers.make_ctx_from_spec(spec)
-  let files = client_gen.generate(ctx)
-  let assert [client_file] = files
-  let content = client_file.content
-  // new must come before with_bearer_auth, which must come before default_base_url
-  let assert Ok(new_pos) =
-    test_helpers.find_substring_index(content, "pub fn new(")
-  let assert Ok(with_pos) =
-    test_helpers.find_substring_index(content, "pub fn with_bearer_auth(")
-  let assert Ok(base_url_pos) =
-    test_helpers.find_substring_index(content, "pub fn default_base_url(")
-  should.be_true(new_pos < with_pos)
-  should.be_true(with_pos < base_url_pos)
 }
 
 // --- content_type structured syntax suffix tests ---
@@ -1757,7 +1184,7 @@ components:
   let files = client_gen.generate(ctx)
   let assert [client_file] = files
   // Should use JSON decode (not string passthrough)
-  string.contains(client_file.content, "decode.decode_problem(resp.body)")
+  string.contains(client_file.content, "decode.decode_problem(text)")
   |> should.be_true()
 }
 

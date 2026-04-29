@@ -72,6 +72,10 @@ all: clean deps
 sync-check:
   bash scripts/check_sync.sh
 
+# Build and test the BEAM transport adapter (sibling package).
+adapter-httpc:
+  cd adapters/httpc && gleam build --warnings-as-errors
+
 # Regenerate and run the petstore client example.
 example-petstore:
   gleam run -- generate --config=examples/petstore_client/oaspec.yaml

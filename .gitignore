@@ -1,6 +1,8 @@
 *.beam
 *.ez
 /build
+adapters/*/build/
+adapters/*/manifest.toml
 erl_crash.dump
 CLAUDE.md
 .codex
