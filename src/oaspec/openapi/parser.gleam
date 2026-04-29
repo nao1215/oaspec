@@ -6,13 +6,12 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
-import oaspec/openapi/diagnostic.{type Diagnostic, NoSourceLoc, SourceLoc}
-import oaspec/openapi/external_loader
-import oaspec/openapi/location_index.{type LocationIndex}
-import oaspec/openapi/parser_error
-import oaspec/openapi/parser_schema
-import oaspec/openapi/schema.{type SchemaRef}
-import oaspec/openapi/spec.{
+import oaspec/internal/openapi/external_loader
+import oaspec/internal/openapi/location_index.{type LocationIndex}
+import oaspec/internal/openapi/parser_error
+import oaspec/internal/openapi/parser_schema
+import oaspec/internal/openapi/schema.{type SchemaRef}
+import oaspec/internal/openapi/spec.{
   type Callback, type Components, type Contact, type Encoding, type ExternalDoc,
   type Header, type Info, type License, type Link, type MediaType,
   type OpenApiSpec, type Operation, type Parameter, type ParameterIn,
@@ -23,8 +22,9 @@ import oaspec/openapi/spec.{
   Ref, RequestBody, Response, SecurityRequirement, Server, ServerVariable, Tag,
   Value,
 }
-import oaspec/openapi/value
-import oaspec/util/http
+import oaspec/internal/openapi/value
+import oaspec/internal/util/http
+import oaspec/openapi/diagnostic.{type Diagnostic, NoSourceLoc, SourceLoc}
 import simplifile
 import yay
 

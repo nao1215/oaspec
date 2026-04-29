@@ -124,7 +124,7 @@ diagnostic instead of producing broken output.
 See [Current Boundaries](#current-boundaries) for the full list,
 including server-mode restrictions and normalization rules. The
 boundaries are kept in sync with the capability registry at
-[`src/oaspec/capability.gleam`](src/oaspec/capability.gleam) by a
+[`src/oaspec/internal/capability.gleam`](src/oaspec/internal/capability.gleam) by a
 drift-detection test.
 
 ## Quickstart
@@ -351,7 +351,7 @@ Coverage is strongest in these areas:
 <!-- BEGIN GENERATED:BOUNDARIES -->
 ## Current Boundaries
 
-These boundaries are generated from the capability registry in `src/oaspec/capability.gleam`.
+These boundaries are generated from the capability registry in `src/oaspec/internal/capability.gleam`.
 
 These are the most important limitations today:
 

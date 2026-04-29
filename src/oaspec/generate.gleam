@@ -1,21 +1,21 @@
 import gleam/list
 import gleam/result
-import oaspec/codegen/client
-import oaspec/codegen/context.{type Context, type GeneratedFile}
-import oaspec/codegen/decoders
-import oaspec/codegen/encoders
-import oaspec/codegen/guards
-import oaspec/codegen/server
-import oaspec/codegen/types
-import oaspec/codegen/validate
 import oaspec/config.{type Config, Both, Client, Server}
-import oaspec/openapi/capability_check
-import oaspec/openapi/dedup
+import oaspec/internal/codegen/client
+import oaspec/internal/codegen/context.{type Context, type GeneratedFile}
+import oaspec/internal/codegen/decoders
+import oaspec/internal/codegen/encoders
+import oaspec/internal/codegen/guards
+import oaspec/internal/codegen/server
+import oaspec/internal/codegen/types
+import oaspec/internal/codegen/validate
+import oaspec/internal/openapi/capability_check
+import oaspec/internal/openapi/dedup
+import oaspec/internal/openapi/hoist
+import oaspec/internal/openapi/normalize
+import oaspec/internal/openapi/resolve
+import oaspec/internal/openapi/spec.{type OpenApiSpec, type Unresolved}
 import oaspec/openapi/diagnostic.{type Diagnostic}
-import oaspec/openapi/hoist
-import oaspec/openapi/normalize
-import oaspec/openapi/resolve
-import oaspec/openapi/spec.{type OpenApiSpec, type Unresolved}
 
 /// Result of a successful code generation run.
 pub type GenerationSummary {
@@ -148,7 +148,7 @@ pub fn generate_all_files(ctx: Context) -> List(GeneratedFile) {
 /// `middleware.gleam` used to be emitted here too, but its `Handler` shape
 /// did not actually compose with the generated client or server APIs (see
 /// issue #116). It is no longer part of the default generated surface;
-/// the `oaspec/codegen/middleware` module is kept only as a library-level
+/// the `oaspec/internal/codegen/middleware` module is kept only as a library-level
 /// helper for consumers who want to assemble their own middleware chain.
 fn generate_shared(ctx: Context) -> List(GeneratedFile) {
   let type_files = types.generate(ctx)

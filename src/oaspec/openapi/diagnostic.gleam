@@ -3,7 +3,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/config
-import oaspec/openapi/diagnostic_format
+import oaspec/internal/openapi/diagnostic_format
 
 /// Pipeline phase that produced the diagnostic.
 pub type Phase {

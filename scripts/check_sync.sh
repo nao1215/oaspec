@@ -10,7 +10,7 @@ warn() { echo "DRIFT: $1"; errors=$((errors + 1)); }
 
 # --- 1. Version consistency ---
 TOML_VERSION=$(grep '^version' gleam.toml | sed 's/.*"\(.*\)"/\1/')
-CONTEXT_VERSION=$(grep 'pub const version' src/oaspec/codegen/context.gleam | sed 's/.*"\(.*\)"/\1/')
+CONTEXT_VERSION=$(grep 'pub const version' src/oaspec/internal/codegen/context.gleam | sed 's/.*"\(.*\)"/\1/')
 CHANGELOG_VERSION=$(grep -m1 '^## \[' CHANGELOG.md | sed 's/.*\[\(.*\)\].*/\1/')
 
 echo "==> Checking version consistency..."

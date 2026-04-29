@@ -4,6 +4,7 @@ target = "erlang"
 description = "Generate Gleam code from OpenAPI 3.x specifications"
 licences = ["MIT"]
 repository = { type = "github", user = "nao1215", repo = "oaspec" }
+internal_modules = ["oaspec/internal/**"]
 
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
@@ -80,14 +81,17 @@ unwrap_used = "error"
 # Codegen and OpenAPI traversal code takes many unlabelled helper
 # parameters and is naturally branchy; fixing these cleanly would require a
 # project-wide refactor that is out of scope for enabling glinter.
-"src/oaspec/cli.gleam" = ["label_possible", "deep_nesting"]
+"src/oaspec/internal/cli.gleam" = ["label_possible", "deep_nesting"]
 "src/oaspec/config.gleam" = ["label_possible"]
-"src/oaspec/capability.gleam" = ["label_possible"]
-"src/oaspec/formatter.gleam" = ["label_possible"]
+"src/oaspec/internal/capability.gleam" = ["label_possible"]
+"src/oaspec/internal/formatter.gleam" = ["label_possible"]
 "src/oaspec/generate.gleam" = ["label_possible", "deep_nesting"]
 # schema_dispatch.gleam uses panic for unsupported inline complex schemas
 # (object/allOf/oneOf/anyOf) in decoder/encoder dispatch — these patterns
 # must fail fast instead of silently generating broken code (#290).
-"src/oaspec/codegen/*.gleam" = ["label_possible", "deep_nesting", "avoid_panic"]
-"src/oaspec/openapi/*.gleam" = ["label_possible", "deep_nesting"]
-"src/oaspec/util/*.gleam" = ["label_possible", "deep_nesting"]
+"src/oaspec/internal/codegen/*.gleam" = ["label_possible", "deep_nesting", "avoid_panic"]
+"src/oaspec/codegen/writer.gleam" = ["label_possible"]
+"src/oaspec/internal/openapi/*.gleam" = ["label_possible", "deep_nesting"]
+"src/oaspec/openapi/parser.gleam" = ["label_possible", "deep_nesting"]
+"src/oaspec/openapi/diagnostic.gleam" = ["label_possible"]
+"src/oaspec/internal/util/*.gleam" = ["label_possible", "deep_nesting"]

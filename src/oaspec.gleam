@@ -4,8 +4,8 @@ import gleam/io
 import gleam/list
 import gleam/string
 import glint
-import oaspec/cli
-import oaspec/codegen/context
+import oaspec/internal/cli
+import oaspec/internal/codegen/context
 
 @external(erlang, "erlang", "halt")
 fn halt(code: Int) -> Nil
