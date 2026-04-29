@@ -48,25 +48,7 @@ pub fn validate_create_pet_request_name_length(
 pub fn validate_pet_name_length(
   value: String,
 ) -> Result(String, ValidationFailure) {
-  let len = string.length(value)
-  case len < 1 {
-    True ->
-      Error(ValidationFailure(
-        field: "name",
-        code: "minLength",
-        message: "must be at least 1 character",
-      ))
-    False ->
-      case len > 100 {
-        True ->
-          Error(ValidationFailure(
-            field: "name",
-            code: "maxLength",
-            message: "must be at most 100 characters",
-          ))
-        False -> Ok(value)
-      }
-  }
+  validate_create_pet_request_name_length(value)
 }
 
 /// Validate all constraints for CreatePetRequest.
