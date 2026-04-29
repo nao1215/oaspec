@@ -29,7 +29,10 @@ pub fn generate_single_content_response(
       case media_type.schema {
         Some(_) ->
           sb
-          |> se.indent(2, http.status_code_to_int_pattern(status_code) <> " -> {")
+          |> se.indent(
+            2,
+            http.status_code_to_int_pattern(status_code) <> " -> {",
+          )
           |> se.indent(3, "use bytes <- result.try(bytes_body(resp.body))")
           |> se.indent(3, "Ok(" <> variant_name <> "(bytes))")
           |> se.indent(2, "}")
@@ -44,13 +47,14 @@ pub fn generate_single_content_response(
           )
       }
 
-    content_type.TextPlain
-    | content_type.ApplicationXml
-    | content_type.TextXml ->
+    content_type.TextPlain | content_type.ApplicationXml | content_type.TextXml ->
       case media_type.schema {
         Some(_) ->
           sb
-          |> se.indent(2, http.status_code_to_int_pattern(status_code) <> " -> {")
+          |> se.indent(
+            2,
+            http.status_code_to_int_pattern(status_code) <> " -> {",
+          )
           |> se.indent(3, "use text <- result.try(text_body(resp.body))")
           |> se.indent(3, "Ok(" <> variant_name <> "(text))")
           |> se.indent(2, "}")
@@ -71,7 +75,10 @@ pub fn generate_single_content_response(
           let decode_expr =
             get_response_decode_expr(schema_ref, op_id, status_code, ctx)
           sb
-          |> se.indent(2, http.status_code_to_int_pattern(status_code) <> " -> {")
+          |> se.indent(
+            2,
+            http.status_code_to_int_pattern(status_code) <> " -> {",
+          )
           |> se.indent(3, "use text <- result.try(text_body(resp.body))")
           |> se.indent(3, "case " <> decode_expr <> " {")
           |> se.indent(4, "Ok(decoded) -> Ok(" <> variant_name <> "(decoded))")

@@ -44,10 +44,7 @@ pub fn render_security_metadata(
   }
 }
 
-fn render_alternative(
-  ctx: Context,
-  alt: spec.SecurityRequirement,
-) -> String {
+fn render_alternative(ctx: Context, alt: spec.SecurityRequirement) -> String {
   let reqs =
     alt.schemes
     |> list.filter_map(fn(scheme_ref) { render_requirement(ctx, scheme_ref) })
