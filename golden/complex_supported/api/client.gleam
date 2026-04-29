@@ -145,7 +145,6 @@ pub fn build_post_search_request(
   let path = "/search"
   let query = []
   let headers = []
-  let headers = list.reverse(headers)
   let body = case body {
     Some(body) -> transport.TextBody(encode.encode_post_search_request(body))
     None -> transport.EmptyBody
@@ -218,7 +217,6 @@ pub fn build_get_user_request(
   let path = string.replace(path, "{userId}", uri.percent_encode(user_id))
   let query = []
   let headers = []
-  let headers = list.reverse(headers)
   let body = transport.EmptyBody
   Ok(
     transport.Request(
@@ -291,7 +289,6 @@ pub fn build_post_webhook_request(
   let path = "/webhook"
   let query = []
   let headers = []
-  let headers = list.reverse(headers)
   let body = case body {
     Some(body) -> transport.TextBody(encode.encode_webhook_event(body))
     None -> transport.EmptyBody
