@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-04-29
+
 ### Added
 
 - New pure runtime modules `oaspec/transport` and `oaspec/mock`. Generated
