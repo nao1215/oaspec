@@ -118,7 +118,7 @@ pub fn build_param_list(
     list.map(all_params, fn(p) {
       let param_name = field_name_for(field_names, p)
       let param_type = param_to_type(p, ctx)
-      ", " <> param_name <> ": " <> param_type
+      ", " <> param_name <> " " <> param_name <> ": " <> param_type
     })
 
   let body_param = case operation.request_body {
@@ -131,8 +131,11 @@ pub fn build_param_list(
       let content_entries = ir_build.sorted_entries(rb.content)
       case content_entries {
         // Multi-content: add content_type param before body
-        [_, _, ..] -> [", content_type: String", ", body: " <> wrapped_type]
-        _ -> [", body: " <> wrapped_type]
+        [_, _, ..] -> [
+          ", content_type content_type: String",
+          ", body body: " <> wrapped_type,
+        ]
+        _ -> [", body body: " <> wrapped_type]
       }
     }
     _ -> []

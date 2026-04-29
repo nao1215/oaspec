@@ -5,226 +5,333 @@ import api/encode
 import api/request_types
 import api/response_types
 import api/types
-import gleam/http
-import gleam/http/request
 import gleam/int
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import gleam/uri
-
-/// HTTP client configuration.
-pub type ClientConfig {
-  ClientConfig(
-    base_url: String,
-    send: fn(request.Request(String)) -> Result(ClientResponse, ClientError),
-  )
-}
-
-/// Raw HTTP response from the server.
-pub type ClientResponse {
-  ClientResponse(status: Int, body: String)
-}
+import oaspec/transport
 
 /// HTTP client errors.
 pub type ClientError {
-  ConnectionError(detail: String)
-  TimeoutError
-  DecodeError(detail: String)
-  InvalidUrl(detail: String)
-  UnexpectedStatus(status: Int, body: String)
+  TransportError(error: transport.TransportError)
+  DecodeFailure(detail: String)
+  InvalidResponse(detail: String)
+  UnexpectedStatus(
+    status: Int,
+    headers: List(#(String, String)),
+    body: transport.Body,
+  )
 }
 
-/// Create a new client configuration.
-pub fn new(
-  base_url: String,
-  send: fn(request.Request(String)) -> Result(ClientResponse, ClientError),
-) -> ClientConfig {
-  ClientConfig(base_url:, send:)
-}
-
-/// Build the base URL from server template variables.
+/// Default base URL declared by the OpenAPI spec.
 pub fn default_base_url() -> String {
   "https://api.example.com/v1"
 }
 
-/// Demonstrate required query / header / cookie params
-pub fn get_required_params(
-  config: ClientConfig,
-  tenant: String,
-  page: Int,
-  x_trace_id: String,
-  session: String,
-) -> Result(response_types.GetRequiredParamsResponse, ClientError) {
-  let path = "/required-params"
-  let query_parts = []
-  let query_parts = ["tenant=" <> uri.percent_encode(tenant), ..query_parts]
-  let query_parts = [
-    "page=" <> uri.percent_encode(int.to_string(page)),
-    ..query_parts
-  ]
-  let query_string = string.join(list.reverse(query_parts), "&")
-  let path = case query_string {
-    "" -> path
-    _ -> path <> "?" <> query_string
-  }
-  let full_url = config.base_url <> path
-  use req <- result.try(
-    request.to(full_url)
-    |> result.map_error(fn(_) { InvalidUrl(detail: full_url) }),
-  )
-  let req = request.set_method(req, http.Get)
-  let req = request.set_header(req, "x-trace-id", x_trace_id)
-  let cookie_parts = []
-  let cookie_parts = ["session=" <> uri.percent_encode(session), ..cookie_parts]
-  let req = case cookie_parts {
-    [] -> req
-    _ -> request.set_header(req, "cookie", string.join(cookie_parts, "; "))
-  }
-  case config.send(req) {
-    Error(e) -> Error(e)
-    Ok(resp) -> {
-      case resp.status {
-        200 -> Ok(response_types.GetRequiredParamsResponseOk)
-        _ -> Error(UnexpectedStatus(status: resp.status, body: resp.body))
-      }
-    }
+fn text_body(body: transport.Body) -> Result(String, ClientError) {
+  case body {
+    transport.TextBody(text) -> Ok(text)
+    transport.BytesBody(_) ->
+      Error(InvalidResponse(detail: "expected text body, got bytes"))
+    transport.EmptyBody ->
+      Error(InvalidResponse(detail: "expected text body, got empty body"))
   }
 }
 
-/// Request-object wrapper. Delegates to get_required_params/N with fields unpacked from the request record.
-pub fn get_required_params_with_request(
-  config: ClientConfig,
-  req: request_types.GetRequiredParamsRequest,
+/// Demonstrate required query / header / cookie params
+pub fn get_required_params(
+  send send: transport.Send,
+  tenant tenant: String,
+  page page: Int,
+  x_trace_id x_trace_id: String,
+  session session: String,
 ) -> Result(response_types.GetRequiredParamsResponse, ClientError) {
-  get_required_params(config, req.tenant, req.page, req.x_trace_id, req.session)
+  use req <- result.try(build_get_required_params_request(
+    tenant: tenant,
+    page: page,
+    x_trace_id: x_trace_id,
+    session: session,
+  ))
+  use resp <- result.try(
+    send(req)
+    |> result.map_error(TransportError),
+  )
+  decode_get_required_params_response(resp)
+}
+
+/// Build the transport request for get_required_params without sending it. Useful for testing and for adding custom transport middleware.
+pub fn build_get_required_params_request(
+  tenant tenant: String,
+  page page: Int,
+  x_trace_id x_trace_id: String,
+  session session: String,
+) -> Result(transport.Request, ClientError) {
+  let path = "/required-params"
+  let query = []
+  let query = [#("tenant", tenant), ..query]
+  let query = [#("page", int.to_string(page)), ..query]
+  let query = list.reverse(query)
+  let headers = []
+  let headers = [#("x-trace-id", x_trace_id), ..headers]
+  let cookie_parts = []
+  let cookie_parts = ["session=" <> uri.percent_encode(session), ..cookie_parts]
+  let headers = case cookie_parts {
+    [] -> headers
+    _ -> [#("cookie", string.join(cookie_parts, "; ")), ..headers]
+  }
+  let headers = list.reverse(headers)
+  let body = transport.EmptyBody
+  Ok(
+    transport.Request(
+      method: transport.Get,
+      base_url: Some(default_base_url()),
+      path: path,
+      query: query,
+      headers: headers,
+      body: body,
+      security: [],
+    ),
+  )
+}
+
+/// Decode a transport response into the typed response variant for get_required_params.
+pub fn decode_get_required_params_response(
+  resp: transport.Response,
+) -> Result(response_types.GetRequiredParamsResponse, ClientError) {
+  case resp.status {
+    200 -> Ok(response_types.GetRequiredParamsResponseOk)
+    _ ->
+      Error(UnexpectedStatus(
+        status: resp.status,
+        headers: resp.headers,
+        body: resp.body,
+      ))
+  }
+}
+
+/// Request-object wrapper. Delegates to get_required_params with fields unpacked from the request record.
+pub fn get_required_params_with_request(
+  send send: transport.Send,
+  request request: request_types.GetRequiredParamsRequest,
+) -> Result(response_types.GetRequiredParamsResponse, ClientError) {
+  get_required_params(
+    send,
+    request.tenant,
+    request.page,
+    request.x_trace_id,
+    request.session,
+  )
 }
 
 /// Complex search
 pub fn post_search(
-  config: ClientConfig,
-  body: Option(types.PostSearchRequest),
+  send send: transport.Send,
+  body body: Option(types.PostSearchRequest),
 ) -> Result(response_types.PostSearchResponse, ClientError) {
-  let path = "/search"
-  let full_url = config.base_url <> path
-  use req <- result.try(
-    request.to(full_url)
-    |> result.map_error(fn(_) { InvalidUrl(detail: full_url) }),
+  use req <- result.try(build_post_search_request(body: body))
+  use resp <- result.try(
+    send(req)
+    |> result.map_error(TransportError),
   )
-  let req = request.set_method(req, http.Post)
-  let req = case body {
-    Some(body) -> {
-      let req = request.set_header(req, "content-type", "application/json")
-      let req = request.set_body(req, encode.encode_post_search_request(body))
-      req
-    }
-    None -> req
+  decode_post_search_response(resp)
+}
+
+/// Build the transport request for post_search without sending it. Useful for testing and for adding custom transport middleware.
+pub fn build_post_search_request(
+  body body: Option(types.PostSearchRequest),
+) -> Result(transport.Request, ClientError) {
+  let path = "/search"
+  let query = []
+  let headers = []
+  let headers = list.reverse(headers)
+  let body = case body {
+    Some(body) -> transport.TextBody(encode.encode_post_search_request(body))
+    None -> transport.EmptyBody
   }
-  case config.send(req) {
-    Error(e) -> Error(e)
-    Ok(resp) -> {
-      case resp.status {
-        200 -> {
-          case decode.decode_post_search_response_ok(resp.body) {
-            Ok(decoded) -> Ok(response_types.PostSearchResponseOk(decoded))
-            Error(_) ->
-              Error(DecodeError(detail: "Failed to decode response body"))
-          }
-        }
-        _ -> Error(UnexpectedStatus(status: resp.status, body: resp.body))
+  let headers = case body {
+    transport.EmptyBody -> headers
+    _ -> [#("content-type", "application/json"), ..headers]
+  }
+  Ok(
+    transport.Request(
+      method: transport.Post,
+      base_url: Some(default_base_url()),
+      path: path,
+      query: query,
+      headers: headers,
+      body: body,
+      security: [],
+    ),
+  )
+}
+
+/// Decode a transport response into the typed response variant for post_search.
+pub fn decode_post_search_response(
+  resp: transport.Response,
+) -> Result(response_types.PostSearchResponse, ClientError) {
+  case resp.status {
+    200 -> {
+      use text <- result.try(text_body(resp.body))
+      case decode.decode_post_search_response_ok(text) {
+        Ok(decoded) -> Ok(response_types.PostSearchResponseOk(decoded))
+        Error(_) ->
+          Error(DecodeFailure(detail: "Failed to decode response body"))
       }
     }
+    _ ->
+      Error(UnexpectedStatus(
+        status: resp.status,
+        headers: resp.headers,
+        body: resp.body,
+      ))
   }
 }
 
-/// Request-object wrapper. Delegates to post_search/N with fields unpacked from the request record.
+/// Request-object wrapper. Delegates to post_search with fields unpacked from the request record.
 pub fn post_search_with_request(
-  config: ClientConfig,
-  req: request_types.PostSearchRequest,
+  send send: transport.Send,
+  request request: request_types.PostSearchRequest,
 ) -> Result(response_types.PostSearchResponse, ClientError) {
-  post_search(config, req.body)
+  post_search(send, request.body)
 }
 
 /// Get user with polymorphic response
 pub fn get_user(
-  config: ClientConfig,
-  user_id: String,
+  send send: transport.Send,
+  user_id user_id: String,
 ) -> Result(response_types.GetUserResponse, ClientError) {
+  use req <- result.try(build_get_user_request(user_id: user_id))
+  use resp <- result.try(
+    send(req)
+    |> result.map_error(TransportError),
+  )
+  decode_get_user_response(resp)
+}
+
+/// Build the transport request for get_user without sending it. Useful for testing and for adding custom transport middleware.
+pub fn build_get_user_request(
+  user_id user_id: String,
+) -> Result(transport.Request, ClientError) {
   let path = "/users/{userId}"
   let path = string.replace(path, "{userId}", uri.percent_encode(user_id))
-  let full_url = config.base_url <> path
-  use req <- result.try(
-    request.to(full_url)
-    |> result.map_error(fn(_) { InvalidUrl(detail: full_url) }),
+  let query = []
+  let headers = []
+  let headers = list.reverse(headers)
+  let body = transport.EmptyBody
+  Ok(
+    transport.Request(
+      method: transport.Get,
+      base_url: Some(default_base_url()),
+      path: path,
+      query: query,
+      headers: headers,
+      body: body,
+      security: [],
+    ),
   )
-  let req = request.set_method(req, http.Get)
-  case config.send(req) {
-    Error(e) -> Error(e)
-    Ok(resp) -> {
-      case resp.status {
-        200 -> {
-          case decode.decode_get_user_response_ok(resp.body) {
-            Ok(decoded) -> Ok(response_types.GetUserResponseOk(decoded))
-            Error(_) ->
-              Error(DecodeError(detail: "Failed to decode response body"))
-          }
-        }
-        404 -> {
-          case decode.decode_error(resp.body) {
-            Ok(decoded) -> Ok(response_types.GetUserResponseNotFound(decoded))
-            Error(_) ->
-              Error(DecodeError(detail: "Failed to decode response body"))
-          }
-        }
-        _ -> Error(UnexpectedStatus(status: resp.status, body: resp.body))
+}
+
+/// Decode a transport response into the typed response variant for get_user.
+pub fn decode_get_user_response(
+  resp: transport.Response,
+) -> Result(response_types.GetUserResponse, ClientError) {
+  case resp.status {
+    200 -> {
+      use text <- result.try(text_body(resp.body))
+      case decode.decode_get_user_response_ok(text) {
+        Ok(decoded) -> Ok(response_types.GetUserResponseOk(decoded))
+        Error(_) ->
+          Error(DecodeFailure(detail: "Failed to decode response body"))
       }
     }
+    404 -> {
+      use text <- result.try(text_body(resp.body))
+      case decode.decode_error(text) {
+        Ok(decoded) -> Ok(response_types.GetUserResponseNotFound(decoded))
+        Error(_) ->
+          Error(DecodeFailure(detail: "Failed to decode response body"))
+      }
+    }
+    _ ->
+      Error(UnexpectedStatus(
+        status: resp.status,
+        headers: resp.headers,
+        body: resp.body,
+      ))
   }
 }
 
-/// Request-object wrapper. Delegates to get_user/N with fields unpacked from the request record.
+/// Request-object wrapper. Delegates to get_user with fields unpacked from the request record.
 pub fn get_user_with_request(
-  config: ClientConfig,
-  req: request_types.GetUserRequest,
+  send send: transport.Send,
+  request request: request_types.GetUserRequest,
 ) -> Result(response_types.GetUserResponse, ClientError) {
-  get_user(config, req.user_id)
+  get_user(send, request.user_id)
 }
 
 /// Receive webhook
 pub fn post_webhook(
-  config: ClientConfig,
-  body: Option(types.WebhookEvent),
+  send send: transport.Send,
+  body body: Option(types.WebhookEvent),
 ) -> Result(response_types.PostWebhookResponse, ClientError) {
-  let path = "/webhook"
-  let full_url = config.base_url <> path
-  use req <- result.try(
-    request.to(full_url)
-    |> result.map_error(fn(_) { InvalidUrl(detail: full_url) }),
+  use req <- result.try(build_post_webhook_request(body: body))
+  use resp <- result.try(
+    send(req)
+    |> result.map_error(TransportError),
   )
-  let req = request.set_method(req, http.Post)
-  let req = case body {
-    Some(body) -> {
-      let req = request.set_header(req, "content-type", "application/json")
-      let req = request.set_body(req, encode.encode_webhook_event(body))
-      req
-    }
-    None -> req
+  decode_post_webhook_response(resp)
+}
+
+/// Build the transport request for post_webhook without sending it. Useful for testing and for adding custom transport middleware.
+pub fn build_post_webhook_request(
+  body body: Option(types.WebhookEvent),
+) -> Result(transport.Request, ClientError) {
+  let path = "/webhook"
+  let query = []
+  let headers = []
+  let headers = list.reverse(headers)
+  let body = case body {
+    Some(body) -> transport.TextBody(encode.encode_webhook_event(body))
+    None -> transport.EmptyBody
   }
-  case config.send(req) {
-    Error(e) -> Error(e)
-    Ok(resp) -> {
-      case resp.status {
-        200 -> Ok(response_types.PostWebhookResponseOk)
-        _ -> Error(UnexpectedStatus(status: resp.status, body: resp.body))
-      }
-    }
+  let headers = case body {
+    transport.EmptyBody -> headers
+    _ -> [#("content-type", "application/json"), ..headers]
+  }
+  Ok(
+    transport.Request(
+      method: transport.Post,
+      base_url: Some(default_base_url()),
+      path: path,
+      query: query,
+      headers: headers,
+      body: body,
+      security: [],
+    ),
+  )
+}
+
+/// Decode a transport response into the typed response variant for post_webhook.
+pub fn decode_post_webhook_response(
+  resp: transport.Response,
+) -> Result(response_types.PostWebhookResponse, ClientError) {
+  case resp.status {
+    200 -> Ok(response_types.PostWebhookResponseOk)
+    _ ->
+      Error(UnexpectedStatus(
+        status: resp.status,
+        headers: resp.headers,
+        body: resp.body,
+      ))
   }
 }
 
-/// Request-object wrapper. Delegates to post_webhook/N with fields unpacked from the request record.
+/// Request-object wrapper. Delegates to post_webhook with fields unpacked from the request record.
 pub fn post_webhook_with_request(
-  config: ClientConfig,
-  req: request_types.PostWebhookRequest,
+  send send: transport.Send,
+  request request: request_types.PostWebhookRequest,
 ) -> Result(response_types.PostWebhookResponse, ClientError) {
-  post_webhook(config, req.body)
+  post_webhook(send, request.body)
 }
