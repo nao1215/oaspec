@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-04-29
+
 ### Fixed
 
 - **`oneOf` decoders now enforce exactly-one-match semantics**, per
