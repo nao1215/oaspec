@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-04-30
+
 ### Changed
 
 - **Internal: split the BEAM-only `yay` bridge out of
