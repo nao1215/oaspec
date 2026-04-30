@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`text/plain` is now a supported request body content type** in both
+  client and server modes. Specs that declare a `text/plain` request
+  body (e.g. GitHub REST `markdown.render-raw`) previously tripped the
+  "unsupported request content type" diagnostic; they now generate
+  working code. Client codegen wraps the body in `transport.TextBody`
+  as a raw string (no JSON quoting), and the server router passes the
+  request body through to handlers as `String`. (#352)
+
 ## [0.30.0] - 2026-04-30
 
 ### Fixed

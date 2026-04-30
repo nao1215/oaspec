@@ -672,9 +672,9 @@ fn validate_request_body(
             path: op_id <> ".requestBody",
             detail: "Content type '"
               <> media_type
-              <> "' is not supported. Supported request content types: application/json (and +json suffix types), multipart/form-data, application/x-www-form-urlencoded, application/octet-stream.",
+              <> "' is not supported. Supported request content types: application/json (and +json suffix types), text/plain, multipart/form-data, application/x-www-form-urlencoded, application/octet-stream.",
             hint: Some(
-              "Use application/json (or a +json suffix type like application/problem+json), multipart/form-data, application/x-www-form-urlencoded, or application/octet-stream.",
+              "Use application/json (or a +json suffix type like application/problem+json), text/plain, multipart/form-data, application/x-www-form-urlencoded, or application/octet-stream.",
             ),
           ),
         ]
@@ -883,6 +883,7 @@ fn validate_server_request_body_content_types(
           && key != "application/x-www-form-urlencoded"
           && key != "multipart/form-data"
           && key != "application/octet-stream"
+          && key != "text/plain"
           && content_type.is_supported_request(content_type.from_string(key))
         })
       list.map(non_json_but_supported, fn(media_type) {

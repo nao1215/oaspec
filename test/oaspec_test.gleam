@@ -675,7 +675,11 @@ paths:
   errors |> should.equal([])
 }
 
-pub fn validate_rejects_text_plain_request_body_test() {
+// Issue #352: text/plain must be accepted as a request body content type so
+// real-world specs (e.g. GitHub `markdown.render-raw`) stop tripping the
+// "unsupported request content type" diagnostic. Mirrors the octet-stream
+// acceptance test below.
+pub fn validate_accepts_text_plain_request_body_test() {
   let yaml =
     "
 openapi: 3.0.3
@@ -699,10 +703,9 @@ paths:
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) {
-    string.contains(s, "multipart/form-data")
-    && string.contains(s, "form-urlencoded")
+    string.contains(s, "text/plain") && string.contains(s, "is not supported")
   })
-  |> should.be_true()
+  |> should.be_false()
 }
 
 // Issue #265: application/octet-stream must be accepted as a request body
@@ -2028,7 +2031,7 @@ pub fn content_type_is_supported_request_test() {
   |> should.be_true()
 
   content_type.is_supported_request(content_type.TextPlain)
-  |> should.be_false()
+  |> should.be_true()
 }
 
 pub fn content_type_is_supported_response_test() {
@@ -4593,6 +4596,7 @@ pub fn capability_registry_covers_content_type_request_helpers_test() {
     "application/x-www-form-urlencoded",
     "multipart/form-data",
     "application/octet-stream",
+    "text/plain",
   ]
   let registry_request_names =
     capability.registry()

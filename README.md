@@ -11,7 +11,7 @@ Generate usable Gleam code from OpenAPI 3.x specifications.
 - Generate client and server-side modules from a single spec
 - Produce readable Gleam types, encoders, decoders, request types, and response types
 - Handle real-world OpenAPI patterns: unions, nullable fields, `additionalProperties`, form bodies, multipart, and security
-- Backed by 795 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 235 test fixtures (including 94 OSS-derived edge-case specs)
+- Backed by 796 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 235 test fixtures (including 94 OSS-derived edge-case specs)
 
 ## Why oaspec?
 
@@ -102,7 +102,7 @@ diagnostic instead of producing broken output.
   fail fast with a dedicated diagnostic that shows the visited chain.
 - Parameters: path, query, header, cookie, plus array styles (`form`,
   `pipeDelimited`, `spaceDelimited`) and objects via `deepObject`
-- Request bodies: `application/json`,
+- Request bodies: `application/json`, `text/plain`,
   `application/x-www-form-urlencoded`, `multipart/form-data`
 - Typed response variants, typed response headers, and `$ref` /
   `default` responses
@@ -397,7 +397,7 @@ Coverage is strongest in these areas:
 - Schemas: component schemas, primitive aliases, enums, nullable fields, arrays, objects, `allOf`, `oneOf`, `anyOf`, and typed `additionalProperties`
 - References: local `$ref` resolution for schemas, parameters, request bodies, responses, and path items, including circular-reference detection
 - Parameters: path, query, header, and cookie parameters, including array serialization (`style: form`, `style: pipeDelimited`, `style: spaceDelimited`) and objects via `style: deepObject`
-- Request bodies: `application/json`, `application/x-www-form-urlencoded`, and `multipart/form-data`
+- Request bodies: `application/json`, `text/plain`, `application/x-www-form-urlencoded`, and `multipart/form-data`
 - Responses: typed status-code variants, `$ref` responses, `default` responses, typed response headers, and text or binary passthrough cases
 - Security: `apiKey` (header, query, cookie), HTTP auth (bearer, basic, digest), OAuth2, and OpenID Connect. For OAuth2 and OpenID Connect, the generated client attaches a bearer token to requests; token acquisition, refresh, and flow execution are outside the generated code.
 - Generation safety: name collision handling, keyword escaping, validation guards, and capability errors with clear failure modes

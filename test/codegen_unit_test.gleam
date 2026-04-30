@@ -1188,6 +1188,51 @@ components:
   |> should.be_true()
 }
 
+// Issue #352: text/plain request bodies must travel as the raw string the
+// caller supplies. The generated client must wrap the body parameter in
+// `transport.TextBody(body)` directly, with no JSON quoting, and the
+// content-type header must echo the spec's "text/plain" verbatim.
+pub fn client_text_plain_request_body_emits_raw_text_body_test() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /markdown/raw:
+    post:
+      operationId: renderRaw
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema: { type: string }
+      responses:
+        '200':
+          description: rendered HTML
+          content:
+            text/plain:
+              schema: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let files = client_gen.generate(ctx)
+  let assert [client_file] = files
+
+  // Body must be wrapped raw — no `json.string` / `json.to_string` on the
+  // request side for a text/plain body.
+  string.contains(client_file.content, "let body = transport.TextBody(body)")
+  |> should.be_true()
+  string.contains(client_file.content, "json.to_string(json.string(body))")
+  |> should.be_false()
+
+  // Content-type header echoes the spec literal.
+  string.contains(client_file.content, "\"text/plain\"")
+  |> should.be_true()
+}
+
 // ===================================================================
 // Encoder: optional non-nullable field omits key on None (issue #303)
 // ===================================================================

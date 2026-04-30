@@ -1251,6 +1251,21 @@ fn generate_body_emission(
           generate_multipart_body_emission(sb, rb, op_id, ctx)
         "application/x-www-form-urlencoded" ->
           generate_form_urlencoded_body_emission(sb, rb, op_id, ctx)
+        "text/plain" ->
+          // Plain-text bodies must travel as the raw string the caller
+          // supplies. The default `_ ->` arm runs the value through the
+          // schema-aware encoder, which would JSON-quote a string schema —
+          // that's wrong for text/plain (the wire payload would be
+          // `"foo"` instead of `foo`).
+          case rb.required {
+            True -> sb |> se.indent(1, "let body = transport.TextBody(body)")
+            False ->
+              sb
+              |> se.indent(1, "let body = case body {")
+              |> se.indent(2, "Some(b) -> transport.TextBody(b)")
+              |> se.indent(2, "None -> transport.EmptyBody")
+              |> se.indent(1, "}")
+          }
         _ -> {
           let encode_expr = client_request.get_body_encode_expr(rb, op_id, ctx)
           case rb.required {

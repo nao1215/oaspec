@@ -180,6 +180,12 @@ pub fn registry() -> List(Capability) {
       "Binary upload (raw bytes; passes through as the body parameter without JSON decoding)",
     ),
     Capability(
+      "text/plain",
+      "request",
+      Supported,
+      "Plain text request bodies (raw string passthrough; no JSON encoding)",
+    ),
+    Capability(
       "+json/+xml suffix",
       "content-type",
       Supported,
@@ -268,7 +274,7 @@ pub fn registry() -> List(Capability) {
       "server: unsupported request content type",
       "server-validation",
       Unsupported,
-      "Server router only supports application/json, application/x-www-form-urlencoded, and multipart/form-data",
+      "Server router only supports application/json, application/x-www-form-urlencoded, multipart/form-data, application/octet-stream, and text/plain",
     ),
     // Codegen scope
     Capability("webhooks", "scope", ParsedNotUsed, "Parsed but no codegen"),
