@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-04-30
+
 ### Changed
 
 - **Internal: make `oaspec/internal/openapi/resolve` cross-target.**
