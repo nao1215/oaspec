@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`type: 'null'` inside `oneOf` / `anyOf`** is now accepted as the
+  OpenAPI 3.1 nullable-via-union form. Previously the parser rejected
+  it with `Unrecognized schema type 'null'`, which blocked specs like
+  the GitHub REST OpenAPI from being generated. The null branch is
+  filtered out and `nullable: true` is lifted onto the parent schema's
+  metadata, matching the existing behaviour for the array form
+  `type: [T, 'null']`. A standalone `type: 'null'` schema (outside any
+  composition) is also accepted now and represented as an unrestricted
+  nullable schema, mirroring the existing fallback for
+  `type: ['null']`. (#349)
+
 ## [0.29.0] - 2026-04-29
 
 ### Fixed

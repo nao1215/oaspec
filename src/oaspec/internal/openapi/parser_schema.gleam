@@ -104,8 +104,17 @@ fn parse_schema_object(
     _ ->
       case yay.select_sugar(from: node, selector: "oneOf") {
         Ok(yay.NodeSeq(items)) -> {
+          let #(non_null_items, has_null) = partition_null_branches(items)
+          let metadata = case has_null {
+            True -> schema.SchemaMetadata(..metadata, nullable: True)
+            False -> metadata
+          }
           use schemas <- result.try(
-            list.try_map(items, parse_schema_ref(_, path <> ".oneOf", index)),
+            list.try_map(non_null_items, parse_schema_ref(
+              _,
+              path <> ".oneOf",
+              index,
+            )),
           )
           use discriminator <- result.try(
             case
@@ -126,8 +135,17 @@ fn parse_schema_object(
         _ ->
           case yay.select_sugar(from: node, selector: "anyOf") {
             Ok(yay.NodeSeq(items)) -> {
+              let #(non_null_items, has_null) = partition_null_branches(items)
+              let metadata = case has_null {
+                True -> schema.SchemaMetadata(..metadata, nullable: True)
+                False -> metadata
+              }
               use schemas <- result.try(
-                list.try_map(items, parse_schema_ref(_, path <> ".anyOf", index)),
+                list.try_map(non_null_items, parse_schema_ref(
+                  _,
+                  path <> ".anyOf",
+                  index,
+                )),
               )
               use discriminator <- result.try(
                 case
@@ -149,6 +167,42 @@ fn parse_schema_object(
           }
       }
   }
+}
+
+/// Detect a schema branch that is a standalone `type: "null"` (the
+/// OpenAPI 3.1 way to express nullability inside a oneOf/anyOf).
+///
+/// Returns `True` only if the node is an inline schema whose only
+/// shape-bearing key is `type: "null"`. A `$ref` to a separately-
+/// defined `type: "null"` schema is not detected here — those are
+/// handled by the standalone `parse_typed_schema` "null" branch.
+fn is_null_branch(node: yay.Node) -> Bool {
+  // A `$ref` branch is never a null literal at this level.
+  case yay.extract_optional_string(node, "$ref") {
+    Ok(Some(_)) -> False
+    _ ->
+      case yay.select_sugar(from: node, selector: "type") {
+        Ok(yay.NodeStr("null")) -> True
+        _ -> False
+      }
+  }
+}
+
+/// Split oneOf/anyOf members into the non-null branches and a flag
+/// indicating whether any branch was a `type: "null"` literal. Used
+/// to translate OpenAPI 3.1 nullable-via-union into the existing
+/// `nullable: True` metadata flag, mirroring how the array form of
+/// `type` ([T, "null"]) is already handled in `parse_typed_schema`.
+fn partition_null_branches(items: List(yay.Node)) -> #(List(yay.Node), Bool) {
+  let #(non_null, has_null) =
+    list.fold(items, #([], False), fn(acc, item) {
+      let #(kept, seen) = acc
+      case is_null_branch(item) {
+        True -> #(kept, True)
+        False -> #([item, ..kept], seen)
+      }
+    })
+  #(list.reverse(non_null), has_null)
 }
 
 /// Detect unsupported JSON Schema 2020-12 keywords present in a schema node.
@@ -221,6 +275,14 @@ fn parse_typed_schema(
           }
         }
       }
+      Ok(yay.NodeStr("null")) ->
+        // OpenAPI 3.1 allows `type: "null"` to mean "the value is
+        // JSON null". Mirror the existing array-form fallback for
+        // `type: ["null"]` (no non-null types): treat as an
+        // unrestricted nullable schema by lifting the null marker
+        // to the metadata `nullable` flag and falling through to
+        // the regular "object" branch for any sibling keywords.
+        Ok(#("object", schema.SchemaMetadata(..metadata, nullable: True)))
       Ok(yay.NodeStr(type_name)) -> Ok(#(type_name, metadata))
       _ -> {
         // When type is absent, default to "object".

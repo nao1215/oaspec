@@ -3911,6 +3911,114 @@ security:
   string.contains(content, "config.bearer_auth") |> should.be_false()
 }
 
+// --- Issue #349: type: 'null' inside anyOf must parse, not error ---
+pub fn openapi_31_anyof_with_null_branch_parses_test() {
+  // The GitHub OpenAPI 3.1 spec uses `anyOf: [$ref, type: 'null']` to
+  // express nullability. Before #349, this surfaced as
+  // "Unrecognized schema type 'null'" because parse_typed_schema was
+  // reached with a literal "null" string. Now the null branch is
+  // stripped and lifted to the parent's `nullable` flag.
+  let yaml =
+    "
+openapi: 3.1.0
+info:
+  title: T
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Installation:
+      type: object
+      properties:
+        suspended_by:
+          anyOf:
+            - $ref: '#/components/schemas/User'
+            - type: 'null'
+    User:
+      type: object
+      properties:
+        login: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let assert Some(components) = spec.components
+  let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
+    dict.get(components.schemas, "Installation")
+  let assert Ok(schema.Inline(schema.AnyOfSchema(
+    metadata: meta,
+    schemas: branches,
+    ..,
+  ))) = dict.get(props, "suspended_by")
+  // The null branch must have been filtered out, leaving only the
+  // $ref to User.
+  list.length(branches) |> should.equal(1)
+  // And nullability must have been lifted onto the parent schema.
+  meta.nullable |> should.be_true()
+}
+
+pub fn openapi_31_oneof_with_null_branch_parses_test() {
+  let yaml =
+    "
+openapi: 3.1.0
+info:
+  title: T
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Maybe:
+      oneOf:
+        - type: string
+        - type: 'null'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let assert Some(components) = spec.components
+  let assert Ok(schema.Inline(schema.OneOfSchema(
+    metadata: meta,
+    schemas: branches,
+    ..,
+  ))) = dict.get(components.schemas, "Maybe")
+  list.length(branches) |> should.equal(1)
+  meta.nullable |> should.be_true()
+}
+
+pub fn openapi_31_standalone_null_type_parses_as_nullable_test() {
+  // `type: 'null'` as a standalone schema (outside oneOf/anyOf) must
+  // not error either. We treat it as an unrestricted nullable schema,
+  // mirroring the existing fallback for `type: ['null']`.
+  let yaml =
+    "
+openapi: 3.1.0
+info:
+  title: T
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    OnlyNull:
+      type: 'null'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let assert Some(components) = spec.components
+  let assert Ok(schema.Inline(schema.ObjectSchema(metadata: meta, ..))) =
+    dict.get(components.schemas, "OnlyNull")
+  meta.nullable |> should.be_true()
+}
+
 // --- Finding 2: OpenAPI 3.1 type: [string, 'null'] must parse as nullable string ---
 pub fn openapi_31_type_array_nullable_test() {
   let yaml =
