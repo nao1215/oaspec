@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-04-30
+
 ### Fixed
 
 - **`type: 'null'` inside `oneOf` / `anyOf`** is now accepted as the
