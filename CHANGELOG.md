@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`ARCHITECTURE.md`** documenting the boundary between the pure
+  Gleam analysis/codegen core and the BEAM-only shell (CLI, file IO,
+  YAML parsing, formatter subprocess, FFI). Classifies every module
+  in `src/` as pure, BEAM-coupled, or adapter, and identifies the
+  minimum pure surface that could in principle compile to other
+  Gleam targets. Adds a coding-standards rule to `CONTRIBUTING.md`
+  asking pull requests to preserve the boundary. (#344)
+
 ## [0.32.0] - 2026-04-30
 
 ### Changed
