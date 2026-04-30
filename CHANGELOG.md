@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-04-30
+
 ### Added
 
 - **`ARCHITECTURE.md`** documenting the boundary between the pure
