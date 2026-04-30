@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-05-01
+
 ### Added
 
 - **`examples/js_smoke` and a CI step that builds + runs it on
@@ -15,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   non-BEAM target: the example imports `oaspec/transport` and
   `oaspec/mock`, builds with Gleam's JS backend, and runs to
   completion on Node. Any future change that re-couples those
-  modules to BEAM-only code will fail the CI job. (#344)
+  modules to BEAM-only code will fail the CI job. Closes #344.
 
 ### Changed
 
@@ -26,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   but module-load on Node fails because `yay`'s JS FFI requires the
   `js-yaml` npm package. The doc now states that explicitly and
   identifies decoupling that transitive chain as the largest piece
-  of remaining cross-target work. (#344)
+  of remaining cross-target work.
 
 ## [0.37.0] - 2026-04-30
 
