@@ -3,6 +3,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/internal/codegen/context.{type Context}
+import oaspec/internal/codegen/decoders
 import oaspec/internal/openapi/schema.{
   type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema, BooleanSchema, Inline,
   IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema, Reference,
@@ -476,7 +477,7 @@ pub fn get_response_decode_expr(
   schema_ref: schema.SchemaRef,
   op_id: String,
   status_code: http.HttpStatusCode,
-  _ctx: Context,
+  ctx: Context,
 ) -> String {
   case schema_ref {
     Reference(name:, ..) -> {
@@ -485,7 +486,14 @@ pub fn get_response_decode_expr(
     Inline(schema.ArraySchema(items:, ..)) ->
       case items {
         Reference(name:, ..) -> {
-          "decode.decode_" <> naming.to_snake_case(name) <> "_list(text)"
+          // Issue #493: pick the disambiguated `_list_items` suffix
+          // when the spec also declares a `<Name>List` component
+          // schema, so we call the synthetic decoder rather than
+          // colliding with the user-named one.
+          "decode.decode_"
+          <> naming.to_snake_case(name)
+          <> decoders.synthetic_list_suffix_for(name, ctx)
+          <> "(text)"
         }
         Inline(inner) -> {
           let inner_decoder = inline_schema_to_decoder(inner)

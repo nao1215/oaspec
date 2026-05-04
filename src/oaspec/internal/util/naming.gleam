@@ -1,3 +1,4 @@
+import gleam/bool
 import gleam/dict
 import gleam/int
 import gleam/list
@@ -131,6 +132,28 @@ pub fn to_snake_case(input: String) -> String {
     |> string.join("_")
     |> ensure_letter_start
   escape_keyword(result)
+}
+
+/// Suffix for the synthetic list decoder/function emitted alongside
+/// every component schema (`decode_<schema>_list`, `<schema>_list`).
+/// Returns the bare `_list` suffix when no collision exists, or the
+/// disambiguated `_list_items` suffix when the spec also declares a
+/// `<Schema>List` component schema (whose own decoder would otherwise
+/// emit the same identifier and trip
+/// `Duplicate definition: decode_<schema>_list` at `gleam build`
+/// time). Issue #493 — the rename keeps the user-named `XxxList`
+/// schema's natural decoder name and shifts the synthetic one,
+/// since the user does not own upstream specs like Kubernetes /
+/// Stripe and cannot rename.
+pub fn synthetic_list_suffix(
+  base_name: String,
+  schema_names: List(String),
+) -> String {
+  use <- bool.guard(
+    list.contains(schema_names, base_name <> "List"),
+    "_list_items",
+  )
+  "_list"
 }
 
 /// Map a leading `+` to `plus_` and a leading `-` to `minus_` so

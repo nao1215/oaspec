@@ -783,9 +783,15 @@ fn generate_object_decoder(
     |> se.line("}")
     |> se.blank_line()
 
-  // List decoder for typed client array responses
-  let list_fn_name = fn_name <> "_list"
-  let list_decoder_fn_name = decoder_fn_name <> "_list"
+  // List decoder for typed client array responses. Issue #493: when
+  // the spec also declares `<Schema>List` as a component (Kubernetes
+  // / Stripe pattern), the synthetic name `decode_<schema>_list`
+  // would collide with the user-declared decoder. Suffix shifts to
+  // `_list_items` only in that case so users without the collision
+  // see the existing `_list` names unchanged.
+  let suffix = synthetic_list_suffix_for(name, ctx)
+  let list_fn_name = fn_name <> suffix
+  let list_decoder_fn_name = decoder_fn_name <> suffix
   sb
   |> se.line(
     "pub fn "
@@ -1389,6 +1395,20 @@ fn schema_ref_to_decoder(
     }
     _ -> schema_dispatch.decoder_expr(ref)
   }
+}
+
+/// Resolve the synthetic list-decoder suffix for `<base>` against the
+/// current context's component schemas (issue #493). Returns
+/// `_list_items` when `<base>List` is declared as a component schema,
+/// `_list` otherwise. Centralised so both the decoder emitter and the
+/// client response decoder share one source of truth for the chosen
+/// suffix.
+pub fn synthetic_list_suffix_for(base: String, ctx: Context) -> String {
+  let schema_names = case context.spec(ctx).components {
+    Some(components) -> components.schemas |> dict.keys
+    None -> []
+  }
+  naming.synthetic_list_suffix(base, schema_names)
 }
 
 /// Add a doc comment if description is present.
