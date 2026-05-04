@@ -4,6 +4,7 @@ pub fn codegen_core_regressions_test() {
   let _ = support.allof_with_primitive_sub_schema_case()
   let _ = support.allof_part_types_not_in_generated_types_case()
   let _ = support.allof_part_types_not_in_generated_decoders_case()
+  let _ = support.empty_object_decoder_omits_constructor_parens_case()
   let _ = support.allof_part_types_not_in_generated_encoders_case()
   let _ = support.generation_is_idempotent_case()
   let _ = support.generated_type_fields_are_alphabetically_ordered_case()

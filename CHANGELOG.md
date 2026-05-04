@@ -10,6 +10,22 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Fixed
+
+- **codegen(decoders)**: a schema declared as
+  `type: object, properties: {}, additionalProperties: false`
+  surfaces in `types.gleam` as a no-arg variant
+  (`pub type EmptyObject { EmptyObject }`), but the matching
+  decoder emitted `decode.success(types.EmptyObject())` —
+  invalid Gleam, since the constructor is a value not a
+  function. The compile failure surfaced on real-world specs
+  (notably the GitHub OpenAPI subset, where multiple endpoints
+  return Empty Object). The decoder generator now special-cases
+  the empty-`param_names` branch and emits the bare reference
+  `decode.success(types.EmptyObject)`. A regression test in
+  `oaspec_support.empty_object_decoder_omits_constructor_parens_case`
+  locks the behaviour in. Closes #474.
+
 ### Changed
 
 - **docs(readme)**: install snippet now adds `gleam_json` alongside

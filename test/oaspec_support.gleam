@@ -14545,3 +14545,53 @@ pub fn diagnostic_render_without_file_path_matches_to_string_case() {
     )
   diagnostic.render(d, None) |> should.equal(diagnostic.to_string(d))
 }
+
+/// Issue #474: a schema declared as `type: object, properties: {},
+/// additionalProperties: false` surfaces in `types.gleam` as a no-arg
+/// variant — `pub type EmptyObject { EmptyObject }`. The decoder
+/// emitted by `decoders.generate` must reference that constructor as
+/// the bare value `types.EmptyObject`, not as a function call
+/// `types.EmptyObject()` (which Gleam rejects with `This value is
+/// being called as a function but its type is: types.EmptyObject`).
+pub fn empty_object_decoder_omits_constructor_parens_case() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /thing:
+    get:
+      operationId: getThing
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyObject'
+components:
+  schemas:
+    EmptyObject:
+      type: object
+      properties: {}
+      additionalProperties: false
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = decoders.generate(ctx)
+
+  let assert Ok(decode_file) =
+    list.find(files, fn(f) { string.contains(f.path, "decode") })
+  let content = decode_file.content
+
+  // Bare-constructor reference is required.
+  string.contains(content, "decode.success(types.EmptyObject)")
+  |> should.be_true()
+
+  // Function-call form is the bug — it must not appear.
+  string.contains(content, "decode.success(types.EmptyObject())")
+  |> should.be_false()
+}
