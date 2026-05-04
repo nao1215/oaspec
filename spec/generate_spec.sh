@@ -1054,6 +1054,49 @@ EOF
     End
   End
 
+  setup_single_target_shared_output_config() {
+    rm -rf "$PROJECT_ROOT/test_single_shared_output"
+    # A single config with mode: both whose `output.server` and
+    # `output.client` resolve to the same directory is the legitimate
+    # case the golden/petstore.oaspec.yaml fixture has used since the
+    # repo started. The codegen writes shared files (types, decode,
+    # encode, guards, request_types, response_types) with identical
+    # content for both modes, plus server-only files (router,
+    # handlers, handlers_generated) and one client-only file
+    # (client.gleam) with unique names — so a shared output directory
+    # never clobbers anything. The CLI must accept this; the
+    # multi-target overlap check above only catches cross-config
+    # collisions.
+    cat > "$PROJECT_ROOT/test_single_shared_output.yaml" <<EOF
+input: test/fixtures/petstore.yaml
+mode: both
+package: api
+output:
+  server: ./test_single_shared_output/api
+  client: ./test_single_shared_output/api
+EOF
+  }
+
+  cleanup_single_target_shared_output_config() {
+    rm -rf "$PROJECT_ROOT/test_single_shared_output" \
+           "$PROJECT_ROOT/test_single_shared_output.yaml"
+  }
+
+  Describe 'single-target shared output'
+    Before 'setup_single_target_shared_output_config'
+    After 'cleanup_single_target_shared_output_config'
+
+    It 'accepts mode: both with output.server == output.client'
+      When run generate --config=./test_single_shared_output.yaml
+      The status should be success
+      The output should include 'Successfully generated'
+      The output should not include 'two targets resolve to the same output directory'
+      The path "$PROJECT_ROOT/test_single_shared_output/api/types.gleam" should be exist
+      The path "$PROJECT_ROOT/test_single_shared_output/api/router.gleam" should be exist
+      The path "$PROJECT_ROOT/test_single_shared_output/api/client.gleam" should be exist
+    End
+  End
+
   setup_multi_target_with_output_override_config() {
     rm -rf "$PROJECT_ROOT/test_multi_targets_override"
     cat > "$PROJECT_ROOT/test_multi_targets_override.yaml" <<EOF
