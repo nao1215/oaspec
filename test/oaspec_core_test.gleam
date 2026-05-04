@@ -117,3 +117,13 @@ pub fn location_index_source_loc_test() {
   let _ = support.location_index_root_path_has_source_loc_case()
   let _ = support.yaml_error_has_source_location_case()
 }
+
+pub fn capability_check_source_loc_test() {
+  let _ =
+    support.location_index_lookup_with_ancestor_falls_back_to_parent_case()
+  let _ =
+    support.location_index_lookup_with_ancestor_no_match_returns_no_source_loc_case()
+  let _ = support.capability_check_attaches_source_loc_to_keyword_error_case()
+  let _ = support.diagnostic_render_includes_file_path_and_loc_case()
+  let _ = support.diagnostic_render_without_file_path_matches_to_string_case()
+}

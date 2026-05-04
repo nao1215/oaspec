@@ -10,6 +10,33 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Added
+
+- **diagnostics**: capability-check errors now carry a YAML
+  `SourceLoc` and the CLI prefixes each rendered diagnostic with
+  `path:line:column:` so editors can jump straight to the offending
+  spec line. Public-API plumbing:
+  `parser.parse_file_with_progress_and_locations` returns the spec
+  *and* a `LocationIndex`, and `generate.generate_with_progress_and_locations`
+  / `validate_only_with_progress_and_locations` thread the index
+  through to capability checks. `diagnostic.capability` gains a
+  required `loc:` parameter (breaking; 0.x) and a new
+  `diagnostic.render(d, file_path)` helper produces the
+  editor-clickable prefix. `location_index.lookup_with_ancestor`
+  walks up dot-separated paths so capability paths that don't
+  exactly match the YAML index still surface the closest known
+  ancestor (e.g. the parent schema's line). Closes #411.
+
+### Changed
+
+- BREAKING: `parser.parse_file_with_progress`,
+  `generate.generate_with_progress`, and
+  `generate.validate_only_with_progress` are removed in favour of the
+  combined `*_with_progress_and_locations` variants. Library callers
+  that relied on the progress-only overloads should migrate to the
+  combined entry point and pass `location_index.empty()` if they
+  don't have a YAML location index. (#411)
+
 ## [0.47.0] - 2026-05-04
 
 ### Changed

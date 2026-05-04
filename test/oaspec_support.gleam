@@ -8077,7 +8077,7 @@ webhooks:
   let resolved = hoist.hoist(resolved)
   let resolved = dedup.dedup(resolved)
   let ctx = context.new(resolved, cfg)
-  let issues = capability_check.check_preserved(ctx)
+  let issues = capability_check.check_preserved(ctx, location_index.empty())
   let warnings = diagnostic.warnings_only(issues)
   { warnings != [] }
   |> should.be_true()
@@ -9217,7 +9217,7 @@ paths:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
-  let issues = capability_check.check_preserved(ctx)
+  let issues = capability_check.check_preserved(ctx, location_index.empty())
   let warnings =
     list.filter(issues, fn(issue) {
       issue.severity == diagnostic.SeverityWarning
@@ -11605,7 +11605,7 @@ components:
 pub fn capability_check_warns_on_callbacks_case() {
   let ctx = make_ctx("test/fixtures/oss_swagger_parser_java_callback_ref.yaml")
   let warnings =
-    capability_check.check_preserved(ctx)
+    capability_check.check_preserved(ctx, location_index.empty())
     |> diagnostic.warnings_only
   let messages = list.map(warnings, validate.error_to_string)
   list.any(messages, fn(s) {
@@ -14431,4 +14431,117 @@ components:
     True -> Nil
     False -> should.fail()
   }
+}
+
+// ============================================================================
+// Issue #411: capability-check diagnostics carry source line/column
+// ============================================================================
+
+/// `lookup_with_ancestor` returns the closest known ancestor when the
+/// exact path is absent, walking the dot-separated segments back one
+/// at a time.
+pub fn location_index_lookup_with_ancestor_falls_back_to_parent_case() {
+  let yaml =
+    "openapi: \"3.0.0\"
+info:
+  title: Test
+  version: \"1.0\"
+paths: {}
+"
+  let index = location_index.build(yaml)
+
+  // The exact path doesn't exist, but `info.title` does — so the
+  // ancestor walk should land there rather than at NoSourceLoc.
+  let loc =
+    location_index.lookup_with_ancestor(index, "info.title.unknown_leaf")
+  case loc {
+    SourceLoc(line: _, column: _) -> should.be_true(True)
+    NoSourceLoc -> should.fail()
+  }
+}
+
+/// When *no* ancestor of a path exists in the index, `lookup_with_ancestor`
+/// returns `NoSourceLoc`.
+pub fn location_index_lookup_with_ancestor_no_match_returns_no_source_loc_case() {
+  let yaml =
+    "openapi: \"3.0.0\"
+info:
+  title: Test
+  version: \"1.0\"
+paths: {}
+"
+  let index = location_index.build(yaml)
+  let loc =
+    location_index.lookup_with_ancestor(index, "totally_unrelated.deep.path")
+  loc |> should.equal(NoSourceLoc)
+}
+
+/// Issue #411: a capability-check error on an unsupported JSON Schema
+/// keyword (`$defs`) must carry a `SourceLoc` pointing into the YAML
+/// document, not `NoSourceLoc`.
+pub fn capability_check_attaches_source_loc_to_keyword_error_case() {
+  let yaml =
+    "openapi: \"3.0.0\"
+info:
+  title: Test
+  version: \"1.0\"
+paths: {}
+components:
+  schemas:
+    Foo:
+      type: object
+      properties:
+        bar:
+          $defs:
+            X:
+              type: string
+"
+  let assert Ok(parsed) = parser.parse_string_with_locations(yaml)
+  let #(spec, index) = parsed
+  let assert Ok(resolved) = resolve.resolve(spec)
+  let issues = capability_check.check(resolved, index)
+  // Must produce at least one capability error
+  let errors = diagnostic.errors_only(issues)
+  errors |> list.length |> should.not_equal(0)
+  // Every emitted capability error should carry a real SourceLoc
+  let loc_present =
+    list.all(errors, fn(d) {
+      case d.source_loc {
+        SourceLoc(..) -> True
+        NoSourceLoc -> False
+      }
+    })
+  loc_present |> should.be_true
+}
+
+/// Issue #411: `diagnostic.render` prepends `path:line:column:` when
+/// both file path and SourceLoc are present.
+pub fn diagnostic_render_includes_file_path_and_loc_case() {
+  let d =
+    diagnostic.capability(
+      severity: diagnostic.SeverityError,
+      target: diagnostic.TargetBoth,
+      path: "components.schemas.Foo",
+      detail: "boom",
+      hint: None,
+      loc: SourceLoc(line: 42, column: 7),
+    )
+  let rendered = diagnostic.render(d, Some("specs/api.yaml"))
+  string.starts_with(rendered, "specs/api.yaml:42:7: ")
+  |> should.be_true
+}
+
+/// Issue #411: `diagnostic.render` falls back to plain `to_string`
+/// when `file_path` is `None`.
+pub fn diagnostic_render_without_file_path_matches_to_string_case() {
+  let d =
+    diagnostic.capability(
+      severity: diagnostic.SeverityError,
+      target: diagnostic.TargetBoth,
+      path: "components.schemas.Foo",
+      detail: "boom",
+      hint: None,
+      loc: SourceLoc(line: 42, column: 7),
+    )
+  diagnostic.render(d, None) |> should.equal(diagnostic.to_string(d))
 }

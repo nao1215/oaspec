@@ -40,27 +40,38 @@ import yay
 /// fail fast with a dedicated diagnostic. HTTP/HTTPS URLs are not
 /// followed.
 pub fn parse_file(path: String) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
-  parse_file_with_progress(path, progress.noop())
+  parse_file_internal(path, [], progress.noop())
+  |> result.map(fn(pair) { pair.0 })
 }
 
-/// Same as `parse_file`, with a `Reporter` that receives a line per
-/// stage (read, parse, resolve external refs). Used by the CLI to
-/// give the user feedback on big specs (issue #352).
-pub fn parse_file_with_progress(
+/// Combined `parse_file` entry point that accepts a `Reporter` and
+/// also returns the top-level YAML `LocationIndex`. Issue #411 +
+/// #352. The CLI uses this so capability-check diagnostics surface
+/// `path:line:column:` and progress lines on big specs at the same
+/// time. Library callers that don't need progress should pass
+/// `progress.noop()`; callers that don't need locations can discard
+/// the second tuple element.
+pub fn parse_file_with_progress_and_locations(
   path: String,
   reporter: Reporter,
-) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
+) -> Result(#(OpenApiSpec(Unresolved), LocationIndex), Diagnostic) {
   parse_file_internal(path, [], reporter)
 }
 
 /// Internal parse entry that threads the `visited` stack through every
 /// external-ref recursion so `A.yaml -> B.yaml -> A.yaml` cycles fail
 /// fast with a dedicated diagnostic instead of spinning forever.
+///
+/// Returns both the parsed spec and the YAML `LocationIndex` built from
+/// the file's content. Recursive external-ref resolution discards
+/// nested files' indices — only the top-level file's index is surfaced
+/// (capability-check needs *one* canonical index, and external refs
+/// land back at their `$ref` site in the main file anyway).
 fn parse_file_internal(
   path: String,
   visited: List(String),
   reporter: Reporter,
-) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
+) -> Result(#(OpenApiSpec(Unresolved), LocationIndex), Diagnostic) {
   let canonical = canonicalize_ref_path(path)
   use <- bool.guard(
     list.contains(visited, canonical),
@@ -95,8 +106,8 @@ fn parse_file_internal(
   let #(elapsed, parsed) =
     progress.timed(fn() {
       case is_json {
-        True -> parse_json_string(content)
-        False -> parse_string(content)
+        True -> parse_json_string_with_locations(content)
+        False -> parse_string_with_locations(content)
       }
     })
   progress.report(reporter, case is_json {
@@ -109,14 +120,17 @@ fn parse_file_internal(
       <> progress.format_ms(elapsed)
       <> ")"
   })
-  use spec <- result.try(parsed)
+  use #(spec, index) <- result.try(parsed)
   let new_visited = [canonical, ..visited]
   let #(elapsed, resolved) =
     progress.timed(fn() {
       external_loader.resolve_external_component_refs(
         spec,
         external_loader_planner.base_dir_of(path),
-        fn(sub_path) { parse_file_internal(sub_path, new_visited, reporter) },
+        fn(sub_path) {
+          parse_file_internal(sub_path, new_visited, reporter)
+          |> result.map(fn(pair) { pair.0 })
+        },
       )
     })
   progress.report(
@@ -126,6 +140,7 @@ fn parse_file_internal(
       <> ")",
   )
   resolved
+  |> result.map(fn(s) { #(s, index) })
 }
 
 fn format_size(bytes: Int) -> String {
@@ -178,8 +193,19 @@ fn cyclic_external_ref_diagnostic(
 pub fn parse_string(
   content: String,
 ) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
+  parse_string_with_locations(content)
+  |> result.map(fn(pair) { pair.0 })
+}
+
+/// Same as `parse_string` but also returns the YAML `LocationIndex`
+/// built from the input. Caller-side companion to
+/// `parse_file_with_locations` (Issue #411).
+pub fn parse_string_with_locations(
+  content: String,
+) -> Result(#(OpenApiSpec(Unresolved), LocationIndex), Diagnostic) {
   use #(root, index) <- result.try(parse_to_node(content))
-  parse_root(root, index)
+  use spec <- result.map(parse_root(root, index))
+  #(spec, index)
 }
 
 /// Parse an OpenAPI spec from a JSON string using OTP's native JSON
@@ -194,8 +220,20 @@ pub fn parse_string(
 pub fn parse_json_string(
   content: String,
 ) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
+  parse_json_string_with_locations(content)
+  |> result.map(fn(pair) { pair.0 })
+}
+
+/// JSON variant of `parse_string_with_locations`. OTP's `json:decode/3`
+/// does not expose token positions so the returned `LocationIndex` is
+/// always empty; capability-check diagnostics from a JSON-only spec
+/// keep `NoSourceLoc`.
+fn parse_json_string_with_locations(
+  content: String,
+) -> Result(#(OpenApiSpec(Unresolved), LocationIndex), Diagnostic) {
   use root <- result.try(decode_json_to_node(content))
-  parse_root(root, location_index.empty())
+  use spec <- result.map(parse_root(root, location_index.empty()))
+  #(spec, location_index.empty())
 }
 
 /// Run yamerl on `content` and return the root node plus a

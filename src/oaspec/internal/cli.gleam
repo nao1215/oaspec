@@ -331,10 +331,11 @@ fn run_generate(
   let shared_input = config.input(first_cfg)
   io.println("Parsing OpenAPI spec: " <> shared_input)
   let reporter = progress.stdout_with_elapsed()
-  use spec <- require(
-    parser.parse_file_with_progress(shared_input, reporter),
+  use parsed <- require(
+    parser.parse_file_with_progress_and_locations(shared_input, reporter),
     fn(e) { "Error: " <> parser.parse_error_to_string(e) },
   )
+  let #(spec, locations) = parsed
 
   // Run codegen once per target. `generate_with_progress` re-runs
   // every per-target stage (filter / hoist / dedup / validate /
@@ -355,11 +356,16 @@ fn run_generate(
       False -> Nil
     }
     use summary <- require(
-      generate.generate_with_progress(spec, cfg, reporter),
-      format_generate_error,
+      generate.generate_with_progress_and_locations(
+        spec,
+        locations,
+        cfg,
+        reporter,
+      ),
+      format_generate_error_for(shared_input),
     )
     io.println("Spec loaded: " <> summary.spec_title)
-    print_warnings(summary.warnings)
+    print_warnings_for(shared_input, summary.warnings)
     case fail_on_warnings && summary.warnings != [] {
       True -> {
         io.println_error("")
@@ -785,10 +791,11 @@ fn run_validate(config_path: String, mode_opt: Option(String)) -> Nil {
   let shared_input = config.input(first_cfg)
   io.println("Parsing OpenAPI spec: " <> shared_input)
   let reporter = progress.stdout_with_elapsed()
-  use spec <- require(
-    parser.parse_file_with_progress(shared_input, reporter),
+  use parsed <- require(
+    parser.parse_file_with_progress_and_locations(shared_input, reporter),
     fn(e) { "Error: " <> parser.parse_error_to_string(e) },
   )
+  let #(spec, locations) = parsed
 
   let multi_target = case cfgs {
     [_, _, ..] -> True
@@ -803,11 +810,16 @@ fn run_validate(config_path: String, mode_opt: Option(String)) -> Nil {
       False -> Nil
     }
     use summary <- require(
-      generate.validate_only_with_progress(spec, cfg, reporter),
-      format_generate_error,
+      generate.validate_only_with_progress_and_locations(
+        spec,
+        locations,
+        cfg,
+        reporter,
+      ),
+      format_generate_error_for(shared_input),
     )
     io.println("Spec loaded: " <> summary.spec_title)
-    print_warnings(summary.warnings)
+    print_warnings_for(shared_input, summary.warnings)
   })
   io.println("")
   io.println("Validation passed.")
@@ -911,26 +923,56 @@ fn require(
 }
 
 /// Format a GenerateError into a printable error message.
-fn format_generate_error(err: generate.GenerateError) -> String {
-  let generate.ValidationErrors(errors:) = err
-  "Error: OpenAPI spec contains unsupported features:\n"
-  <> string.join(
-    list.map(errors, fn(validation_error) {
-      "  - " <> diagnostic.to_short_string(validation_error)
-    }),
-    "\n",
-  )
+///
+/// Issue #411: each diagnostic is rendered with an editor-clickable
+/// `path:line:column:` prefix when the spec file path and a `SourceLoc`
+/// are both known. Diagnostics without a `SourceLoc` keep the legacy
+/// short-string format so existing CLI output stays familiar.
+fn format_generate_error_for(
+  file_path: String,
+) -> fn(generate.GenerateError) -> String {
+  fn(err: generate.GenerateError) -> String {
+    let generate.ValidationErrors(errors:) = err
+    let file_opt = case file_path {
+      "" -> None
+      _ -> Some(file_path)
+    }
+    "Error: OpenAPI spec contains unsupported features:\n"
+    <> string.join(
+      list.map(errors, fn(validation_error) {
+        "  - "
+        <> case validation_error.source_loc {
+          diagnostic.SourceLoc(..) ->
+            diagnostic.render(validation_error, file_opt)
+          diagnostic.NoSourceLoc -> diagnostic.to_short_string(validation_error)
+        }
+      }),
+      "\n",
+    )
+  }
 }
 
 /// Print warnings if any exist. Warnings are diagnostics, so they go to stderr
-/// to keep stdout reserved for requested output.
-fn print_warnings(warnings: List(diagnostic.Diagnostic)) -> Nil {
+/// to keep stdout reserved for requested output. Issue #411: see
+/// `format_generate_error_for` for the rendering contract.
+fn print_warnings_for(
+  file_path: String,
+  warnings: List(diagnostic.Diagnostic),
+) -> Nil {
+  let file_opt = case file_path {
+    "" -> None
+    _ -> Some(file_path)
+  }
   case warnings {
     [] -> Nil
     _ -> {
       io.println_error("Warnings:")
       list.each(warnings, fn(w) {
-        io.println_error("  - " <> diagnostic.to_short_string(w))
+        let rendered = case w.source_loc {
+          diagnostic.SourceLoc(..) -> diagnostic.render(w, file_opt)
+          diagnostic.NoSourceLoc -> diagnostic.to_short_string(w)
+        }
+        io.println_error("  - " <> rendered)
       })
     }
   }
