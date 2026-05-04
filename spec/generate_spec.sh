@@ -651,26 +651,40 @@ Describe 'oaspec init round-trip'
     rm -rf "$PROJECT_ROOT/test_init_round_trip"
   }
 
+  # Shellspec evaluates the It body in the host shell, so any
+  # `cd` inside it leaks across cases and outlives `After`.
+  # Wrap the steps in subshell helpers (`( cd ...; ... )`) so the
+  # working directory only changes inside `When run`'s subprocess
+  # — cleanup can then `rm -rf` the test dir without yanking the
+  # parent shell's cwd.
+  init_in_test_dir() {
+    ( cd "$PROJECT_ROOT/test_init_round_trip" \
+      && gleam run --no-print-progress -- init --output=./oaspec.yaml )
+  }
+
+  init_then_validate_in_test_dir() {
+    ( cd "$PROJECT_ROOT/test_init_round_trip" \
+      && gleam run --no-print-progress -- init --output=./oaspec.yaml \
+           > /dev/null \
+      && gleam run --no-print-progress -- validate --config=./oaspec.yaml )
+  }
+
   Before 'setup_init_round_trip'
   After 'cleanup_init_round_trip'
 
   It 'creates an oaspec.yaml that the validator can load and parse'
-    cd "$PROJECT_ROOT/test_init_round_trip" || exit 1
-    # `oaspec init` writes ./oaspec.yaml in the current directory.
-    When run gleam run --no-print-progress -- init --output=./oaspec.yaml
+    When run init_in_test_dir
     The status should be success
     The output should include 'Created'
     The path "$PROJECT_ROOT/test_init_round_trip/oaspec.yaml" should be file
   End
 
   It 'validates against a real spec without parse errors'
-    cd "$PROJECT_ROOT/test_init_round_trip" || exit 1
-    # Generate the template via init, then run validate against
+    # Generates the template via init, then runs validate against
     # the petstore stub copied as openapi.yaml above. If the
     # template's commented include / targets blocks broke the
     # YAML parser, this would fail before any validation logic ran.
-    gleam run --no-print-progress -- init --output=./oaspec.yaml > /dev/null 2>&1
-    When run gleam run --no-print-progress -- validate --config=./oaspec.yaml
+    When run init_then_validate_in_test_dir
     The status should be success
     The output should include 'Validation passed'
   End
