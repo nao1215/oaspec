@@ -193,24 +193,6 @@ fn duplicate_function_name_diagnostic(
   )
 }
 
-/// Filter to only errors (not warnings).
-pub fn errors_only(issues: List(Diagnostic)) -> List(Diagnostic) {
-  diagnostic.errors_only(issues)
-}
-
-/// Filter to only warnings (not errors).
-pub fn warnings_only(issues: List(Diagnostic)) -> List(Diagnostic) {
-  diagnostic.warnings_only(issues)
-}
-
-/// Filter validation issues to those relevant for the selected generation mode.
-pub fn filter_by_mode(
-  issues: List(Diagnostic),
-  mode: config.GenerateMode,
-) -> List(Diagnostic) {
-  diagnostic.filter_by_mode(issues, mode)
-}
-
 /// Convert a validation error to a human-readable string.
 pub fn error_to_string(error: Diagnostic) -> String {
   diagnostic.to_string(error)

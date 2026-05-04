@@ -95,36 +95,6 @@ pub fn operations_petstore_snapshot_test() {
   ])
 }
 
-pub fn analyzed_schemas_snapshot_test() {
-  let ctx = test_helpers.make_ctx(readonly_writeonly)
-  let snapshot =
-    context.analyzed_schemas(ctx)
-    |> list.map(fn(entry) {
-      #(entry.name, entry.ref, case entry.resolved {
-        Ok(schema.ObjectSchema(..)) -> "object"
-        Ok(schema.AllOfSchema(..)) -> "allOf"
-        Ok(schema.OneOfSchema(..)) -> "oneOf"
-        Ok(schema.AnyOfSchema(..)) -> "anyOf"
-        Ok(schema.ArraySchema(..)) -> "array"
-        Ok(schema.StringSchema(..)) -> "string"
-        Ok(schema.IntegerSchema(..)) -> "integer"
-        Ok(schema.NumberSchema(..)) -> "number"
-        Ok(schema.BooleanSchema(..)) -> "boolean"
-        Error(resolver.UnresolvedRef(..)) -> "unresolved"
-        Error(resolver.CircularRef(..)) -> "circular"
-      })
-    })
-
-  snapshot
-  |> should.equal([
-    #("AccountBase", "#/components/schemas/AccountBase", "object"),
-    #("AccountRead", "#/components/schemas/AccountRead", "allOf"),
-    #("AccountReadPart1", "#/components/schemas/AccountReadPart1", "object"),
-    #("AccountWrite", "#/components/schemas/AccountWrite", "allOf"),
-    #("AccountWritePart1", "#/components/schemas/AccountWritePart1", "object"),
-  ])
-}
-
 pub fn schema_cache_matches_direct_resolver_test() {
   let ctx = test_helpers.make_ctx(readonly_writeonly)
   let account_read_ref =

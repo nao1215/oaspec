@@ -1,7 +1,6 @@
 import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/string
 import oaspec/config.{type Config}
 import oaspec/internal/openapi/operations
 import oaspec/internal/openapi/resolver
@@ -21,16 +20,6 @@ pub const version = "0.41.0"
 pub type AnalyzedOperation =
   #(String, Operation(Resolved), String, HttpMethod)
 
-/// One analyzed component schema: the component name, its canonical local
-/// `$ref`, and the pre-resolved schema object (or the resolution error).
-pub type AnalyzedSchema {
-  AnalyzedSchema(
-    name: String,
-    ref: String,
-    resolved: Result(SchemaObject, resolver.ResolveError),
-  )
-}
-
 /// Context for code generation, carrying all needed state.
 /// Only accepts a resolved spec — codegen must not operate on unresolved ASTs.
 ///
@@ -44,7 +33,6 @@ pub opaque type Context {
     config: Config,
     operations: List(AnalyzedOperation),
     schema_cache: dict.Dict(String, Result(SchemaObject, resolver.ResolveError)),
-    analyzed_schemas: List(AnalyzedSchema),
   )
 }
 
@@ -55,14 +43,11 @@ pub opaque type Context {
 /// read them via `operations/1` / `resolve_schema_ref/2` instead of
 /// rebuilding the same analysis at unrelated call sites (issue #371).
 pub fn new(spec: OpenApiSpec(Resolved), config: Config) -> Context {
-  let analyzed_schemas = collect_analyzed_schemas(spec)
-  let schema_cache = build_schema_cache(analyzed_schemas)
   Context(
     spec:,
     config:,
     operations: operations.collect_operations(spec),
-    schema_cache:,
-    analyzed_schemas:,
+    schema_cache: build_schema_cache(spec),
   )
 }
 
@@ -81,12 +66,6 @@ pub fn config(ctx: Context) -> Config {
 /// `operations.collect_operations` directly.
 pub fn operations(ctx: Context) -> List(AnalyzedOperation) {
   ctx.operations
-}
-
-/// The analyzed component schemas, sorted by schema name. This is a
-/// debug-friendly inspectable view over the schema-resolution cache.
-pub fn analyzed_schemas(ctx: Context) -> List(AnalyzedSchema) {
-  ctx.analyzed_schemas
 }
 
 /// Resolve a schema ref through the shared analyzed cache.
@@ -121,30 +100,22 @@ pub fn schema_metadata(
   }
 }
 
-fn collect_analyzed_schemas(spec: OpenApiSpec(Resolved)) -> List(AnalyzedSchema) {
+fn build_schema_cache(
+  spec: OpenApiSpec(Resolved),
+) -> dict.Dict(String, Result(SchemaObject, resolver.ResolveError)) {
   case spec.components {
     Some(components) ->
-      dict.to_list(components.schemas)
-      |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
-      |> list.map(fn(entry) {
+      list.fold(dict.to_list(components.schemas), dict.new(), fn(acc, entry) {
         let #(name, _schema_ref) = entry
         let ref = component_schema_ref(name)
-        AnalyzedSchema(
-          name: name,
-          ref: ref,
-          resolved: resolver.resolve_schema_ref(Reference(ref:, name:), spec),
+        dict.insert(
+          acc,
+          ref,
+          resolver.resolve_schema_ref(Reference(ref:, name:), spec),
         )
       })
-    None -> []
+    None -> dict.new()
   }
-}
-
-fn build_schema_cache(
-  analyzed_schemas: List(AnalyzedSchema),
-) -> dict.Dict(String, Result(SchemaObject, resolver.ResolveError)) {
-  list.fold(analyzed_schemas, dict.new(), fn(acc, entry) {
-    dict.insert(acc, entry.ref, entry.resolved)
-  })
 }
 
 fn component_schema_ref(name: String) -> String {

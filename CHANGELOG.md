@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Removed
+
+- **codegen**: dropped the unused `context.analyzed_schemas/1` accessor
+  and its backing `AnalyzedSchema` type. Production codegen consumes
+  the schema cache through `resolve_schema_ref/2`, and the snapshot
+  test that backed `analyzed_schemas/1` was the only reader. The
+  internal `build_schema_cache` is now a one-shot fold over the spec's
+  components dict instead of going through an intermediary list. (#429)
+- **codegen**: dropped the `validate.errors_only` /
+  `validate.warnings_only` / `validate.filter_by_mode` pass-through
+  wrappers. Callers (`generate.gleam` and the test suite) now import
+  `oaspec/openapi/diagnostic` and call those functions directly, which
+  removes the prior two-name confusion (`generate.gleam` had been
+  mixing both forms). (#430)
+
 ### Changed
 
 - **codegen**: extracted shared codec helpers
