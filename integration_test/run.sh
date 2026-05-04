@@ -523,6 +523,79 @@ rm -rf "$MULTI_DIR"
 info "Multipart server integration tests passed."
 
 # -------------------------------------------------------
+# Step 10b: Issue #482 — multipart/form-data with `$ref`-typed
+# string-enum field must compile end-to-end. Before the fix the
+# router copied the raw String into the sum-typed slot, breaking
+# `gleam check`.
+# -------------------------------------------------------
+info "Testing Issue #482 multipart enum-field server code generation..."
+
+ENUM_MULTI_DIR="$SCRIPT_DIR/multipart_enum_test"
+rm -rf "$ENUM_MULTI_DIR"
+mkdir -p "$ENUM_MULTI_DIR/src"
+
+cat > "$ENUM_MULTI_DIR/oaspec-multi-enum.yaml" << 'YAML_EOF'
+input: test/fixtures/server_multipart_enum_field.yaml
+output:
+  server: ./integration_test/multipart_enum_test/src/api
+package: api
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$ENUM_MULTI_DIR/oaspec-multi-enum.yaml" \
+  --mode=server
+
+cat > "$ENUM_MULTI_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
+import api/request_types
+import api/response_types
+
+pub type State {
+  State
+}
+
+pub fn upload_thing(state: State, req: request_types.UploadThingRequest) -> response_types.UploadThingResponse {
+  let _ = state
+  let _ = req
+  response_types.UploadThingResponseNoContent
+}
+GLEAM_EOF
+
+cat > "$ENUM_MULTI_DIR/gleam.toml" << 'TOML_EOF'
+name = "multipart_enum_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$ENUM_MULTI_DIR/src/multipart_enum_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$ENUM_MULTI_DIR"
+gleam deps download
+
+if gleam build --warnings-as-errors; then
+  info "PASS: Generated multipart enum-field server code compiles (#482)."
+else
+  fail "Generated multipart enum-field server code failed to compile (#482 regression)."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$ENUM_MULTI_DIR"
+
+info "Issue #482 multipart enum-field integration test passed."
+
+# -------------------------------------------------------
 # Step 11: Generate callback spec and verify it compiles
 # -------------------------------------------------------
 info "Testing callback handler code generation..."

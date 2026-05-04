@@ -1,0 +1,32 @@
+openapi: 3.0.3
+info:
+  title: Server Multipart Enum Field Test API
+  version: 1.0.0
+paths:
+  /things:
+    post:
+      operationId: uploadThing
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - category
+              properties:
+                category:
+                  $ref: "#/components/schemas/Category"
+                tag:
+                  $ref: "#/components/schemas/Category"
+      responses:
+        "204":
+          description: ok
+components:
+  schemas:
+    Category:
+      type: string
+      enum:
+        - logs
+        - screenshots
+        - configs

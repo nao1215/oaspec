@@ -1271,6 +1271,57 @@ fn multipart_body_optional_expr_with_schema(
   body_optional_expr(key, "multipart_body", False, "_", schema_ref, ctx)
 }
 
+/// Inline string-enum dispatch for a required form/multipart body
+/// field (issue #482). When the dict is missing the key, or the value
+/// is outside the spec's enum set, falls back to the first variant —
+/// mirroring the type-zero fallback used for primitive required body
+/// fields (#327). The handler is responsible for any stricter
+/// validation.
+fn body_required_enum_expr(
+  lookup: String,
+  type_name: String,
+  values: List(String),
+) -> String {
+  let default = case values {
+    [first, ..] -> "types." <> type_name <> naming.to_pascal_case(first)
+    [] -> ""
+  }
+  let arms =
+    values
+    |> list.map(fn(v) {
+      "\"" <> v <> "\" -> types." <> type_name <> naming.to_pascal_case(v)
+    })
+    |> string.join(" ")
+  "case "
+  <> lookup
+  <> " { Ok([v, ..]) -> case v { "
+  <> arms
+  <> " _ -> "
+  <> default
+  <> " } _ -> "
+  <> default
+  <> " }"
+}
+
+/// Inline string-enum dispatch for an optional form/multipart body
+/// field (issue #482). Unknown values map to `None`, matching the
+/// permissive behaviour already used for `$ref`-typed enum query
+/// parameters (#305).
+fn body_optional_enum_expr(
+  lookup: String,
+  miss: String,
+  type_name: String,
+  values: List(String),
+) -> String {
+  "case "
+  <> lookup
+  <> " { Ok([v, ..]) -> "
+  <> enum_match_option_expr("v", type_name, values)
+  <> " "
+  <> miss
+  <> " -> None }"
+}
+
 /// Generate a required body field expression.
 /// `source` is the dict name (e.g., "form_body", "multipart_body").
 /// `trim_items` controls whether array items are trimmed (form_body) or
@@ -1292,6 +1343,29 @@ fn body_required_expr(
 ) -> String {
   let lookup = "dict.get(" <> source <> ", \"" <> key <> "\")"
   let base = "case " <> lookup <> " { Ok([v, ..]) -> v _ -> \"\" }"
+  // Issue #482: a `$ref`-typed string-enum field must dispatch to the
+  // generated sum-type variant. Without this branch the codegen falls
+  // through to `base` (raw String), which fails `gleam check` because
+  // the field's compile-time type is `types.<EnumName>`.
+  case
+    schema_ref
+    |> option.then(fn(ref) { schema_ref_string_enum(ref, ctx) })
+  {
+    Some(#(type_name, values)) ->
+      body_required_enum_expr(lookup, type_name, values)
+    None -> body_required_expr_kind(lookup, base, schema_ref, trim_items, ctx)
+  }
+}
+
+/// Existing per-`BodyFieldKind` dispatch for `body_required_expr`,
+/// extracted so the enum check above can short-circuit cleanly.
+fn body_required_expr_kind(
+  lookup: String,
+  base: String,
+  schema_ref: Option(SchemaRef),
+  trim_items: Bool,
+  ctx: Context,
+) -> String {
   case schema_ref_body_field_kind(schema_ref, ctx) {
     BodyFieldStringArray ->
       case trim_items {
@@ -1348,6 +1422,29 @@ fn body_optional_expr(
   ctx: Context,
 ) -> String {
   let lookup = "dict.get(" <> source <> ", \"" <> key <> "\")"
+  // Issue #482: as in `body_required_expr`, a `$ref`-typed string-enum
+  // field needs string→variant dispatch. Without this branch the field
+  // ends up as `Some(v)` where `v: String` clashes with the
+  // `Option(types.<EnumName>)` slot.
+  case
+    schema_ref
+    |> option.then(fn(ref) { schema_ref_string_enum(ref, ctx) })
+  {
+    Some(#(type_name, values)) ->
+      body_optional_enum_expr(lookup, miss, type_name, values)
+    None -> body_optional_expr_kind(lookup, miss, schema_ref, trim_items, ctx)
+  }
+}
+
+/// Existing per-`BodyFieldKind` dispatch for `body_optional_expr`,
+/// extracted so the enum check above can short-circuit cleanly.
+fn body_optional_expr_kind(
+  lookup: String,
+  miss: String,
+  schema_ref: Option(SchemaRef),
+  trim_items: Bool,
+  ctx: Context,
+) -> String {
   case schema_ref_body_field_kind(schema_ref, ctx) {
     BodyFieldStringArray ->
       case trim_items {
