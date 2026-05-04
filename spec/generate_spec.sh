@@ -568,6 +568,66 @@ EOF
 End
 
 # ===================================================================
+# Nested package paths (Issue #387)
+# ===================================================================
+
+Describe 'oaspec nested package'
+  Include "$SHELLSPEC_SPECDIR/spec_helper.sh"
+
+  setup_nested_pkg() {
+    rm -rf "$PROJECT_ROOT/test_nested_pkg"
+    cat > "$PROJECT_ROOT/test_nested_pkg.yaml" <<EOF
+input: test/fixtures/petstore.yaml
+package: dco_check/github
+output:
+  dir: ./test_nested_pkg
+EOF
+    # Match `generate_petstore_once` in spec_helper.sh: silence both
+    # streams so the BeforeAll hook produces no output (shellspec
+    # treats stdout from BeforeAll as a hook error).
+    cd "$PROJECT_ROOT" && gleam run -- generate --config=./test_nested_pkg.yaml >/dev/null 2>&1
+  }
+
+  cleanup_nested_pkg() {
+    rm -rf "$PROJECT_ROOT/test_nested_pkg" "$PROJECT_ROOT/test_nested_pkg.yaml"
+  }
+
+  BeforeAll 'setup_nested_pkg'
+  AfterAll 'cleanup_nested_pkg'
+
+  # Server tree: <dir>/dco_check/github/...
+  It 'writes server files under <dir>/<a>/<b>'
+    The path "$PROJECT_ROOT/test_nested_pkg/dco_check/github/types.gleam" should be file
+    The path "$PROJECT_ROOT/test_nested_pkg/dco_check/github/router.gleam" should be file
+  End
+
+  # Client tree: <dir>/dco_check/github_client/... — `_client` suffix
+  # attaches to the LAST package segment only.
+  It 'writes client files under <dir>/<a>/<b>_client'
+    The path "$PROJECT_ROOT/test_nested_pkg/dco_check/github_client/types.gleam" should be file
+    The path "$PROJECT_ROOT/test_nested_pkg/dco_check/github_client/client.gleam" should be file
+  End
+
+  # Regression guard: the pre-#387 single-segment fallback
+  # `<dir>/dco_check_github` (slashes stripped) must NOT be written.
+  It 'does not write the slashes-stripped fallback path'
+    The path "$PROJECT_ROOT/test_nested_pkg/dco_check_github" should not be exist
+  End
+
+  # Generated code must import the full `<a>/<b>` module path so the
+  # Gleam compiler resolves it against `<dir>/<a>/<b>/...`. #387 was
+  # reported precisely because the validator rejected the layout that
+  # makes these imports compilable.
+  It 'client imports reference the nested package'
+    The contents of file "$PROJECT_ROOT/test_nested_pkg/dco_check/github_client/client.gleam" should include 'import dco_check/github/types'
+  End
+
+  It 'router imports reference the nested package'
+    The contents of file "$PROJECT_ROOT/test_nested_pkg/dco_check/github/router.gleam" should include 'import dco_check/github/handlers_generated'
+  End
+End
+
+# ===================================================================
 # generate --check tests
 # ===================================================================
 

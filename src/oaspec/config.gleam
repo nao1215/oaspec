@@ -254,56 +254,119 @@ pub fn with_output(config: Config, output: Option(String)) -> Config {
 /// (the new default since Issue #248 — both server and client share the same
 /// `<dir>` and need distinct basenames). Anything else is a misconfigured
 /// package/output mismatch the user should be told about.
+///
+/// Nested packages (Issue #387): a `package` containing `/` such as
+/// `dco_check/github` declares an N-segment Gleam module path. The path
+/// tail compared against the package is N segments deep — the LAST N
+/// segments of the output path must equal the package's segments. The
+/// `_client` suffix attaches to the LAST package segment only, matching
+/// the single-segment behaviour (`dco_check/github` →
+/// `dco_check/github_client`, never `dco_check_client/github`).
 pub fn validate_output_package_match(config: Config) -> Result(Nil, ConfigError) {
-  case config.mode {
-    Server | Both ->
-      case basename(config.output_server) == config.package {
-        True -> Ok(Nil)
-        False ->
-          Error(InvalidValue(
-            field: "output.server",
-            detail: "Directory basename '"
-              <> basename(config.output_server)
-              <> "' must match package '"
-              <> config.package
-              <> "'",
-          ))
+  let pkg = package_segments(config.package)
+  case pkg {
+    // Empty package would make the rule vacuously true; bail out
+    // explicitly so a stray `package: ""` does not silently disable
+    // the validation.
+    [] -> Ok(Nil)
+    _ ->
+      case config.mode {
+        Server | Both ->
+          validate_path_tail_matches_package(
+            "output.server",
+            config.output_server,
+            pkg,
+            False,
+          )
+        Client -> Ok(Nil)
       }
-    Client -> Ok(Nil)
-  }
-  |> result.try(fn(_) {
-    case config.mode {
-      Client | Both -> {
-        let client_basename = basename(config.output_client)
-        let client_suffix = config.package <> "_client"
-        case
-          client_basename == config.package || client_basename == client_suffix
-        {
-          True -> Ok(Nil)
-          False ->
-            Error(InvalidValue(
-              field: "output.client",
-              detail: "Directory basename '"
-                <> client_basename
-                <> "' must match package '"
-                <> config.package
-                <> "' or '"
-                <> client_suffix
-                <> "'",
-            ))
+      |> result.try(fn(_) {
+        case config.mode {
+          Client | Both ->
+            validate_path_tail_matches_package(
+              "output.client",
+              config.output_client,
+              pkg,
+              True,
+            )
+          Server -> Ok(Nil)
         }
-      }
-      Server -> Ok(Nil)
-    }
-  })
+      })
+  }
 }
 
-/// Get the basename of a path (last segment after /).
-fn basename(path: String) -> String {
+fn validate_path_tail_matches_package(
+  field: String,
+  path: String,
+  pkg: List(String),
+  allow_client_suffix: Bool,
+) -> Result(Nil, ConfigError) {
+  let tail = last_n(path_segments(path), list.length(pkg))
+  let pkg_with_suffix = suffix_last_segment(pkg, "_client")
+  case tail == pkg, allow_client_suffix && tail == pkg_with_suffix {
+    True, _ | _, True -> Ok(Nil)
+    False, False ->
+      Error(
+        InvalidValue(field: field, detail: case allow_client_suffix {
+          True ->
+            "Output path tail '"
+            <> string.join(tail, "/")
+            <> "' must match package '"
+            <> string.join(pkg, "/")
+            <> "' or '"
+            <> string.join(pkg_with_suffix, "/")
+            <> "'"
+          False ->
+            "Output path tail '"
+            <> string.join(tail, "/")
+            <> "' must match package '"
+            <> string.join(pkg, "/")
+            <> "'"
+        }),
+      )
+  }
+}
+
+/// Split a package name into its slash-separated segments. Empty
+/// entries are dropped so trailing slashes and accidental double
+/// slashes are tolerated. `"api"` → `["api"]`,
+/// `"dco_check/github"` → `["dco_check", "github"]`.
+fn package_segments(package: String) -> List(String) {
+  package
+  |> string.split("/")
+  |> list.filter(fn(s) { s != "" })
+}
+
+/// Split a filesystem path into its segments, dropping `.` and empty
+/// entries so `./src/foo/`, `src/foo`, and `./src//foo` all yield
+/// `["src", "foo"]`.
+fn path_segments(path: String) -> List(String) {
   path
   |> string.split("/")
-  |> list.last
-  |> result.unwrap("")
+  |> list.filter(fn(s) { s != "" && s != "." })
+}
+
+/// Return the last `n` entries of `items`, preserving order. If
+/// `items` has fewer than `n` entries, returns `items` unchanged.
+fn last_n(items: List(a), n: Int) -> List(a) {
+  items |> list.reverse |> list.take(n) |> list.reverse
+}
+
+/// Drop the last `n` entries of `items`, preserving order. If
+/// `items` has fewer than `n` entries, returns `[]`.
+fn drop_last_n(items: List(a), n: Int) -> List(a) {
+  items |> list.reverse |> list.drop(n) |> list.reverse
+}
+
+/// Append `suffix` to the LAST segment of `segments`. Empty input
+/// stays empty. `["a","b"]` + `"_client"` → `["a","b_client"]`. Used
+/// to derive the client-output spelling for nested packages while
+/// keeping all but the leaf intact.
+fn suffix_last_segment(segments: List(String), suffix: String) -> List(String) {
+  case list.reverse(segments) {
+    [] -> []
+    [last, ..rest] -> list.reverse([last <> suffix, ..rest])
+  }
 }
 
 /// Validate the on-disk layout implied by `output.dir`.
@@ -315,31 +378,45 @@ fn basename(path: String) -> String {
 /// clear error instead of a wall of `Unknown module ...` from
 /// `gleam build`.
 ///
-/// Heuristic: in the path leading up to the package directory, `src`
-/// must either be the immediate parent of the package (the "<dir> is
-/// the project's src/" pattern) or be absent (the standalone-Gleam-
-/// project pattern). `src` in any other position is the foot-gun.
+/// Heuristic: in the path leading up to the package's top-level
+/// directory, `src` must either be the immediate parent (the "<dir>
+/// is the project's src/" pattern) or be absent (the standalone-
+/// Gleam-project pattern). `src` in any other position is the
+/// foot-gun.
+///
+/// Nested packages (Issue #387): for a package like `dco_check/github`
+/// the "package directory" is the last 2 path segments, and the rule
+/// applies to whatever sits BEFORE that pair. So `./src/dco_check/github`
+/// has parent chain `[src]` (immediate parent `src` → ok), and
+/// `./pkg/src/foo/dco_check/github` has parent chain
+/// `[pkg, src, foo]` (last is `foo` and `src` appears earlier → bad).
 pub fn validate_output_dir_layout(config: Config) -> Result(Nil, ConfigError) {
-  case config.mode {
-    Server | Both ->
-      case path_has_misplaced_src(config.output_server) {
-        False -> Ok(Nil)
-        True ->
-          Error(misplaced_src_error("output.server", config.output_server))
+  let segment_count = list.length(package_segments(config.package))
+  case segment_count {
+    // Empty package: nothing to peel; skip the layout rule entirely.
+    0 -> Ok(Nil)
+    _ ->
+      case config.mode {
+        Server | Both ->
+          case path_has_misplaced_src(config.output_server, segment_count) {
+            False -> Ok(Nil)
+            True ->
+              Error(misplaced_src_error("output.server", config.output_server))
+          }
+        Client -> Ok(Nil)
       }
-    Client -> Ok(Nil)
-  }
-  |> result.try(fn(_) {
-    case config.mode {
-      Client | Both ->
-        case path_has_misplaced_src(config.output_client) {
-          False -> Ok(Nil)
-          True ->
-            Error(misplaced_src_error("output.client", config.output_client))
+      |> result.try(fn(_) {
+        case config.mode {
+          Client | Both ->
+            case path_has_misplaced_src(config.output_client, segment_count) {
+              False -> Ok(Nil)
+              True ->
+                Error(misplaced_src_error("output.client", config.output_client))
+            }
+          Server -> Ok(Nil)
         }
-      Server -> Ok(Nil)
-    }
-  })
+      })
+  }
 }
 
 fn misplaced_src_error(field: String, path: String) -> ConfigError {
@@ -351,25 +428,19 @@ fn misplaced_src_error(field: String, path: String) -> ConfigError {
   )
 }
 
-fn path_has_misplaced_src(path: String) -> Bool {
-  let segments =
-    path
-    |> string.split("/")
-    |> list.filter(fn(s) { s != "" && s != "." })
-  case list.reverse(segments) {
-    // Strip the final segment (the package directory). Inspect what's
-    // left — the "directory chain" leading up to the package.
-    [_pkg, ..rest_reversed] -> {
-      let parent_segments = list.reverse(rest_reversed)
-      case list.last(parent_segments) {
-        // 'src' is the immediate parent of the package — correct shape.
-        Ok("src") -> False
-        // No parent segment, or some other parent: foot-gun iff 'src'
-        // appears anywhere earlier in the path.
-        _ -> list.any(parent_segments, fn(s) { s == "src" })
-      }
-    }
-    [] -> False
+fn path_has_misplaced_src(path: String, package_segment_count: Int) -> Bool {
+  let parent_segments = drop_last_n(path_segments(path), package_segment_count)
+  let earlier_parents = drop_last_n(parent_segments, 1)
+  case list.last(parent_segments) {
+    // 'src' is the immediate parent of the package's top-level
+    // directory. Still a foot-gun if `src` ALSO appears earlier in
+    // the parent chain (e.g. `./src/foo/src/<pkg>`), because Gleam
+    // resolves imports against the outermost `src/` and the inner
+    // copy ends up baked into the module path.
+    Ok("src") -> list.any(earlier_parents, fn(s) { s == "src" })
+    // No parent segment, or some other parent: foot-gun iff 'src'
+    // appears anywhere in the parent chain.
+    _ -> list.any(parent_segments, fn(s) { s == "src" })
   }
 }
 
