@@ -10,6 +10,27 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Fixed
+
+- **cli(config)**: `validate_no_target_overlap` no longer rejects
+  a single-target config with `mode: both` whose `output.server`
+  and `output.client` resolve to the same directory. The check
+  was added in #387 to catch cross-config (multi-target) collisions
+  where two `targets:` entries clobber each other on disk; for a
+  single config the case is intentionally allowed because the
+  codegen writes shared files (`types`, `decode`, `encode`,
+  `guards`, `request_types`, `response_types`) with identical
+  content for both modes, plus disjoint server-only files
+  (`router`, `handlers`, `handlers_generated`) and one client-only
+  file (`client`). Previously `gleam run -- generate
+  --config=golden/petstore.oaspec.yaml` (and therefore
+  `just update-golden`) failed with `two targets resolve to the
+  same output directory`. `active_output_paths` now dedupes
+  intra-config when `output.server == output.client`, leaving the
+  cross-config rejection path unchanged. Added a positive
+  shellspec test under `single-target shared output` alongside the
+  existing rejection test for multi-target overlap.
+
 ### Added
 
 - **adapters**: README files for `adapters/httpc/` and `adapters/fetch/`.

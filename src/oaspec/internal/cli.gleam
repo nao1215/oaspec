@@ -470,7 +470,24 @@ fn active_output_paths(cfg: config.Config) -> List(String) {
   case config.mode(cfg) {
     config.Server -> [config.output_server(cfg)]
     config.Client -> [config.output_client(cfg)]
-    config.Both -> [config.output_server(cfg), config.output_client(cfg)]
+    // For a single config with `mode: both`, `output.server` and
+    // `output.client` may legitimately resolve to the same directory.
+    // The codegen writes shared files (types/decode/encode/guards/
+    // request_types/response_types) with identical content for both
+    // modes, plus server-only files (router/handlers/handlers_generated)
+    // and one client-only file (client.gleam) that have unique names —
+    // so a shared output directory does not clobber anything. Dedupe
+    // intra-config to allow this case while still letting
+    // `validate_no_target_overlap` reject cross-config (multi-target)
+    // collisions, which are the real footgun #387 was tracking.
+    config.Both -> {
+      let server_path = config.output_server(cfg)
+      let client_path = config.output_client(cfg)
+      case server_path == client_path {
+        True -> [server_path]
+        False -> [server_path, client_path]
+      }
+    }
   }
 }
 
