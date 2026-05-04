@@ -23,6 +23,17 @@ within `Changed` / `Fixed` and stay as-is.
   caller sites in `decoders` / `encoders` / `client_request` and
   would have masked the contract that hoist is responsible for. (#390)
 
+### Performance
+
+- naming: `to_pascal_case` / `to_snake_case` no longer recompile the
+  three internal regexes on every call. The compiled `Regexes`
+  record is cached in the BEAM `persistent_term` table via a tiny
+  `oaspec_naming_ffi:memoize/2` Erlang helper — first caller wins,
+  every subsequent call is an O(1) lookup with no GC pressure. On a
+  10k-schema spec this collapses 30k+ regex compiles to 3. The new
+  file is the only FFI in the project; an `ffi_usage` lint
+  exception is added only for `internal/util/naming.gleam`. (#405)
+
 ## [0.44.0] - 2026-05-04
 
 ### Changed
