@@ -295,6 +295,109 @@ pub fn config_output_dir_client_only_under_src_subdir_is_rejected_case() {
   should.be_error(result)
 }
 
+// Issue #387: nested package paths. A `package` containing slashes is a
+// multi-segment Gleam module path; the layout validator must compare the
+// LAST N segments of the output path against the package's segments and
+// peel them off before applying the `src/` placement rule.
+
+pub fn config_nested_package_dir_match_case() {
+  let cfg =
+    config.new(
+      input: "openapi.yaml",
+      output_server: "./gen/dco_check/github",
+      output_client: "./gen/dco_check/github_client",
+      package: "dco_check/github",
+      mode: config.Both,
+      validate: False,
+    )
+  let result = config.validate_output_package_match(cfg)
+  should.be_ok(result)
+}
+
+pub fn config_nested_package_wrong_middle_segment_rejected_case() {
+  let cfg =
+    config.new(
+      input: "openapi.yaml",
+      output_server: "./gen/wrong/github",
+      output_client: "./gen/wrong/github_client",
+      package: "dco_check/github",
+      mode: config.Both,
+      validate: False,
+    )
+  let result = config.validate_output_package_match(cfg)
+  should.be_error(result)
+}
+
+pub fn config_nested_package_wrong_last_segment_rejected_case() {
+  let cfg =
+    config.new(
+      input: "openapi.yaml",
+      output_server: "./gen/dco_check/wrong",
+      output_client: "./gen/dco_check/wrong_client",
+      package: "dco_check/github",
+      mode: config.Both,
+      validate: False,
+    )
+  let result = config.validate_output_package_match(cfg)
+  should.be_error(result)
+}
+
+pub fn config_nested_package_client_no_suffix_accepted_case() {
+  let cfg =
+    config.new(
+      input: "openapi.yaml",
+      output_server: "./gen/dco_check/github",
+      output_client: "./gen/dco_check/github",
+      package: "dco_check/github",
+      mode: config.Client,
+      validate: False,
+    )
+  let result = config.validate_output_package_match(cfg)
+  should.be_ok(result)
+}
+
+pub fn config_nested_package_layout_under_src_accepted_case() {
+  let cfg =
+    config.new(
+      input: "openapi.yaml",
+      output_server: "./src/dco_check/github",
+      output_client: "./src/dco_check/github_client",
+      package: "dco_check/github",
+      mode: config.Both,
+      validate: False,
+    )
+  let result = config.validate_output_dir_layout(cfg)
+  should.be_ok(result)
+}
+
+pub fn config_nested_package_layout_under_src_subdir_rejected_case() {
+  let cfg =
+    config.new(
+      input: "openapi.yaml",
+      output_server: "./src/foo/dco_check/github",
+      output_client: "./src/foo/dco_check/github_client",
+      package: "dco_check/github",
+      mode: config.Both,
+      validate: False,
+    )
+  let result = config.validate_output_dir_layout(cfg)
+  should.be_error(result)
+}
+
+pub fn config_nested_package_layout_outside_src_accepted_case() {
+  let cfg =
+    config.new(
+      input: "openapi.yaml",
+      output_server: "./gen/dco_check/github",
+      output_client: "./gen/dco_check/github_client",
+      package: "dco_check/github",
+      mode: config.Both,
+      validate: False,
+    )
+  let result = config.validate_output_dir_layout(cfg)
+  should.be_ok(result)
+}
+
 // --- Parser Tests ---
 
 pub fn parse_petstore_case() {

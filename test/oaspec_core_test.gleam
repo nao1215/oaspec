@@ -44,6 +44,13 @@ pub fn config_output_paths_test() {
   let _ = support.config_output_dir_deep_under_src_is_rejected_case()
   let _ =
     support.config_output_dir_client_only_under_src_subdir_is_rejected_case()
+  let _ = support.config_nested_package_dir_match_case()
+  let _ = support.config_nested_package_wrong_middle_segment_rejected_case()
+  let _ = support.config_nested_package_wrong_last_segment_rejected_case()
+  let _ = support.config_nested_package_client_no_suffix_accepted_case()
+  let _ = support.config_nested_package_layout_under_src_accepted_case()
+  let _ = support.config_nested_package_layout_under_src_subdir_rejected_case()
+  let _ = support.config_nested_package_layout_outside_src_accepted_case()
 }
 
 pub fn content_type_helpers_test() {
