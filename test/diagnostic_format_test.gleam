@@ -1,9 +1,98 @@
+import gleam/string
 import gleeunit
 import gleeunit/should
 import oaspec/internal/openapi/diagnostic_format
+import oaspec/openapi/diagnostic
 
 pub fn main() {
   gleeunit.main()
+}
+
+// ====================================================================
+// Issue #414: pin diagnostic.to_short_string and diagnostic.to_string
+// shape per code variant. These strings leak to the CLI and a format
+// regression was previously invisible to the test suite.
+// ====================================================================
+
+pub fn to_short_string_file_error_test() {
+  let diag = diagnostic.file_error(detail: "file not found: spec.yaml")
+  diagnostic.to_short_string(diag)
+  |> should.equal("file not found: spec.yaml")
+}
+
+pub fn to_short_string_yaml_error_with_loc_test() {
+  let diag =
+    diagnostic.yaml_error(
+      detail: "unexpected token",
+      loc: diagnostic.SourceLoc(line: 4, column: 7),
+    )
+  diagnostic.to_short_string(diag)
+  |> should.equal("unexpected token (line 4, column 7)")
+}
+
+pub fn to_short_string_yaml_error_no_loc_test() {
+  let diag =
+    diagnostic.yaml_error(detail: "empty document", loc: diagnostic.NoSourceLoc)
+  diagnostic.to_short_string(diag)
+  |> should.equal("empty document")
+}
+
+pub fn to_short_string_missing_field_test() {
+  let diag =
+    diagnostic.missing_field(
+      path: "paths.~1pets.get",
+      field: "responses",
+      loc: diagnostic.NoSourceLoc,
+    )
+  let rendered = diagnostic.to_short_string(diag)
+  rendered
+  |> should.equal(
+    "Missing required field 'responses' at GET /pets. Check your OpenAPI spec structure.",
+  )
+}
+
+pub fn to_short_string_invalid_value_test() {
+  let diag =
+    diagnostic.invalid_value(
+      path: "paths.~1pets.post.requestBody",
+      detail: "content type must be a string",
+      loc: diagnostic.NoSourceLoc,
+    )
+  let rendered = diagnostic.to_short_string(diag)
+  rendered
+  |> should.equal(
+    "Invalid value at POST /pets, requestBody: content type must be a string",
+  )
+}
+
+pub fn to_string_yaml_error_full_format_test() {
+  // Full to_string should include phase prefix, severity, message, and
+  // SourceLoc trailer. yaml_error has no pointer so the "at ..." chunk
+  // is absent.
+  let diag =
+    diagnostic.yaml_error(
+      detail: "boom",
+      loc: diagnostic.SourceLoc(line: 1, column: 2),
+    )
+  diagnostic.to_string(diag)
+  |> should.equal("[Parse] Error: boom (line 1, column 2)")
+}
+
+pub fn to_string_missing_field_includes_pointer_and_hint_test() {
+  let diag =
+    diagnostic.missing_field(
+      path: "components.schemas.Pet",
+      field: "type",
+      loc: diagnostic.NoSourceLoc,
+    )
+  let rendered = diagnostic.to_string(diag)
+  // Phase + severity + pointer + message + hint must all appear.
+  rendered |> string.contains("[Parse] Error") |> should.be_true()
+  rendered |> string.contains("at components.schemas.Pet") |> should.be_true()
+  rendered |> string.contains("Missing required field: type") |> should.be_true()
+  rendered
+  |> string.contains("Check your OpenAPI spec structure.")
+  |> should.be_true()
 }
 
 // --- empty / root ---------------------------------------------------

@@ -12,6 +12,22 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Added
 
+- tests: complementary `try_await` (Ok-Ok chaining) and `map_try`
+  (error short-circuit) coverage on `oaspec/transport`, plus async-send
+  variants of `with_default_header`, `with_default_headers`, and
+  `with_security` so the polymorphic-transport contract is exercised
+  on `transport.AsyncSend`, not just the sync `Send` surface. (#427, #428)
+- tests: a new `config_error_formatting_test` group asserting the
+  user-facing string produced by `config.error_to_string` for each
+  `ConfigError` variant (FileNotFound, FileReadError, ParseError,
+  MissingField, InvalidValue), plus a regression case pinning that an
+  empty / non-conforming config surfaces as `MissingField` /
+  `InvalidValue` rather than a generic parse failure. (#413)
+- tests: `diagnostic.to_short_string` and `diagnostic.to_string` now
+  have direct shape assertions for the `file_error`, `yaml_error`
+  (with and without source loc), `missing_field`, and `invalid_value`
+  branches. The pointer-to-human stack is already covered by
+  `diagnostic_format_test`; this fills the surrounding format gap. (#414)
 - tests: ShellSpec coverage for `oaspec generate --output=DIR` /
   `--output DIR` (space form), parse-failure exit codes on
   `error_missing_info.yaml`, the same parse-failure path through

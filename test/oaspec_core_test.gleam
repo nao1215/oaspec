@@ -31,6 +31,15 @@ pub fn config_defaults_test() {
   let _ = support.config_validate_default_when_omitted_case()
 }
 
+pub fn config_error_formatting_test() {
+  let _ = support.config_error_to_string_file_not_found_case()
+  let _ = support.config_error_to_string_file_read_error_case()
+  let _ = support.config_error_to_string_parse_error_case()
+  let _ = support.config_error_to_string_missing_field_case()
+  let _ = support.config_error_to_string_invalid_value_case()
+  let _ = support.config_load_missing_input_returns_missing_field_case()
+}
+
 pub fn config_output_paths_test() {
   let _ = support.config_client_only_default_drops_client_suffix_case()
   let _ = support.config_with_output_client_only_drops_suffix_case()
