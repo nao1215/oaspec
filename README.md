@@ -198,7 +198,7 @@ with the capability registry at
 
 Working examples live under [`examples/`](./examples):
 
-- [`examples/petstore_client`](./examples/petstore_client) — minimal client usage against a canned HTTP transport. Run it from the repo root with `just example-petstore`.
+- [`examples/petstore_client`](./examples/petstore_client) — generated client / decoder roundtrip demo against a stub transport (no network). The example's README shows the one-liner swap to `oaspec_httpc` for real BEAM HTTP. Run it from the repo root with `just example-petstore`.
 - [`examples/petstore_client_fetch`](./examples/petstore_client_fetch) — JavaScript-target client usage through the first-party fetch adapter. Run it from the repo root with `just example-petstore-fetch`.
 - [`examples/server_adapter`](./examples/server_adapter) — wires the generated `router.route/5` to a framework-free adapter. Run it from the repo root with `just example-server-adapter`.
 

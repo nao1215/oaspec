@@ -20,6 +20,13 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Documentation
 
+- examples: `petstore_client` is now scoped (in title, README header,
+  and program preamble) as a generated-client / decoder roundtrip demo
+  against a stub transport, not a real-HTTP example. Adds a "Hooking
+  up real HTTP" section showing the one-liner swap to the
+  `oaspec_httpc` adapter so the BEAM HTTP path is documented in code
+  even though no sibling runnable example ships yet. The top-level
+  README's examples list reflects the same scoping. (#425)
 - changelog: adopted a dedicated `Breaking` subsection convention for
   future releases — older `BREAKING:`-prefixed entries within
   `Changed` / `Fixed` stay as historical record. The README pointer
