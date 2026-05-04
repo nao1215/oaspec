@@ -12,6 +12,18 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Added
 
+- tests: ShellSpec coverage for `oaspec generate --output=DIR` /
+  `--output DIR` (space form), parse-failure exit codes on
+  `error_missing_info.yaml`, the same parse-failure path through
+  `oaspec validate`, and `--mode=client` override on the validator.
+  (#398, #399, #433)
+- tests: a dedicated `oaspec init` ShellSpec block covering default
+  output (`./oaspec.yaml`), `--output=PATH` override, and the
+  overwrite-refusal exit-status / stderr contract. (#400)
+- tests: `parse_json_string_malformed_has_diagnostic_shape_case`
+  pins the parse-phase diagnostic shape (severity, phase, non-empty
+  code/message) so a regression that returned a bare-`String` error
+  or dropped the structured fields surfaces immediately. (#431)
 - community files: a Contributor Covenant `CODE_OF_CONDUCT.md`, plus
   minimal issue templates (bug report, feature request) and a pull
   request template under `.github/`. The templates only ask for what

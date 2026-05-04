@@ -771,6 +771,21 @@ pub fn parse_json_string_rejects_malformed_case() {
   should.be_error(result)
 }
 
+pub fn parse_json_string_malformed_has_diagnostic_shape_case() {
+  // Issue #431: the `should.be_error` check above only verified that an
+  // error was produced. Here we pin the diagnostic shape (parse-phase
+  // error severity, non-empty message) for any malformed-or-rejected
+  // JSON input, so a regression that returned a bare `String` error or
+  // dropped the severity/phase fields surfaces as a failing test
+  // instead of a silent contract drift.
+  let bad_json = "::: not really json"
+  let assert Error(d) = parser.parse_json_string(bad_json)
+  d.phase |> should.equal(diagnostic.PhaseParse)
+  d.severity |> should.equal(diagnostic.SeverityError)
+  d.message |> should.not_equal("")
+  d.code |> should.not_equal("")
+}
+
 pub fn parse_file_dispatches_json_path_for_json_extension_case() {
   // Call `parse_file` end-to-end so the `.json` extension dispatch
   // is what's under test — if the routing regressed and `.json`
