@@ -10,6 +10,23 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Changed
+
+- **codegen**: lifted the static runtime helper blobs that
+  `internal/codegen/server` (`deep_object_present`,
+  `deep_object_present_any`, `deep_object_additional_properties`,
+  `coerce_dict`, `form_url_decode` / `parse_form_body`,
+  multipart helpers, `form_object_present`, `cookie_lookup`),
+  `internal/codegen/encoders` (`encode_dynamic`), and
+  `internal/codegen/client` (`text_body` / `bytes_body` /
+  `await_response`) splice into generated code into a new
+  `internal/codegen/runtime_snippets` module. Each helper is now a
+  `pub const` string spliced via the new `string_extra.raw`
+  appender; the gating `case requirements.<flag>` shape stays put
+  but the snippet body is no longer interleaved with `se.line` /
+  `se.indent` calls. `server.gleam` shrinks by ~210 lines and the
+  snippets become trivially diff-able. Closes #417.
+
 ## [0.46.0] - 2026-05-04
 
 ### Changed

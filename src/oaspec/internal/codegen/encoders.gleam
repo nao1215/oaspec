@@ -19,6 +19,7 @@ import oaspec/internal/codegen/context.{
   type Context, type GeneratedFile, GeneratedFile,
 }
 import oaspec/internal/codegen/ir_build
+import oaspec/internal/codegen/runtime_snippets
 import oaspec/internal/codegen/schema_dispatch
 import oaspec/internal/codegen/schema_utils
 import oaspec/internal/openapi/dedup
@@ -175,44 +176,19 @@ fn generate_encoders(
   // Generate encoders for anonymous inline schemas from operations
   let sb = generate_anonymous_encoders(sb, ctx, operations)
 
-  // Generate encode_dynamic helper if needed for untyped additionalProperties
+  // Generate encode_dynamic helper if needed for untyped additionalProperties.
+  //
+  // The fallback `_ -> json.null()` arm covers unsupported dynamic
+  // classifications (List, Dict, Tuple, etc.). Emitting the type name as a
+  // string would silently corrupt payloads; null at least fails loud when
+  // the receiving end doesn't tolerate it.
   let sb = case needs_dynamic {
     True ->
       sb
       |> se.doc_comment(
         "Encode a Dynamic value to JSON by inspecting its runtime type.",
       )
-      |> se.line("fn encode_dynamic(value: dynamic.Dynamic) -> json.Json {")
-      |> se.indent(1, "case dynamic.classify(value) {")
-      |> se.indent(2, "\"String\" ->")
-      |> se.indent(3, "case decode.run(value, decode.string) {")
-      |> se.indent(4, "Ok(s) -> json.string(s)")
-      |> se.indent(4, "Error(_) -> json.null()")
-      |> se.indent(3, "}")
-      |> se.indent(2, "\"Int\" ->")
-      |> se.indent(3, "case decode.run(value, decode.int) {")
-      |> se.indent(4, "Ok(i) -> json.int(i)")
-      |> se.indent(4, "Error(_) -> json.null()")
-      |> se.indent(3, "}")
-      |> se.indent(2, "\"Float\" ->")
-      |> se.indent(3, "case decode.run(value, decode.float) {")
-      |> se.indent(4, "Ok(f) -> json.float(f)")
-      |> se.indent(4, "Error(_) -> json.null()")
-      |> se.indent(3, "}")
-      |> se.indent(2, "\"Bool\" ->")
-      |> se.indent(3, "case decode.run(value, decode.bool) {")
-      |> se.indent(4, "Ok(b) -> json.bool(b)")
-      |> se.indent(4, "Error(_) -> json.null()")
-      |> se.indent(3, "}")
-      |> se.indent(2, "\"Nil\" -> json.null()")
-      // Fallback: unsupported dynamic classifications (List, Dict, Tuple,
-      // etc.) emit `json.null()` rather than the type name as a string.
-      // Emitting the type name silently corrupts payloads; null at least
-      // fails loud when the receiving end doesn't tolerate it.
-      |> se.indent(2, "_ -> json.null()")
-      |> se.indent(1, "}")
-      |> se.line("}")
-      |> se.blank_line()
+      |> se.raw(runtime_snippets.encode_dynamic)
     False -> sb
   }
 
