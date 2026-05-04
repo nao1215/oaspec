@@ -285,6 +285,13 @@ includes the path it attempted to read.
 | `oaspec generate` | Generate Gleam code from an OpenAPI specification |
 | `oaspec validate` | Validate an OpenAPI specification without generating code |
 | `oaspec init` | Create a default `oaspec.yaml` config file |
+| `oaspec version` | Print the installed `oaspec` version (also available as `--version`) |
+
+### CLI options for `init`
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--output=<path>` | `./oaspec.yaml` | Output path for the generated config file |
 
 ### CLI options for `generate`
 
