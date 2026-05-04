@@ -488,3 +488,66 @@ pub fn async_try_await_short_circuits_error_test() {
   |> transport.try_await(fn(_value) { transport.resolve(Ok("should not run")) })
   |> transport.run(fn(result) { result |> should.equal(Error("boom")) })
 }
+
+// Issue #427: complementary halves of try_await / map_try.
+
+pub fn async_try_await_chains_ok_test() {
+  // Successful first stage flows into the second stage; both Ok values
+  // are visible to the final continuation.
+  transport.resolve(Ok(1))
+  |> transport.try_await(fn(value) { transport.resolve(Ok(value + 1)) })
+  |> transport.run(fn(result) { result |> should.equal(Ok(2)) })
+}
+
+pub fn async_map_try_short_circuits_error_test() {
+  // Error skips the mapping function entirely.
+  transport.resolve(Error("nope"))
+  |> transport.map_try(fn(_value) { Ok(99) })
+  |> transport.run(fn(result) { result |> should.equal(Error("nope")) })
+}
+
+// Issue #428: middleware composition has to keep working when wired
+// against `AsyncSend`, not just sync `Send`. `with_base_url` is
+// already covered above; mirror the rest.
+
+pub fn with_default_header_async_send_test() {
+  let send =
+    transport.with_default_header(echo_to_async_response(), "x-trace", "abc")
+  transport.run(send(empty_request()), fn(result) {
+    let assert Ok(resp) = result
+    resp.headers
+    |> list.key_find("x-trace")
+    |> should.equal(Ok("abc"))
+  })
+}
+
+pub fn with_default_headers_async_send_test() {
+  let send =
+    transport.with_default_headers(echo_to_async_response(), [
+      #("x-a", "1"),
+      #("x-b", "2"),
+    ])
+  transport.run(send(empty_request()), fn(result) {
+    let assert Ok(resp) = result
+    resp.headers
+    |> list.key_find("x-a")
+    |> should.equal(Ok("1"))
+    resp.headers
+    |> list.key_find("x-b")
+    |> should.equal(Ok("2"))
+  })
+}
+
+pub fn with_security_async_send_test() {
+  let creds =
+    transport.credentials()
+    |> transport.with_bearer_token("BearerAuth", "tok-async")
+  let send = transport.with_security(echo_to_async_response(), creds)
+  let req = with_security_alts([HttpAuthorization("BearerAuth", "Bearer")])
+  transport.run(send(req), fn(result) {
+    let assert Ok(resp) = result
+    resp.headers
+    |> list.key_find("authorization")
+    |> should.equal(Ok("Bearer tok-async"))
+  })
+}

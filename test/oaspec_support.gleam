@@ -111,6 +111,59 @@ pub fn config_not_found_case() {
   }
 }
 
+// Issue #413: pin the user-facing strings produced by
+// `config.error_to_string` for each ConfigError variant. These leak to
+// the CLI surface, so format regressions degrade UX silently.
+
+pub fn config_error_to_string_file_not_found_case() {
+  let s = config.error_to_string(config.FileNotFound(path: "missing.yaml"))
+  s |> string.contains("Config file not found") |> should.be_true()
+  s |> string.contains("missing.yaml") |> should.be_true()
+}
+
+pub fn config_error_to_string_file_read_error_case() {
+  let s =
+    config.error_to_string(config.FileReadError(
+      path: "x.yaml",
+      detail: "permission denied",
+    ))
+  s |> string.contains("Error reading config file") |> should.be_true()
+  s |> string.contains("x.yaml") |> should.be_true()
+  s |> string.contains("permission denied") |> should.be_true()
+}
+
+pub fn config_error_to_string_parse_error_case() {
+  let s = config.error_to_string(config.ParseError(detail: "unexpected token"))
+  s |> string.contains("Config parse error") |> should.be_true()
+  s |> string.contains("unexpected token") |> should.be_true()
+}
+
+pub fn config_error_to_string_missing_field_case() {
+  let s = config.error_to_string(config.MissingField(field: "input"))
+  s |> string.contains("Missing required config field") |> should.be_true()
+  s |> string.contains("input") |> should.be_true()
+}
+
+pub fn config_error_to_string_invalid_value_case() {
+  let s =
+    config.error_to_string(config.InvalidValue(
+      field: "mode",
+      detail: "must be one of: server, client, both",
+    ))
+  s |> string.contains("Invalid value for") |> should.be_true()
+  s |> string.contains("mode") |> should.be_true()
+  s |> string.contains("must be one of") |> should.be_true()
+}
+
+pub fn config_load_missing_input_returns_missing_field_case() {
+  let result = config.load("test/fixtures/oaspec_targets_empty.yaml")
+  case result {
+    Error(config.MissingField(field: _)) | Error(config.InvalidValue(..)) ->
+      should.be_true(True)
+    _ -> should.fail()
+  }
+}
+
 pub fn parse_mode_case() {
   config.parse_mode("server") |> should.be_ok()
   config.parse_mode("client") |> should.be_ok()
