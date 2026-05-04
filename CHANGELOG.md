@@ -10,6 +10,19 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Documentation
+
+- **codegen**: clarified the four `panic as { ... }` sites in
+  `internal/codegen/schema_dispatch` (`decoder_expr` /
+  `json_encoder_expr` / `json_encoder_fn` / `to_string_fn`) as
+  hoist-contract tripwires rather than user-facing errors. Each panic
+  now points at `oaspec/internal/openapi/hoist` as the post-hoist
+  invariant owner and asks users who hit them to file an issue with
+  the offending spec. The `Result`-based dispatch suggested in #390
+  was investigated but deferred — it would have rippled through 9+
+  caller sites in `decoders` / `encoders` / `client_request` and
+  would have masked the contract that hoist is responsible for. (#390)
+
 ## [0.44.0] - 2026-05-04
 
 ### Changed

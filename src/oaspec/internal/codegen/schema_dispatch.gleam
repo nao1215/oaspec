@@ -107,12 +107,25 @@ pub fn decoder_expr(ref: SchemaRef) -> String {
     Inline(NumberSchema(..)) -> "decode.float"
     Inline(BooleanSchema(..)) -> "decode.bool"
     Reference(name:, ..) -> naming.to_snake_case(name) <> "_decoder()"
+    // Issue #390: this panic guards a contract that the hoist pass
+    // (oaspec/internal/openapi/hoist) is responsible for: every inline
+    // composite (object / allOf / oneOf / anyOf / array of composites)
+    // must be hoisted to components/schemas before codegen runs, so
+    // decoder_expr only ever sees primitives or References. If this
+    // branch fires, the bug is either in hoist or in a new spec shape
+    // that hoist doesn't recognise — fix at the hoist level rather
+    // than here. Converting this dispatch to Result was considered in
+    // #390 but rippled through 9+ caller sites and would have masked
+    // the contract. The panic stays as a fail-fast tripwire.
     Inline(schema) ->
       panic as {
         "oaspec: inline "
         <> schema_kind(schema)
-        <> " schema is not supported in decoder_expr. "
-        <> "Move the schema to components/schemas and use a $ref instead."
+        <> " schema reached decoder_expr after hoist. "
+        <> "This is a hoist contract bug — inline composites must be "
+        <> "moved to components/schemas before codegen. Please open an "
+        <> "issue at https://github.com/nao1215/oaspec/issues with the "
+        <> "spec that triggered this."
       }
   }
 }
@@ -126,12 +139,14 @@ pub fn json_encoder_expr(ref: SchemaRef, value: String) -> String {
     Inline(BooleanSchema(..)) -> "json.bool(" <> value <> ")"
     Reference(name:, ..) ->
       "encode_" <> naming.to_snake_case(name) <> "_json(" <> value <> ")"
+    // Issue #390: same hoist contract as decoder_expr above —
+    // inline composites must be hoisted before reaching this dispatch.
     Inline(schema) ->
       panic as {
         "oaspec: inline "
         <> schema_kind(schema)
-        <> " schema is not supported in json_encoder_expr. "
-        <> "Move the schema to components/schemas and use a $ref instead."
+        <> " schema reached json_encoder_expr after hoist. "
+        <> "This is a hoist contract bug; please file an issue with the spec."
       }
   }
 }
@@ -144,12 +159,14 @@ pub fn json_encoder_fn(ref: SchemaRef) -> String {
     Inline(NumberSchema(..)) -> "json.float"
     Inline(BooleanSchema(..)) -> "json.bool"
     Reference(name:, ..) -> "encode_" <> naming.to_snake_case(name) <> "_json"
+    // Issue #390: see decoder_expr's panic note. Inline composites
+    // are a post-hoist invariant violation, not a user-facing error.
     Inline(schema) ->
       panic as {
         "oaspec: inline "
         <> schema_kind(schema)
-        <> " schema is not supported in json_encoder_fn. "
-        <> "Move the schema to components/schemas and use a $ref instead."
+        <> " schema reached json_encoder_fn after hoist. "
+        <> "This is a hoist contract bug; please file an issue with the spec."
       }
   }
 }
@@ -170,12 +187,14 @@ pub fn to_string_fn(ref: SchemaRef, ctx: Context) -> String {
         Error(_) -> "fn(x) { x }"
       }
     }
+    // Issue #390: see decoder_expr's panic note. Inline composites are
+    // a post-hoist invariant violation, not a user-facing error.
     Inline(schema) ->
       panic as {
         "oaspec: inline "
         <> schema_kind(schema)
-        <> " schema is not supported in to_string_fn. "
-        <> "Move the schema to components/schemas and use a $ref instead."
+        <> " schema reached to_string_fn after hoist. "
+        <> "This is a hoist contract bug; please file an issue with the spec."
       }
   }
 }
