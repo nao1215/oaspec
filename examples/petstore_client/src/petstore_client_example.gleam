@@ -1,9 +1,12 @@
-//// Runnable example: using the oaspec-generated Petstore client.
+//// Runnable example: oaspec-generated Petstore client against a stub
+//// transport. This is a decoder / transport-contract demo, not a real
+//// HTTP example — see this example's README for the
+//// `oaspec/httpc` swap when you want live BEAM HTTP, or
+//// `examples/petstore_client_fetch/` for the JavaScript fetch path.
 ////
-//// This program calls `list_pets` against a fake transport built with
-//// `oaspec/mock`, then prints the result. Replace `mock.from(...)` with
-//// a real transport adapter (e.g. `oaspec/httpc`) to talk to a live
-//// Petstore.
+//// The program calls `list_pets` against a `mock.from(...)` transport
+//// that returns a canned 200 response, then prints the typed
+//// `ListPetsResponseOk(...)` payload.
 
 import api/client
 import api/response_types

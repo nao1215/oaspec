@@ -1,17 +1,27 @@
-# petstore_client — runnable client example
+# petstore_client — generated client / decoder roundtrip demo
 
 A minimal Gleam project that uses an oaspec-generated client for the
 Petstore OpenAPI spec at `test/fixtures/petstore.yaml`.
+
+This example is intentionally framework-free: it does not hit a real
+HTTP endpoint. The transport is a stub built with `oaspec/mock` that
+returns a canned JSON body, so the example runs without a live server,
+without network access, and without any HTTP adapter dependency. The
+focus is the contract between oaspec-generated code and `oaspec/transport`
+— request building, response decoding, and the typed response variants.
+
+For a parallel example that calls a live JavaScript fetch endpoint, see
+[`examples/petstore_client_fetch`](../petstore_client_fetch/). For a
+BEAM example that issues real HTTP, see "Hooking up real HTTP" below
+for the exact swap.
 
 ## What it shows
 
 - Generating a client from an OpenAPI 3.x spec via `oaspec.yaml`.
 - Importing the generated client and response types.
 - Building a `transport.Send` value with `mock.from(...)` and a custom
-  request handler (here a stub that returns a canned JSON body — swap
-  in the [`oaspec_httpc`](../../adapters/httpc/) adapter for real
-  BEAM-side traffic, or the [`oaspec_fetch`](../../adapters/fetch/)
-  adapter for the JavaScript target).
+  request handler — the stub is the only piece swapped out when moving
+  to a real adapter.
 - Handling the typed response variants that oaspec generates for each
   operation.
 
@@ -79,6 +89,38 @@ examples/petstore_client/
   src/api/                   — generated client code (checked in)
   src/petstore_client_example.gleam  — the program you run
 ```
+
+## Hooking up real HTTP
+
+To run the same client against a live BEAM HTTP backend, swap the
+stub for the `oaspec_httpc` adapter from
+[`adapters/httpc/`](../../adapters/httpc/). The change is a one-liner
+on the transport: everything else (the typed `list_pets/3` call, the
+`response_types.ListPetsResponseOk(pets)` match, the
+`ClientError` handling) stays the same.
+
+```gleam
+// before — stubbed, no network
+import oaspec/mock
+let send = mock.from(stub_handler)
+
+// after — real BEAM HTTP via gleam_httpc
+import oaspec/httpc
+import oaspec/transport
+let send =
+  httpc.send
+  |> transport.with_base_url("https://petstore3.swagger.io/api/v3")
+```
+
+`oaspec_httpc` is not yet on Hex; depend on it from a path or git
+dependency in your project's `gleam.toml` (see the
+[oaspec_fetch example layout](../petstore_client_fetch/gleam.toml) for
+the canonical pattern).
+
+A self-contained runnable real-HTTP sibling example
+(`petstore_client_httpc`) can be added later once the `oaspec_httpc`
+adapter ships on Hex; the swap above is small enough that it doesn't
+need its own directory in the meantime.
 
 ## Related examples
 
