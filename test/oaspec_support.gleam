@@ -457,6 +457,79 @@ pub fn config_output_dir_double_src_with_immediate_parent_rejected_case() {
 // filter module's `apply` is a no-op when the filter is empty and
 // otherwise drops operations whose tags / paths do not match.
 
+// Issue #387 follow-up: multi-target configs.
+
+pub fn config_load_all_single_target_case() {
+  // Legacy single-target shape (no `targets:` key) yields a
+  // 1-element list whose values match the legacy `load/1`.
+  let assert Ok(cfgs) =
+    config.load_all("test/fixtures/oaspec_include_filter.yaml")
+  list.length(cfgs) |> should.equal(1)
+}
+
+pub fn config_load_all_multi_target_case() {
+  let assert Ok(cfgs) =
+    config.load_all("test/fixtures/oaspec_targets_multi.yaml")
+  list.length(cfgs) |> should.equal(2)
+  // Each target has its own package and output paths, but the
+  // shared input/mode/validate are baked into both.
+  let packages =
+    cfgs
+    |> list.map(fn(c) { config.package(c) })
+    |> list.sort(string.compare)
+  packages |> should.equal(["petshop/details", "petshop/listing"])
+  list.each(cfgs, fn(c) {
+    config.input(c) |> should.equal("petstore.yaml")
+    config.mode(c) |> should.equal(config.Client)
+  })
+}
+
+pub fn config_load_targets_per_target_include_case() {
+  let assert Ok(cfgs) =
+    config.load_all("test/fixtures/oaspec_targets_multi.yaml")
+  // Sort by package so the assertion below matches the spec
+  // regardless of dict iteration order.
+  let by_package =
+    cfgs
+    |> list.sort(fn(a, b) {
+      string.compare(config.package(a), config.package(b))
+    })
+  let assert [details, listing] = by_package
+  config.include(details).paths |> should.equal(["/pets/**"])
+  config.include(listing).paths |> should.equal(["/pets"])
+}
+
+pub fn config_load_targets_per_target_output_case() {
+  let assert Ok(cfgs) =
+    config.load_all("test/fixtures/oaspec_targets_multi.yaml")
+  // `output.dir: ./gen` + `package: petshop/<leaf>` resolves to
+  // `./gen/petshop/<leaf>` for each target; client mode means no
+  // `_client` suffix.
+  let outputs =
+    cfgs
+    |> list.map(fn(c) { config.output_client(c) })
+    |> list.sort(string.compare)
+  outputs |> should.equal(["./gen/petshop/details", "./gen/petshop/listing"])
+}
+
+pub fn config_load_target_missing_package_rejected_case() {
+  let result =
+    config.load_all("test/fixtures/oaspec_targets_missing_package.yaml")
+  should.be_error(result)
+}
+
+pub fn config_load_targets_empty_rejected_case() {
+  let result = config.load_all("test/fixtures/oaspec_targets_empty.yaml")
+  should.be_error(result)
+}
+
+pub fn config_load_multi_target_via_load_returns_error_case() {
+  // The legacy `load/1` only handles single-target configs; multi-
+  // target callers must use `load_all/1` explicitly.
+  let result = config.load("test/fixtures/oaspec_targets_multi.yaml")
+  should.be_error(result)
+}
+
 pub fn config_load_parses_include_block_case() {
   let assert Ok(cfg) = config.load("test/fixtures/oaspec_include_filter.yaml")
   let inc = config.include(cfg)

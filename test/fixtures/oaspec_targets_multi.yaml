@@ -1,0 +1,15 @@
+input: petstore.yaml
+mode: client
+targets:
+  - package: petshop/listing
+    output:
+      dir: ./gen
+    include:
+      paths:
+        - "/pets"
+  - package: petshop/details
+    output:
+      dir: ./gen
+    include:
+      paths:
+        - "/pets/**"

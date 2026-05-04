@@ -749,6 +749,148 @@ EOF
 End
 
 # ===================================================================
+# Issue #387 — `targets:` array (multi-target codegen)
+# ===================================================================
+#
+# Splits a single spec into multiple Gleam packages in one
+# `oaspec generate` run. Each `targets:` entry has its own
+# `package`, `output`, and `include`, but all entries share the
+# top-level `input`, `mode`, and `validate`. The CLI parses the
+# spec once and runs the per-target pipeline (filter → capability
+# check → hoist → dedup → validate → codegen → write) for each
+# target in order.
+
+Describe 'oaspec multi-target generate'
+  Include "$SHELLSPEC_SPECDIR/spec_helper.sh"
+
+  setup_multi_target_config() {
+    rm -rf "$PROJECT_ROOT/test_multi_targets"
+    cat > "$PROJECT_ROOT/test_multi_targets.yaml" <<EOF
+input: test/fixtures/petstore.yaml
+mode: client
+targets:
+  - package: petshop/listing
+    output:
+      dir: ./test_multi_targets
+    include:
+      paths:
+        - "/pets"
+  - package: petshop/details
+    output:
+      dir: ./test_multi_targets
+    include:
+      paths:
+        - "/pets/**"
+EOF
+  }
+
+  cleanup_multi_target_config() {
+    rm -rf "$PROJECT_ROOT/test_multi_targets" \
+           "$PROJECT_ROOT/test_multi_targets.yaml"
+  }
+
+  Before 'setup_multi_target_config'
+  After 'cleanup_multi_target_config'
+
+  It 'writes one package per target with its filtered subset'
+    When run generate --config=./test_multi_targets.yaml
+    The status should be success
+    The output should include 'Successfully generated'
+    The output should include '[target: petshop/listing]'
+    The output should include '[target: petshop/details]'
+    # listing target: only the /pets operations land in its client.
+    The path "$PROJECT_ROOT/test_multi_targets/petshop/listing/client.gleam" should be file
+    The contents of file "$PROJECT_ROOT/test_multi_targets/petshop/listing/client.gleam" should include 'pub fn list_pets'
+    The contents of file "$PROJECT_ROOT/test_multi_targets/petshop/listing/client.gleam" should include 'pub fn create_pet'
+    The contents of file "$PROJECT_ROOT/test_multi_targets/petshop/listing/client.gleam" should not include 'pub fn get_pet'
+    The contents of file "$PROJECT_ROOT/test_multi_targets/petshop/listing/client.gleam" should not include 'pub fn delete_pet'
+    # details target: only the /pets/** operations land in its client.
+    The path "$PROJECT_ROOT/test_multi_targets/petshop/details/client.gleam" should be file
+    The contents of file "$PROJECT_ROOT/test_multi_targets/petshop/details/client.gleam" should include 'pub fn get_pet'
+    The contents of file "$PROJECT_ROOT/test_multi_targets/petshop/details/client.gleam" should include 'pub fn delete_pet'
+    The contents of file "$PROJECT_ROOT/test_multi_targets/petshop/details/client.gleam" should not include 'pub fn list_pets'
+    The contents of file "$PROJECT_ROOT/test_multi_targets/petshop/details/client.gleam" should not include 'pub fn create_pet'
+  End
+
+  setup_multi_target_overlap_config() {
+    rm -rf "$PROJECT_ROOT/test_multi_targets_overlap"
+    # Two targets with the same package would write to the same
+    # directory. The CLI must reject this before any file is written.
+    cat > "$PROJECT_ROOT/test_multi_targets_overlap.yaml" <<EOF
+input: test/fixtures/petstore.yaml
+mode: client
+targets:
+  - package: shared/api
+    output:
+      dir: ./test_multi_targets_overlap
+    include:
+      paths:
+        - "/pets"
+  - package: shared/api
+    output:
+      dir: ./test_multi_targets_overlap
+    include:
+      paths:
+        - "/pets/**"
+EOF
+  }
+
+  cleanup_multi_target_overlap_config() {
+    rm -rf "$PROJECT_ROOT/test_multi_targets_overlap" \
+           "$PROJECT_ROOT/test_multi_targets_overlap.yaml"
+  }
+
+  Describe 'overlap detection'
+    Before 'setup_multi_target_overlap_config'
+    After 'cleanup_multi_target_overlap_config'
+
+    It 'rejects configs whose targets resolve to the same output dir'
+      When run generate --config=./test_multi_targets_overlap.yaml
+      The status should be failure
+      The output should include 'two targets resolve to the same output directory'
+      The path "$PROJECT_ROOT/test_multi_targets_overlap" should not be exist
+    End
+  End
+
+  setup_multi_target_with_output_override_config() {
+    rm -rf "$PROJECT_ROOT/test_multi_targets_override"
+    cat > "$PROJECT_ROOT/test_multi_targets_override.yaml" <<EOF
+input: test/fixtures/petstore.yaml
+mode: client
+targets:
+  - package: foo/listing
+    output:
+      dir: ./test_multi_targets_override
+    include:
+      paths:
+        - "/pets"
+  - package: foo/details
+    output:
+      dir: ./test_multi_targets_override
+    include:
+      paths:
+        - "/pets/**"
+EOF
+  }
+
+  cleanup_multi_target_with_output_override_config() {
+    rm -rf "$PROJECT_ROOT/test_multi_targets_override" \
+           "$PROJECT_ROOT/test_multi_targets_override.yaml"
+  }
+
+  Describe 'CLI --output override'
+    Before 'setup_multi_target_with_output_override_config'
+    After 'cleanup_multi_target_with_output_override_config'
+
+    It 'rejects --output override on a multi-target config'
+      When run generate --config=./test_multi_targets_override.yaml --output=./somewhere_else
+      The status should be failure
+      The output should include 'cannot override the output directory for a multi-target config'
+    End
+  End
+End
+
+# ===================================================================
 # Issue #387 — Reference-typed response header refused at codegen
 # ===================================================================
 #

@@ -1,3 +1,4 @@
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -141,7 +142,38 @@ pub fn parse_mode(mode: String) -> Result(GenerateMode, ConfigError) {
 }
 
 /// Load config from a YAML file.
+///
+/// Returns the single target the YAML declares. When the YAML has a
+/// `targets:` array with more than one entry, this errors out with
+/// a multi-target hint — callers that need to handle the multi-
+/// target case must use `load_all/1` instead. For ordinary
+/// single-target configs (no `targets:` key, or a `targets:` array
+/// with exactly one entry) the result is the same as before.
 pub fn load(path: String) -> Result(Config, ConfigError) {
+  use targets <- result.try(load_all(path))
+  case targets {
+    [single] -> Ok(single)
+    [_, _, ..] ->
+      Error(InvalidValue(
+        field: "targets",
+        detail: "config declares multiple targets; use config.load_all/1 to retrieve the full list",
+      ))
+    [] ->
+      Error(InvalidValue(
+        field: "targets",
+        detail: "must declare at least one target",
+      ))
+  }
+}
+
+/// Load every target declared by an oaspec.yaml. A config without a
+/// `targets:` key is treated as a single implicit target whose
+/// fields come from the top-level `package:`, `output:`, and
+/// `include:` keys (the legacy single-target shape). A config with
+/// a `targets:` sequence yields one `Config` per element, each
+/// carrying its own `package` / `output_*` / `include` while
+/// sharing the top-level `input:`, `mode:`, and `validate:` values.
+pub fn load_all(path: String) -> Result(List(Config), ConfigError) {
   use content <- result.try(
     simplifile.read(path)
     |> result.map_error(fn(e) {
@@ -176,11 +208,6 @@ pub fn load(path: String) -> Result(Config, ConfigError) {
     |> result.map_error(fn(_) { MissingField(field: "input") }),
   )
 
-  let package =
-    yay.extract_optional_string(root, "package")
-    |> result.unwrap(None)
-    |> option.unwrap("api")
-
   use mode <- result.try(
     case yay.extract_optional_string(root, "mode") |> result.unwrap(None) {
       Some("server") -> Ok(Server)
@@ -194,37 +221,6 @@ pub fn load(path: String) -> Result(Config, ConfigError) {
         ))
     },
   )
-
-  // Determine output base directory, then derive mode-aware server/client
-  // defaults. Priority: output.server/client (explicit) > output.dir (base)
-  // > default "./gen".
-  //
-  // The `_client` suffix is only needed in `Both` mode to disambiguate the
-  // two output trees inside a single `<dir>`. In client-only mode there is
-  // no server output to clash with, so the default client output is just
-  // `<dir>/<package>` and the generated `import <package>/...` lines
-  // resolve correctly (Issue #262).
-  //
-  // The unused field in single-mode configs (e.g. `output_server` in
-  // client-only mode) is set to a sensible-looking placeholder for
-  // diagnostics; it is never read by the writer or codegen.
-  let output_dir =
-    extract_nested_string(root, "output", "dir")
-    |> option.unwrap("./gen")
-
-  let server_default = output_dir <> "/" <> package
-  let client_default = case mode {
-    Client -> output_dir <> "/" <> package
-    Server | Both -> output_dir <> "/" <> package <> "_client"
-  }
-
-  let output_server =
-    extract_nested_string(root, "output", "server")
-    |> option.unwrap(server_default)
-
-  let output_client =
-    extract_nested_string(root, "output", "client")
-    |> option.unwrap(client_default)
 
   // When `validate:` is omitted, the default is mode-dependent (issue #268).
   // Server-mode codegen with `validate: false` lets schema-invalid input
@@ -253,11 +249,88 @@ pub fn load(path: String) -> Result(Config, ConfigError) {
     },
   )
 
-  // Issue #387: optional `include:` block selects a subset of
-  // operations to generate. Either list (tags / paths) may be omitted
-  // or empty, in which case no filtering is applied along that axis.
-  // Both omitted == match everything.
-  use include <- result.try(parse_include(root))
+  // Issue #387: when `targets:` is present, walk the sequence and
+  // build one `Config` per item, each inheriting the shared
+  // input/mode/validate values from the root. When absent, the root
+  // itself is the implicit single target (legacy single-target
+  // shape: top-level package / output / include).
+  case yay.select_sugar(from: root, selector: "targets") {
+    // nolint: thrown_away_error -- absent `targets:` is the documented default for single-target configs.
+    Error(_) -> {
+      use cfg <- result.try(parse_target_node(root, input, mode, validate))
+      Ok([cfg])
+    }
+    Ok(yay.NodeSeq(items)) ->
+      case items {
+        [] ->
+          Error(InvalidValue(
+            field: "targets",
+            detail: "must declare at least one target",
+          ))
+        _ ->
+          items
+          |> list.index_map(fn(item, idx) {
+            parse_target_item(item, idx, input, mode, validate)
+          })
+          |> result.all
+      }
+    Ok(_) ->
+      Error(InvalidValue(
+        field: "targets",
+        detail: "must be a sequence of target objects",
+      ))
+  }
+}
+
+/// Parse a single target node — either the YAML root (legacy
+/// single-target config) or one element of the `targets:` sequence
+/// — into a fully-formed `Config`. The shared `input` / `mode` /
+/// `validate` come from the top-level YAML and are baked into the
+/// returned value.
+fn parse_target_node(
+  node: yay.Node,
+  input: String,
+  mode: GenerateMode,
+  validate: Bool,
+) -> Result(Config, ConfigError) {
+  let package =
+    yay.extract_optional_string(node, "package")
+    |> result.unwrap(None)
+    |> option.unwrap("api")
+
+  // Determine output base directory, then derive mode-aware
+  // server/client defaults. Priority: output.server/client
+  // (explicit) > output.dir (base) > default "./gen".
+  //
+  // The `_client` suffix is only needed in `Both` mode to
+  // disambiguate the two output trees inside a single `<dir>`. In
+  // client-only mode there is no server output to clash with, so
+  // the default client output is just `<dir>/<package>` and the
+  // generated `import <package>/...` lines resolve correctly
+  // (Issue #262).
+  //
+  // The unused field in single-mode configs (e.g. `output_server`
+  // in client-only mode) is set to a sensible-looking placeholder
+  // for diagnostics; it is never read by the writer or codegen.
+  let output_dir =
+    extract_nested_string(node, "output", "dir")
+    |> option.unwrap("./gen")
+
+  let server_default = output_dir <> "/" <> package
+  let client_default = case mode {
+    Client -> output_dir <> "/" <> package
+    Server | Both -> output_dir <> "/" <> package <> "_client"
+  }
+
+  let output_server =
+    extract_nested_string(node, "output", "server")
+    |> option.unwrap(server_default)
+
+  let output_client =
+    extract_nested_string(node, "output", "client")
+    |> option.unwrap(client_default)
+
+  use include <- result.try(parse_include(node))
 
   Ok(Config(
     input:,
@@ -268,6 +341,28 @@ pub fn load(path: String) -> Result(Config, ConfigError) {
     validate:,
     include:,
   ))
+}
+
+fn parse_target_item(
+  node: yay.Node,
+  idx: Int,
+  input: String,
+  mode: GenerateMode,
+  validate: Bool,
+) -> Result(Config, ConfigError) {
+  // Each entry in `targets:` MUST declare its own `package:` —
+  // unlike the single-target shape (which falls back to "api"),
+  // multiple targets sharing the default package would clobber each
+  // other on disk and via Gleam imports. Reject early with a clear
+  // index-tagged error.
+  case yay.extract_optional_string(node, "package") |> result.unwrap(None) {
+    None ->
+      Error(InvalidValue(
+        field: "targets[" <> int.to_string(idx) <> "].package",
+        detail: "each target must declare a package name",
+      ))
+    Some(_) -> parse_target_node(node, input, mode, validate)
+  }
 }
 
 /// Parse the optional `include:` block. Returns `empty_include()`

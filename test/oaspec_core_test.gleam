@@ -58,6 +58,13 @@ pub fn config_output_paths_test() {
 }
 
 pub fn include_filter_test() {
+  let _ = support.config_load_all_single_target_case()
+  let _ = support.config_load_all_multi_target_case()
+  let _ = support.config_load_targets_per_target_include_case()
+  let _ = support.config_load_targets_per_target_output_case()
+  let _ = support.config_load_target_missing_package_rejected_case()
+  let _ = support.config_load_targets_empty_rejected_case()
+  let _ = support.config_load_multi_target_via_load_returns_error_case()
   let _ = support.config_load_parses_include_block_case()
   let _ = support.config_load_omitted_include_is_empty_case()
   let _ = support.config_default_include_is_empty_case()
