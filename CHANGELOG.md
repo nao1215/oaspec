@@ -12,6 +12,24 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Fixed
 
+- **server-codegen(multipart)**: a `multipart/form-data` request body
+  field whose schema is a `$ref` to a string-enum schema is now
+  decoded into the generated sum-type variant rather than copied as
+  raw `String` into the enum-typed slot of the request type. The
+  previous shape (`category: case dict.get(multipart_body,
+  "category") { Ok([v, ..]) -> v _ -> "" }`) failed `gleam check`
+  with a type mismatch (`Expected: types.Category, Found: String`),
+  putting a perfectly normal OpenAPI shape (enum field on a
+  multipart upload) outside the "autogen compiles unmodified"
+  promise. The same fix also covers
+  `application/x-www-form-urlencoded` bodies, which share the
+  underlying `body_required_expr` / `body_optional_expr` codepath.
+  Required enum fields fall back to the first declared variant on
+  miss / unknown (mirroring the type-zero fallback already used for
+  primitive required body fields per #327); optional enum fields
+  fall back to `None` (mirroring the permissive behaviour of #305
+  for `$ref`-typed enum query parameters). (#482)
+
 - **cli(config)**: `validate_no_target_overlap` no longer rejects
   a single-target config with `mode: both` whose `output.server`
   and `output.client` resolve to the same directory. The check
@@ -32,6 +50,13 @@ within `Changed` / `Fixed` and stay as-is.
   existing rejection test for multi-target overlap.
 
 ### Added
+
+- **docs(README)**: the main README now ships an inline canonical
+  `mist` server-adapter snippet (mirroring the existing inline
+  Client transport snippet) so server users can reach a runnable
+  shape without first drilling into `examples/server_adapter`. Stale
+  references to `router.route/5` were corrected to `route/6` (the
+  app_state parameter has been emitted for several releases). (#480)
 
 - **adapters**: README files for `adapters/httpc/` and `adapters/fetch/`.
   `gleam publish` requires every package to have a README, and the

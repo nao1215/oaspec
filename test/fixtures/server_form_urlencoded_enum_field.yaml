@@ -1,0 +1,32 @@
+openapi: 3.0.3
+info:
+  title: Server Form Urlencoded Enum Field Test API
+  version: 1.0.0
+paths:
+  /things:
+    post:
+      operationId: createThing
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - category
+              properties:
+                category:
+                  $ref: "#/components/schemas/Category"
+                tag:
+                  $ref: "#/components/schemas/Category"
+      responses:
+        "204":
+          description: ok
+components:
+  schemas:
+    Category:
+      type: string
+      enum:
+        - logs
+        - screenshots
+        - configs

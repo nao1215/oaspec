@@ -20,6 +20,8 @@ pub fn server_param_and_body_codegen_test() {
   let _ = support.server_multipart_body_is_parsed_case()
   let _ = support.server_form_urlencoded_ref_fields_are_parsed_case()
   let _ = support.server_multipart_ref_fields_are_parsed_case()
+  let _ = support.server_multipart_enum_field_dispatches_to_variant_case()
+  let _ = support.server_form_urlencoded_enum_field_dispatches_to_variant_case()
   let _ = support.server_cookie_param_generates_cookie_lookup_case()
   let _ = support.server_cookie_param_optional_string_case()
   let _ = support.server_cookie_param_integer_case()

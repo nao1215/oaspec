@@ -9780,6 +9780,58 @@ pub fn server_multipart_ref_fields_are_parsed_case() {
   |> should.be_true()
 }
 
+pub fn server_multipart_enum_field_dispatches_to_variant_case() {
+  // Issue #482: `$ref`-typed string-enum field on a multipart body must
+  // dispatch into the generated sum-type variant, not be copied as raw
+  // String. Without this fix `gleam check` rejects the autogen output.
+  let ctx = make_ctx("test/fixtures/server_multipart_enum_field.yaml")
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  // Required enum field falls back to first variant on miss / unknown.
+  string.contains(
+    content,
+    "category: case dict.get(multipart_body, \"category\") { Ok([v, ..]) -> case v { \"logs\" -> types.CategoryLogs \"screenshots\" -> types.CategoryScreenshots \"configs\" -> types.CategoryConfigs _ -> types.CategoryLogs } _ -> types.CategoryLogs }",
+  )
+  |> should.be_true()
+  // Optional enum field falls back to None on miss / unknown.
+  string.contains(
+    content,
+    "tag: case dict.get(multipart_body, \"tag\") { Ok([v, ..]) -> case v { \"logs\" -> Some(types.CategoryLogs) \"screenshots\" -> Some(types.CategoryScreenshots) \"configs\" -> Some(types.CategoryConfigs) _ -> None } _ -> None }",
+  )
+  |> should.be_true()
+  // The previous broken shape — copying the raw String — must be gone.
+  string.contains(
+    content,
+    "category: case dict.get(multipart_body, \"category\") { Ok([v, ..]) -> v _ -> \"\" }",
+  )
+  |> should.be_false()
+}
+
+pub fn server_form_urlencoded_enum_field_dispatches_to_variant_case() {
+  // Issue #482: same fix applies to application/x-www-form-urlencoded
+  // bodies, which share the body_required_expr / body_optional_expr
+  // codepath with multipart.
+  let ctx = make_ctx("test/fixtures/server_form_urlencoded_enum_field.yaml")
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(
+    content,
+    "category: case dict.get(form_body, \"category\") { Ok([v, ..]) -> case v { \"logs\" -> types.CategoryLogs \"screenshots\" -> types.CategoryScreenshots \"configs\" -> types.CategoryConfigs _ -> types.CategoryLogs } _ -> types.CategoryLogs }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "tag: case dict.get(form_body, \"tag\") { Ok([v, ..]) -> case v { \"logs\" -> Some(types.CategoryLogs) \"screenshots\" -> Some(types.CategoryScreenshots) \"configs\" -> Some(types.CategoryConfigs) _ -> None } _ -> None }",
+  )
+  |> should.be_true()
+}
+
 // --- Server cookie parameter end-to-end tests ---
 
 pub fn server_cookie_param_generates_cookie_lookup_case() {
