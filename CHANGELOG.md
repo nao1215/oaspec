@@ -10,6 +10,22 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Performance
+
+- parser: finished migrating `openapi/parser.gleam` (~40 sites) onto the
+  `parser_value.{optional_*, *_default}` helpers. The lingering
+  `result.unwrap(None) |> option.unwrap(default)` chains across path /
+  operation / parameter / requestBody / response / securityScheme /
+  serverVariable / mediaType / encoding / link parsing are gone; intent
+  now reads off the call site instead of needing a two-line decode.
+  Closes the follow-up tracked under #423.
+- codegen: `decoders.gleam::generate_decoders` now computes the
+  sorted+filtered component-schema list once and shares it across the
+  import-detection `list.any` passes and the emission folds. The
+  previous shape sorted the dict twice and filtered separately at the
+  second site, which both wasted work and risked the import header
+  disagreeing with the emission on internal schemas. (#435)
+
 ## [0.42.0] - 2026-05-04
 
 ### Added

@@ -51,11 +51,17 @@ fn generate_decoders(
   ctx: Context,
   operations: List(context.AnalyzedOperation),
 ) -> String {
+  // Issue #435: compute the sorted+filtered schema list once and share it
+  // across the import-detection `list.any` passes and the emission folds.
+  // The previous shape sorted the dict twice and filtered separately at
+  // the second site, which both wasted work and risked the import header
+  // disagreeing with what the second pass actually emits.
   let schemas = case context.spec(ctx).components {
     Some(components) ->
       list.sort(dict.to_list(components.schemas), fn(a, b) {
         string.compare(a.0, b.0)
       })
+      |> list.filter(fn(entry) { !ir_build.is_internal_schema(entry.1) })
     None -> []
   }
 
@@ -156,15 +162,6 @@ fn generate_decoders(
   let sb =
     se.file_header(context.version)
     |> se.imports(imports)
-
-  let schemas = case context.spec(ctx).components {
-    Some(components) ->
-      list.sort(dict.to_list(components.schemas), fn(a, b) {
-        string.compare(a.0, b.0)
-      })
-      |> list.filter(fn(entry) { !ir_build.is_internal_schema(entry.1) })
-    None -> []
-  }
 
   // First pass: generate inline enum decoders from object/allOf properties
   let sb =
