@@ -6350,11 +6350,11 @@ paths:
     )
   let issues = validate.validate(ctx)
   // No blocking errors — codegen would proceed.
-  validate.errors_only(issues)
+  diagnostic.errors_only(issues)
   |> list.is_empty
   |> should.be_true()
   // But there's exactly one warning, pointing at the filter param.
-  let warnings = validate.warnings_only(issues)
+  let warnings = diagnostic.warnings_only(issues)
   list.length(warnings) |> should.equal(1)
   let assert [Diagnostic(message: msg, ..)] = warnings
   string.contains(msg, "no explicit 'style'")
@@ -6404,7 +6404,7 @@ paths:
       ),
     )
   let issues = validate.validate(ctx)
-  validate.errors_only(issues)
+  diagnostic.errors_only(issues)
   |> list.is_empty
   |> should.be_true()
 }
@@ -9039,7 +9039,7 @@ pub fn filter_by_mode_drops_server_errors_for_client_case() {
       hint: None,
     ),
   ]
-  let filtered = validate.filter_by_mode(issues, config.Client)
+  let filtered = diagnostic.filter_by_mode(issues, config.Client)
   list.length(filtered)
   |> should.equal(1)
 }
@@ -9061,7 +9061,7 @@ pub fn filter_by_mode_drops_client_errors_for_server_case() {
       hint: None,
     ),
   ]
-  let filtered = validate.filter_by_mode(issues, config.Server)
+  let filtered = diagnostic.filter_by_mode(issues, config.Server)
   list.length(filtered)
   |> should.equal(1)
 }
@@ -9090,7 +9090,7 @@ pub fn filter_by_mode_keeps_all_errors_for_both_case() {
       hint: None,
     ),
   ]
-  let filtered = validate.filter_by_mode(issues, config.Both)
+  let filtered = diagnostic.filter_by_mode(issues, config.Both)
   list.length(filtered)
   |> should.equal(3)
 }
@@ -10441,7 +10441,7 @@ pub fn oss_libopenapi_all_components_validates_security_case() {
     parser.parse_file("test/fixtures/oss_libopenapi_all_components.yaml")
   let ctx = make_ctx_from_spec(spec)
   let errors = validate.validate(ctx)
-  let blocking = validate.errors_only(errors)
+  let blocking = diagnostic.errors_only(errors)
   let has_security_error =
     list.any(blocking, fn(e) {
       string.contains(diagnostic.to_string(e), "api_key")
@@ -10523,7 +10523,7 @@ pub fn oss_oapi_codegen_nullable_generates_case() {
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
-      let blocking = validate.errors_only(errors)
+      let blocking = diagnostic.errors_only(errors)
       list.length(blocking) |> should.equal(0)
     }
   }
@@ -10552,7 +10552,7 @@ pub fn oss_oapi_codegen_allof_additional_generates_case() {
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
-      let blocking = validate.errors_only(errors)
+      let blocking = diagnostic.errors_only(errors)
       list.length(blocking) |> should.equal(0)
     }
   }
@@ -10581,7 +10581,7 @@ pub fn oss_oapi_codegen_multi_content_rejects_unsupported_types_case() {
     parser.parse_file("test/fixtures/oss_oapi_codegen_multi_content.yaml")
   let ctx = make_ctx_from_spec(spec)
   let errors = validate.validate(ctx)
-  let blocking = validate.errors_only(errors)
+  let blocking = diagnostic.errors_only(errors)
   // Should have blocking errors for unsupported content types
   list.length(blocking) |> should.not_equal(0)
 }
@@ -10604,7 +10604,7 @@ pub fn oss_oapi_codegen_issue_312_generates_case() {
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
-      list.length(validate.errors_only(errors)) |> should.equal(0)
+      list.length(diagnostic.errors_only(errors)) |> should.equal(0)
     }
   }
 }
@@ -10634,7 +10634,7 @@ pub fn oss_oapi_codegen_issue_52_generates_case() {
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
-      list.length(validate.errors_only(errors)) |> should.equal(0)
+      list.length(diagnostic.errors_only(errors)) |> should.equal(0)
     }
   }
 }
@@ -10683,7 +10683,7 @@ pub fn oss_oapi_codegen_issue_579_generates_case() {
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
-      list.length(validate.errors_only(errors)) |> should.equal(0)
+      list.length(diagnostic.errors_only(errors)) |> should.equal(0)
     }
   }
 }
@@ -10704,7 +10704,7 @@ pub fn oss_oapi_codegen_issue_2185_generates_case() {
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
-      list.length(validate.errors_only(errors)) |> should.equal(0)
+      list.length(diagnostic.errors_only(errors)) |> should.equal(0)
     }
   }
 }
@@ -10735,7 +10735,7 @@ pub fn oss_openapi_gen_issue_9719_generates_case() {
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
-      list.length(validate.errors_only(errors)) |> should.equal(0)
+      list.length(diagnostic.errors_only(errors)) |> should.equal(0)
     }
   }
 }
@@ -10754,7 +10754,7 @@ pub fn oss_openapi_gen_issue_13917_rejects_json_patch_content_case() {
     parser.parse_file("test/fixtures/oss_openapi_gen_issue_13917.yaml")
   let ctx = make_ctx_from_spec(spec)
   let errors = validate.validate(ctx)
-  let blocking = validate.errors_only(errors)
+  let blocking = diagnostic.errors_only(errors)
   list.length(blocking) |> should.not_equal(0)
 }
 
@@ -10808,7 +10808,7 @@ pub fn oss_kiota_discriminator_generates_case() {
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
-      list.length(validate.errors_only(errors)) |> should.equal(0)
+      list.length(diagnostic.errors_only(errors)) |> should.equal(0)
     }
   }
 }
@@ -10828,7 +10828,7 @@ pub fn oss_kiota_derived_types_generates_case() {
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
-      list.length(validate.errors_only(errors)) |> should.equal(0)
+      list.length(diagnostic.errors_only(errors)) |> should.equal(0)
     }
   }
 }
@@ -10849,7 +10849,7 @@ pub fn oss_kiota_multi_security_generates_case() {
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
-      list.length(validate.errors_only(errors)) |> should.equal(0)
+      list.length(diagnostic.errors_only(errors)) |> should.equal(0)
     }
   }
 }
@@ -11002,7 +11002,7 @@ pub fn oss_openapi_gen_issue_11897_generates_case() {
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) ->
-      list.length(validate.errors_only(errors)) |> should.equal(0)
+      list.length(diagnostic.errors_only(errors)) |> should.equal(0)
   }
 }
 
@@ -11028,7 +11028,7 @@ pub fn oss_openapi_gen_issue_1666_generates_case() {
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) ->
-      list.length(validate.errors_only(errors)) |> should.equal(0)
+      list.length(diagnostic.errors_only(errors)) |> should.equal(0)
   }
 }
 
@@ -11054,7 +11054,7 @@ pub fn oss_openapi_gen_issue_18516_generates_case() {
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) ->
-      list.length(validate.errors_only(errors)) |> should.equal(0)
+      list.length(diagnostic.errors_only(errors)) |> should.equal(0)
   }
 }
 
@@ -11386,7 +11386,7 @@ pub fn oss_openapi_dotnet_dollar_id_parses_case() {
 /// actionable hint.
 pub fn validate_rejects_id_backed_url_ref_with_dedicated_diagnostic_case() {
   let ctx = make_ctx("test/fixtures/oss_openapi_dotnet_dollar_id.yaml")
-  let errors = validate.validate(ctx) |> validate.errors_only
+  let errors = validate.validate(ctx) |> diagnostic.errors_only
   let messages = list.map(errors, validate.error_to_string)
   list.any(messages, fn(s) {
     string.contains(s, "URL-style $ref")
@@ -11535,7 +11535,7 @@ pub fn capability_check_warns_on_callbacks_case() {
   let ctx = make_ctx("test/fixtures/oss_swagger_parser_java_callback_ref.yaml")
   let warnings =
     capability_check.check_preserved(ctx)
-    |> validate.warnings_only
+    |> diagnostic.warnings_only
   let messages = list.map(warnings, validate.error_to_string)
   list.any(messages, fn(s) {
     string.contains(s, "Operation-level callbacks")
@@ -12380,7 +12380,7 @@ pub fn pipeline_end_to_end_case() {
   case result {
     Ok(summary) -> list.length(summary.files) |> should.not_equal(0)
     Error(generate.ValidationErrors(errors:)) -> {
-      let blocking = validate.errors_only(errors)
+      let blocking = diagnostic.errors_only(errors)
       list.length(blocking) |> should.equal(0)
     }
   }
@@ -12855,7 +12855,7 @@ pub fn error_missing_path_param_case() {
         )
       let ctx = context.new(resolved, cfg)
       let diagnostics = validate.validate(ctx)
-      let errors = validate.errors_only(diagnostics)
+      let errors = diagnostic.errors_only(diagnostics)
       { list.length(errors) >= 1 } |> should.be_true()
       Nil
     }
@@ -13017,42 +13017,42 @@ pub fn server_default_response_only_generates_case() {
 pub fn validate_wildcard_status_codes_case() {
   let ctx = make_ctx("test/fixtures/wildcard_status_codes.yaml")
   let diagnostics = validate.validate(ctx)
-  let errors = validate.errors_only(diagnostics)
+  let errors = diagnostic.errors_only(diagnostics)
   list.length(errors) |> should.equal(0)
 }
 
 pub fn validate_format_types_case() {
   let ctx = make_ctx("test/fixtures/format_types.yaml")
   let diagnostics = validate.validate(ctx)
-  let errors = validate.errors_only(diagnostics)
+  let errors = diagnostic.errors_only(diagnostics)
   list.length(errors) |> should.equal(0)
 }
 
 pub fn validate_enum_edge_cases_case() {
   let ctx = make_ctx("test/fixtures/enum_edge_cases.yaml")
   let diagnostics = validate.validate(ctx)
-  let errors = validate.errors_only(diagnostics)
+  let errors = diagnostic.errors_only(diagnostics)
   list.length(errors) |> should.equal(0)
 }
 
 pub fn validate_mixed_param_locations_case() {
   let ctx = make_ctx("test/fixtures/mixed_param_locations.yaml")
   let diagnostics = validate.validate(ctx)
-  let errors = validate.errors_only(diagnostics)
+  let errors = diagnostic.errors_only(diagnostics)
   list.length(errors) |> should.equal(0)
 }
 
 pub fn validate_complex_discriminator_case() {
   let ctx = make_ctx("test/fixtures/complex_discriminator.yaml")
   let diagnostics = validate.validate(ctx)
-  let errors = validate.errors_only(diagnostics)
+  let errors = diagnostic.errors_only(diagnostics)
   list.length(errors) |> should.equal(0)
 }
 
 pub fn validate_optional_required_combinations_case() {
   let ctx = make_ctx("test/fixtures/optional_required_combinations.yaml")
   let diagnostics = validate.validate(ctx)
-  let errors = validate.errors_only(diagnostics)
+  let errors = diagnostic.errors_only(diagnostics)
   list.length(errors) |> should.equal(0)
 }
 

@@ -94,14 +94,14 @@ fn prepare_context(
   let #(elapsed, capability_issues) =
     progress.timed(fn() {
       capability_check.check(spec)
-      |> validate.filter_by_mode(config.mode(cfg))
+      |> diagnostic.filter_by_mode(config.mode(cfg))
     })
   progress.report(
     reporter,
     "capability check (took " <> progress.format_ms(elapsed) <> ")",
   )
-  let capability_errors = validate.errors_only(capability_issues)
-  let capability_warnings = validate.warnings_only(capability_issues)
+  let capability_errors = diagnostic.errors_only(capability_issues)
+  let capability_warnings = diagnostic.warnings_only(capability_issues)
   use _ <- result.try(case list.is_empty(capability_errors) {
     False -> Error(ValidationErrors(errors: capability_errors))
     True -> Ok(Nil)
@@ -139,7 +139,7 @@ fn prepare_context(
   let #(elapsed, validation_issues) =
     progress.timed(fn() {
       validate.validate(ctx)
-      |> validate.filter_by_mode(config.mode(cfg))
+      |> diagnostic.filter_by_mode(config.mode(cfg))
     })
   progress.report(
     reporter,
@@ -147,8 +147,8 @@ fn prepare_context(
       <> progress.format_ms(elapsed)
       <> ")",
   )
-  let blocking_errors = validate.errors_only(validation_issues)
-  let validation_warnings = validate.warnings_only(validation_issues)
+  let blocking_errors = diagnostic.errors_only(validation_issues)
+  let validation_warnings = diagnostic.warnings_only(validation_issues)
   use _ <- result.try(case list.is_empty(blocking_errors) {
     False -> Error(ValidationErrors(errors: blocking_errors))
     True -> Ok(Nil)
