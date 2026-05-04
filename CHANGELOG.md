@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Documentation
+
+- **readme**: top-of-README rewrite — added the `doc/img/gleam-oas-logo.png`
+  logo, Hex / HexDocs / license / CI badges, a 30-second pitch with a
+  runnable 5-line client example, and a HexDocs link near the install
+  section. (#397)
+- **readme**: install section now leads with the Hex library install
+  (`gleam add oaspec`) for consumers of the runtime / generator API,
+  and the GitHub-release / build-from-source paths are scoped to the
+  CLI use case. (#391)
+- **readme**: Quickstart adds a "fetch a sample spec" step so first-time
+  users can run `oaspec generate` end-to-end, and rephrases step 2 to
+  match what `oaspec init` actually writes (a fully-commented template
+  with only `package: api` uncommented). (#396)
+- **readme**: Supported input list and the Mode-Specific Support table
+  document `text/plain` and `application/octet-stream` request bodies,
+  matching what the validator and capability registry already accept.
+  (#407)
+- **readme**: multipart/form-data server restriction is now described
+  as "primitive scalar fields or arrays of primitive scalars", matching
+  the validator and the diagnostic hint. (#408)
+- **readme**: added a "Public modules at a glance" table to the
+  Library API section that covers all seven public modules
+  (`oaspec/transport`, `oaspec/mock`, `oaspec/config`,
+  `oaspec/generate`, `oaspec/openapi/parser`, `oaspec/openapi/diagnostic`,
+  `oaspec/codegen/writer`) so library users can pick the right entry
+  point at a glance. (#412)
+- **readme**: explicit "not yet on Hex" note next to the `oaspec_httpc`
+  / `oaspec_fetch` adapter mentions, with a path / git dependency
+  snippet pointing at the bundled examples' `gleam.toml`. (#392)
+
 ### Removed
 
 - **codegen**: dropped the unused `context.analyzed_schemas/1` accessor

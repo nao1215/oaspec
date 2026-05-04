@@ -1,5 +1,34 @@
 # oaspec
-Generate Gleam client and server modules from OpenAPI 3.x specs.
+
+<p align="center">
+  <img src="doc/img/gleam-oas-logo.png" alt="oaspec logo" width="180">
+</p>
+
+<p align="center">
+  <a href="https://hex.pm/packages/oaspec"><img src="https://img.shields.io/hexpm/v/oaspec" alt="Hex package"></a>
+  <a href="https://hexdocs.pm/oaspec/"><img src="https://img.shields.io/badge/hexdocs-latest-blue" alt="HexDocs"></a>
+  <a href="https://github.com/nao1215/oaspec/blob/main/LICENSE"><img src="https://img.shields.io/github/license/nao1215/oaspec" alt="License"></a>
+  <a href="https://github.com/nao1215/oaspec/actions"><img src="https://github.com/nao1215/oaspec/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
+
+**Generate Gleam client and server modules from OpenAPI 3.x specs.**
+
+OpenAPI in → typed Gleam client and server out, with no per-operation glue
+code to write or maintain. The generator owns request and response types,
+encoders, decoders, validation guards, and the router; you wire credentials
+and a transport adapter, then call typed operation functions:
+
+```gleam
+import api/client
+import oaspec/httpc
+import oaspec/transport
+
+let send =
+  httpc.send
+  |> transport.with_base_url(client.default_base_url())
+
+let assert Ok(pets) = client.list_pets(send, limit: Some(10), offset: None)
+```
 
 `oaspec` focuses on the parts of OpenAPI that affect generated code in real
 projects: `$ref`, `allOf`, `oneOf`, `anyOf`, typed request and response
@@ -14,9 +43,33 @@ stops with a diagnostic instead of emitting partial code.
 - Backed by 336 unit tests, ShellSpec CLI tests, 40 integration compile tests,
   and 257 test fixtures (including 98 OSS-derived edge-case specs)
 
+API reference: <https://hexdocs.pm/oaspec/>
+
 ## Install
 
-### GitHub release
+`oaspec` ships in two flavors:
+
+- **Library API** (the runtime contract for generated clients, plus the
+  generator itself for in-process use) — install via `gleam add` from Hex.
+- **CLI** (the `oaspec` binary that drives `init` / `generate` / `validate`
+  on the command line) — install from a GitHub release or build from source.
+
+Most users want both: `gleam add oaspec` in the project that consumes the
+generated code, and the CLI installed system-wide to run `oaspec generate`.
+
+### Library (Hex)
+
+```sh
+gleam add oaspec
+```
+
+This pulls the published [hex.pm package](https://hex.pm/packages/oaspec)
+and gives you the public modules under `oaspec/transport`, `oaspec/mock`,
+`oaspec/config`, `oaspec/generate`, `oaspec/openapi/parser`, and
+`oaspec/openapi/diagnostic`. See [Library API](#library-api) below for the
+full module list.
+
+### CLI — GitHub release
 
 Requires Erlang/OTP 27+. The release artifact is an Erlang escript, so the
 same binary runs anywhere Erlang is available.
@@ -29,7 +82,7 @@ sudo mv oaspec /usr/local/bin/
 
 On Windows, download `oaspec` from the [latest release](https://github.com/nao1215/oaspec/releases/latest) and run it with `escript oaspec <command>`. Erlang/OTP 27+ must be on your `PATH`.
 
-### Build from source
+### CLI — build from source
 
 Requires Gleam 1.15+, Erlang/OTP 27+, and `rebar3`.
 
@@ -46,20 +99,27 @@ your `PATH` and run it with `escript oaspec <command>`.
 
 ## Quickstart
 
-1. Create a config file.
+If you already have an OpenAPI 3.x spec on disk, skip step 1 and point
+`input:` at it. Otherwise, fetch a tiny sample to try the generator
+end-to-end:
+
+1. Fetch a sample spec (skip this step if you have your own).
+
+```sh
+curl -fSL -o openapi.yaml https://raw.githubusercontent.com/nao1215/oaspec/main/test/fixtures/petstore.yaml
+```
+
+2. Generate a starter `oaspec.yaml`.
 
 ```sh
 oaspec init
 ```
 
-2. Edit `oaspec.yaml`.
-
-```yaml
-input: openapi.yaml
-package: my_api
-output:
-  dir: ./gen
-```
+`oaspec init` writes a fully-commented template — `package: api` is the
+only uncommented field, with `input`, `mode`, `validate`, and `output:` all
+present as commented examples. Open the file and at minimum uncomment
+`input:` and point it at your spec (or set `input: openapi.yaml` if you
+followed step 1).
 
 3. Run the generator.
 
@@ -116,7 +176,8 @@ gen/my_api_client/
 - Parameters: path, query, header, cookie, plus array styles (`form`,
   `pipeDelimited`, `spaceDelimited`) and objects via `deepObject`
 - Request bodies: `application/json`, `text/plain`,
-  `application/x-www-form-urlencoded`, `multipart/form-data`
+  `application/octet-stream`, `application/x-www-form-urlencoded`,
+  `multipart/form-data`
 - Typed response variants, typed response headers, and `$ref` /
   `default` responses
 - Security: `apiKey`, HTTP (bearer/basic/digest), OAuth2, OpenID Connect
@@ -222,6 +283,23 @@ HTTP runtime:
 - `oaspec_fetch` (`adapters/fetch/`) — JavaScript adapter backed by
   `gleam_fetch`, with helpers to bridge `transport.Async` and native
   JavaScript promises.
+
+> **Note** — `oaspec_httpc` and `oaspec_fetch` are **not yet published on
+> Hex**. `gleam add oaspec_httpc` / `gleam add oaspec_fetch` will fail
+> with "package not found". Until they are published, depend on them
+> from a local checkout via a path or git dependency in your
+> consumer project's `gleam.toml`:
+>
+> ```toml
+> [dependencies]
+> oaspec = "..."
+> oaspec_fetch = { path = "../oaspec/adapters/fetch" }
+> # or
+> # oaspec_fetch = { git = "https://github.com/nao1215/oaspec.git", subpath = "adapters/fetch" }
+> ```
+>
+> See [`examples/petstore_client_fetch/gleam.toml`](./examples/petstore_client_fetch/gleam.toml)
+> for the canonical path-dependency layout used in the bundled examples.
 
 ## Configuration
 
@@ -525,12 +603,31 @@ imports, and each operation forwards to `handlers.<op_name>(req)`.
 | Array query parameters | restricted | yes | Server: only inline primitive item schemas |
 | `style: pipeDelimited` / `style: spaceDelimited` query arrays | yes | yes | Query array parameters only; primitive item types. Non-exploded joins with `\|` / `%20`, exploded degenerates to form-style `name=a&name=b`. |
 | `application/x-www-form-urlencoded` | restricted | yes | Server: must be sole content type; only primitive fields and shallow nested objects |
-| `multipart/form-data` | restricted | yes | Server: must be sole content type; only primitive scalar fields |
+| `multipart/form-data` | restricted | yes | Server: must be sole content type; only primitive scalar fields or arrays of primitive scalars |
+| `text/plain` request body | yes | yes | Treated as a single `String` field on the request |
+| `application/octet-stream` request body | yes | yes | Treated as raw `BitArray`/binary on the request |
 | Security (apiKey, HTTP, OAuth2, OpenID Connect) | yes | yes | Client attaches credentials via config; OAuth2/OpenID Connect: bearer token only |
 
 ## Library API
 
 `oaspec` can be used as a Gleam library, not just a CLI tool. The generation pipeline is pure (no IO) and split into composable steps.
+
+### Public modules at a glance
+
+| Module | Purpose |
+|--------|---------|
+| `oaspec/transport` | Runtime contract for generated clients (`Send` / `AsyncSend` types, `with_base_url`, `with_default_headers`, `with_security`) |
+| `oaspec/mock` | In-memory transport adapter for tests — no network, no FFI |
+| `oaspec/config` | Load config from YAML (`config.load/1` / `config.load_all/1`) or build a `Config` in code (`config.new/6`) |
+| `oaspec/generate` | Pure generation pipeline (`generate.generate/2`, `generate.validate_only/2`) — no IO |
+| `oaspec/openapi/parser` | Parse YAML/JSON spec text into an `OpenApiSpec(Unresolved)` |
+| `oaspec/openapi/diagnostic` | Structured warnings and errors used throughout the pipeline |
+| `oaspec/codegen/writer` | Write a `List(GeneratedFile)` to disk under `output.server` / `output.client` |
+
+If you only consume generated clients, you only need `oaspec/transport` and
+`oaspec/mock`. Tools that drive generation in-process (CI checks, custom
+build steps, doctests) reach for `oaspec/openapi/parser` →
+`oaspec/generate` → `oaspec/codegen/writer`.
 
 ### Pipeline overview
 
@@ -580,16 +677,6 @@ case generate.validate_only(spec, cfg) {
   Error(generate.ValidationErrors(errors:)) -> // spec has errors
 }
 ```
-
-### Key modules
-
-| Module | Purpose |
-|--------|---------|
-| `oaspec/openapi/parser` | Parse YAML/JSON spec into `OpenApiSpec(Unresolved)` |
-| `oaspec/config` | Load config from YAML or construct programmatically |
-| `oaspec/generate` | Pure generation pipeline (parse → codegen) |
-| `oaspec/codegen/writer` | Write generated files to disk |
-| `oaspec/openapi/diagnostic` | Structured warnings and errors |
 
 ## Development
 
