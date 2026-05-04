@@ -74,6 +74,21 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Added
 
+- **docs(README)**: clarify that server-side OpenAPI `security:`
+  declarations are parsed but **not enforced** by the generated
+  router. The previous Mode-Specific Support table listed
+  `Security` as `yes` for the server, which spec authors
+  reasonably read as "the router emits a 401 when the request
+  lacks the declared credentials" — the router does no such
+  check; handlers must verify auth themselves. The table entry
+  now reads `parsed (not enforced)`, the prose support list and
+  the OpenAPI Support coverage paragraph distinguish client vs.
+  server behaviour explicitly, and a new `Server security model`
+  subsection documents the two practical options (enforce in the
+  handler, or wrap `router.route/6` in an outer auth-checking
+  adapter). No source code change in this entry; the underlying
+  router behaviour is unchanged. (#484)
+
 - **docs(README)**: the main README now ships an inline canonical
   `mist` server-adapter snippet (mirroring the existing inline
   Client transport snippet) so server users can reach a runnable

@@ -183,7 +183,8 @@ gen/my_api_client/
 - Typed response variants, typed response headers, and `$ref` /
   `default` responses
 - Security: `apiKey`, HTTP (bearer/basic/digest), OAuth2, OpenID Connect
-  (bearer token attachment)
+  (bearer token attachment on the client; **parsed but not enforced** on
+  the server — see [Server security model](#server-security-model))
 
 Generation stops with a diagnostic for:
 
@@ -629,7 +630,7 @@ Coverage is strongest in these areas:
 - Parameters: path, query, header, and cookie parameters, including array serialization (`style: form`, `style: pipeDelimited`, `style: spaceDelimited`) and objects via `style: deepObject`
 - Request bodies: `application/json`, `text/plain`, `application/x-www-form-urlencoded`, and `multipart/form-data`
 - Responses: typed status-code variants, `$ref` responses, `default` responses, typed response headers, and text or binary passthrough cases
-- Security: `apiKey` (header, query, cookie), HTTP auth (bearer, basic, digest), OAuth2, and OpenID Connect. For OAuth2 and OpenID Connect, the generated client attaches a bearer token to requests; token acquisition, refresh, and flow execution are outside the generated code.
+- Security: `apiKey` (header, query, cookie), HTTP auth (bearer, basic, digest), OAuth2, and OpenID Connect. **Client-side**: the generated client attaches credentials per the `security:` declaration on each operation, walking OR-of-AND alternatives and applying the first satisfied one. For OAuth2 and OpenID Connect, the generated client attaches a bearer token to requests; token acquisition, refresh, and flow execution are outside the generated code. **Server-side**: the `security:` declaration on an operation is parsed but **not enforced** by the generated router — the handler is invoked regardless of whether the request carries the declared credentials. Handlers must check `Authorization` / `X-Api-Key` / cookie themselves and return their own 401. See [Server security model](#server-security-model) below.
 - Generation safety: name collision handling, keyword escaping, validation guards, and capability errors with clear failure modes
 
 ### `format: byte` and `format: binary`
@@ -709,7 +710,47 @@ imports, and each operation forwards to `handlers.<op_name>(req)`.
 | `multipart/form-data` | restricted | yes | Server: must be sole content type; only primitive scalar fields or arrays of primitive scalars |
 | `text/plain` request body | yes | yes | Treated as a single `String` field on the request |
 | `application/octet-stream` request body | yes | yes | Treated as raw `BitArray`/binary on the request |
-| Security (apiKey, HTTP, OAuth2, OpenID Connect) | yes | yes | Client attaches credentials via config; OAuth2/OpenID Connect: bearer token only |
+| Security (apiKey, HTTP, OAuth2, OpenID Connect) | parsed (not enforced) | yes | Client attaches credentials via config; OAuth2/OpenID Connect: bearer token only. **Server-side**: see [Server security model](#server-security-model) — the spec's `security:` requirement is parsed but the generated router does not emit a 401 for missing/invalid credentials. Handlers must enforce auth themselves. (#484) |
+
+### Server security model
+
+Spec authors who declare `security:` on an operation expect "this
+endpoint requires auth". The current oaspec server codegen
+**does not enforce** that requirement: it parses the security
+declaration during validation (so a typo in a scheme name or a
+reference to an undefined `securityScheme` is still caught at
+generation time) but emits no auth check in the generated router.
+A request that omits the declared `Authorization` / `X-Api-Key` /
+session cookie reaches the handler unchanged.
+
+This is intentional in this release — picking a single auth
+enforcement model would prescribe more policy than the rest of
+the codegen does — but it is also a sharp edge worth calling out.
+Until the generator gains a verifier hook, server users have two
+options:
+
+1. **Enforce in the handler.** The router already passes the full
+   `headers` and (for cookie-based schemes) the path / query /
+   body pieces it receives, so the handler can read
+   `dict.get(headers, "authorization")` etc. and short-circuit
+   with a 401 response variant before touching domain logic.
+   Generated `XxxResponse` types include any explicit `"401":`
+   variants, and after #483 the `default` response variant carries
+   a runtime `Int` so a single `Default(401, ...)` arm can cover
+   the catch-all 401 case for any operation.
+
+2. **Enforce in an outer adapter layer.** Wrap the generated
+   `router.route/6` in a thin auth-checking function that runs
+   before dispatch — typically the same place where the framework
+   adapter (`mist`, `wisp`, …) lives. This keeps the per-operation
+   handlers focused on domain logic and centralises the auth
+   policy in one place.
+
+Tracking issue: [#484](https://github.com/nao1215/oaspec/issues/484).
+Future work may add an opt-in verifier signature on the generated
+`State` (e.g. `verify_security: fn(scheme, value) -> Result(...)`)
+so the router can emit the 401 itself; that direction is not yet
+committed to.
 
 ## Library API
 
