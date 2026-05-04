@@ -10,6 +10,16 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Added
+
+- **adapters**: README files for `adapters/httpc/` and `adapters/fetch/`.
+  `gleam publish` requires every package to have a README, and the
+  first attempt to push `oaspec_httpc-v0.1.0` failed with `Cannot
+  publish with no README`. Each adapter README describes what the
+  package is, how to install it once published, the quick-start
+  example from the root README's Client transport section, and a
+  pointer to `oaspec/mock` for unit tests. No source-code change.
+
 ## [0.49.0] - 2026-05-04
 
 ### Fixed
