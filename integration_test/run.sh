@@ -1971,4 +1971,83 @@ rm -rf "$COMPLEX_SHAPES_DIR"
 
 info "Issue #387 complex response shapes integration tests passed."
 
+# -------------------------------------------------------
+# Step N+1: Issue #387 — `include:` filter compiles a strict subset
+# -------------------------------------------------------
+# Generates from the petstore fixture with `include.paths: ["/pets"]`
+# and verifies (a) only `/pets` operations appear in the generated
+# code, AND (b) the result still compiles with
+# `--warnings-as-errors`. If the filter accidentally drops something
+# the remaining code references — say, a component schema only used
+# by `listPets` — the build fails here before users ever see broken
+# output.
+info "Testing Issue #387 include filter (subset client compiles)..."
+
+INCLUDE_DIR="$SCRIPT_DIR/include_filter_test"
+rm -rf "$INCLUDE_DIR"
+mkdir -p "$INCLUDE_DIR/src"
+
+cat > "$INCLUDE_DIR/oaspec-include.yaml" << 'YAML_EOF'
+input: test/fixtures/petstore.yaml
+output:
+  client: ./integration_test/include_filter_test/src/api
+package: api
+mode: client
+include:
+  paths:
+    - "/pets"
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$INCLUDE_DIR/oaspec-include.yaml" \
+  --mode=client
+
+# Sanity check: handlers / client only carry the included operations.
+if grep -q "pub fn list_pets" "$INCLUDE_DIR/src/api/client.gleam"; then
+  info "PASS: included operation list_pets is present in client.gleam"
+else
+  fail "include filter dropped list_pets, which should have been kept"
+fi
+if grep -q "pub fn get_pet" "$INCLUDE_DIR/src/api/client.gleam"; then
+  fail "include filter kept get_pet, which should have been filtered out"
+else
+  info "PASS: filtered-out operation get_pet absent from client.gleam"
+fi
+
+cat > "$INCLUDE_DIR/gleam.toml" << 'TOML_EOF'
+name = "include_filter_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+oaspec = { path = "../.." }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$INCLUDE_DIR/src/include_filter_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$INCLUDE_DIR"
+gleam deps download
+
+if gleam build --warnings-as-errors 2>&1; then
+  info "PASS: subset client (path filter) compiles cleanly."
+else
+  fail "Issue #387 include filter — subset client failed to compile."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$INCLUDE_DIR"
+
+info "Issue #387 include-filter integration tests passed."
+
 info "All integration tests passed!"

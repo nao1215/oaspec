@@ -11,6 +11,7 @@ import oaspec/internal/codegen/types
 import oaspec/internal/codegen/validate
 import oaspec/internal/openapi/capability_check
 import oaspec/internal/openapi/dedup
+import oaspec/internal/openapi/filter
 import oaspec/internal/openapi/hoist
 import oaspec/internal/openapi/normalize
 import oaspec/internal/openapi/resolve
@@ -77,6 +78,16 @@ fn prepare_context(
   use spec <- result.try(
     resolved
     |> result.map_error(fn(errors) { ValidationErrors(errors:) }),
+  )
+
+  // Issue #387: apply the include filter (if any) before capability
+  // check / hoist / validate so every downstream stage sees only the
+  // operations the user asked for. Empty filter is a no-op.
+  let #(elapsed, spec) =
+    progress.timed(fn() { filter.apply(spec, config.include(cfg)) })
+  progress.report(
+    reporter,
+    "apply include filter (took " <> progress.format_ms(elapsed) <> ")",
   )
 
   // Check for unsupported features using capability registry

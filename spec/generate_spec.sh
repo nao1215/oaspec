@@ -628,6 +628,127 @@ EOF
 End
 
 # ===================================================================
+# Issue #387 — `include:` filter (subset of operations)
+# ===================================================================
+#
+# `include.tags` and `include.paths` let users generate code for a
+# subset of the spec without modifying the spec itself. Operations
+# pass when their tag list intersects `include.tags` OR their path
+# matches one of `include.paths` (`/foo/**` matches anything under
+# `/foo/`). Both lists empty == no filter.
+
+Describe 'oaspec include filter'
+  Include "$SHELLSPEC_SPECDIR/spec_helper.sh"
+
+  setup_path_filter_config() {
+    rm -rf "$PROJECT_ROOT/test_include_path"
+    cat > "$PROJECT_ROOT/test_include_path.yaml" <<EOF
+input: test/fixtures/petstore.yaml
+package: api
+output:
+  dir: ./test_include_path
+include:
+  paths:
+    - "/pets"
+EOF
+  }
+
+  cleanup_path_filter_config() {
+    rm -rf "$PROJECT_ROOT/test_include_path" \
+           "$PROJECT_ROOT/test_include_path.yaml"
+  }
+
+  Describe 'path filter'
+    Before 'setup_path_filter_config'
+    After 'cleanup_path_filter_config'
+
+    It 'keeps only the operations on the matched path'
+      When run generate --config=./test_include_path.yaml
+      The status should be success
+      The output should include 'Successfully generated'
+      # /pets stays (listPets, createPet) but /pets/{petId} is filtered
+      # out, so its operations must NOT appear in handlers.gleam.
+      The contents of file "$PROJECT_ROOT/test_include_path/api/handlers.gleam" should include 'pub fn list_pets'
+      The contents of file "$PROJECT_ROOT/test_include_path/api/handlers.gleam" should include 'pub fn create_pet'
+      The contents of file "$PROJECT_ROOT/test_include_path/api/handlers.gleam" should not include 'pub fn get_pet'
+      The contents of file "$PROJECT_ROOT/test_include_path/api/handlers.gleam" should not include 'pub fn delete_pet'
+    End
+  End
+
+  setup_glob_filter_config() {
+    rm -rf "$PROJECT_ROOT/test_include_glob"
+    cat > "$PROJECT_ROOT/test_include_glob.yaml" <<EOF
+input: test/fixtures/petstore.yaml
+package: api
+output:
+  dir: ./test_include_glob
+include:
+  paths:
+    - "/pets/**"
+EOF
+  }
+
+  cleanup_glob_filter_config() {
+    rm -rf "$PROJECT_ROOT/test_include_glob" \
+           "$PROJECT_ROOT/test_include_glob.yaml"
+  }
+
+  Describe 'path glob filter'
+    Before 'setup_glob_filter_config'
+    After 'cleanup_glob_filter_config'
+
+    It 'keeps only operations under the glob prefix'
+      When run generate --config=./test_include_glob.yaml
+      The status should be success
+      The output should include 'Successfully generated'
+      # `/pets/**` matches `/pets/{petId}` (getPet, deletePet) but
+      # NOT the bare `/pets` path itself (which has listPets and
+      # createPet) — that is the documented strict-prefix glob
+      # behaviour.
+      The contents of file "$PROJECT_ROOT/test_include_glob/api/handlers.gleam" should include 'pub fn get_pet'
+      The contents of file "$PROJECT_ROOT/test_include_glob/api/handlers.gleam" should include 'pub fn delete_pet'
+      The contents of file "$PROJECT_ROOT/test_include_glob/api/handlers.gleam" should not include 'pub fn list_pets'
+      The contents of file "$PROJECT_ROOT/test_include_glob/api/handlers.gleam" should not include 'pub fn create_pet'
+    End
+  End
+
+  setup_tag_filter_config() {
+    rm -rf "$PROJECT_ROOT/test_include_tag"
+    cat > "$PROJECT_ROOT/test_include_tag.yaml" <<EOF
+input: test/fixtures/petstore.yaml
+package: api
+output:
+  dir: ./test_include_tag
+include:
+  tags:
+    - pets
+EOF
+  }
+
+  cleanup_tag_filter_config() {
+    rm -rf "$PROJECT_ROOT/test_include_tag" \
+           "$PROJECT_ROOT/test_include_tag.yaml"
+  }
+
+  Describe 'tag filter'
+    Before 'setup_tag_filter_config'
+    After 'cleanup_tag_filter_config'
+
+    It 'keeps every operation tagged with the listed tag'
+      When run generate --config=./test_include_tag.yaml
+      The status should be success
+      The output should include 'Successfully generated'
+      # All petstore operations are tagged `pets`, so the tag
+      # filter is a no-op for this fixture — but the run still
+      # demonstrates that tag-based filtering parses and applies
+      # without error.
+      The contents of file "$PROJECT_ROOT/test_include_tag/api/handlers.gleam" should include 'pub fn list_pets'
+      The contents of file "$PROJECT_ROOT/test_include_tag/api/handlers.gleam" should include 'pub fn get_pet'
+    End
+  End
+End
+
+# ===================================================================
 # Issue #387 — Reference-typed response header refused at codegen
 # ===================================================================
 #

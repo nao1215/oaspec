@@ -9,8 +9,8 @@ import yay
 ///
 /// Opaque: external callers construct via `new/6` and read fields via
 /// the accessors below. Mutators (`with_mode`, `with_validate`,
-/// `with_output`) live in this module too, so every change to a
-/// `Config` value goes through an explicit function.
+/// `with_output`, `with_include`) live in this module too, so every
+/// change to a `Config` value goes through an explicit function.
 pub opaque type Config {
   Config(
     input: String,
@@ -19,12 +19,43 @@ pub opaque type Config {
     package: String,
     mode: GenerateMode,
     validate: Bool,
+    include: Include,
   )
 }
 
-/// Construct a new `Config` from its six fields. Prefer `load/1` in
-/// production code; `new/6` is primarily for tests and ad-hoc tooling
-/// that assembles a config in memory.
+/// Issue #387: subset filter for codegen. When non-empty, only
+/// operations matching at least one of the listed `tags` or `paths`
+/// are kept; the others are dropped before capability check, hoist,
+/// and validate.
+///
+/// Path patterns may end in `/**` to match any path under a prefix
+/// (`"/repos/**"` matches `/repos/foo`, `/repos/foo/bar`, …);
+/// otherwise the pattern is compared by exact string equality.
+///
+/// `tags` and `paths` combine with OR semantics — an operation is
+/// kept if EITHER its tag list intersects `Include.tags` OR its path
+/// matches one of `Include.paths`. With both lists empty (the
+/// default), no filtering is applied.
+pub type Include {
+  Include(tags: List(String), paths: List(String))
+}
+
+/// The default include filter — matches everything. Equivalent to
+/// `oaspec.yaml` omitting the `include:` key entirely.
+pub fn empty_include() -> Include {
+  Include(tags: [], paths: [])
+}
+
+/// True when no filter is active (both tag and path lists empty).
+pub fn include_is_empty(include: Include) -> Bool {
+  list.is_empty(include.tags) && list.is_empty(include.paths)
+}
+
+/// Construct a new `Config` from its six required fields. Prefer
+/// `load/1` in production code; `new/6` is primarily for tests and
+/// ad-hoc tooling that assembles a config in memory. The include
+/// filter defaults to `empty_include()` (match everything); use
+/// `with_include/2` to override.
 pub fn new(
   input input: String,
   output_server output_server: String,
@@ -33,7 +64,15 @@ pub fn new(
   mode mode: GenerateMode,
   validate validate: Bool,
 ) -> Config {
-  Config(input:, output_server:, output_client:, package:, mode:, validate:)
+  Config(
+    input:,
+    output_server:,
+    output_client:,
+    package:,
+    mode:,
+    validate:,
+    include: empty_include(),
+  )
 }
 
 /// Path to the OpenAPI spec this config was built for.
@@ -64,6 +103,11 @@ pub fn mode(cfg: Config) -> GenerateMode {
 /// Whether guard-based runtime validation is enabled.
 pub fn validate(cfg: Config) -> Bool {
   cfg.validate
+}
+
+/// Operation include filter (tags / paths). Issue #387.
+pub fn include(cfg: Config) -> Include {
+  cfg.include
 }
 
 /// Generation mode.
@@ -209,7 +253,67 @@ pub fn load(path: String) -> Result(Config, ConfigError) {
     },
   )
 
-  Ok(Config(input:, output_server:, output_client:, package:, mode:, validate:))
+  // Issue #387: optional `include:` block selects a subset of
+  // operations to generate. Either list (tags / paths) may be omitted
+  // or empty, in which case no filtering is applied along that axis.
+  // Both omitted == match everything.
+  use include <- result.try(parse_include(root))
+
+  Ok(Config(
+    input:,
+    output_server:,
+    output_client:,
+    package:,
+    mode:,
+    validate:,
+    include:,
+  ))
+}
+
+/// Parse the optional `include:` block. Returns `empty_include()`
+/// when the key is absent so the absence path stays cheap.
+fn parse_include(root: yay.Node) -> Result(Include, ConfigError) {
+  case yay.select_sugar(from: root, selector: "include") {
+    // nolint: thrown_away_error -- absent `include:` key is the documented default; the empty-include filter matches everything.
+    Error(_) -> Ok(empty_include())
+    Ok(include_node) -> {
+      use tags <- result.try(extract_optional_string_list(
+        include_node,
+        "include.tags",
+        "tags",
+      ))
+      use paths <- result.try(extract_optional_string_list(
+        include_node,
+        "include.paths",
+        "paths",
+      ))
+      Ok(Include(tags: tags, paths: paths))
+    }
+  }
+}
+
+/// Read a list-of-strings YAML field that may be absent, in which
+/// case an empty list is returned. `field_path` is the dotted name
+/// shown in any `InvalidValue` diagnostic.
+fn extract_optional_string_list(
+  node: yay.Node,
+  field_path: String,
+  key: String,
+) -> Result(List(String), ConfigError) {
+  case yay.extract_string_list(node, key) {
+    Ok(values) -> Ok(values)
+    // nolint: thrown_away_error -- yay's distinction between "key absent" and "key present but not a list" is squashed here; absent → empty list, type-mismatch → InvalidValue with a specific detail string is emitted by the existence check below.
+    Error(_) ->
+      case yay.select_sugar(from: node, selector: key) {
+        // nolint: thrown_away_error -- key truly absent: the documented default of an empty list applies.
+        Error(_) -> Ok([])
+        Ok(_) ->
+          Error(InvalidValue(
+            field: field_path,
+            detail: "must be a list of strings",
+          ))
+      }
+  }
 }
 
 /// Apply CLI overrides to a config.
@@ -220,6 +324,12 @@ pub fn with_mode(config: Config, mode: GenerateMode) -> Config {
 /// Apply validation mode override.
 pub fn with_validate(config: Config, validate: Bool) -> Config {
   Config(..config, validate:)
+}
+
+/// Apply include-filter override (Issue #387). Useful for tests
+/// that build a `Config` in memory.
+pub fn with_include(config: Config, include: Include) -> Config {
+  Config(..config, include:)
 }
 
 /// Apply output base directory override.

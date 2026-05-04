@@ -57,6 +57,19 @@ pub fn config_output_paths_test() {
     support.config_output_dir_double_src_with_immediate_parent_rejected_case()
 }
 
+pub fn include_filter_test() {
+  let _ = support.config_load_parses_include_block_case()
+  let _ = support.config_load_omitted_include_is_empty_case()
+  let _ = support.config_default_include_is_empty_case()
+  let _ = support.config_with_include_round_trip_case()
+  let _ = support.filter_apply_empty_filter_returns_spec_unchanged_case()
+  let _ = support.filter_apply_path_glob_keeps_matching_paths_case()
+  let _ = support.filter_apply_unknown_path_drops_everything_case()
+  let _ = support.filter_apply_tag_membership_keeps_tagged_operations_case()
+  let _ = support.filter_apply_tags_or_paths_unions_case()
+  let _ = support.filter_path_matches_exact_and_glob_case()
+}
+
 pub fn content_type_helpers_test() {
   let _ = support.content_type_from_string_case()
   let _ = support.content_type_x_ndjson_is_supported_response_case()
