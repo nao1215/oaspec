@@ -461,10 +461,21 @@ pub fn config_output_dir_double_src_with_immediate_parent_rejected_case() {
 
 pub fn config_load_all_single_target_case() {
   // Legacy single-target shape (no `targets:` key) yields a
-  // 1-element list whose values match the legacy `load/1`.
-  let assert Ok(cfgs) =
-    config.load_all("test/fixtures/oaspec_include_filter.yaml")
-  list.length(cfgs) |> should.equal(1)
+  // 1-element list whose sole config is field-equal to what the
+  // legacy `load/1` returns. Asserting field-by-field catches
+  // drift between the two entry points if either one changes its
+  // parsing rules.
+  let path = "test/fixtures/oaspec_include_filter.yaml"
+  let assert Ok(cfgs) = config.load_all(path)
+  let assert [cfg] = cfgs
+  let assert Ok(legacy) = config.load(path)
+  config.input(cfg) |> should.equal(config.input(legacy))
+  config.mode(cfg) |> should.equal(config.mode(legacy))
+  config.validate(cfg) |> should.equal(config.validate(legacy))
+  config.package(cfg) |> should.equal(config.package(legacy))
+  config.output_server(cfg) |> should.equal(config.output_server(legacy))
+  config.output_client(cfg) |> should.equal(config.output_client(legacy))
+  config.include(cfg) |> should.equal(config.include(legacy))
 }
 
 pub fn config_load_all_multi_target_case() {
@@ -497,6 +508,12 @@ pub fn config_load_targets_per_target_include_case() {
   let assert [details, listing] = by_package
   config.include(details).paths |> should.equal(["/pets/**"])
   config.include(listing).paths |> should.equal(["/pets"])
+  // No `tags:` declared in this fixture, so each target should
+  // default to an empty tag list. Asserting this catches any
+  // regression where tag defaulting silently leaks state across
+  // targets or fails to parse omitted tag lists as `[]`.
+  config.include(details).tags |> should.equal([])
+  config.include(listing).tags |> should.equal([])
 }
 
 pub fn config_load_targets_per_target_output_case() {

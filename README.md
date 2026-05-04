@@ -236,6 +236,73 @@ Generated server code is written to `<dir>/<package>` and generated client code 
 | `output.dir` | no | `./gen` | Base output directory |
 | `output.server` | no | `<dir>/<package>` | Server output path |
 | `output.client` | no | `<dir>/<package>_client` | Client output path |
+| `include.tags` | no | `[]` | Operation tag allowlist (filter) |
+| `include.paths` | no | `[]` | Operation path allowlist (filter, supports `/foo/**` glob) |
+| `targets` | no | - | Array of per-target overrides (multi-target codegen) |
+
+### Filtering operations with `include:`
+
+To generate code for a subset of a large spec without modifying the
+spec file, set `include.tags` and / or `include.paths`:
+
+```yaml
+input: github.yaml
+package: github
+mode: client
+include:
+  tags: [issues, repos]
+  paths:
+    - "/users/{username}"
+    - "/repos/**"
+```
+
+- Both lists are optional. Empty or omitted = no filter on that
+  axis. Both empty = no filtering applied.
+- Operations pass when their tag list intersects `include.tags`
+  **OR** their path matches one of `include.paths` (the two lists
+  are unioned, not intersected).
+- Path patterns ending in `/**` match any path that extends the
+  prefix with a `/<rest>` segment (`"/repos/**"` matches
+  `/repos/foo` and `/repos/foo/bar`, but **not** the bare
+  `/repos` — list it explicitly when needed). Other patterns are
+  compared by exact equality.
+
+### Splitting one spec into multiple packages with `targets:`
+
+`targets:` is an array of per-target overrides. The same input
+spec gets generated once per entry, each with its own
+`package` / `output` / `include`. The top-level `input`, `mode`,
+and `validate` are shared across every target.
+
+```yaml
+input: github.yaml
+mode: client
+targets:
+  - package: dco_check/github/issues
+    output: { dir: ./src }
+    include:
+      tags: [issues]
+  - package: dco_check/github/repos
+    output: { dir: ./src }
+    include:
+      paths: ["/repos/**"]
+```
+
+Above, one `oaspec generate` run produces two packages:
+`./src/dco_check/github/issues/...` and
+`./src/dco_check/github/repos/...`. Callers consume them as
+`import dco_check/github/issues/client` and
+`import dco_check/github/repos/client`.
+
+Notes:
+- Each target must declare its own `package` — there is no
+  fallback default for multi-target configs (otherwise two
+  targets without a package would overwrite each other).
+- The CLI rejects configs whose targets resolve to overlapping
+  output paths, before any file is written.
+- `--output` cannot be used with multi-target configs (each target
+  already declares its own per-package output directory). Use the
+  per-target `output:` blocks instead.
 
 ### Configuration paths
 

@@ -293,11 +293,11 @@ fn run_generate(
   print_resolved_paths_for_all(config_path, cfgs)
 
   // The input spec is shared across every target, so parse it once.
-  // `load_configs` already guarantees `cfgs` is non-empty.
-  let shared_input = case cfgs {
-    [first, ..] -> config.input(first)
-    [] -> ""
-  }
+  // `load_configs` rejects empty target lists at config-load time,
+  // so `cfgs` is guaranteed non-empty by the time we get here.
+  // nolint: assert_ok_pattern -- `load_configs` rejects empty target lists; reaching the empty branch would be an internal invariant violation.
+  let assert [first_cfg, ..] = cfgs
+  let shared_input = config.input(first_cfg)
   io.println("Parsing OpenAPI spec: " <> shared_input)
   let reporter = progress.stdout_with_elapsed()
   use spec <- require(
@@ -747,10 +747,11 @@ fn run_validate(config_path: String, mode_opt: Option(String)) -> Nil {
     load_config_error_to_string,
   )
 
-  let shared_input = case cfgs {
-    [first, ..] -> config.input(first)
-    [] -> ""
-  }
+  // `load_configs` rejects empty target lists; the destructure
+  // documents that invariant for any future reader.
+  // nolint: assert_ok_pattern -- `load_configs` rejects empty target lists; reaching the empty branch would be an internal invariant violation.
+  let assert [first_cfg, ..] = cfgs
+  let shared_input = config.input(first_cfg)
   io.println("Parsing OpenAPI spec: " <> shared_input)
   let reporter = progress.stdout_with_elapsed()
   use spec <- require(

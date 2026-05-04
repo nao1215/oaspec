@@ -92,21 +92,14 @@ fn filter_op(
 }
 
 fn path_item_has_operations(item: PathItem(Resolved)) -> Bool {
-  is_some(item.get)
-  || is_some(item.post)
-  || is_some(item.put)
-  || is_some(item.delete)
-  || is_some(item.patch)
-  || is_some(item.head)
-  || is_some(item.options)
-  || is_some(item.trace)
-}
-
-fn is_some(opt: Option(a)) -> Bool {
-  case opt {
-    Some(_) -> True
-    None -> False
-  }
+  option.is_some(item.get)
+  || option.is_some(item.post)
+  || option.is_some(item.put)
+  || option.is_some(item.delete)
+  || option.is_some(item.patch)
+  || option.is_some(item.head)
+  || option.is_some(item.options)
+  || option.is_some(item.trace)
 }
 
 fn keep_operation(
