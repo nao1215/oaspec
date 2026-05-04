@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-05-04
+
 ### Changed
 
 - **codegen**: collapsed the seven near-identical
