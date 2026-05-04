@@ -142,16 +142,23 @@ fn group_operations_by_id(
   operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
   key_fn: fn(String) -> String,
 ) -> Dict(String, List(String)) {
-  list.fold(operations, dict.new(), fn(acc, entry) {
-    let #(op_id, _operation, path, method) = entry
-    let key = key_fn(op_id)
-    let site = string.uppercase(spec.method_to_string(method)) <> " " <> path
-    case dict.get(acc, key) {
-      Ok(existing) -> dict.insert(acc, key, list.append(existing, [site]))
-      // nolint: thrown_away_error -- dict.get's Error signals absence of key; we start a new list for the first occurrence
-      Error(_) -> dict.insert(acc, key, [site])
-    }
-  })
+  // Accumulate site lists in reverse (prepend is O(1)) then reverse each
+  // value once at the end. The previous `list.append(existing, [site])`
+  // shape was O(N²) on the number of duplicates per key, which matters
+  // when a large spec accidentally collides many operationIds under the
+  // same case-folded form.
+  let reversed =
+    list.fold(operations, dict.new(), fn(acc, entry) {
+      let #(op_id, _operation, path, method) = entry
+      let key = key_fn(op_id)
+      let site = string.uppercase(spec.method_to_string(method)) <> " " <> path
+      case dict.get(acc, key) {
+        Ok(existing) -> dict.insert(acc, key, [site, ..existing])
+        // nolint: thrown_away_error -- dict.get's Error signals absence of key; we start a new list for the first occurrence
+        Error(_) -> dict.insert(acc, key, [site])
+      }
+    })
+  dict.map_values(reversed, fn(_key, sites) { list.reverse(sites) })
 }
 
 fn duplicate_operation_id_diagnostic(

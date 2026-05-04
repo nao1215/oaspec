@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.41.0] - 2026-05-02
+### Performance
+
+- **transport**: `with_default_headers` no longer rebuilds `req.headers`
+  with `list.append(acc, [...])` on every fold step — the merge now uses
+  prepend + final reverse, dropping the O(N²) shape that showed up on
+  requests with many default headers. Iteration order on the wire is
+  preserved. (#404)
+- **codegen**: `hoist.hoist_parameters` and `validate.group_operations_by_id`
+  switch their inner accumulators from `list.append(acc, [x])` to
+  prepend-and-reverse-once, so traversal of large specs scales linearly
+  with parameter / duplicate-site counts instead of quadratically. (#426)
+- **parser**: new `parser_value.{optional_bool, optional_string,
+  optional_int, optional_float, bool_default, string_default,
+  int_default}` helpers replace the brittle
+  `result.unwrap(None) |> option.unwrap(default)` chains. Migrated the
+  schema-object parser and `config.gleam` over to the helpers; the
+  remaining ~40 mechanical migration sites in `openapi/parser.gleam`
+  are tracked as a follow-up under the same Issue. (#423)
 
 ### Added
 

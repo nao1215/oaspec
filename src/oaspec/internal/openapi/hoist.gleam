@@ -516,34 +516,37 @@ fn hoist_parameters(
   op_id: String,
   state: HoistState,
 ) -> #(List(RefOr(spec.Parameter(stage))), HoistState) {
-  list.fold(params, #([], state), fn(acc, ref_or_param) {
-    let #(params_acc, state) = acc
-    case ref_or_param {
-      Ref(_) -> #(list.append(params_acc, [ref_or_param]), state)
-      Value(param) -> {
-        case param.payload {
-          spec.ParameterSchema(schema_ref) -> {
-            let suffix = "Param" <> naming.to_pascal_case(param.name)
-            let #(hoisted, state) =
-              hoist_schema_ref(
-                schema_ref,
-                op_id,
-                suffix,
-                HoistedParameter(operation_id: op_id, name: param.name),
-                state,
-              )
-            let new_param =
-              spec.Parameter(..param, payload: spec.ParameterSchema(hoisted))
-            #(list.append(params_acc, [Value(new_param)]), state)
+  // Build params_rev with prepend (O(1) per step), reverse once at the
+  // end. Replaces the prior `list.append(acc, [x])` shape that was
+  // O(N²) on the parameter count — observable on operations with many
+  // parameters in large specs.
+  let #(params_rev, state) =
+    list.fold(params, #([], state), fn(acc, ref_or_param) {
+      let #(params_acc, state) = acc
+      case ref_or_param {
+        Ref(_) -> #([ref_or_param, ..params_acc], state)
+        Value(param) -> {
+          case param.payload {
+            spec.ParameterSchema(schema_ref) -> {
+              let suffix = "Param" <> naming.to_pascal_case(param.name)
+              let #(hoisted, state) =
+                hoist_schema_ref(
+                  schema_ref,
+                  op_id,
+                  suffix,
+                  HoistedParameter(operation_id: op_id, name: param.name),
+                  state,
+                )
+              let new_param =
+                spec.Parameter(..param, payload: spec.ParameterSchema(hoisted))
+              #([Value(new_param), ..params_acc], state)
+            }
+            spec.ParameterContent(_) -> #([ref_or_param, ..params_acc], state)
           }
-          spec.ParameterContent(_) -> #(
-            list.append(params_acc, [ref_or_param]),
-            state,
-          )
         }
       }
-    }
-  })
+    })
+  #(list.reverse(params_rev), state)
 }
 
 /// Hoist schemas within a RequestBody.

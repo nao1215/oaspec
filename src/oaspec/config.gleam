@@ -3,6 +3,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import oaspec/internal/openapi/parser_value
 import simplifile
 import yay
 
@@ -208,19 +209,17 @@ pub fn load_all(path: String) -> Result(List(Config), ConfigError) {
     |> result.map_error(fn(_) { MissingField(field: "input") }),
   )
 
-  use mode <- result.try(
-    case yay.extract_optional_string(root, "mode") |> result.unwrap(None) {
-      Some("server") -> Ok(Server)
-      Some("client") -> Ok(Client)
-      Some("both") -> Ok(Both)
-      None -> Ok(Both)
-      Some(other) ->
-        Error(InvalidValue(
-          field: "mode",
-          detail: "must be one of: server, client, both (got: " <> other <> ")",
-        ))
-    },
-  )
+  use mode <- result.try(case parser_value.optional_string(root, "mode") {
+    Some("server") -> Ok(Server)
+    Some("client") -> Ok(Client)
+    Some("both") -> Ok(Both)
+    None -> Ok(Both)
+    Some(other) ->
+      Error(InvalidValue(
+        field: "mode",
+        detail: "must be one of: server, client, both (got: " <> other <> ")",
+      ))
+  })
 
   // When `validate:` is omitted, the default is mode-dependent (issue #268).
   // Server-mode codegen with `validate: false` lets schema-invalid input
@@ -293,10 +292,7 @@ fn parse_target_node(
   mode: GenerateMode,
   validate: Bool,
 ) -> Result(Config, ConfigError) {
-  let package =
-    yay.extract_optional_string(node, "package")
-    |> result.unwrap(None)
-    |> option.unwrap("api")
+  let package = parser_value.string_default(node, "package", "api")
 
   // Determine output base directory, then derive mode-aware
   // server/client defaults. Priority: output.server/client
@@ -355,7 +351,7 @@ fn parse_target_item(
   // multiple targets sharing the default package would clobber each
   // other on disk and via Gleam imports. Reject early with a clear
   // index-tagged error.
-  case yay.extract_optional_string(node, "package") |> result.unwrap(None) {
+  case parser_value.optional_string(node, "package") {
     None ->
       Error(InvalidValue(
         field: "targets[" <> int.to_string(idx) <> "].package",
