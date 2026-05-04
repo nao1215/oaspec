@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-05-04
+
 ### Added
 
 - tests: complementary `try_await` (Ok-Ok chaining) and `map_try`
