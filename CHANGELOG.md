@@ -19,6 +19,17 @@ within `Changed` / `Fixed` and stay as-is.
   must list `gleam_json` as a direct dependency to avoid a
   "Transitive dependency imported" warning on every `gleam check`
   (and a hard compile error in a future Gleam release). Closes #469.
+- **docs(readme)**: dropped the broken `git = "...", subpath = "..."`
+  alternative from the `oaspec_httpc` / `oaspec_fetch` adapter
+  install note. Gleam's `gleam.toml` parser does not accept a
+  `subpath` field on git dependencies as of Gleam 1.16, so the
+  recommended snippet failed with `data did not match any variant
+  of untagged enum Requirement` before any build started. The
+  surviving `path = "../oaspec/adapters/fetch"` form is the only
+  working approach until the adapters are published to Hex (tracked
+  in #471), and the note now explains why a pure git dependency
+  also does not work (each adapter is in a subdirectory of the
+  oaspec repo). Closes #470.
 
 ## [0.48.0] - 2026-05-04
 

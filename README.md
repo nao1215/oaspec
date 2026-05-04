@@ -288,17 +288,23 @@ HTTP runtime:
 
 > Note: `oaspec_httpc` and `oaspec_fetch` are not yet published on
 > Hex. `gleam add oaspec_httpc` / `gleam add oaspec_fetch` will fail
-> with "package not found". Until they are published, depend on them
-> from a local checkout via a path or git dependency in your
-> consumer project's `gleam.toml`:
+> with "package not found" — track #471 for Hex publication. Until
+> they are published, depend on them via a `path` dependency to a
+> local checkout of the oaspec repository in your consumer project's
+> `gleam.toml`:
 >
 > ```toml
 > [dependencies]
 > oaspec = "..."
 > oaspec_fetch = { path = "../oaspec/adapters/fetch" }
-> # or
-> # oaspec_fetch = { git = "https://github.com/nao1215/oaspec.git", subpath = "adapters/fetch" }
 > ```
+>
+> A pure `git = "..."` dependency is not a workaround here: each
+> adapter lives in a subdirectory of the oaspec repo (`adapters/httpc/`,
+> `adapters/fetch/`), and Gleam's `gleam.toml` parser does not support
+> a `subpath` field on git dependencies as of Gleam 1.16, so the build
+> tool cannot locate the adapter's `gleam.toml` inside the larger
+> repository.
 >
 > See [`examples/petstore_client_fetch/gleam.toml`](./examples/petstore_client_fetch/gleam.toml)
 > for the canonical path-dependency layout used in the bundled examples.
