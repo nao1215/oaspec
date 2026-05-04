@@ -430,12 +430,16 @@ fn misplaced_src_error(field: String, path: String) -> ConfigError {
 
 fn path_has_misplaced_src(path: String, package_segment_count: Int) -> Bool {
   let parent_segments = drop_last_n(path_segments(path), package_segment_count)
+  let earlier_parents = drop_last_n(parent_segments, 1)
   case list.last(parent_segments) {
     // 'src' is the immediate parent of the package's top-level
-    // directory — correct shape.
-    Ok("src") -> False
+    // directory. Still a foot-gun if `src` ALSO appears earlier in
+    // the parent chain (e.g. `./src/foo/src/<pkg>`), because Gleam
+    // resolves imports against the outermost `src/` and the inner
+    // copy ends up baked into the module path.
+    Ok("src") -> list.any(earlier_parents, fn(s) { s == "src" })
     // No parent segment, or some other parent: foot-gun iff 'src'
-    // appears anywhere earlier in the path.
+    // appears anywhere in the parent chain.
     _ -> list.any(parent_segments, fn(s) { s == "src" })
   }
 }

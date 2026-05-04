@@ -51,6 +51,10 @@ pub fn config_output_paths_test() {
   let _ = support.config_nested_package_layout_under_src_accepted_case()
   let _ = support.config_nested_package_layout_under_src_subdir_rejected_case()
   let _ = support.config_nested_package_layout_outside_src_accepted_case()
+  let _ = support.config_nested_package_three_segments_match_case()
+  let _ = support.config_nested_package_trailing_slash_match_case()
+  let _ =
+    support.config_output_dir_double_src_with_immediate_parent_rejected_case()
 }
 
 pub fn content_type_helpers_test() {
