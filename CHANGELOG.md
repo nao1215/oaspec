@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-05-04
+
 ### Documentation
 
 - **codegen**: clarified the four `panic as { ... }` sites in
