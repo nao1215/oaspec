@@ -689,6 +689,96 @@ rm -rf "$DEF_DIR"
 info "Issue #483 default response status integration test passed."
 
 # -------------------------------------------------------
+# Step 10d: Issue #485 — `application/octet-stream` request body
+# now surfaces as `body: BitArray` on both client and server
+# request types. The router signature also switches to
+# `body: BitArray` when any operation declares octet-stream,
+# with non-binary arms shadowing the param via
+# `bit_array.to_string`. Compile a generated server + client
+# end-to-end with `--warnings-as-errors`.
+# -------------------------------------------------------
+info "Testing Issue #485 octet-stream request body code generation..."
+
+OCT_DIR="$SCRIPT_DIR/octet_stream_test"
+rm -rf "$OCT_DIR"
+mkdir -p "$OCT_DIR/src"
+
+cat > "$OCT_DIR/oaspec-octet.yaml" << 'YAML_EOF'
+input: test/fixtures/server_octet_stream_request_body.yaml
+output:
+  dir: ./integration_test/octet_stream_test/src
+package: api
+mode: both
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate --config="$OCT_DIR/oaspec-octet.yaml"
+
+cat > "$OCT_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
+import api/request_types
+import api/response_types
+import api/types
+
+pub type State {
+  State
+}
+
+pub fn ingest_binary_webhook(
+  state: State,
+  req: request_types.IngestBinaryWebhookRequest,
+) -> response_types.IngestBinaryWebhookResponse {
+  let _ = state
+  let _ = req
+  response_types.IngestBinaryWebhookResponseNoContent
+}
+
+pub fn create_artifact(
+  state: State,
+  req: request_types.CreateArtifactRequest,
+) -> response_types.CreateArtifactResponse {
+  let _ = state
+  let _ = req
+  let _: types.CreateArtifactRequest = req.body
+  response_types.CreateArtifactResponseCreated(types.CreateArtifactResponseCreated(id: "abc"))
+}
+GLEAM_EOF
+
+cat > "$OCT_DIR/gleam.toml" << 'TOML_EOF'
+name = "octet_stream_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+oaspec = { path = "../.." }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$OCT_DIR/src/octet_stream_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$OCT_DIR"
+gleam deps download
+
+if gleam build --warnings-as-errors; then
+  info "PASS: Generated octet-stream request body code compiles (#485)."
+else
+  fail "Generated octet-stream request body code failed to compile (#485 regression)."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$OCT_DIR"
+
+info "Issue #485 octet-stream request body integration test passed."
+
+# -------------------------------------------------------
 # Step 11: Generate callback spec and verify it compiles
 # -------------------------------------------------------
 info "Testing callback handler code generation..."

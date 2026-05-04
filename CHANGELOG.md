@@ -12,6 +12,30 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Breaking
 
+- **codegen(octet-stream)**: an `application/octet-stream` request
+  body field now surfaces as `body: BitArray` on both server and
+  client request types instead of `body: String`. The README's
+  Mode-Specific Support table promised `BitArray`, the client
+  wraps it in `transport.BytesBody` (which expects `BitArray`),
+  and forcing it through `String` meant arbitrary binary payloads
+  could not round-trip without going through
+  `bit_array.to_string |> result.unwrap("")`, which silently
+  drops non-UTF-8 bytes. The client autogen `let body =
+  transport.BytesBody(body)` previously failed `gleam check` with
+  a type mismatch. Specs that declare octet-stream on any
+  operation also see the server router signature change from
+  `body: String` to `body: BitArray`; non-binary arms shadow the
+  parameter with the String conversion at the top of each arm so
+  the rest of the codegen template is unchanged. Specs without
+  any binary request body keep the existing `body: String`
+  signature. **Migration**: server adapters for specs with
+  octet-stream pass `mist.read_body(...).body` (a `BitArray`)
+  straight to `oas_router.route(...)` without the lossy
+  `bit_array.to_string` step; client callers pass
+  `BitArray` instead of `String` for binary bodies. (#485)
+
+### Breaking
+
 - **codegen(default-response)**: the generated `XxxResponseDefault`
   variant now carries a runtime `Int` status code as its first
   positional field, so handlers can pick any 4xx/5xx for the

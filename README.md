@@ -35,7 +35,7 @@ stops with a diagnostic instead of emitting partial code.
   types
 - Keep unsupported spec shapes explicit and testable
 - Backed by 353 unit tests, ShellSpec CLI tests, 40 integration compile tests,
-  and 260 test fixtures (including 98 OSS-derived edge-case specs)
+  and 261 test fixtures (including 98 OSS-derived edge-case specs)
 
 API reference: <https://hexdocs.pm/oaspec/>
 
@@ -404,6 +404,16 @@ response type. Because the router is pure and synchronous, it is also
 trivial to test in isolation without an HTTP server — see
 [`examples/server_adapter`](./examples/server_adapter) for a
 framework-free runnable example.
+
+> **Note:** if any operation in your spec declares
+> `application/octet-stream` on its request body, the generated
+> router signature is `body: BitArray` (not `String`) so arbitrary
+> binary payloads round-trip without going through
+> `bit_array.to_string`. In that case drop the
+> `|> bit_array.to_string |> result.unwrap("")` step from the
+> snippet above and pass `mist.read_body(...).body` directly to
+> `oas_router.route(...)`. The router internally converts to String
+> for the non-binary arms. (#485)
 
 ## Configuration
 

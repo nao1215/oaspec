@@ -9,6 +9,7 @@ import oaspec/internal/codegen/schema_dispatch
 import oaspec/internal/openapi/dedup
 import oaspec/internal/openapi/schema.{Inline, Reference}
 import oaspec/internal/openapi/spec.{type Resolved, ParameterSchema, Value}
+import oaspec/internal/util/content_type
 import oaspec/internal/util/naming
 import oaspec/internal/util/string_extra as se
 
@@ -213,22 +214,33 @@ pub fn to_str_for_optional_value(
 }
 
 /// Get the Gleam type for a request body parameter.
+///
+/// Issue #485: an `application/octet-stream` request body is raw
+/// bytes — the README's mode-specific table promises `BitArray`,
+/// the client wraps it in `transport.BytesBody` (which expects
+/// `BitArray`), and forcing it through `String` means arbitrary
+/// binary payloads cannot round-trip. The `String` fallback for
+/// every other content type stays unchanged.
 pub fn get_body_type(rb: spec.RequestBody(Resolved), op_id: String) -> String {
   let content_entries = ir_build.sorted_entries(rb.content)
   case content_entries {
     // Multiple content types: use pre-serialized String
     [_, _, ..] -> "String"
-    [#(_, media_type)] ->
-      case media_type.schema {
-        Some(Reference(name:, ..)) ->
-          "types." <> naming.schema_to_type_name(name)
-        Some(Inline(schema.StringSchema(..))) -> "String"
-        Some(Inline(schema.IntegerSchema(..))) -> "Int"
-        Some(Inline(schema.NumberSchema(..))) -> "Float"
-        Some(Inline(schema.BooleanSchema(..))) -> "Bool"
-        Some(Inline(_)) ->
-          "types." <> naming.schema_to_type_name(op_id) <> "RequestBody"
-        _ -> "String"
+    [#(media_type_name, media_type)] ->
+      case content_type.from_string(media_type_name) {
+        content_type.ApplicationOctetStream -> "BitArray"
+        _ ->
+          case media_type.schema {
+            Some(Reference(name:, ..)) ->
+              "types." <> naming.schema_to_type_name(name)
+            Some(Inline(schema.StringSchema(..))) -> "String"
+            Some(Inline(schema.IntegerSchema(..))) -> "Int"
+            Some(Inline(schema.NumberSchema(..))) -> "Float"
+            Some(Inline(schema.BooleanSchema(..))) -> "Bool"
+            Some(Inline(_)) ->
+              "types." <> naming.schema_to_type_name(op_id) <> "RequestBody"
+            _ -> "String"
+          }
       }
     [] -> "String"
   }

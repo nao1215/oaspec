@@ -328,7 +328,18 @@ String.",
       <> route_arg_name("headers", requirements.uses_headers)
       <> ": Dict(String, String), "
       <> route_arg_name("body", requirements.uses_body)
-      <> ": String) -> ServerResponse {",
+      <> case requirements.has_binary_request_body {
+        // Issue #485: when any operation declares
+        // `application/octet-stream` on its request body, the
+        // router signature takes raw bytes instead of String so
+        // arbitrary binary payloads round-trip without going
+        // through `bit_array.to_string`. Non-binary route arms
+        // shadow the parameter with a String conversion at the
+        // top of each arm so the rest of the codegen template
+        // is unchanged.
+        True -> ": BitArray) -> ServerResponse {"
+        False -> ": String) -> ServerResponse {"
+      },
     )
     |> se.indent(1, "case method, path {")
 
@@ -343,8 +354,29 @@ String.",
         !list.is_empty(operation.parameters)
         || option.is_some(operation.request_body)
 
-      sb
-      |> se.indent(2, "\"" <> method_str <> "\", " <> path_pattern <> " -> {")
+      // Issue #485: when the route signature is `body: BitArray`
+      // (because some other operation in this spec declares
+      // `application/octet-stream`), every non-binary arm needs to
+      // shadow `body` with the String conversion at the top so the
+      // existing per-content-type decoding code can keep treating
+      // `body` as a String. Binary arms use `body` directly.
+      let arm_sb =
+        sb
+        |> se.indent(2, "\"" <> method_str <> "\", " <> path_pattern <> " -> {")
+      let arm_sb = case
+        requirements.has_binary_request_body,
+        option.is_some(operation.request_body),
+        decode_helpers.operation_uses_octet_stream_body(operation)
+      {
+        True, True, False ->
+          arm_sb
+          |> se.indent(
+            3,
+            "let body = bit_array.to_string(body) |> result.unwrap(\"\")",
+          )
+        _, _, _ -> arm_sb
+      }
+      arm_sb
       |> generate_route_body(op_id, fn_name, operation, path, has_params, ctx)
       |> se.indent(2, "}")
     })

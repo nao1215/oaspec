@@ -21,6 +21,8 @@ pub type RouterRequirements {
     has_deep_object_untyped_ap: Bool,
     has_form_urlencoded_body: Bool,
     has_multipart_body: Bool,
+    has_binary_request_body: Bool,
+    needs_bit_array_import: Bool,
     has_nested_form_urlencoded_body: Bool,
     needs_int: Bool,
     needs_float: Bool,
@@ -109,6 +111,28 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       decode_helpers.operation_uses_multipart_body(operation)
+    })
+  // Issue #485: when any operation declares
+  // `application/octet-stream` on its request body, the route
+  // function takes `body: BitArray` instead of `body: String` so
+  // arbitrary binary payloads round-trip without being forced
+  // through `bit_array.to_string`. Specs without any binary
+  // request body keep the existing `body: String` signature.
+  let has_binary_request_body =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      decode_helpers.operation_uses_octet_stream_body(operation)
+    })
+  // The route arms shadow `body` with the String conversion
+  // only for non-binary arms that actually have a request body.
+  // The `bit_array` / `result` imports are needed iff at least
+  // one such arm exists alongside a binary one.
+  let needs_bit_array_import =
+    has_binary_request_body
+    && list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      option.is_some(operation.request_body)
+      && !decode_helpers.operation_uses_octet_stream_body(operation)
     })
   let has_nested_form_urlencoded_body =
     list.any(operations, fn(op) {
@@ -354,6 +378,8 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
     has_deep_object_untyped_ap: has_deep_object_untyped_ap,
     has_form_urlencoded_body: has_form_urlencoded_body,
     has_multipart_body: has_multipart_body,
+    has_binary_request_body: has_binary_request_body,
+    needs_bit_array_import: needs_bit_array_import,
     has_nested_form_urlencoded_body: has_nested_form_urlencoded_body,
     needs_int: needs_int,
     needs_float: needs_float,
@@ -415,6 +441,16 @@ pub fn imports(requirements: RouterRequirements, ctx: Context) -> List(String) {
   }
   let std_imports = case requirements.has_deep_object_untyped_ap {
     True -> list.append(std_imports, ["gleam/dynamic"])
+    False -> std_imports
+  }
+  // Issue #485: when the route signature is `body: BitArray`
+  // and at least one non-binary arm exists, every non-binary
+  // arm shadows `body` with
+  // `bit_array.to_string(body) |> result.unwrap("")`, so both
+  // `gleam/bit_array` and `gleam/result` need to be imported.
+  // Pure-binary specs skip the imports to avoid unused warnings.
+  let std_imports = case requirements.needs_bit_array_import {
+    True -> list.append(std_imports, ["gleam/bit_array", "gleam/result"])
     False -> std_imports
   }
 

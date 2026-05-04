@@ -734,6 +734,14 @@ pub fn request_body_uses_multipart(rb: spec.RequestBody(Resolved)) -> Bool {
   dict.has_key(rb.content, "multipart/form-data")
 }
 
+/// Issue #485: an `application/octet-stream` request body is raw
+/// bytes, so the router takes `body: BitArray` instead of
+/// `body: String`. The single-arm dispatch (no other content types
+/// allowed alongside binary) is enforced by the validator.
+fn request_body_uses_octet_stream(rb: spec.RequestBody(Resolved)) -> Bool {
+  dict.has_key(rb.content, "application/octet-stream")
+}
+
 pub fn operation_uses_form_urlencoded_body(
   operation: spec.Operation(Resolved),
 ) -> Bool {
@@ -748,6 +756,15 @@ pub fn operation_uses_multipart_body(
 ) -> Bool {
   case operation.request_body {
     Some(Value(rb)) -> request_body_uses_multipart(rb)
+    _ -> False
+  }
+}
+
+pub fn operation_uses_octet_stream_body(
+  operation: spec.Operation(Resolved),
+) -> Bool {
+  case operation.request_body {
+    Some(Value(rb)) -> request_body_uses_octet_stream(rb)
     _ -> False
   }
 }
