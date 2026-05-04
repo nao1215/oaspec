@@ -313,8 +313,7 @@ fn parse_root(
   let tags = parse_tags(node)
   let external_docs = parse_optional_external_docs(node)
   let json_schema_dialect =
-    yay.extract_optional_string(node, "jsonSchemaDialect")
-    |> result.unwrap(None)
+    parser_value.optional_string(node, "jsonSchemaDialect")
 
   Ok(OpenApiSpec(
     openapi:,
@@ -410,17 +409,12 @@ fn parse_info(root: yay.Node, index: LocationIndex) -> Result(Info, Diagnostic) 
     )),
   )
 
-  let description =
-    yay.extract_optional_string(info_node, "description")
-    |> result.unwrap(None)
+  let description = parser_value.optional_string(info_node, "description")
 
-  let summary =
-    yay.extract_optional_string(info_node, "summary")
-    |> result.unwrap(None)
+  let summary = parser_value.optional_string(info_node, "summary")
 
   let terms_of_service =
-    yay.extract_optional_string(info_node, "termsOfService")
-    |> result.unwrap(None)
+    parser_value.optional_string(info_node, "termsOfService")
 
   let contact = parse_optional_contact(info_node)
   let license = parse_optional_license(info_node)
@@ -463,9 +457,7 @@ fn parse_server(
     )),
   )
 
-  let description =
-    yay.extract_optional_string(node, "description")
-    |> result.unwrap(None)
+  let description = parser_value.optional_string(node, "description")
 
   let variables = parse_server_variables(node)
 
@@ -489,10 +481,7 @@ fn parse_paths(
               False -> {
                 // Check for $ref first — resolve from components.pathItems
                 use ref_or_path_item <- result.try(
-                  case
-                    yay.extract_optional_string(value_node, "$ref")
-                    |> result.unwrap(None)
-                  {
+                  case parser_value.optional_string(value_node, "$ref") {
                     Some(ref_str) -> Ok(Ref(ref_str))
                     None -> {
                       use pi <- result.try(parse_path_item(
@@ -523,13 +512,9 @@ fn parse_path_item(
   components: Option(Components(Unresolved)),
   index: LocationIndex,
 ) -> Result(PathItem(Unresolved), Diagnostic) {
-  let summary =
-    yay.extract_optional_string(node, "summary")
-    |> result.unwrap(None)
+  let summary = parser_value.optional_string(node, "summary")
 
-  let description =
-    yay.extract_optional_string(node, "description")
-    |> result.unwrap(None)
+  let description = parser_value.optional_string(node, "description")
 
   // Operations are optional, but if present must parse correctly.
   use get <- result.try(parse_optional_operation(
@@ -657,27 +642,18 @@ fn parse_operation(
   components: Option(Components(Unresolved)),
   index: LocationIndex,
 ) -> Result(Operation(Unresolved), Diagnostic) {
-  let operation_id =
-    yay.extract_optional_string(node, "operationId")
-    |> result.unwrap(None)
+  let operation_id = parser_value.optional_string(node, "operationId")
 
-  let summary =
-    yay.extract_optional_string(node, "summary")
-    |> result.unwrap(None)
+  let summary = parser_value.optional_string(node, "summary")
 
-  let description =
-    yay.extract_optional_string(node, "description")
-    |> result.unwrap(None)
+  let description = parser_value.optional_string(node, "description")
 
   let tags = case yay.extract_string_list(node, "tags") {
     Ok(t) -> t
     _ -> []
   }
 
-  let deprecated =
-    yay.extract_optional_bool(node, "deprecated")
-    |> result.unwrap(None)
-    |> option.unwrap(False)
+  let deprecated = parser_value.bool_default(node, "deprecated", False)
 
   use parameters <- result.try(parse_parameters_list(node, components, index))
 
@@ -800,13 +776,9 @@ fn parse_parameter(
 
       use in_ <- result.try(parse_parameter_in(in_str, index))
 
-      let description =
-        yay.extract_optional_string(node, "description")
-        |> result.unwrap(None)
+      let description = parser_value.optional_string(node, "description")
 
-      let explicit_required =
-        yay.extract_optional_bool(node, "required")
-        |> result.unwrap(None)
+      let explicit_required = parser_value.optional_bool(node, "required")
 
       // OpenAPI 3.x: path parameters MUST have required: true
       use required <- result.try(case in_, explicit_required {
@@ -821,10 +793,7 @@ fn parse_parameter(
         _, None -> Ok(False)
       })
 
-      let deprecated =
-        yay.extract_optional_bool(node, "deprecated")
-        |> result.unwrap(None)
-        |> option.unwrap(False)
+      let deprecated = parser_value.bool_default(node, "deprecated", False)
 
       use param_schema <- result.try(
         case yay.select_sugar(from: node, selector: "schema") {
@@ -840,27 +809,18 @@ fn parse_parameter(
         },
       )
 
-      use style <- result.try(
-        case
-          yay.extract_optional_string(node, "style")
-          |> result.unwrap(None)
-        {
-          Some(s) -> {
-            use parsed <- result.try(parse_parameter_style(s, index))
-            Ok(Some(parsed))
-          }
-          None -> Ok(None)
-        },
-      )
+      use style <- result.try(case parser_value.optional_string(node, "style") {
+        Some(s) -> {
+          use parsed <- result.try(parse_parameter_style(s, index))
+          Ok(Some(parsed))
+        }
+        None -> Ok(None)
+      })
 
-      let explode =
-        yay.extract_optional_bool(node, "explode")
-        |> result.unwrap(None)
+      let explode = parser_value.optional_bool(node, "explode")
 
       let allow_reserved =
-        yay.extract_optional_bool(node, "allowReserved")
-        |> result.unwrap(None)
-        |> option.unwrap(False)
+        parser_value.bool_default(node, "allowReserved", False)
 
       use content <- result.try(parse_content_map(node, index))
       let examples = parser_value.extract_map(node, "examples")
@@ -987,14 +947,9 @@ fn parse_request_body(
   context: String,
   index: LocationIndex,
 ) -> Result(RequestBody(Unresolved), Diagnostic) {
-  let description =
-    yay.extract_optional_string(node, "description")
-    |> result.unwrap(None)
+  let description = parser_value.optional_string(node, "description")
 
-  let required =
-    yay.extract_optional_bool(node, "required")
-    |> result.unwrap(None)
-    |> option.unwrap(False)
+  let required = parser_value.bool_default(node, "required", False)
 
   // content is REQUIRED per OpenAPI spec
   use content <- result.try(parse_required_content(node, context, index))
@@ -1519,22 +1474,16 @@ fn parse_security_scheme(
           ),
         )),
       )
-      let bearer_format =
-        yay.extract_optional_string(node, "bearerFormat")
-        |> result.unwrap(None)
+      let bearer_format = parser_value.optional_string(node, "bearerFormat")
       Ok(spec.HttpScheme(scheme:, bearer_format:))
     }
     "oauth2" -> {
-      let description =
-        yay.extract_optional_string(node, "description")
-        |> result.unwrap(None)
+      let description = parser_value.optional_string(node, "description")
       let flows = parse_oauth2_flows(node)
       Ok(spec.OAuth2Scheme(description:, flows:))
     }
     "openIdConnect" -> {
-      let description =
-        yay.extract_optional_string(node, "description")
-        |> result.unwrap(None)
+      let description = parser_value.optional_string(node, "description")
       use open_id_connect_url <- result.try(
         yay.extract_string(node, "openIdConnectUrl")
         |> result.map_error(parser_yay_error.missing_field_from_extraction(
@@ -1566,14 +1515,10 @@ fn parse_oauth2_flows(node: yay.Node) -> dict.Dict(String, spec.OAuth2Flow) {
         case key_node {
           yay.NodeStr(flow_name) -> {
             let authorization_url =
-              yay.extract_optional_string(flow_node, "authorizationUrl")
-              |> result.unwrap(None)
-            let token_url =
-              yay.extract_optional_string(flow_node, "tokenUrl")
-              |> result.unwrap(None)
+              parser_value.optional_string(flow_node, "authorizationUrl")
+            let token_url = parser_value.optional_string(flow_node, "tokenUrl")
             let refresh_url =
-              yay.extract_optional_string(flow_node, "refreshUrl")
-              |> result.unwrap(None)
+              parser_value.optional_string(flow_node, "refreshUrl")
             let scopes = case
               yay.select_sugar(from: flow_node, selector: "scopes")
             {
@@ -1775,10 +1720,7 @@ fn parse_callback_object(
           case key_node {
             yay.NodeStr(url_expression) -> {
               // Check for $ref first — preserve as Ref for resolve phase
-              case
-                yay.extract_optional_string(path_item_node, "$ref")
-                |> result.unwrap(None)
-              {
+              case parser_value.optional_string(path_item_node, "$ref") {
                 Some(ref_str) -> Ok([#(url_expression, Ref(ref_str)), ..acc])
                 None -> {
                   use path_item <- result.try(parse_path_item(
@@ -1826,15 +1768,9 @@ fn parse_callback_object(
 fn parse_optional_contact(info_node: yay.Node) -> Option(Contact) {
   case yay.select_sugar(from: info_node, selector: "contact") {
     Ok(contact_node) -> {
-      let name =
-        yay.extract_optional_string(contact_node, "name")
-        |> result.unwrap(None)
-      let url =
-        yay.extract_optional_string(contact_node, "url")
-        |> result.unwrap(None)
-      let email =
-        yay.extract_optional_string(contact_node, "email")
-        |> result.unwrap(None)
+      let name = parser_value.optional_string(contact_node, "name")
+      let url = parser_value.optional_string(contact_node, "url")
+      let email = parser_value.optional_string(contact_node, "email")
       Some(Contact(name:, url:, email:))
     }
     _ -> None
@@ -1847,9 +1783,7 @@ fn parse_optional_license(info_node: yay.Node) -> Option(License) {
     Ok(license_node) -> {
       case yay.extract_string(license_node, "name") {
         Ok(name) -> {
-          let url =
-            yay.extract_optional_string(license_node, "url")
-            |> result.unwrap(None)
+          let url = parser_value.optional_string(license_node, "url")
           Some(License(name:, url:))
         }
         _ -> None
@@ -1867,17 +1801,13 @@ fn parse_server_variables(node: yay.Node) -> Dict(String, ServerVariable) {
         let #(key_node, value_node) = entry
         case key_node {
           yay.NodeStr(var_name) -> {
-            let default =
-              yay.extract_optional_string(value_node, "default")
-              |> result.unwrap(None)
-              |> option.unwrap("")
+            let default = parser_value.string_default(value_node, "default", "")
             let enum_values = case yay.extract_string_list(value_node, "enum") {
               Ok(values) -> values
               _ -> []
             }
             let description =
-              yay.extract_optional_string(value_node, "description")
-              |> result.unwrap(None)
+              parser_value.optional_string(value_node, "description")
             dict.insert(
               acc,
               var_name,
@@ -1898,8 +1828,7 @@ fn parse_optional_external_docs(node: yay.Node) -> Option(ExternalDoc) {
       case yay.extract_string(doc_node, "url") {
         Ok(url) -> {
           let description =
-            yay.extract_optional_string(doc_node, "description")
-            |> result.unwrap(None)
+            parser_value.optional_string(doc_node, "description")
           Some(ExternalDoc(url:, description:))
         }
         _ -> None
@@ -1917,8 +1846,7 @@ fn parse_tags(node: yay.Node) -> List(Tag) {
         case yay.extract_string(tag_node, "name") {
           Ok(name) -> {
             let description =
-              yay.extract_optional_string(tag_node, "description")
-              |> result.unwrap(None)
+              parser_value.optional_string(tag_node, "description")
             let external_docs = parse_optional_external_docs(tag_node)
             Ok(Tag(name:, description:, external_docs:))
           }
@@ -1942,10 +1870,7 @@ fn parse_webhooks(
         case key_node {
           yay.NodeStr(name) -> {
             // Check for $ref first — preserve as Ref for resolve phase
-            case
-              yay.extract_optional_string(value_node, "$ref")
-              |> result.unwrap(None)
-            {
+            case parser_value.optional_string(value_node, "$ref") {
               Some(ref_str) -> Ok(dict.insert(acc, name, Ref(ref_str)))
               None -> {
                 use path_item <- result.try(parse_path_item(
@@ -2024,13 +1949,9 @@ fn parse_encoding_map(
         case key_node {
           yay.NodeStr(prop_name) -> {
             let content_type =
-              yay.extract_optional_string(value_node, "contentType")
-              |> result.unwrap(None)
+              parser_value.optional_string(value_node, "contentType")
             use style <- result.try(
-              case
-                yay.extract_optional_string(value_node, "style")
-                |> result.unwrap(None)
-              {
+              case parser_value.optional_string(value_node, "style") {
                 Some(s) -> {
                   use parsed <- result.try(parse_parameter_style(s, index))
                   Ok(Some(parsed))
@@ -2038,9 +1959,7 @@ fn parse_encoding_map(
                 None -> Ok(None)
               },
             )
-            let explode =
-              yay.extract_optional_bool(value_node, "explode")
-              |> result.unwrap(None)
+            let explode = parser_value.optional_bool(value_node, "explode")
             Ok(dict.insert(
               acc,
               prop_name,
@@ -2066,12 +1985,9 @@ fn parse_headers_map(
         case key_node {
           yay.NodeStr(header_name) -> {
             let description =
-              yay.extract_optional_string(value_node, "description")
-              |> result.unwrap(None)
+              parser_value.optional_string(value_node, "description")
             let required =
-              yay.extract_optional_bool(value_node, "required")
-              |> result.unwrap(None)
-              |> option.unwrap(False)
+              parser_value.bool_default(value_node, "required", False)
             use hdr_schema <- result.try(
               case yay.select_sugar(from: value_node, selector: "schema") {
                 Ok(schema_node) -> {
@@ -2107,11 +2023,9 @@ fn parse_links_map(node: yay.Node) -> Result(Dict(String, Link), Diagnostic) {
         case key_node {
           yay.NodeStr(link_name) -> {
             let operation_id =
-              yay.extract_optional_string(value_node, "operationId")
-              |> result.unwrap(None)
+              parser_value.optional_string(value_node, "operationId")
             let description =
-              yay.extract_optional_string(value_node, "description")
-              |> result.unwrap(None)
+              parser_value.optional_string(value_node, "description")
             Ok(dict.insert(acc, link_name, Link(operation_id:, description:)))
           }
           _ -> Ok(acc)

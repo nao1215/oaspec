@@ -48,10 +48,8 @@ pub fn extract_optional(node: yay.Node, key: String) -> Option(JsonValue) {
 }
 
 /// Extract an optional bool, collapsing yay's
-/// `Result(Option(Bool), _)` into a plain `Option(Bool)`. Used by
-/// `bool_default` below — kept private until a defaulted-only caller
-/// genuinely needs `Option(Bool)` outside the helper module.
-fn optional_bool(node: yay.Node, key: String) -> Option(Bool) {
+/// `Result(Option(Bool), _)` into a plain `Option(Bool)`.
+pub fn optional_bool(node: yay.Node, key: String) -> Option(Bool) {
   case yay.extract_optional_bool(node, key) {
     Ok(value) -> value
     // nolint: thrown_away_error -- yay extractor errors collapse to "absent" for these helpers; the explicit Diagnostic surface is a separate concern handled elsewhere
