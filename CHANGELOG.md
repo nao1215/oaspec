@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-05-04
+
 ### Fixed
 
 - **codegen(decoders)**: a schema declared as
