@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-05-04
+
 ### Changed
 
 - **codegen**: introduced three severity / target shortcut builders
