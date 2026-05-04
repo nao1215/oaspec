@@ -31,6 +31,25 @@ within `Changed` / `Fixed` and stay as-is.
   also does not work (each adapter is in a subdirectory of the
   oaspec repo). Closes #470.
 
+### Added
+
+- **release(adapters)**: dedicated tag-driven publishing
+  workflows for `oaspec_httpc` and `oaspec_fetch`. Tag patterns
+  `oaspec_httpc-v*` and `oaspec_fetch-v*` trigger
+  `.github/workflows/release-adapter-httpc.yml` and
+  `.github/workflows/release-adapter-fetch.yml` respectively;
+  each rewrites the adapter's parent `oaspec = { path = "../.." }`
+  dep to a Hex version constraint floored at the current
+  root-`gleam.toml` version (`>= X.Y.Z and < 1.0.0`) before
+  invoking `gleam publish`, so consumers can `gleam add
+  oaspec_httpc` / `gleam add oaspec_fetch` after any successful
+  adapter release. Decoupling the adapter tag pattern from the
+  main `v*` tag means oaspec releases and adapter releases can
+  cut on independent cadences and avoid `gleam publish` rejecting
+  a re-published version. The README's adapter section now
+  describes the new flow and keeps the path-dep workaround for the
+  interim before the first adapter tag is pushed. Closes #471.
+
 ## [0.48.0] - 2026-05-04
 
 ### Added
