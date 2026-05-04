@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-05-04
+
 ### Added
 
 - **diagnostics**: capability-check errors now carry a YAML
