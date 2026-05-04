@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-05-04
+
 ### Performance
 
 - parser: finished migrating `openapi/parser.gleam` (~40 sites) onto the
