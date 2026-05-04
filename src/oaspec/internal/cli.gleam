@@ -315,6 +315,7 @@ fn print_resolved_paths(config_path: String, cfg: config.Config) -> Nil {
         io.println("  " <> label <> ": " <> path)
       })
     }
+    // nolint: thrown_away_error -- path printing is best-effort; if the cwd cannot be read we silently skip rather than abort generation.
     Error(_) -> Nil
   }
 }
