@@ -54,7 +54,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
         _ -> False
       }
     })
-  let needs_float =
+  let needs_float_param =
     list.any(all_params, fn(p) {
       case p.payload {
         ParameterSchema(Inline(schema.NumberSchema(..))) -> True
@@ -226,8 +226,49 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     || has_optional_response_headers
     || any_operation_has_no_server(ctx)
 
+  // Issue #387: typed response headers (`type: integer`, `type: number`)
+  // are extracted via `int.parse` / `float.parse`, so we must import
+  // those modules whenever any operation declares such a header.
+  let has_int_response_header =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(dict.to_list(operation.responses), fn(entry) {
+        let #(_, ref_or) = entry
+        case ref_or {
+          Value(response) ->
+            list.any(dict.to_list(response.headers), fn(h_entry) {
+              let #(_, header) = h_entry
+              case header.schema {
+                Some(Inline(schema.IntegerSchema(..))) -> True
+                _ -> False
+              }
+            })
+          _ -> False
+        }
+      })
+    })
+  let has_float_response_header =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(dict.to_list(operation.responses), fn(entry) {
+        let #(_, ref_or) = entry
+        case ref_or {
+          Value(response) ->
+            list.any(dict.to_list(response.headers), fn(h_entry) {
+              let #(_, header) = h_entry
+              case header.schema {
+                Some(Inline(schema.NumberSchema(..))) -> True
+                _ -> False
+              }
+            })
+          _ -> False
+        }
+      })
+    })
+
   let needs_int =
-    list.any(all_params, fn(p) {
+    has_int_response_header
+    || list.any(all_params, fn(p) {
       case p.payload {
         ParameterSchema(Inline(schema.IntegerSchema(..))) -> True
         ParameterSchema(Inline(schema.ArraySchema(
@@ -244,6 +285,8 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
         _ -> False
       }
     })
+
+  let needs_float = needs_float_param || has_float_response_header
 
   let needs_bytes_helper =
     list.any(operations, fn(op) {

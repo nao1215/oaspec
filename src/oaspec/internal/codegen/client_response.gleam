@@ -3,12 +3,30 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/internal/codegen/context.{type Context}
-import oaspec/internal/openapi/schema.{Inline, Reference}
+import oaspec/internal/openapi/schema.{
+  type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema, BooleanSchema, Inline,
+  IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema, Reference,
+  StringSchema,
+}
 import oaspec/internal/openapi/spec.{type Resolved}
 import oaspec/internal/util/content_type
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
 import oaspec/internal/util/string_extra as se
+
+/// Issue #387: assembled response-headers record. Tracks both the
+/// pre-statements (let bindings or `use` chains that extract each
+/// header field from `resp.headers`) and the final constructor
+/// expression that references those bound names.
+///
+/// Required headers and parse-required typed headers (Int / Float /
+/// Bool) emit `use ... <- result.try(...)` so a missing or
+/// unparseable header short-circuits with
+/// `Error(InvalidResponse(detail: ...))`. Optional headers emit a
+/// plain `let`, defaulting to `None` when the lookup or parse fails.
+pub type HeadersRecord {
+  HeadersRecord(pre_statements: List(String), record_expr: String)
+}
 
 /// Generate response handling for a single content type. Emits a branch
 /// of the `case resp.status { ... }` ladder inside a generated
@@ -26,51 +44,25 @@ pub fn generate_single_content_response(
   media_type: spec.MediaType,
   op_id: String,
   ctx: Context,
-  headers_record_expr: Option(String),
+  headers: Option(HeadersRecord),
 ) -> se.StringBuilder {
   case content_type.from_string(media_type_name) {
     content_type.ApplicationOctetStream ->
       case media_type.schema {
         Some(_) ->
-          sb
-          |> se.indent(
-            2,
-            http.status_code_to_int_pattern(status_code) <> " -> {",
-          )
-          |> se.indent(3, "use bytes <- result.try(bytes_body(resp.body))")
-          |> se.indent(
-            3,
-            "Ok("
-              <> variant_name
-              <> "("
-              <> append_headers_arg("bytes", headers_record_expr)
-              <> "))",
-          )
-          |> se.indent(2, "}")
-        _ ->
-          empty_body_branch(sb, status_code, variant_name, headers_record_expr)
+          body_branch(sb, status_code, variant_name, "bytes", headers, fn(sb) {
+            se.indent(sb, 3, "use bytes <- result.try(bytes_body(resp.body))")
+          })
+        _ -> empty_body_branch(sb, status_code, variant_name, headers)
       }
 
     content_type.TextPlain | content_type.ApplicationXml | content_type.TextXml ->
       case media_type.schema {
         Some(_) ->
-          sb
-          |> se.indent(
-            2,
-            http.status_code_to_int_pattern(status_code) <> " -> {",
-          )
-          |> se.indent(3, "use text <- result.try(text_body(resp.body))")
-          |> se.indent(
-            3,
-            "Ok("
-              <> variant_name
-              <> "("
-              <> append_headers_arg("text", headers_record_expr)
-              <> "))",
-          )
-          |> se.indent(2, "}")
-        _ ->
-          empty_body_branch(sb, status_code, variant_name, headers_record_expr)
+          body_branch(sb, status_code, variant_name, "text", headers, fn(sb) {
+            se.indent(sb, 3, "use text <- result.try(text_body(resp.body))")
+          })
+        _ -> empty_body_branch(sb, status_code, variant_name, headers)
       }
 
     _ ->
@@ -78,19 +70,22 @@ pub fn generate_single_content_response(
         Some(schema_ref) -> {
           let decode_expr =
             get_response_decode_expr(schema_ref, op_id, status_code, ctx)
+          let sb =
+            sb
+            |> se.indent(
+              2,
+              http.status_code_to_int_pattern(status_code) <> " -> {",
+            )
+            |> se.indent(3, "use text <- result.try(text_body(resp.body))")
+            |> emit_pre_statements(headers)
           sb
-          |> se.indent(
-            2,
-            http.status_code_to_int_pattern(status_code) <> " -> {",
-          )
-          |> se.indent(3, "use text <- result.try(text_body(resp.body))")
           |> se.indent(3, "case " <> decode_expr <> " {")
           |> se.indent(
             4,
             "Ok(decoded) -> Ok("
               <> variant_name
               <> "("
-              <> append_headers_arg("decoded", headers_record_expr)
+              <> append_headers_arg("decoded", headers)
               <> "))",
           )
           |> se.indent(
@@ -100,38 +95,120 @@ pub fn generate_single_content_response(
           |> se.indent(3, "}")
           |> se.indent(2, "}")
         }
-        _ ->
-          empty_body_branch(sb, status_code, variant_name, headers_record_expr)
+        _ -> empty_body_branch(sb, status_code, variant_name, headers)
       }
   }
 }
 
+/// Common branch shape for content branches that extract a body
+/// value (`text` / `bytes`) directly into the variant constructor
+/// without an intervening decoder. The `extract_body` callback emits
+/// the `use <body> <- ...` line; the rest is reused across binary
+/// and text/xml branches.
+fn body_branch(
+  sb: se.StringBuilder,
+  status_code: http.HttpStatusCode,
+  variant_name: String,
+  body_arg: String,
+  headers: Option(HeadersRecord),
+  extract_body: fn(se.StringBuilder) -> se.StringBuilder,
+) -> se.StringBuilder {
+  sb
+  |> se.indent(2, http.status_code_to_int_pattern(status_code) <> " -> {")
+  |> extract_body
+  |> emit_pre_statements(headers)
+  |> se.indent(
+    3,
+    "Ok("
+      <> variant_name
+      <> "("
+      <> append_headers_arg(body_arg, headers)
+      <> "))",
+  )
+  |> se.indent(2, "}")
+}
+
 /// Issue #387: shared empty-body branch for status entries that have
 /// no schema (e.g. 204 No Content) but may still carry a typed
-/// headers record.
+/// headers record. Emits a single-line `<status> -> Ok(...)` when the
+/// headers record has no pre-statements, or a multi-line block when
+/// any required header forces a `use` chain.
 fn empty_body_branch(
   sb: se.StringBuilder,
   status_code: http.HttpStatusCode,
   variant_name: String,
-  headers_record_expr: Option(String),
+  headers: Option(HeadersRecord),
 ) -> se.StringBuilder {
-  let ok_call = case headers_record_expr {
-    Some(expr) -> " -> Ok(" <> variant_name <> "(" <> expr <> "))"
-    None -> " -> Ok(" <> variant_name <> ")"
+  case headers {
+    Some(HeadersRecord(pre_statements: [_, ..], record_expr: expr)) ->
+      sb
+      |> se.indent(2, http.status_code_to_int_pattern(status_code) <> " -> {")
+      |> emit_pre_statements(headers)
+      |> se.indent(3, "Ok(" <> variant_name <> "(" <> expr <> "))")
+      |> se.indent(2, "}")
+    Some(HeadersRecord(record_expr: expr, ..)) ->
+      sb
+      |> se.indent(
+        2,
+        http.status_code_to_int_pattern(status_code)
+          <> " -> Ok("
+          <> variant_name
+          <> "("
+          <> expr
+          <> "))",
+      )
+    None ->
+      sb
+      |> se.indent(
+        2,
+        http.status_code_to_int_pattern(status_code)
+          <> " -> Ok("
+          <> variant_name
+          <> ")",
+      )
   }
-  sb
-  |> se.indent(2, http.status_code_to_int_pattern(status_code) <> ok_call)
+}
+
+/// Emit each header pre-statement at the appropriate indentation
+/// level (3, inside the per-status block). No-op when the response
+/// declares no headers.
+fn emit_pre_statements(
+  sb: se.StringBuilder,
+  headers: Option(HeadersRecord),
+) -> se.StringBuilder {
+  case headers {
+    Some(HeadersRecord(pre_statements: stmts, ..)) ->
+      list.fold(stmts, sb, fn(acc, line) { se.indent(acc, 3, line) })
+    None -> sb
+  }
 }
 
 /// Issue #387: when a response declares headers, the variant
 /// constructor takes the body value followed by the typed headers
 /// record. This helper appends the headers expression to a body
 /// argument so callers do not need to know whether headers exist.
-fn append_headers_arg(body_arg: String, headers: Option(String)) -> String {
+fn append_headers_arg(
+  body_arg: String,
+  headers: Option(HeadersRecord),
+) -> String {
   case headers {
-    Some(expr) -> body_arg <> ", " <> expr
+    Some(HeadersRecord(record_expr: expr, ..)) -> body_arg <> ", " <> expr
     None -> body_arg
   }
+}
+
+/// Generate the per-status branch for responses that declare no
+/// `content` entries (e.g. 204 No Content, or anywhere the spec uses
+/// just `description:` and optional `headers:`). When typed headers
+/// are present this still emits the headers extraction; otherwise
+/// it collapses to a single `<status> -> Ok(<Variant>)` line.
+pub fn generate_empty_content_response(
+  sb: se.StringBuilder,
+  status_code: http.HttpStatusCode,
+  variant_name: String,
+  headers: Option(HeadersRecord),
+) -> se.StringBuilder {
+  empty_body_branch(sb, status_code, variant_name, headers)
 }
 
 /// Generate response handling for multiple content types. Multi-content
@@ -144,53 +221,37 @@ pub fn generate_multi_content_response(
   _content_entries: List(#(String, spec.MediaType)),
   _op_id: String,
   _ctx: Context,
-  headers_record_expr: Option(String),
+  headers: Option(HeadersRecord),
 ) -> se.StringBuilder {
-  sb
-  |> se.indent(2, http.status_code_to_int_pattern(status_code) <> " -> {")
-  |> se.indent(3, "use text <- result.try(text_body(resp.body))")
-  |> se.indent(
-    3,
-    "Ok("
-      <> variant_name
-      <> "("
-      <> append_headers_arg("text", headers_record_expr)
-      <> "))",
-  )
-  |> se.indent(2, "}")
+  body_branch(sb, status_code, variant_name, "text", headers, fn(sb) {
+    se.indent(sb, 3, "use text <- result.try(text_body(resp.body))")
+  })
 }
 
-/// Issue #387: build the typed-headers-record constructor expression
-/// for a response, or `None` if the response declares no headers.
+/// Issue #387: build the typed-headers record for a response, or
+/// `None` if the response declares no headers. Returns a
+/// `HeadersRecord` carrying both the per-field extraction
+/// pre-statements and the final constructor expression that
+/// references the bound names.
 ///
-/// The emitted expression references `resp.headers` (a
-/// `List(#(String, String))` from `oaspec/transport`) and constructs
-/// the `<Op>Response<Status>Headers` record using whatever fields
-/// the spec declares. HTTP header names are looked up case-
-/// insensitively by lowercasing the spec-declared name; that matches
-/// what `gleam/list.key_find` is given to compare against.
+/// Header type plumbing (no longer scoped down to "String only"):
+///   - Optional + String → `let <fn> = list.key_find(...) |> result.map(Some) |> result.unwrap(None)`
+///   - Required + String → `use <fn> <- result.try(list.key_find(...) |> result.map_error(...))`
+///   - Optional + Int / Float → same as String, plus `result.try(int.parse)` / `result.try(float.parse)`
+///   - Required + Int / Float → use chain that errors on missing OR unparseable values
+///   - Optional + Bool   → case match for "true" / "false" (anything else → None)
+///   - Required + Bool   → case match wrapped in `use ... <- result.try(...)`
 ///
-/// Field-type handling (current scope):
-///   - optional headers (`required: false` or omitted) →
-///     `list.key_find(...) |> result.map(Some) |> result.unwrap(None)`,
-///     producing `Option(String)`.
-///   - required headers (`required: true`) →
-///     `result.unwrap(list.key_find(...), "")`, producing `String`
-///     with an empty-string fallback when the upstream server omits
-///     the header. The server is in violation of its own contract in
-///     that case; treating it as "" is safer than panicking inside a
-///     generated client.
-///
-/// Typed headers beyond String (Int / Float / Bool / `$ref` schemas)
-/// would require parsers or component decoders here. Real specs
-/// rarely declare typed response headers, so the minimal fix lets
-/// the typical case (String / Option(String)) compile and reach the
-/// caller; broader typing is left to a follow-up.
-pub fn build_headers_record_expr(
+/// `$ref`-typed response headers (`schema: $ref: ...`) and complex
+/// inline shapes (Object / Array / allOf / oneOf / anyOf) are
+/// rejected at generation time with a clear `panic` so the user
+/// sees the gap explicitly rather than getting a cryptic compile
+/// error in the generated module.
+pub fn build_headers_record(
   op_id: String,
   status_code: http.HttpStatusCode,
   response: spec.Response(Resolved),
-) -> Option(String) {
+) -> Option(HeadersRecord) {
   let headers =
     response.headers
     |> dict.to_list
@@ -208,18 +269,153 @@ pub fn build_headers_record_expr(
         list.map(headers, fn(entry) {
           let #(header_name, header) = entry
           let field_name = naming.to_snake_case(header_name)
-          let lookup = header_lookup_expr(header_name)
-          // `header.required` is the OAS-required flag; `False` (the
-          // OAS default) maps to `Option(_)` in the generated record.
-          let value_expr = case header.required {
-            False -> lookup <> " |> result.map(Some) |> result.unwrap(None)"
-            True -> "result.unwrap(" <> lookup <> ", \"\")"
-          }
-          field_name <> ": " <> value_expr
+          let pre_statement =
+            header_field_extraction(field_name, header_name, header)
+          #(field_name, pre_statement)
         })
-      Some(record_name <> "(" <> string.join(fields, ", ") <> ")")
+      let pre_statements = list.map(fields, fn(p) { p.1 })
+      let assignments = list.map(fields, fn(p) { p.0 <> ": " <> p.0 })
+      Some(HeadersRecord(
+        pre_statements: pre_statements,
+        record_expr: record_name <> "(" <> string.join(assignments, ", ") <> ")",
+      ))
     }
   }
+}
+
+/// Classification of a response header's schema, restricted to
+/// shapes the client extractor can produce code for. Anything
+/// outside this set falls back to a codegen-time panic via
+/// `header_field_extraction`.
+type HeaderFieldType {
+  StringHeader
+  IntHeader
+  FloatHeader
+  BoolHeader
+}
+
+fn classify_header_schema(
+  schema_opt: Option(SchemaRef),
+  header_name: String,
+) -> HeaderFieldType {
+  case schema_opt {
+    None -> StringHeader
+    Some(Inline(StringSchema(..))) -> StringHeader
+    Some(Inline(IntegerSchema(..))) -> IntHeader
+    Some(Inline(NumberSchema(..))) -> FloatHeader
+    Some(Inline(BooleanSchema(..))) -> BoolHeader
+    Some(Reference(name:, ..)) ->
+      panic as response_header_unsupported(
+          header_name,
+          "$ref to component schema '" <> name <> "'",
+        )
+    Some(Inline(ObjectSchema(..))) ->
+      panic as response_header_unsupported(header_name, "inline object schema")
+    Some(Inline(ArraySchema(..))) ->
+      panic as response_header_unsupported(header_name, "inline array schema")
+    Some(Inline(AllOfSchema(..))) ->
+      panic as response_header_unsupported(header_name, "allOf composition")
+    Some(Inline(OneOfSchema(..))) ->
+      panic as response_header_unsupported(header_name, "oneOf composition")
+    Some(Inline(AnyOfSchema(..))) ->
+      panic as response_header_unsupported(header_name, "anyOf composition")
+  }
+}
+
+fn response_header_unsupported(header_name: String, kind: String) -> String {
+  "Cannot generate client extractor for response header '"
+  <> header_name
+  <> "' (unsupported schema: "
+  <> kind
+  <> "). Supported shapes today are inline String / Int / Float / Bool. "
+  <> "File a follow-up to oaspec issue #387 if you need typed extraction "
+  <> "for this header."
+}
+
+fn header_field_extraction(
+  field_name: String,
+  header_name: String,
+  header: spec.Header,
+) -> String {
+  let lookup = header_lookup_expr(header_name)
+  let kind = classify_header_schema(header.schema, header_name)
+  case header.required, kind {
+    False, StringHeader ->
+      "let "
+      <> field_name
+      <> " = "
+      <> lookup
+      <> " |> result.map(Some) |> result.unwrap(None)"
+    True, StringHeader ->
+      "use "
+      <> field_name
+      <> " <- result.try("
+      <> lookup
+      <> " |> result.map_error(fn(_) { "
+      <> missing_required_error(header_name, "string")
+      <> " }))"
+    False, IntHeader ->
+      "let "
+      <> field_name
+      <> " = "
+      <> lookup
+      <> " |> result.try(int.parse) |> result.map(Some) |> result.unwrap(None)"
+    True, IntHeader ->
+      "use "
+      <> field_name
+      <> " <- result.try("
+      <> lookup
+      <> " |> result.try(int.parse) |> result.map_error(fn(_) { "
+      <> missing_required_error(header_name, "integer")
+      <> " }))"
+    False, FloatHeader ->
+      "let "
+      <> field_name
+      <> " = "
+      <> lookup
+      <> " |> result.try(float.parse) |> result.map(Some) |> result.unwrap(None)"
+    True, FloatHeader ->
+      "use "
+      <> field_name
+      <> " <- result.try("
+      <> lookup
+      <> " |> result.try(float.parse) |> result.map_error(fn(_) { "
+      <> missing_required_error(header_name, "number")
+      <> " }))"
+    False, BoolHeader ->
+      "let "
+      <> field_name
+      <> " = case "
+      <> lookup
+      <> " { Ok(\"true\") -> Some(True) Ok(\"false\") -> Some(False) _ -> None }"
+    True, BoolHeader ->
+      "use "
+      <> field_name
+      <> " <- result.try(case "
+      <> lookup
+      <> " { Ok(\"true\") -> Ok(True) Ok(\"false\") -> Ok(False) _ -> Error("
+      <> missing_required_error_inner(header_name, "boolean")
+      <> ") })"
+  }
+}
+
+fn missing_required_error(header_name: String, kind: String) -> String {
+  "InvalidResponse(detail: \"missing or invalid required "
+  <> kind
+  <> " header: "
+  <> header_name
+  <> "\")"
+}
+
+fn missing_required_error_inner(header_name: String, kind: String) -> String {
+  // Same payload as `missing_required_error/2` but built without the
+  // outer `fn(_) { ... }` wrapper, used inside an inline
+  // `case ... { ... -> Error(...) }` branch.
+  "InvalidResponse(detail: \"missing or invalid required "
+  <> kind
+  <> " header: "
+  <> header_name
+  <> "\")"
 }
 
 fn header_lookup_expr(header_name: String) -> String {

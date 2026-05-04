@@ -34,10 +34,46 @@ paths:
         '200':
           description: List of items, paginated via Link header.
           headers:
+            # Optional String header — bug #5 (no client construction
+            # of headers record). Most common shape in real specs.
             Link:
               description: Pagination cursor.
               schema:
                 type: string
+            # Required String header — exercises the
+            # `use ... <- result.try(...)` short-circuit path that
+            # replaces the silent empty-string fallback.
+            X-Request-Id:
+              description: Server-supplied request id, always present.
+              required: true
+              schema:
+                type: string
+            # Optional Int header — exercises typed primitive
+            # parsing via `int.parse`. Real-world example:
+            # GitHub's `X-RateLimit-Remaining`.
+            X-RateLimit-Remaining:
+              description: Remaining requests in the current window.
+              schema:
+                type: integer
+            # Required Int header — same path as the optional Int
+            # header but errors on missing/unparseable values.
+            X-Total-Count:
+              description: Total item count across all pages.
+              required: true
+              schema:
+                type: integer
+            # Optional Float header — covers `float.parse` on the
+            # extractor side.
+            X-Response-Time-Seconds:
+              description: Server-side processing time in seconds.
+              schema:
+                type: number
+            # Optional Bool header — covers the case-match
+            # extraction (no parser; "true"/"false" only).
+            X-Cache-Hit:
+              description: Whether the response was served from cache.
+              schema:
+                type: boolean
           content:
             application/json:
               schema:
