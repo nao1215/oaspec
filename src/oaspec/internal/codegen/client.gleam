@@ -451,16 +451,29 @@ fn generate_client_function(
             <> "Response"
             <> http.status_code_suffix(status_code)
           let content_entries = ir_build.sorted_entries(response.content)
+          // Issue #387: when the response declares headers, the
+          // response variant constructor takes an extra typed headers
+          // record. Build the constructor expression here and thread
+          // it through to every variant-emitting branch so they pass
+          // both `decoded` and `headers` in the right order.
+          let headers_record_expr =
+            client_response.build_headers_record_expr(
+              op_id,
+              status_code,
+              response,
+            )
           case content_entries {
-            [] ->
+            [] -> {
+              let ok_call = case headers_record_expr {
+                Some(expr) -> " -> Ok(" <> variant_name <> "(" <> expr <> "))"
+                None -> " -> Ok(" <> variant_name <> ")"
+              }
               sb
               |> se.indent(
                 2,
-                http.status_code_to_int_pattern(status_code)
-                  <> " -> Ok("
-                  <> variant_name
-                  <> ")",
+                http.status_code_to_int_pattern(status_code) <> ok_call,
               )
+            }
             [#(single_ct, single_mt)] ->
               client_response.generate_single_content_response(
                 sb,
@@ -470,6 +483,7 @@ fn generate_client_function(
                 single_mt,
                 op_id,
                 ctx,
+                headers_record_expr,
               )
             multiple ->
               client_response.generate_multi_content_response(
@@ -479,6 +493,7 @@ fn generate_client_function(
                 multiple,
                 op_id,
                 ctx,
+                headers_record_expr,
               )
           }
         }

@@ -1,0 +1,125 @@
+openapi: 3.0.3
+info:
+  title: Complex response shapes (Issue #387 regression fixture)
+  version: 1.0.0
+  description: |
+    Pinned subset of GitHub-API-shaped patterns that previously
+    produced uncompilable client code (#387). Each path / schema
+    targets one of the five generator bugs surfaced when generating
+    a client from the GitHub OpenAPI document:
+
+    1. anyOf of primitives — used to call missing
+       `decode_<x>_decoder` helpers.
+    2. inline string-enum + nullable — used to lose its `Option(...)`
+       wrapper in `types.gleam` while the decoder/encoder still
+       expected one.
+    3. nullable top-level array (oneOf branch with array + nullable)
+       — used to emit `decode.Decoder(List(T))` against an
+       `Option(List(T))` type alias and a bare `json.array(...)`
+       encoder against an `Option(List(T))` parameter.
+    4. decoders generated bare `Option(...)` types without importing
+       `type Option`.
+    5. responses declaring `headers:` — used to widen the variant
+       constructor arity but the client never passed the headers
+       record.
+
+    Keep this fixture minimal; if a future spec shape breaks
+    something this one already covers, prefer adding a paragraph
+    here over inflating the spec.
+paths:
+  /items:
+    get:
+      operationId: listItems
+      responses:
+        '200':
+          description: List of items, paginated via Link header.
+          headers:
+            Link:
+              description: Pagination cursor.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Item'
+        '422':
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+    patch:
+      operationId: updateItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                state_reason:
+                  description: Optional nullable inline string-enum (bug #2).
+                  type: string
+                  nullable: true
+                  enum:
+                    - completed
+                    - reopened
+                    - cancelled
+                value:
+                  description: Optional nullable inline anyOf-of-primitives (bug #1).
+                  anyOf:
+                    - type: string
+                    - type: integer
+                    - type: number
+                  nullable: true
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Item'
+
+components:
+  schemas:
+    Item:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        nickname:
+          type: string
+          nullable: true
+
+    ValidationError:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              # nullable variant inside oneOf — bug #3 + bug #4 trigger
+              value:
+                oneOf:
+                  - type: string
+                    nullable: true
+                  - type: integer
+                    nullable: true
+                  - type: array
+                    nullable: true
+                    items:
+                      type: string

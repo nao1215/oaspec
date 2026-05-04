@@ -1905,4 +1905,70 @@ rm -rf "$CONST_DIR"
 
 info "Issue #309 constant-property integration tests passed."
 
+# -------------------------------------------------------
+# Step N: Issue #387 — GitHub-API-shaped client compiles
+# -------------------------------------------------------
+# Pinned subset of GitHub-style schema patterns that previously
+# produced uncompilable client code. Five distinct generator bugs
+# surfaced together when halostatue ran oaspec against a trimmed
+# GitHub OpenAPI document; each is now exercised by
+# `test/fixtures/issue_387_complex_response_shapes.yaml`. If a
+# future change re-breaks any of:
+#   - anyOf-of-primitives variant decoder names
+#   - inline string-enum + nullable type wrapping
+#   - nullable top-level array decoder/encoder Option wrapping
+#   - bare `Option(...)` use in decode.gleam / encode.gleam without
+#     a `type Option` import
+#   - response-headers variant arity in client.gleam
+# this step fails before the regression escapes to users.
+info "Testing complex response shapes spec (Issue #387 regression)..."
+
+COMPLEX_SHAPES_DIR="$SCRIPT_DIR/complex_shapes_test"
+rm -rf "$COMPLEX_SHAPES_DIR"
+mkdir -p "$COMPLEX_SHAPES_DIR/src"
+
+cat > "$COMPLEX_SHAPES_DIR/oaspec-complex-shapes.yaml" << 'YAML_EOF'
+input: test/fixtures/issue_387_complex_response_shapes.yaml
+output:
+  client: ./integration_test/complex_shapes_test/src/api
+package: api
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$COMPLEX_SHAPES_DIR/oaspec-complex-shapes.yaml" \
+  --mode=client
+
+cat > "$COMPLEX_SHAPES_DIR/gleam.toml" << 'TOML_EOF'
+name = "complex_shapes_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+oaspec = { path = "../.." }
+TOML_EOF
+
+cat > "$COMPLEX_SHAPES_DIR/src/complex_shapes_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$COMPLEX_SHAPES_DIR"
+gleam deps download
+
+if gleam build --warnings-as-errors 2>&1; then
+  info "PASS: Issue #387 regression — generated client compiles cleanly."
+else
+  fail "Issue #387 regression — generated client failed to compile."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$COMPLEX_SHAPES_DIR"
+
+info "Issue #387 complex response shapes integration tests passed."
+
 info "All integration tests passed!"

@@ -99,9 +99,43 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
       }
     })
 
+  // Issue #387: when any response declares `headers:`, the client
+  // assembles a typed headers record by calling `list.key_find` on
+  // `resp.headers`. That makes `gleam/list` mandatory and (for any
+  // optional header field) brings `Some`/`None` into the body of the
+  // function. Track both signals here so the import builder picks up
+  // the right shapes.
+  let has_response_headers =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(dict.to_list(operation.responses), fn(entry) {
+        let #(_, ref_or) = entry
+        case ref_or {
+          Value(response) -> dict.size(response.headers) > 0
+          _ -> False
+        }
+      })
+    })
+  let has_optional_response_headers =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(dict.to_list(operation.responses), fn(entry) {
+        let #(_, ref_or) = entry
+        case ref_or {
+          Value(response) ->
+            list.any(dict.to_list(response.headers), fn(h_entry) {
+              let #(_, header) = h_entry
+              !header.required
+            })
+          _ -> False
+        }
+      })
+    })
+
   let needs_list =
     has_form_urlencoded
     || has_multi_content_response
+    || has_response_headers
     || list.any(all_params, fn(p) { p.in_ == spec.InQuery })
     || list.any(all_params, fn(p) { p.in_ == spec.InCookie })
     || list.any(all_params, fn(p) { p.in_ == spec.InHeader })
@@ -175,11 +209,22 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
 
   let needs_typed_schemas =
     import_analysis.operations_need_typed_schemas(operations)
+  // `needs_option_type` represents the bare `Option(...)` type
+  // appearing in client function SIGNATURES. Optional response
+  // headers do not surface in signatures (only as `Some`/`None`
+  // constructors inside function bodies), so they are not added
+  // here — Issue #387.
   let needs_option_type =
     import_analysis.operations_have_optional_params(operations)
     || import_analysis.operations_have_optional_body(operations)
-  let needs_some_ctor = needs_option_type || any_operation_has_server(ctx)
-  let needs_none_ctor = needs_option_type || any_operation_has_no_server(ctx)
+  let needs_some_ctor =
+    needs_option_type
+    || has_optional_response_headers
+    || any_operation_has_server(ctx)
+  let needs_none_ctor =
+    needs_option_type
+    || has_optional_response_headers
+    || any_operation_has_no_server(ctx)
 
   let needs_int =
     list.any(all_params, fn(p) {

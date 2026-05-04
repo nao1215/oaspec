@@ -12,7 +12,7 @@ stops with a diagnostic instead of emitting partial code.
   types
 - Keep unsupported spec shapes explicit and testable
 - Backed by 336 unit tests, ShellSpec CLI tests, 40 integration compile tests,
-  and 251 test fixtures (including 98 OSS-derived edge-case specs)
+  and 252 test fixtures (including 98 OSS-derived edge-case specs)
 
 ## Install
 
