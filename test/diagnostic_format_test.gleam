@@ -89,7 +89,9 @@ pub fn to_string_missing_field_includes_pointer_and_hint_test() {
   // Phase + severity + pointer + message + hint must all appear.
   rendered |> string.contains("[Parse] Error") |> should.be_true()
   rendered |> string.contains("at components.schemas.Pet") |> should.be_true()
-  rendered |> string.contains("Missing required field: type") |> should.be_true()
+  rendered
+  |> string.contains("Missing required field: type")
+  |> should.be_true()
   rendered
   |> string.contains("Check your OpenAPI spec structure.")
   |> should.be_true()
