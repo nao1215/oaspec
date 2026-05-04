@@ -9,6 +9,7 @@ pub fn parser_smoke_test() {
   let _ = support.parse_json_string_preserves_required_array_order_case()
   let _ = support.parse_json_string_handles_many_paths_case()
   let _ = support.parse_json_string_rejects_malformed_case()
+  let _ = support.parse_json_string_malformed_has_diagnostic_shape_case()
   let _ = support.parse_file_dispatches_json_path_for_json_extension_case()
   let _ = support.oss_oai_petstore_expanded_yaml_and_json_agree_case()
   let _ = support.oss_oai_petstore_expanded_yaml_path_count_pinned_case()

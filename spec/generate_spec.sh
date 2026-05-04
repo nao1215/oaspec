@@ -74,6 +74,54 @@ Describe 'oaspec generate'
       The status should be failure
       The output should include 'Error'
     End
+
+    # Issue #398: a spec with parse-level breakage (`error_missing_info.yaml`
+    # has no `info:` key, which the parser requires) must surface as a
+    # non-zero exit with a diagnostic, not as silent success or a panic.
+    It 'exits non-zero when the spec fails to parse'
+      setup_missing_info_config() {
+        rm -rf "$PROJECT_ROOT/test_missing_info"
+        cat > "$PROJECT_ROOT/test_missing_info.yaml" <<EOF
+input: test/fixtures/error_missing_info.yaml
+package: api
+output:
+  dir: ./test_missing_info
+EOF
+      }
+      cleanup_missing_info_config() {
+        rm -rf "$PROJECT_ROOT/test_missing_info" "$PROJECT_ROOT/test_missing_info.yaml"
+      }
+      setup_missing_info_config
+      When run generate --config=./test_missing_info.yaml
+      The status should be failure
+      The output should include 'Error'
+      cleanup_missing_info_config
+    End
+  End
+
+  Describe '--output flag (Issue #433)'
+    setup_output_flag_dir() {
+      rm -rf "$PROJECT_ROOT/test_output_flag_eq" "$PROJECT_ROOT/test_output_flag_sp"
+    }
+    cleanup_output_flag_dir() {
+      rm -rf "$PROJECT_ROOT/test_output_flag_eq" "$PROJECT_ROOT/test_output_flag_sp"
+    }
+    Before 'setup_output_flag_dir'
+    After 'cleanup_output_flag_dir'
+
+    It 'writes generated files under --output=DIR'
+      When run generate --config=test/fixtures/oaspec.yaml --output=./test_output_flag_eq
+      The status should be success
+      The output should include 'Successfully generated'
+      The path "$PROJECT_ROOT/test_output_flag_eq" should be directory
+    End
+
+    It 'writes generated files under --output DIR (space form)'
+      When run generate --config=test/fixtures/oaspec.yaml --output ./test_output_flag_sp
+      The status should be success
+      The output should include 'Successfully generated'
+      The path "$PROJECT_ROOT/test_output_flag_sp" should be directory
+    End
   End
 
   Describe 'successful generation'
@@ -527,6 +575,97 @@ Describe 'oaspec validate'
       The status should be failure
       The output should include 'Error'
     End
+
+    # Issue #399: validate must exit non-zero when the spec fails to
+    # parse (no info field). Without this, a regression that swallowed
+    # parse errors and returned 0 would defeat validate's CI value.
+    It 'exits non-zero when the underlying spec fails to parse'
+      setup_validate_missing_info_config() {
+        cat > "$PROJECT_ROOT/test_validate_missing_info.yaml" <<EOF
+input: test/fixtures/error_missing_info.yaml
+package: api
+output:
+  dir: ./test_validate_missing_info
+EOF
+      }
+      cleanup_validate_missing_info_config() {
+        rm -f "$PROJECT_ROOT/test_validate_missing_info.yaml"
+      }
+      setup_validate_missing_info_config
+      When run validate_spec --config=./test_validate_missing_info.yaml
+      The status should be failure
+      The output should include 'Error'
+      cleanup_validate_missing_info_config
+    End
+
+    # Issue #399: --mode=client must be accepted on the CLI surface.
+    # Whether the fixture ultimately passes depends on the spec; the
+    # test pins that the flag is parsed (no usage error) and the CLI
+    # produces typed output instead of crashing.
+    It 'accepts the --mode=client override flag without crashing'
+      When run validate_spec --config=test/fixtures/oaspec.yaml --mode=client
+      The status should be success
+      The output should include 'Validation passed'
+    End
+  End
+End
+
+# ===================================================================
+# Issue #400: oaspec init subcommand
+# ===================================================================
+#
+# Pin the init subcommand's three documented behaviors:
+# default-output write, --output PATH override, and overwrite refusal.
+
+Describe 'oaspec init'
+  Include "$SHELLSPEC_SPECDIR/spec_helper.sh"
+
+  setup_init_dir() {
+    rm -rf "$PROJECT_ROOT/test_init_dir"
+    mkdir -p "$PROJECT_ROOT/test_init_dir"
+  }
+
+  cleanup_init_dir() {
+    rm -rf "$PROJECT_ROOT/test_init_dir"
+  }
+
+  init_default_output() {
+    ( cd "$PROJECT_ROOT/test_init_dir" \
+      && gleam run --no-print-progress -- init )
+  }
+
+  init_with_output_path() {
+    ( cd "$PROJECT_ROOT/test_init_dir" \
+      && gleam run --no-print-progress -- init --output=./custom.yaml )
+  }
+
+  init_twice() {
+    ( cd "$PROJECT_ROOT/test_init_dir" \
+      && gleam run --no-print-progress -- init > /dev/null \
+      && gleam run --no-print-progress -- init )
+  }
+
+  Before 'setup_init_dir'
+  After 'cleanup_init_dir'
+
+  It 'writes ./oaspec.yaml by default and reports the path'
+    When run init_default_output
+    The status should be success
+    The output should include 'Created'
+    The path "$PROJECT_ROOT/test_init_dir/oaspec.yaml" should be file
+  End
+
+  It 'writes to the location given via --output=PATH'
+    When run init_with_output_path
+    The status should be success
+    The output should include 'Created'
+    The path "$PROJECT_ROOT/test_init_dir/custom.yaml" should be file
+  End
+
+  It 'refuses to overwrite an existing target'
+    When run init_twice
+    The status should be failure
+    The stderr should include 'already exists'
   End
 End
 
