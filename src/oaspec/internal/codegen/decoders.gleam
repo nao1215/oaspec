@@ -5,13 +5,13 @@ import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/config
 import oaspec/internal/codegen/allof_merge
+import oaspec/internal/codegen/codec_helpers
 import oaspec/internal/codegen/context.{
   type Context, type GeneratedFile, GeneratedFile,
 }
 import oaspec/internal/codegen/ir_build
 import oaspec/internal/codegen/schema_dispatch
 import oaspec/internal/codegen/schema_utils
-import oaspec/internal/codegen/types as type_gen
 import oaspec/internal/openapi/dedup
 import oaspec/internal/openapi/resolver
 import oaspec/internal/openapi/schema.{
@@ -49,7 +49,7 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
 /// Generate JSON decoders for all component schemas and anonymous types.
 fn generate_decoders(
   ctx: Context,
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> String {
   let schemas = case context.spec(ctx).components {
     Some(components) ->
@@ -63,7 +63,7 @@ fn generate_decoders(
   let needs_option =
     list.any(schemas, fn(entry) {
       let #(_, schema_ref) = entry
-      type_gen.schema_has_optional_fields(schema_ref, ctx)
+      schema_utils.schema_has_optional_fields(schema_ref, ctx)
     })
 
   // Check if dict module is needed (any schema with typed/untyped
@@ -78,13 +78,19 @@ fn generate_decoders(
   let component_needs_dict =
     list.any(schemas, fn(entry) {
       let #(_, schema_ref) = entry
-      type_gen.schema_has_additional_properties(schema_ref, ctx)
-      || type_gen.schema_has_forbidden_additional_properties(schema_ref, ctx)
+      schema_utils.schema_has_additional_properties(schema_ref, ctx)
+      || schema_utils.schema_has_forbidden_additional_properties(
+        schema_ref,
+        ctx,
+      )
     })
   let operation_needs_dict =
     list.any(operation_inline_schemas, fn(schema_ref) {
-      type_gen.schema_has_additional_properties(schema_ref, ctx)
-      || type_gen.schema_has_forbidden_additional_properties(schema_ref, ctx)
+      schema_utils.schema_has_additional_properties(schema_ref, ctx)
+      || schema_utils.schema_has_forbidden_additional_properties(
+        schema_ref,
+        ctx,
+      )
     })
   let needs_dict = component_needs_dict || operation_needs_dict
 
@@ -94,10 +100,10 @@ fn generate_decoders(
   let needs_strict_oneof_runtime =
     list.any(schemas, fn(entry) {
       let #(_, schema_ref) = entry
-      type_gen.schema_has_non_discriminator_oneof(schema_ref, ctx)
+      schema_utils.schema_has_non_discriminator_oneof(schema_ref, ctx)
     })
     || list.any(operation_inline_schemas, fn(schema_ref) {
-      type_gen.schema_has_non_discriminator_oneof(schema_ref, ctx)
+      schema_utils.schema_has_non_discriminator_oneof(schema_ref, ctx)
     })
 
   // Check if types module is needed (any non-primitive schema)
@@ -139,7 +145,7 @@ fn generate_decoders(
   let needs_bare_option_type =
     list.any(schemas, fn(entry) {
       let #(_, schema_ref) = entry
-      schema_ref_has_bare_option_decoder_type(schema_ref)
+      codec_helpers.schema_ref_has_bare_option_type(schema_ref)
     })
   let imports = case needs_option, needs_bare_option_type {
     True, True -> list.append(base_imports, ["gleam/option.{type Option}"])
@@ -184,7 +190,7 @@ fn generate_decoders(
 fn generate_anonymous_decoders(
   sb: se.StringBuilder,
   ctx: Context,
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> se.StringBuilder {
   list.fold(operations, sb, fn(sb, op) {
     let #(op_id, operation, _path, _method) = op
@@ -212,7 +218,7 @@ fn generate_anonymous_response_decoders(
               Some(Inline(schema_obj)) -> {
                 // Filter out writeOnly properties from response decoders
                 let filtered_schema =
-                  type_gen.filter_write_only_properties(schema_obj, ctx)
+                  schema_utils.filter_write_only_properties(schema_obj, ctx)
                 let suffix = "Response" <> http.status_code_suffix(status_code)
                 generate_anonymous_schema_decoder(
                   sb,
@@ -248,7 +254,7 @@ fn generate_anonymous_request_body_decoder(
             Some(Inline(schema_obj)) -> {
               // Filter out readOnly properties from request body decoders
               let filtered_schema =
-                type_gen.filter_read_only_properties(schema_obj, ctx)
+                schema_utils.filter_read_only_properties(schema_obj, ctx)
               generate_anonymous_schema_decoder(
                 sb,
                 op_id,
@@ -273,7 +279,7 @@ fn generate_anonymous_request_body_decoder(
 /// leave `gleam/dict` un-imported when the body of the generated decoder
 /// references it.
 fn collect_operation_inline_schemas(
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> List(SchemaRef) {
   list.flat_map(operations, fn(op) {
     let #(_op_id, operation, _path, _method) = op
@@ -404,7 +410,7 @@ fn generate_decoder(
       )
 
     Inline(AllOfSchema(metadata:, schemas:)) -> {
-      let merged = type_gen.merge_allof_schemas(schemas, ctx)
+      let merged = allof_merge.merge_allof_schemas(schemas, ctx)
       let merged_schema =
         Inline(ObjectSchema(
           metadata:,
@@ -541,10 +547,14 @@ fn generate_object_decoder(
     list.index_fold(props, sb, fn(sb, entry, idx) {
       let #(prop_name, prop_ref) = entry
       let field_name =
-        list_at_or(deduped_names, idx, naming.to_snake_case(prop_name))
+        codec_helpers.list_at_or(
+          deduped_names,
+          idx,
+          naming.to_snake_case(prop_name),
+        )
       // writeOnly fields may not appear in responses, so treat them
       // as optional even if listed in required
-      let is_write_only = type_gen.schema_ref_is_write_only(prop_ref, ctx)
+      let is_write_only = schema_utils.schema_ref_is_write_only(prop_ref, ctx)
       let is_required = list.contains(required, prop_name) && !is_write_only
       let field_decoder = schema_ref_to_decoder(prop_ref, name, prop_name)
       let is_nullable_schema =
@@ -708,7 +718,11 @@ fn generate_object_decoder(
     list.index_map(props, fn(entry, idx) {
       let #(prop_name, prop_ref) = entry
       let field_name =
-        list_at_or(deduped_names, idx, naming.to_snake_case(prop_name))
+        codec_helpers.list_at_or(
+          deduped_names,
+          idx,
+          naming.to_snake_case(prop_name),
+        )
       #(prop_name, prop_ref, field_name)
     })
     // Issue #309: constant properties are elided from the record, so
@@ -817,7 +831,11 @@ fn generate_enum_decoder(
   let sb =
     list.index_fold(enum_values, sb, fn(sb, value, idx) {
       let variant_suffix =
-        list_at_or(deduped_variants, idx, naming.to_pascal_case(value))
+        codec_helpers.list_at_or(
+          deduped_variants,
+          idx,
+          naming.to_pascal_case(value),
+        )
       let variant = naming.schema_to_type_name(type_name) <> variant_suffix
       sb
       |> se.indent(
@@ -828,7 +846,7 @@ fn generate_enum_decoder(
 
   // Unknown enum values → decode failure, not silent fallback
   let first_variant_suffix =
-    list_at_or(deduped_variants, 0, case enum_values {
+    codec_helpers.list_at_or(deduped_variants, 0, case enum_values {
       [first, ..] -> naming.to_pascal_case(first)
       [] -> "Unknown"
     })
@@ -991,7 +1009,7 @@ fn generate_array_decoder(
   ctx: Context,
 ) -> se.StringBuilder {
   let inner_decoder = schema_ref_to_decoder(items, name, "")
-  let inner_type = qualified_schema_ref_type(items, ctx)
+  let inner_type = codec_helpers.qualified_schema_ref_type(items, ctx)
   let list_type = "List(" <> inner_type <> ")"
   let list_decoder = "decode.list(" <> inner_decoder <> ")"
   let #(gleam_type, decoder_expr) = case nullable {
@@ -1369,42 +1387,6 @@ fn schema_ref_to_decoder(
   }
 }
 
-/// Get element at index from a list, or return a default.
-fn list_at_or(lst: List(String), idx: Int, default: String) -> String {
-  case lst, idx {
-    [], _ -> default
-    [head, ..], 0 -> head
-    [_, ..rest], n -> list_at_or(rest, n - 1, default)
-  }
-}
-
-/// Convert a SchemaRef to a qualified Gleam type string (with types. prefix for refs).
-fn qualified_schema_ref_type(ref: SchemaRef, ctx: Context) -> String {
-  case ref {
-    Inline(schema) -> type_gen.schema_to_gleam_type(schema, ctx)
-    _ -> schema_dispatch.schema_ref_qualified_type(ref)
-  }
-}
-
-/// Issue #387: True when the top-level decoder for this schema would
-/// emit a bare `decode.Decoder(Option(...))` annotation. That happens
-/// only for primitive / array component schemas with `nullable: true`,
-/// since those produce a top-level type alias wrapped in `Option(...)`
-/// and the matching decoder declares the same type. Object / allOf /
-/// oneOf / anyOf / enum schemas wrap any optionality through
-/// `decode.optional(...)` inside `decode.field`, so the bare `Option`
-/// type never appears in their decoder bodies.
-fn schema_ref_has_bare_option_decoder_type(ref: SchemaRef) -> Bool {
-  case ref {
-    Inline(StringSchema(metadata:, enum_values: [], ..)) -> metadata.nullable
-    Inline(IntegerSchema(metadata:, ..)) -> metadata.nullable
-    Inline(NumberSchema(metadata:, ..)) -> metadata.nullable
-    Inline(BooleanSchema(metadata:)) -> metadata.nullable
-    Inline(ArraySchema(metadata:, ..)) -> metadata.nullable
-    _ -> False
-  }
-}
-
 /// Add a doc comment if description is present.
 fn maybe_doc_comment(
   sb: se.StringBuilder,
@@ -1430,7 +1412,7 @@ fn emit_constant_field_decoder(
   prop_name: String,
   constant_value: String,
 ) -> se.StringBuilder {
-  let escaped = escape_for_string_literal(constant_value)
+  let escaped = codec_helpers.escape_for_string_literal(constant_value)
   sb
   |> se.indent(
     1,
@@ -1450,14 +1432,4 @@ fn emit_constant_field_decoder(
   )
   |> se.indent(2, "}")
   |> se.indent(1, "}))")
-}
-
-/// Escape a spec-derived string so it can be safely interpolated
-/// inside a generated Gleam string literal. Mirrors the helper in
-/// `encoders.gleam` — extracted here to keep the decoder module
-/// self-contained for issue #309.
-fn escape_for_string_literal(value: String) -> String {
-  value
-  |> string.replace(each: "\\", with: "\\\\")
-  |> string.replace(each: "\"", with: "\\\"")
 }

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **codegen**: extracted shared codec helpers
+  (`escape_for_string_literal`, `list_at_or`, `qualified_schema_ref_type`,
+  `schema_ref_has_bare_option_type`) into a new
+  `oaspec/internal/codegen/codec_helpers` module. Both `encoders.gleam`
+  and `decoders.gleam` import from there now; the prior copy-pasted
+  duplicates (and the divergent `schema_ref_has_bare_option_*_type`
+  pair) are gone. Closes the follow-up flagged in #212. (#402)
+- **codegen**: `oaspec/internal/codegen/types` is now a thin module
+  that owns only `generate/1` and its private rendering helpers. The
+  dozen passthrough re-exports (`schema_to_gleam_type`,
+  `schema_has_*`, `filter_*_properties`, `merge_allof_schemas`, …) are
+  removed; callers (`encoders`, `decoders`, `guards`, `codec_helpers`)
+  now import `schema_utils` / `schema_dispatch` / `allof_merge`
+  directly. (#419)
+- **codegen**: function signatures across `decoders`, `encoders`,
+  `ir_build`, `router_ir`, `server`, `server_request_decode`, and
+  `validate` standardise on `List(context.AnalyzedOperation)` instead
+  of the inline 4-tuple shape `List(#(String, spec.Operation(Resolved),
+  String, spec.HttpMethod))`. The `AnalyzedOperation` alias already
+  existed; this PR finishes wiring callers through it so future field
+  additions on the alias don't ripple across 19 signatures. (#421)
+
 ### Performance
 
 - **transport**: `with_default_headers` no longer rebuilds `req.headers`

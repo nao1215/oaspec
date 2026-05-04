@@ -2,11 +2,10 @@
 ////
 //// Split out of `decoders.gleam` so each module owns one direction of
 //// the codec pipeline — decoders produces `decode.gleam`, encoders
-//// produces `encode.gleam`. Shared traversal helpers (`list_at_or`,
-//// `qualified_schema_ref_type`) are intentionally duplicated rather
-//// than lifted into a third module; the helpers are small, the
-//// duplication is stable, and extracting a shared dispatch module is
-//// tracked as follow-up to #212.
+//// produces `encode.gleam`. The shared traversal helpers
+//// (`escape_for_string_literal`, `list_at_or`, `qualified_schema_ref_type`,
+//// `schema_ref_has_bare_option_type`) live in `codec_helpers.gleam` —
+//// extracted in #402 to close the follow-up flagged by #212.
 
 import gleam/bool
 import gleam/dict
@@ -15,13 +14,13 @@ import gleam/option.{None, Some}
 import gleam/string
 import oaspec/config
 import oaspec/internal/codegen/allof_merge
+import oaspec/internal/codegen/codec_helpers
 import oaspec/internal/codegen/context.{
   type Context, type GeneratedFile, GeneratedFile,
 }
 import oaspec/internal/codegen/ir_build
 import oaspec/internal/codegen/schema_dispatch
 import oaspec/internal/codegen/schema_utils
-import oaspec/internal/codegen/types as type_gen
 import oaspec/internal/openapi/dedup
 import oaspec/internal/openapi/schema.{
   type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema, BooleanSchema,
@@ -49,7 +48,7 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
 /// Generate JSON encoders for all component schemas and anonymous types.
 fn generate_encoders(
   ctx: Context,
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> String {
   let schemas = case context.spec(ctx).components {
     Some(components) ->
@@ -134,7 +133,7 @@ fn generate_encoders(
   let needs_bare_option_type =
     list.any(schemas, fn(entry) {
       let #(_, schema_ref) = entry
-      schema_ref_has_bare_option_encoder_type(schema_ref)
+      codec_helpers.schema_ref_has_bare_option_type(schema_ref)
     })
   let option_import_line = case needs_bare_option_type {
     True -> "gleam/option.{type Option}"
@@ -264,7 +263,7 @@ fn generate_inline_enum_encoders(
 fn generate_anonymous_encoders(
   sb: se.StringBuilder,
   ctx: Context,
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> se.StringBuilder {
   list.fold(operations, sb, fn(sb, op) {
     let #(op_id, operation, _path, _method) = op
@@ -289,7 +288,7 @@ fn generate_anonymous_request_body_encoder(
             Some(Inline(schema_obj)) -> {
               // Filter out readOnly properties from request body encoders
               let filtered_schema =
-                type_gen.filter_read_only_properties(schema_obj, ctx)
+                schema_utils.filter_read_only_properties(schema_obj, ctx)
               let name = naming.to_snake_case(op_id) <> "_request_body"
               generate_encoder(sb, name, Inline(filtered_schema), ctx)
             }
@@ -347,12 +346,16 @@ fn generate_encoder(
         list.index_map(all_props, fn(entry, idx) {
           let #(prop_name, prop_ref) = entry
           let field_name =
-            list_at_or(all_deduped_names, idx, naming.to_snake_case(prop_name))
+            codec_helpers.list_at_or(
+              all_deduped_names,
+              idx,
+              naming.to_snake_case(prop_name),
+            )
           #(prop_name, prop_ref, field_name)
         })
         |> list.filter(fn(entry) {
           let #(_, prop_ref, _) = entry
-          !type_gen.schema_ref_is_read_only(prop_ref, ctx)
+          !schema_utils.schema_ref_is_read_only(prop_ref, ctx)
         })
 
       // Issue #303: a property that is in `properties` but not in `required`
@@ -405,7 +408,7 @@ fn generate_encoder(
           {
             Some(constant_value) ->
               "json.string(\""
-              <> escape_for_string_literal(constant_value)
+              <> codec_helpers.escape_for_string_literal(constant_value)
               <> "\")"
             None ->
               schema_ref_to_json_encoder(
@@ -567,7 +570,11 @@ fn generate_encoder(
       let sb =
         list.index_fold(enum_values, sb, fn(sb, value, idx) {
           let variant_suffix =
-            list_at_or(enc_deduped_variants, idx, naming.to_pascal_case(value))
+            codec_helpers.list_at_or(
+              enc_deduped_variants,
+              idx,
+              naming.to_pascal_case(value),
+            )
           let variant = naming.schema_to_type_name(type_name) <> variant_suffix
           sb
           |> se.indent(2, "types." <> variant <> " -> \"" <> value <> "\"")
@@ -610,7 +617,11 @@ fn generate_encoder(
       let sb =
         list.index_fold(enum_values, sb, fn(sb, value, idx) {
           let variant_suffix =
-            list_at_or(enc_deduped_variants, idx, naming.to_pascal_case(value))
+            codec_helpers.list_at_or(
+              enc_deduped_variants,
+              idx,
+              naming.to_pascal_case(value),
+            )
           let variant = naming.schema_to_type_name(type_name) <> variant_suffix
           sb
           |> se.indent(2, "types." <> variant <> " -> \"" <> value <> "\"")
@@ -623,7 +634,7 @@ fn generate_encoder(
     }
 
     Inline(AllOfSchema(metadata:, schemas:)) -> {
-      let merged = type_gen.merge_allof_schemas(schemas, ctx)
+      let merged = allof_merge.merge_allof_schemas(schemas, ctx)
       let merged_schema =
         Inline(ObjectSchema(
           metadata:,
@@ -838,7 +849,7 @@ fn generate_encoder(
       // alias rendered as `Option(List(T))`, so the encoder must accept
       // `Option(List(T))` and use `json.nullable(value, ...)` instead
       // of the bare `json.array(...)` it had been emitting.
-      let inner_type = qualified_schema_ref_type(items, ctx)
+      let inner_type = codec_helpers.qualified_schema_ref_type(items, ctx)
       let list_type = "List(" <> inner_type <> ")"
       let inner_encoder = schema_ref_to_json_encoder_fn(items, name, "")
       let array_expr = "json.array(value, " <> inner_encoder <> ")"
@@ -945,50 +956,4 @@ fn schema_ref_to_json_encoder_fn(
 fn ensure_import(imports: List(String), name: String) -> List(String) {
   use <- bool.guard(list.contains(imports, name), imports)
   list.append(imports, [name])
-}
-
-/// Issue #387: True when the top-level encoder for this schema would
-/// emit a bare `Option(...)` parameter type. Mirrors the decoder
-/// counterpart in `decoders.gleam`. Only primitive / array component
-/// schemas with `nullable: true` reach this shape; object / allOf /
-/// oneOf / anyOf / enum schemas wrap optionality through
-/// `json.nullable(...)` inside their encoder bodies and never declare
-/// `Option(...)` as the outer parameter type.
-fn schema_ref_has_bare_option_encoder_type(ref: SchemaRef) -> Bool {
-  case ref {
-    Inline(StringSchema(metadata:, enum_values: [], ..)) -> metadata.nullable
-    Inline(IntegerSchema(metadata:, ..)) -> metadata.nullable
-    Inline(NumberSchema(metadata:, ..)) -> metadata.nullable
-    Inline(BooleanSchema(metadata:)) -> metadata.nullable
-    Inline(ArraySchema(metadata:, ..)) -> metadata.nullable
-    _ -> False
-  }
-}
-
-/// Escape a spec-derived string so it can be safely interpolated
-/// inside a generated Gleam string literal (e.g. `json.string("...")`).
-/// Constant property values from issue #309 land here — practical
-/// values are simple identifiers (`text`, `media`, …) but a spec
-/// could in principle declare an enum value containing `"` or `\`.
-fn escape_for_string_literal(value: String) -> String {
-  value
-  |> string.replace(each: "\\", with: "\\\\")
-  |> string.replace(each: "\"", with: "\\\"")
-}
-
-/// Get element at index from a list, or return a default.
-fn list_at_or(lst: List(String), idx: Int, default: String) -> String {
-  case lst, idx {
-    [], _ -> default
-    [head, ..], 0 -> head
-    [_, ..rest], n -> list_at_or(rest, n - 1, default)
-  }
-}
-
-/// Convert a SchemaRef to a qualified Gleam type string (with types. prefix for refs).
-fn qualified_schema_ref_type(ref: SchemaRef, ctx: Context) -> String {
-  case ref {
-    Inline(schema) -> type_gen.schema_to_gleam_type(schema, ctx)
-    _ -> schema_dispatch.schema_ref_qualified_type(ref)
-  }
 }

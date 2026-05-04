@@ -13,7 +13,7 @@ import oaspec/internal/codegen/context.{
   type Context, type GeneratedFile, GeneratedFile,
 }
 import oaspec/internal/codegen/ir_build
-import oaspec/internal/codegen/types as type_gen
+import oaspec/internal/codegen/schema_dispatch
 import oaspec/internal/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, ArraySchema, Inline,
   IntegerSchema, NumberSchema, ObjectSchema, Reference, StringSchema,
@@ -1410,7 +1410,7 @@ fn composite_validator_type(
     Ok(ObjectSchema(..)) | Ok(AllOfSchema(..)) ->
       "types." <> naming.schema_to_type_name(name)
     Ok(s) -> {
-      type_gen.schema_to_gleam_type(s, ctx)
+      schema_dispatch.schema_type(s)
     }
     _ -> "types." <> naming.schema_to_type_name(name)
   }

@@ -82,7 +82,7 @@ pub fn build_request_types_module(ctx: Context) -> Module {
 }
 
 fn compute_request_type_imports(
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
   ctx: Context,
 ) -> List(String) {
   let needs_option =
@@ -237,7 +237,7 @@ pub fn build_response_types_module(ctx: Context) -> Module {
 
 /// Build ResponseHeaderRecord list from all operations.
 fn build_response_header_records(
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> List(ir.ResponseHeaderRecord) {
   list.flat_map(operations, fn(op) {
     let #(op_id, operation, _path, _method) = op
@@ -296,7 +296,7 @@ fn response_headers_need_option(records: List(ir.ResponseHeaderRecord)) -> Bool 
 }
 
 fn responses_need_types_import(
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> Bool {
   list.any(operations, fn(op) {
     let #(_op_id, operation, _path, _method) = op

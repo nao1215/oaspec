@@ -65,7 +65,7 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
 /// banner is intentionally absent — the user owns this file.
 fn generate_handlers(
   ctx: Context,
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> String {
   let sb =
     se.line(
@@ -112,7 +112,7 @@ fn generate_handlers(
 /// spec without touching the user's `handlers.gleam`.
 fn generate_handlers_generated(
   ctx: Context,
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> String {
   let pkg = config.package(context.config(ctx))
   let sb =
@@ -238,7 +238,7 @@ fn generate_handler(
 /// Generate a router module that dispatches requests.
 fn generate_router(
   ctx: Context,
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> String {
   let requirements = router_ir.analyze(ctx)
   let all_imports = router_ir.imports(requirements, ctx)
