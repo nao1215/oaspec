@@ -86,7 +86,7 @@ gen/my_api/
   handlers_generated.gleam
   router.gleam
 
-gen_client/my_api/
+gen/my_api_client/
   types.gleam
   decode.gleam
   encode.gleam
