@@ -1,0 +1,8 @@
+input: petstore.yaml
+mode: client
+targets:
+  - output:
+      dir: ./gen
+    include:
+      tags:
+        - pets

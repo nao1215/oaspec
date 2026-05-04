@@ -20,6 +20,7 @@ import oaspec/internal/codegen/types
 import oaspec/internal/codegen/validate
 import oaspec/internal/openapi/capability_check
 import oaspec/internal/openapi/dedup
+import oaspec/internal/openapi/filter
 import oaspec/internal/openapi/hoist
 import oaspec/internal/openapi/location_index
 import oaspec/internal/openapi/normalize
@@ -448,6 +449,204 @@ pub fn config_output_dir_double_src_with_immediate_parent_rejected_case() {
     )
   let result = config.validate_output_dir_layout(cfg)
   should.be_error(result)
+}
+
+// --- Issue #387: include filter ---
+// Default `Config` has an empty include filter; only `load`-loaded
+// or `with_include`-applied configs ever carry a non-empty one. The
+// filter module's `apply` is a no-op when the filter is empty and
+// otherwise drops operations whose tags / paths do not match.
+
+// Issue #387 follow-up: multi-target configs.
+
+pub fn config_load_all_single_target_case() {
+  // Legacy single-target shape (no `targets:` key) yields a
+  // 1-element list whose sole config is field-equal to what the
+  // legacy `load/1` returns. Asserting field-by-field catches
+  // drift between the two entry points if either one changes its
+  // parsing rules.
+  let path = "test/fixtures/oaspec_include_filter.yaml"
+  let assert Ok(cfgs) = config.load_all(path)
+  let assert [cfg] = cfgs
+  let assert Ok(legacy) = config.load(path)
+  config.input(cfg) |> should.equal(config.input(legacy))
+  config.mode(cfg) |> should.equal(config.mode(legacy))
+  config.validate(cfg) |> should.equal(config.validate(legacy))
+  config.package(cfg) |> should.equal(config.package(legacy))
+  config.output_server(cfg) |> should.equal(config.output_server(legacy))
+  config.output_client(cfg) |> should.equal(config.output_client(legacy))
+  config.include(cfg) |> should.equal(config.include(legacy))
+}
+
+pub fn config_load_all_multi_target_case() {
+  let assert Ok(cfgs) =
+    config.load_all("test/fixtures/oaspec_targets_multi.yaml")
+  list.length(cfgs) |> should.equal(2)
+  // Each target has its own package and output paths, but the
+  // shared input/mode/validate are baked into both.
+  let packages =
+    cfgs
+    |> list.map(fn(c) { config.package(c) })
+    |> list.sort(string.compare)
+  packages |> should.equal(["petshop/details", "petshop/listing"])
+  list.each(cfgs, fn(c) {
+    config.input(c) |> should.equal("petstore.yaml")
+    config.mode(c) |> should.equal(config.Client)
+  })
+}
+
+pub fn config_load_targets_per_target_include_case() {
+  let assert Ok(cfgs) =
+    config.load_all("test/fixtures/oaspec_targets_multi.yaml")
+  // Sort by package so the assertion below matches the spec
+  // regardless of dict iteration order.
+  let by_package =
+    cfgs
+    |> list.sort(fn(a, b) {
+      string.compare(config.package(a), config.package(b))
+    })
+  let assert [details, listing] = by_package
+  config.include(details).paths |> should.equal(["/pets/**"])
+  config.include(listing).paths |> should.equal(["/pets"])
+  // No `tags:` declared in this fixture, so each target should
+  // default to an empty tag list. Asserting this catches any
+  // regression where tag defaulting silently leaks state across
+  // targets or fails to parse omitted tag lists as `[]`.
+  config.include(details).tags |> should.equal([])
+  config.include(listing).tags |> should.equal([])
+}
+
+pub fn config_load_targets_per_target_output_case() {
+  let assert Ok(cfgs) =
+    config.load_all("test/fixtures/oaspec_targets_multi.yaml")
+  // `output.dir: ./gen` + `package: petshop/<leaf>` resolves to
+  // `./gen/petshop/<leaf>` for each target; client mode means no
+  // `_client` suffix.
+  let outputs =
+    cfgs
+    |> list.map(fn(c) { config.output_client(c) })
+    |> list.sort(string.compare)
+  outputs |> should.equal(["./gen/petshop/details", "./gen/petshop/listing"])
+}
+
+pub fn config_load_target_missing_package_rejected_case() {
+  let result =
+    config.load_all("test/fixtures/oaspec_targets_missing_package.yaml")
+  should.be_error(result)
+}
+
+pub fn config_load_targets_empty_rejected_case() {
+  let result = config.load_all("test/fixtures/oaspec_targets_empty.yaml")
+  should.be_error(result)
+}
+
+pub fn config_load_multi_target_via_load_returns_error_case() {
+  // The legacy `load/1` only handles single-target configs; multi-
+  // target callers must use `load_all/1` explicitly.
+  let result = config.load("test/fixtures/oaspec_targets_multi.yaml")
+  should.be_error(result)
+}
+
+pub fn config_load_parses_include_block_case() {
+  let assert Ok(cfg) = config.load("test/fixtures/oaspec_include_filter.yaml")
+  let inc = config.include(cfg)
+  config.include_is_empty(inc) |> should.be_false
+  inc.tags |> should.equal(["pets"])
+  inc.paths |> should.equal(["/pets", "/pets/**"])
+}
+
+pub fn config_load_omitted_include_is_empty_case() {
+  let assert Ok(cfg) = config.load("test/fixtures/oaspec.yaml")
+  config.include(cfg) |> config.include_is_empty |> should.be_true
+}
+
+pub fn config_default_include_is_empty_case() {
+  let cfg = make_default_cfg()
+  config.include(cfg) |> config.include_is_empty |> should.be_true
+}
+
+pub fn config_with_include_round_trip_case() {
+  let include = config.Include(tags: ["a", "b"], paths: ["/x", "/y/**"])
+  let cfg = make_default_cfg() |> config.with_include(include)
+  config.include(cfg) |> should.equal(include)
+}
+
+pub fn filter_apply_empty_filter_returns_spec_unchanged_case() {
+  let assert Ok(unresolved) = parser.parse_file("test/fixtures/petstore.yaml")
+  let assert Ok(resolved) = resolve.resolve(unresolved)
+  let before = dict.size(resolved.paths)
+  let after =
+    filter.apply(resolved, config.empty_include())
+    |> fn(s) { dict.size(s.paths) }
+  after |> should.equal(before)
+}
+
+pub fn filter_apply_path_glob_keeps_matching_paths_case() {
+  // petstore declares /pets and /pets/{petId}; both must survive a
+  // `/pets/**` filter (glob matches everything under `/pets/`) AND
+  // an exact `/pets` filter via the union semantics.
+  let assert Ok(unresolved) = parser.parse_file("test/fixtures/petstore.yaml")
+  let assert Ok(resolved) = resolve.resolve(unresolved)
+  let include = config.Include(tags: [], paths: ["/pets", "/pets/**"])
+  let filtered = filter.apply(resolved, include)
+  let kept = dict.keys(filtered.paths) |> list.sort(string.compare)
+  kept |> should.equal(["/pets", "/pets/{petId}"])
+}
+
+pub fn filter_apply_unknown_path_drops_everything_case() {
+  let assert Ok(unresolved) = parser.parse_file("test/fixtures/petstore.yaml")
+  let assert Ok(resolved) = resolve.resolve(unresolved)
+  let include = config.Include(tags: [], paths: ["/no-such-path"])
+  let filtered = filter.apply(resolved, include)
+  dict.size(filtered.paths) |> should.equal(0)
+}
+
+pub fn filter_apply_tag_membership_keeps_tagged_operations_case() {
+  // petstore tags every operation `pets`; including that tag keeps
+  // both paths, and including a non-existent tag drops everything.
+  let assert Ok(unresolved) = parser.parse_file("test/fixtures/petstore.yaml")
+  let assert Ok(resolved) = resolve.resolve(unresolved)
+  filter.apply(resolved, config.Include(tags: ["pets"], paths: []))
+  |> fn(s) { dict.size(s.paths) }
+  |> should.equal(2)
+  filter.apply(resolved, config.Include(tags: ["nope"], paths: []))
+  |> fn(s) { dict.size(s.paths) }
+  |> should.equal(0)
+}
+
+pub fn filter_apply_tags_or_paths_unions_case() {
+  // OR semantics: an operation passes if EITHER its tags intersect
+  // include.tags OR its path matches include.paths. Setting one
+  // matching list and one mismatching list still keeps the
+  // matching subset.
+  let assert Ok(unresolved) = parser.parse_file("test/fixtures/petstore.yaml")
+  let assert Ok(resolved) = resolve.resolve(unresolved)
+  let include = config.Include(tags: ["pets"], paths: ["/no-such-path"])
+  filter.apply(resolved, include)
+  |> fn(s) { dict.size(s.paths) }
+  |> should.equal(2)
+}
+
+pub fn filter_path_matches_exact_and_glob_case() {
+  filter.path_matches("/repos/foo", ["/repos/**"]) |> should.be_true
+  filter.path_matches("/repos/foo/bar", ["/repos/**"]) |> should.be_true
+  // `/repos/**` requires an extending segment; `/repos` itself does
+  // NOT match the glob form (callers list it explicitly when needed).
+  filter.path_matches("/repos", ["/repos/**"]) |> should.be_false
+  filter.path_matches("/repository/foo", ["/repos/**"]) |> should.be_false
+  filter.path_matches("/repos", ["/repos"]) |> should.be_true
+  filter.path_matches("/repos/foo", ["/repos"]) |> should.be_false
+}
+
+fn make_default_cfg() -> config.Config {
+  config.new(
+    input: "openapi.yaml",
+    output_server: "./gen/api",
+    output_client: "./gen/api_client",
+    package: "api",
+    mode: config.Both,
+    validate: False,
+  )
 }
 
 // --- Parser Tests ---

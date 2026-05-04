@@ -1,0 +1,9 @@
+input: petstore.yaml
+package: api
+mode: client
+include:
+  tags:
+    - pets
+  paths:
+    - "/pets"
+    - "/pets/**"

@@ -628,6 +628,332 @@ EOF
 End
 
 # ===================================================================
+# `oaspec init` round-trip — Issue #387 follow-up
+# ===================================================================
+#
+# `init` creates a default oaspec.yaml. After Issue #387 added
+# `include:` and `targets:` to the schema, the template grew new
+# commented-out blocks documenting both. The parser must still load
+# the shipped template cleanly (the new blocks are comments, but a
+# stray colon or indent slip would only surface in a CI run).
+
+Describe 'oaspec init round-trip'
+  Include "$SHELLSPEC_SPECDIR/spec_helper.sh"
+
+  setup_init_round_trip() {
+    rm -rf "$PROJECT_ROOT/test_init_round_trip"
+    mkdir -p "$PROJECT_ROOT/test_init_round_trip"
+    cp "$PROJECT_ROOT/test/fixtures/petstore.yaml" \
+       "$PROJECT_ROOT/test_init_round_trip/openapi.yaml"
+  }
+
+  cleanup_init_round_trip() {
+    rm -rf "$PROJECT_ROOT/test_init_round_trip"
+  }
+
+  # Shellspec evaluates the It body in the host shell, so any
+  # `cd` inside it leaks across cases and outlives `After`.
+  # Wrap the steps in subshell helpers (`( cd ...; ... )`) so the
+  # working directory only changes inside `When run`'s subprocess
+  # — cleanup can then `rm -rf` the test dir without yanking the
+  # parent shell's cwd.
+  init_in_test_dir() {
+    ( cd "$PROJECT_ROOT/test_init_round_trip" \
+      && gleam run --no-print-progress -- init --output=./oaspec.yaml )
+  }
+
+  init_then_validate_in_test_dir() {
+    ( cd "$PROJECT_ROOT/test_init_round_trip" \
+      && gleam run --no-print-progress -- init --output=./oaspec.yaml \
+           > /dev/null \
+      && gleam run --no-print-progress -- validate --config=./oaspec.yaml )
+  }
+
+  Before 'setup_init_round_trip'
+  After 'cleanup_init_round_trip'
+
+  It 'creates an oaspec.yaml that the validator can load and parse'
+    When run init_in_test_dir
+    The status should be success
+    The output should include 'Created'
+    The path "$PROJECT_ROOT/test_init_round_trip/oaspec.yaml" should be file
+  End
+
+  It 'validates against a real spec without parse errors'
+    # Generates the template via init, then runs validate against
+    # the petstore stub copied as openapi.yaml above. If the
+    # template's commented include / targets blocks broke the
+    # YAML parser, this would fail before any validation logic ran.
+    When run init_then_validate_in_test_dir
+    The status should be success
+    The output should include 'Validation passed'
+  End
+End
+
+# ===================================================================
+# Issue #387 — `include:` filter (subset of operations)
+# ===================================================================
+#
+# `include.tags` and `include.paths` let users generate code for a
+# subset of the spec without modifying the spec itself. Operations
+# pass when their tag list intersects `include.tags` OR their path
+# matches one of `include.paths` (`/foo/**` matches anything under
+# `/foo/`). Both lists empty == no filter.
+
+Describe 'oaspec include filter'
+  Include "$SHELLSPEC_SPECDIR/spec_helper.sh"
+
+  setup_path_filter_config() {
+    rm -rf "$PROJECT_ROOT/test_include_path"
+    cat > "$PROJECT_ROOT/test_include_path.yaml" <<EOF
+input: test/fixtures/petstore.yaml
+package: api
+output:
+  dir: ./test_include_path
+include:
+  paths:
+    - "/pets"
+EOF
+  }
+
+  cleanup_path_filter_config() {
+    rm -rf "$PROJECT_ROOT/test_include_path" \
+           "$PROJECT_ROOT/test_include_path.yaml"
+  }
+
+  Describe 'path filter'
+    Before 'setup_path_filter_config'
+    After 'cleanup_path_filter_config'
+
+    It 'keeps only the operations on the matched path'
+      When run generate --config=./test_include_path.yaml
+      The status should be success
+      The output should include 'Successfully generated'
+      # /pets stays (listPets, createPet) but /pets/{petId} is filtered
+      # out, so its operations must NOT appear in handlers.gleam.
+      The contents of file "$PROJECT_ROOT/test_include_path/api/handlers.gleam" should include 'pub fn list_pets'
+      The contents of file "$PROJECT_ROOT/test_include_path/api/handlers.gleam" should include 'pub fn create_pet'
+      The contents of file "$PROJECT_ROOT/test_include_path/api/handlers.gleam" should not include 'pub fn get_pet'
+      The contents of file "$PROJECT_ROOT/test_include_path/api/handlers.gleam" should not include 'pub fn delete_pet'
+    End
+  End
+
+  setup_glob_filter_config() {
+    rm -rf "$PROJECT_ROOT/test_include_glob"
+    cat > "$PROJECT_ROOT/test_include_glob.yaml" <<EOF
+input: test/fixtures/petstore.yaml
+package: api
+output:
+  dir: ./test_include_glob
+include:
+  paths:
+    - "/pets/**"
+EOF
+  }
+
+  cleanup_glob_filter_config() {
+    rm -rf "$PROJECT_ROOT/test_include_glob" \
+           "$PROJECT_ROOT/test_include_glob.yaml"
+  }
+
+  Describe 'path glob filter'
+    Before 'setup_glob_filter_config'
+    After 'cleanup_glob_filter_config'
+
+    It 'keeps only operations under the glob prefix'
+      When run generate --config=./test_include_glob.yaml
+      The status should be success
+      The output should include 'Successfully generated'
+      # `/pets/**` matches `/pets/{petId}` (getPet, deletePet) but
+      # NOT the bare `/pets` path itself (which has listPets and
+      # createPet) — that is the documented strict-prefix glob
+      # behaviour.
+      The contents of file "$PROJECT_ROOT/test_include_glob/api/handlers.gleam" should include 'pub fn get_pet'
+      The contents of file "$PROJECT_ROOT/test_include_glob/api/handlers.gleam" should include 'pub fn delete_pet'
+      The contents of file "$PROJECT_ROOT/test_include_glob/api/handlers.gleam" should not include 'pub fn list_pets'
+      The contents of file "$PROJECT_ROOT/test_include_glob/api/handlers.gleam" should not include 'pub fn create_pet'
+    End
+  End
+
+  setup_tag_filter_config() {
+    rm -rf "$PROJECT_ROOT/test_include_tag"
+    cat > "$PROJECT_ROOT/test_include_tag.yaml" <<EOF
+input: test/fixtures/petstore.yaml
+package: api
+output:
+  dir: ./test_include_tag
+include:
+  tags:
+    - pets
+EOF
+  }
+
+  cleanup_tag_filter_config() {
+    rm -rf "$PROJECT_ROOT/test_include_tag" \
+           "$PROJECT_ROOT/test_include_tag.yaml"
+  }
+
+  Describe 'tag filter'
+    Before 'setup_tag_filter_config'
+    After 'cleanup_tag_filter_config'
+
+    It 'keeps every operation tagged with the listed tag'
+      When run generate --config=./test_include_tag.yaml
+      The status should be success
+      The output should include 'Successfully generated'
+      # All petstore operations are tagged `pets`, so the tag
+      # filter is a no-op for this fixture — but the run still
+      # demonstrates that tag-based filtering parses and applies
+      # without error.
+      The contents of file "$PROJECT_ROOT/test_include_tag/api/handlers.gleam" should include 'pub fn list_pets'
+      The contents of file "$PROJECT_ROOT/test_include_tag/api/handlers.gleam" should include 'pub fn get_pet'
+    End
+  End
+End
+
+# ===================================================================
+# Issue #387 — `targets:` array (multi-target codegen)
+# ===================================================================
+#
+# Splits a single spec into multiple Gleam packages in one
+# `oaspec generate` run. Each `targets:` entry has its own
+# `package`, `output`, and `include`, but all entries share the
+# top-level `input`, `mode`, and `validate`. The CLI parses the
+# spec once and runs the per-target pipeline (filter → capability
+# check → hoist → dedup → validate → codegen → write) for each
+# target in order.
+
+Describe 'oaspec multi-target generate'
+  Include "$SHELLSPEC_SPECDIR/spec_helper.sh"
+
+  setup_multi_target_config() {
+    rm -rf "$PROJECT_ROOT/test_multi_targets"
+    cat > "$PROJECT_ROOT/test_multi_targets.yaml" <<EOF
+input: test/fixtures/petstore.yaml
+mode: client
+targets:
+  - package: petshop/listing
+    output:
+      dir: ./test_multi_targets
+    include:
+      paths:
+        - "/pets"
+  - package: petshop/details
+    output:
+      dir: ./test_multi_targets
+    include:
+      paths:
+        - "/pets/**"
+EOF
+  }
+
+  cleanup_multi_target_config() {
+    rm -rf "$PROJECT_ROOT/test_multi_targets" \
+           "$PROJECT_ROOT/test_multi_targets.yaml"
+  }
+
+  Before 'setup_multi_target_config'
+  After 'cleanup_multi_target_config'
+
+  It 'writes one package per target with its filtered subset'
+    When run generate --config=./test_multi_targets.yaml
+    The status should be success
+    The output should include 'Successfully generated'
+    The output should include '[target: petshop/listing]'
+    The output should include '[target: petshop/details]'
+    # listing target: only the /pets operations land in its client.
+    The path "$PROJECT_ROOT/test_multi_targets/petshop/listing/client.gleam" should be file
+    The contents of file "$PROJECT_ROOT/test_multi_targets/petshop/listing/client.gleam" should include 'pub fn list_pets'
+    The contents of file "$PROJECT_ROOT/test_multi_targets/petshop/listing/client.gleam" should include 'pub fn create_pet'
+    The contents of file "$PROJECT_ROOT/test_multi_targets/petshop/listing/client.gleam" should not include 'pub fn get_pet'
+    The contents of file "$PROJECT_ROOT/test_multi_targets/petshop/listing/client.gleam" should not include 'pub fn delete_pet'
+    # details target: only the /pets/** operations land in its client.
+    The path "$PROJECT_ROOT/test_multi_targets/petshop/details/client.gleam" should be file
+    The contents of file "$PROJECT_ROOT/test_multi_targets/petshop/details/client.gleam" should include 'pub fn get_pet'
+    The contents of file "$PROJECT_ROOT/test_multi_targets/petshop/details/client.gleam" should include 'pub fn delete_pet'
+    The contents of file "$PROJECT_ROOT/test_multi_targets/petshop/details/client.gleam" should not include 'pub fn list_pets'
+    The contents of file "$PROJECT_ROOT/test_multi_targets/petshop/details/client.gleam" should not include 'pub fn create_pet'
+  End
+
+  setup_multi_target_overlap_config() {
+    rm -rf "$PROJECT_ROOT/test_multi_targets_overlap"
+    # Two targets with the same package would write to the same
+    # directory. The CLI must reject this before any file is written.
+    cat > "$PROJECT_ROOT/test_multi_targets_overlap.yaml" <<EOF
+input: test/fixtures/petstore.yaml
+mode: client
+targets:
+  - package: shared/api
+    output:
+      dir: ./test_multi_targets_overlap
+    include:
+      paths:
+        - "/pets"
+  - package: shared/api
+    output:
+      dir: ./test_multi_targets_overlap
+    include:
+      paths:
+        - "/pets/**"
+EOF
+  }
+
+  cleanup_multi_target_overlap_config() {
+    rm -rf "$PROJECT_ROOT/test_multi_targets_overlap" \
+           "$PROJECT_ROOT/test_multi_targets_overlap.yaml"
+  }
+
+  Describe 'overlap detection'
+    Before 'setup_multi_target_overlap_config'
+    After 'cleanup_multi_target_overlap_config'
+
+    It 'rejects configs whose targets resolve to the same output dir'
+      When run generate --config=./test_multi_targets_overlap.yaml
+      The status should be failure
+      The output should include 'two targets resolve to the same output directory'
+      The path "$PROJECT_ROOT/test_multi_targets_overlap" should not be exist
+    End
+  End
+
+  setup_multi_target_with_output_override_config() {
+    rm -rf "$PROJECT_ROOT/test_multi_targets_override"
+    cat > "$PROJECT_ROOT/test_multi_targets_override.yaml" <<EOF
+input: test/fixtures/petstore.yaml
+mode: client
+targets:
+  - package: foo/listing
+    output:
+      dir: ./test_multi_targets_override
+    include:
+      paths:
+        - "/pets"
+  - package: foo/details
+    output:
+      dir: ./test_multi_targets_override
+    include:
+      paths:
+        - "/pets/**"
+EOF
+  }
+
+  cleanup_multi_target_with_output_override_config() {
+    rm -rf "$PROJECT_ROOT/test_multi_targets_override" \
+           "$PROJECT_ROOT/test_multi_targets_override.yaml"
+  }
+
+  Describe 'CLI --output override'
+    Before 'setup_multi_target_with_output_override_config'
+    After 'cleanup_multi_target_with_output_override_config'
+
+    It 'rejects --output override on a multi-target config'
+      When run generate --config=./test_multi_targets_override.yaml --output=./somewhere_else
+      The status should be failure
+      The output should include 'cannot override the output directory for a multi-target config'
+    End
+  End
+End
+
+# ===================================================================
 # Issue #387 — Reference-typed response header refused at codegen
 # ===================================================================
 #

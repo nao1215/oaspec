@@ -11,8 +11,8 @@ stops with a diagnostic instead of emitting partial code.
 - Produce readable Gleam types, encoders, decoders, request types, and response
   types
 - Keep unsupported spec shapes explicit and testable
-- Backed by 336 unit tests, ShellSpec CLI tests, 40 integration compile tests,
-  and 253 test fixtures (including 98 OSS-derived edge-case specs)
+- Backed by 337 unit tests, ShellSpec CLI tests, 40 integration compile tests,
+  and 257 test fixtures (including 98 OSS-derived edge-case specs)
 
 ## Install
 
@@ -236,6 +236,72 @@ Generated server code is written to `<dir>/<package>` and generated client code 
 | `output.dir` | no | `./gen` | Base output directory |
 | `output.server` | no | `<dir>/<package>` | Server output path |
 | `output.client` | no | `<dir>/<package>_client` | Client output path |
+| `include.tags` | no | `[]` | Operation tag allowlist (filter) |
+| `include.paths` | no | `[]` | Operation path allowlist (filter, supports `/foo/**` glob) |
+| `targets` | no | - | Array of per-target overrides (multi-target codegen) |
+
+### Filtering operations with `include:`
+
+To generate code for a subset of a large spec without modifying the
+spec file, set `include.tags` and / or `include.paths`:
+
+```yaml
+input: github.yaml
+package: github
+mode: client
+include:
+  tags: [issues, repos]
+  paths:
+    - "/users/{username}"
+    - "/repos/**"
+```
+
+Both lists are optional; omitting one means there is no constraint on
+that axis, and omitting both leaves the filter inactive. An operation
+is kept when its tag list intersects `include.tags` or its path matches
+one of `include.paths`; the two lists are unioned rather than
+intersected, so adding entries to either list widens the result.
+
+Path patterns ending in `/**` match any path that extends the prefix
+with a `/<rest>` segment, so `"/repos/**"` matches `/repos/foo` and
+`/repos/foo/bar` but does not match the bare `/repos` — list `/repos`
+explicitly when you also need it. Other patterns are compared by exact
+equality.
+
+### Splitting one spec into multiple packages with `targets:`
+
+`targets:` is an array of per-target overrides. The same input spec is
+generated once per entry, each with its own `package`, `output`, and
+`include`. The top-level `input`, `mode`, and `validate` are shared
+across every target.
+
+```yaml
+input: github.yaml
+mode: client
+targets:
+  - package: dco_check/github/issues
+    output: { dir: ./src }
+    include:
+      tags: [issues]
+  - package: dco_check/github/repos
+    output: { dir: ./src }
+    include:
+      paths: ["/repos/**"]
+```
+
+The example above produces two packages from one `oaspec generate` run,
+at `./src/dco_check/github/issues/...` and
+`./src/dco_check/github/repos/...`. Callers consume them as
+`import dco_check/github/issues/client` and
+`import dco_check/github/repos/client`.
+
+Each target must declare its own `package`; there is no fallback default
+for multi-target configs because two targets sharing the same default
+would overwrite each other. The CLI rejects configs whose targets
+resolve to overlapping output directories before writing any file. The
+`--output` CLI flag is also rejected with multi-target configs because
+each target already declares its own per-package output directory; use
+per-target `output:` blocks instead.
 
 ### Configuration paths
 

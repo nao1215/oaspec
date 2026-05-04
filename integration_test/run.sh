@@ -1971,4 +1971,178 @@ rm -rf "$COMPLEX_SHAPES_DIR"
 
 info "Issue #387 complex response shapes integration tests passed."
 
+# -------------------------------------------------------
+# Step N+1: Issue #387 — `include:` filter compiles a strict subset
+# -------------------------------------------------------
+# Generates from the petstore fixture with `include.paths: ["/pets"]`
+# and verifies (a) only `/pets` operations appear in the generated
+# code, AND (b) the result still compiles with
+# `--warnings-as-errors`. If the filter accidentally drops something
+# the remaining code references — say, a component schema only used
+# by `listPets` — the build fails here before users ever see broken
+# output.
+info "Testing Issue #387 include filter (subset client compiles)..."
+
+INCLUDE_DIR="$SCRIPT_DIR/include_filter_test"
+rm -rf "$INCLUDE_DIR"
+mkdir -p "$INCLUDE_DIR/src"
+
+cat > "$INCLUDE_DIR/oaspec-include.yaml" << 'YAML_EOF'
+input: test/fixtures/petstore.yaml
+output:
+  client: ./integration_test/include_filter_test/src/api
+package: api
+mode: client
+include:
+  paths:
+    - "/pets"
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$INCLUDE_DIR/oaspec-include.yaml" \
+  --mode=client
+
+# Sanity check: handlers / client only carry the included operations.
+if grep -q "pub fn list_pets" "$INCLUDE_DIR/src/api/client.gleam"; then
+  info "PASS: included operation list_pets is present in client.gleam"
+else
+  fail "include filter dropped list_pets, which should have been kept"
+fi
+if grep -q "pub fn get_pet" "$INCLUDE_DIR/src/api/client.gleam"; then
+  fail "include filter kept get_pet, which should have been filtered out"
+else
+  info "PASS: filtered-out operation get_pet absent from client.gleam"
+fi
+
+cat > "$INCLUDE_DIR/gleam.toml" << 'TOML_EOF'
+name = "include_filter_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+oaspec = { path = "../.." }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$INCLUDE_DIR/src/include_filter_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$INCLUDE_DIR"
+gleam deps download
+
+if gleam build --warnings-as-errors 2>&1; then
+  info "PASS: subset client (path filter) compiles cleanly."
+else
+  fail "Issue #387 include filter — subset client failed to compile."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$INCLUDE_DIR"
+
+info "Issue #387 include-filter integration tests passed."
+
+# -------------------------------------------------------
+# Step N+2: Issue #387 — `targets:` array (multi-target codegen)
+# -------------------------------------------------------
+# Splits the petstore spec into two Gleam packages
+# (`petshop/listing` for `/pets`, `petshop/details` for
+# `/pets/**`) in one `oaspec generate` run, then verifies BOTH
+# packages compile cleanly. If the multi-target pipeline ever
+# generates code that fails to compile (e.g. a target's filter
+# orphans a referenced component), this build catches it.
+info "Testing Issue #387 multi-target codegen (two packages compile)..."
+
+MULTI_DIR="$SCRIPT_DIR/multi_target_test"
+rm -rf "$MULTI_DIR"
+mkdir -p "$MULTI_DIR/src"
+
+cat > "$MULTI_DIR/oaspec-multi-target.yaml" << 'YAML_EOF'
+input: test/fixtures/petstore.yaml
+mode: client
+targets:
+  - package: petshop/listing
+    output:
+      dir: ./integration_test/multi_target_test/src
+    include:
+      paths:
+        - "/pets"
+  - package: petshop/details
+    output:
+      dir: ./integration_test/multi_target_test/src
+    include:
+      paths:
+        - "/pets/**"
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$MULTI_DIR/oaspec-multi-target.yaml"
+
+# Sanity: each target's client.gleam carries only its filtered
+# operations.
+if grep -q "pub fn list_pets" "$MULTI_DIR/src/petshop/listing/client.gleam"; then
+  info "PASS: listing target carries list_pets."
+else
+  fail "multi-target: listing target dropped list_pets, which should have been kept"
+fi
+if grep -q "pub fn get_pet" "$MULTI_DIR/src/petshop/listing/client.gleam"; then
+  fail "multi-target: listing target kept get_pet, which should have been filtered out"
+else
+  info "PASS: listing target excludes get_pet."
+fi
+if grep -q "pub fn get_pet" "$MULTI_DIR/src/petshop/details/client.gleam"; then
+  info "PASS: details target carries get_pet."
+else
+  fail "multi-target: details target dropped get_pet, which should have been kept"
+fi
+if grep -q "pub fn list_pets" "$MULTI_DIR/src/petshop/details/client.gleam"; then
+  fail "multi-target: details target kept list_pets, which should have been filtered out"
+else
+  info "PASS: details target excludes list_pets."
+fi
+
+cat > "$MULTI_DIR/gleam.toml" << 'TOML_EOF'
+name = "multi_target_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+oaspec = { path = "../.." }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$MULTI_DIR/src/multi_target_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$MULTI_DIR"
+gleam deps download
+
+if gleam build --warnings-as-errors 2>&1; then
+  info "PASS: both targets compile cleanly under one project."
+else
+  fail "Issue #387 multi-target — combined build failed to compile."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$MULTI_DIR"
+
+info "Issue #387 multi-target integration tests passed."
+
 info "All integration tests passed!"

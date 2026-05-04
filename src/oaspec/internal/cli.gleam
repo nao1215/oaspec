@@ -229,6 +229,37 @@ package: api
 #                                 # picks up both.
 #   server: ./gen/api             # Override server output path
 #   client: ./gen/api_client      # Override client output path
+
+# Operation filter (optional, Issue #387). When set, codegen only
+# emits operations whose tag list intersects `tags` OR whose path
+# matches one of `paths` (the two lists are unioned, not
+# intersected). Path patterns ending in `/**` match any path that
+# extends the prefix with a `/<rest>` segment. Both lists empty /
+# both keys omitted = no filter.
+# include:
+#   tags:
+#     - issues
+#   paths:
+#     - \"/users/{username}\"
+#     - \"/repos/**\"
+
+# Multi-target codegen (optional, Issue #387). When `targets:` is
+# set, the same input spec is generated once per entry, each with
+# its own `package`, `output`, and `include`. The top-level
+# `input`, `mode`, and `validate` are shared across every target.
+# Targets whose output paths overlap are rejected at config-load
+# time. `--output` cannot be used with multi-target configs.
+# targets:
+#   - package: my_app/issues
+#     output:
+#       dir: ./src
+#     include:
+#       tags: [issues]
+#   - package: my_app/repos
+#     output:
+#       dir: ./src
+#     include:
+#       paths: [\"/repos/**\"]
 "
 
   case simplifile.is_file(path) {
@@ -267,41 +298,195 @@ fn run_generate(
   io.println("oaspec v" <> context.version)
   io.println("Loading config from: " <> config_path)
 
-  use cfg <- require(
-    load_config(config_path, mode_opt, output_opt),
+  // Issue #387: a config may declare multiple `targets:`. Each target
+  // produces its own package + output tree from the same input spec.
+  // The single-target legacy shape returns a 1-element list here.
+  use cfgs <- require(
+    load_configs(config_path, mode_opt, output_opt),
     load_config_error_to_string,
   )
-  let cfg = case validate_mode {
-    True -> config.with_validate(cfg, True)
-    False -> cfg
-  }
+  let cfgs =
+    list.map(cfgs, fn(c) {
+      case validate_mode {
+        True -> config.with_validate(c, True)
+        False -> c
+      }
+    })
 
-  print_resolved_paths(config_path, cfg)
-  io.println("Parsing OpenAPI spec: " <> config.input(cfg))
+  // Reject configs where two targets would write to the same
+  // directory — generated files would clobber each other and there
+  // is no sensible default order.
+  use _ <- require(
+    validate_no_target_overlap(cfgs),
+    load_config_error_to_string,
+  )
+
+  print_resolved_paths_for_all(config_path, cfgs)
+
+  // The input spec is shared across every target, so parse it once.
+  // `load_configs` rejects empty target lists at config-load time,
+  // so `cfgs` is guaranteed non-empty by the time we get here.
+  // nolint: assert_ok_pattern -- `load_configs` rejects empty target lists; reaching the empty branch would be an internal invariant violation.
+  let assert [first_cfg, ..] = cfgs
+  let shared_input = config.input(first_cfg)
+  io.println("Parsing OpenAPI spec: " <> shared_input)
   let reporter = progress.stdout_with_elapsed()
   use spec <- require(
-    parser.parse_file_with_progress(config.input(cfg), reporter),
+    parser.parse_file_with_progress(shared_input, reporter),
     fn(e) { "Error: " <> parser.parse_error_to_string(e) },
   )
 
-  use summary <- require(
-    generate.generate_with_progress(spec, cfg, reporter),
-    format_generate_error,
-  )
-
-  io.println("Spec loaded: " <> summary.spec_title)
-  print_warnings(summary.warnings)
-  case fail_on_warnings && summary.warnings != [] {
-    True -> {
-      io.println_error("")
-      io.println_error("Error: warnings present and --fail-on-warnings is set.")
-      halt(1)
-    }
-    False -> Nil
+  // Run codegen once per target. `generate_with_progress` re-runs
+  // every per-target stage (filter / hoist / dedup / validate /
+  // codegen) so each target sees only the operations its filter
+  // keeps. `parse` and `normalize` would be re-run too if we passed
+  // the same `OpenApiSpec(Unresolved)` value through the pipeline,
+  // but those stages are pure and cheap relative to codegen.
+  let multi_target = case cfgs {
+    [_, _, ..] -> True
+    _ -> False
   }
-  case check_mode {
-    True -> run_check(summary.files, cfg)
-    False -> write_files(summary.files, cfg)
+  list.each(cfgs, fn(cfg) {
+    case multi_target {
+      True -> {
+        io.println("")
+        io.println("[target: " <> config.package(cfg) <> "]")
+      }
+      False -> Nil
+    }
+    use summary <- require(
+      generate.generate_with_progress(spec, cfg, reporter),
+      format_generate_error,
+    )
+    io.println("Spec loaded: " <> summary.spec_title)
+    print_warnings(summary.warnings)
+    case fail_on_warnings && summary.warnings != [] {
+      True -> {
+        io.println_error("")
+        io.println_error(
+          "Error: warnings present and --fail-on-warnings is set.",
+        )
+        halt(1)
+      }
+      False -> Nil
+    }
+    case check_mode {
+      True -> run_check(summary.files, cfg)
+      False -> write_files(summary.files, cfg)
+    }
+  })
+}
+
+fn print_resolved_paths_for_all(
+  config_path: String,
+  cfgs: List(config.Config),
+) -> Nil {
+  case cfgs {
+    [single] -> print_resolved_paths(config_path, single)
+    multiple -> {
+      case simplifile.current_directory() {
+        Ok(cwd) -> {
+          io.println("Resolved paths:")
+          io.println("  config: " <> resolve_path_from_cwd(config_path, cwd))
+          let inputs =
+            multiple
+            |> list.map(fn(c) { config.input(c) })
+            |> list.unique
+          list.each(inputs, fn(p) {
+            io.println("  input: " <> resolve_path_from_cwd(p, cwd))
+          })
+          list.each(multiple, fn(cfg) {
+            io.println("  target [" <> config.package(cfg) <> "]:")
+            print_target_outputs(cfg, cwd, "    ")
+          })
+        }
+        // nolint: thrown_away_error -- path printing is best-effort.
+        Error(_) -> Nil
+      }
+    }
+  }
+}
+
+fn print_target_outputs(cfg: config.Config, cwd: String, prefix: String) -> Nil {
+  case config.mode(cfg) {
+    config.Server -> {
+      io.println(
+        prefix
+        <> "output.server: "
+        <> resolve_path_from_cwd(config.output_server(cfg), cwd),
+      )
+    }
+    config.Client -> {
+      io.println(
+        prefix
+        <> "output.client: "
+        <> resolve_path_from_cwd(config.output_client(cfg), cwd),
+      )
+    }
+    config.Both -> {
+      io.println(
+        prefix
+        <> "output.server: "
+        <> resolve_path_from_cwd(config.output_server(cfg), cwd),
+      )
+      io.println(
+        prefix
+        <> "output.client: "
+        <> resolve_path_from_cwd(config.output_client(cfg), cwd),
+      )
+    }
+  }
+}
+
+/// Issue #387: every active output path across every target must be
+/// unique. Two targets writing to the same directory would clobber
+/// each other on disk and surface random "wrong package" errors at
+/// the Gleam compiler level depending on which generate ran second.
+fn validate_no_target_overlap(
+  cfgs: List(config.Config),
+) -> Result(Nil, LoadConfigError) {
+  let paths =
+    cfgs
+    |> list.flat_map(fn(cfg) { active_output_paths(cfg) })
+  find_duplicate_path(paths, [])
+  |> result.map_error(fn(err) {
+    let DuplicateOutputPath(path) = err
+    OutputValidationError(error: config.InvalidValue(
+      field: "targets",
+      detail: "two targets resolve to the same output directory '"
+        <> path
+        <> "' — give them distinct package or output paths so generated files do not clobber each other",
+    ))
+  })
+}
+
+fn active_output_paths(cfg: config.Config) -> List(String) {
+  case config.mode(cfg) {
+    config.Server -> [config.output_server(cfg)]
+    config.Client -> [config.output_client(cfg)]
+    config.Both -> [config.output_server(cfg), config.output_client(cfg)]
+  }
+}
+
+/// Internal error from `find_duplicate_path/2`. Wrapping the offending
+/// path in a named record (rather than a bare String) keeps the
+/// linter happy and makes the failure mode explicit for any future
+/// caller that wants the path on its own.
+type DuplicateOutputPathError {
+  DuplicateOutputPath(path: String)
+}
+
+fn find_duplicate_path(
+  remaining: List(String),
+  seen: List(String),
+) -> Result(Nil, DuplicateOutputPathError) {
+  case remaining {
+    [] -> Ok(Nil)
+    [path, ..rest] ->
+      case list.contains(seen, path) {
+        True -> Error(DuplicateOutputPath(path: path))
+        False -> find_duplicate_path(rest, [path, ..seen])
+      }
   }
 }
 
@@ -581,30 +766,49 @@ fn unique_id() -> String {
   }
 }
 
-/// Execute the validation-only pipeline.
+/// Execute the validation-only pipeline. With a multi-target
+/// config, every target is validated against the same parsed spec
+/// and the run only succeeds when each target validates cleanly.
 fn run_validate(config_path: String, mode_opt: Option(String)) -> Nil {
   io.println("oaspec v" <> context.version)
   io.println("Loading config from: " <> config_path)
 
-  use cfg <- require(
-    load_config(config_path, mode_opt, None),
+  use cfgs <- require(
+    load_configs(config_path, mode_opt, None),
     load_config_error_to_string,
   )
 
-  io.println("Parsing OpenAPI spec: " <> config.input(cfg))
+  // `load_configs` rejects empty target lists; the destructure
+  // documents that invariant for any future reader.
+  // nolint: assert_ok_pattern -- `load_configs` rejects empty target lists; reaching the empty branch would be an internal invariant violation.
+  let assert [first_cfg, ..] = cfgs
+  let shared_input = config.input(first_cfg)
+  io.println("Parsing OpenAPI spec: " <> shared_input)
   let reporter = progress.stdout_with_elapsed()
   use spec <- require(
-    parser.parse_file_with_progress(config.input(cfg), reporter),
+    parser.parse_file_with_progress(shared_input, reporter),
     fn(e) { "Error: " <> parser.parse_error_to_string(e) },
   )
 
-  use summary <- require(
-    generate.validate_only_with_progress(spec, cfg, reporter),
-    format_generate_error,
-  )
-
-  io.println("Spec loaded: " <> summary.spec_title)
-  print_warnings(summary.warnings)
+  let multi_target = case cfgs {
+    [_, _, ..] -> True
+    _ -> False
+  }
+  list.each(cfgs, fn(cfg) {
+    case multi_target {
+      True -> {
+        io.println("")
+        io.println("[target: " <> config.package(cfg) <> "]")
+      }
+      False -> Nil
+    }
+    use summary <- require(
+      generate.validate_only_with_progress(spec, cfg, reporter),
+      format_generate_error,
+    )
+    io.println("Spec loaded: " <> summary.spec_title)
+    print_warnings(summary.warnings)
+  })
   io.println("")
   io.println("Validation passed.")
 }
@@ -628,33 +832,65 @@ fn load_config_error_to_string(error: LoadConfigError) -> String {
   "Error: " <> detail
 }
 
-/// Pure config loading and validation pipeline.
-fn load_config(
+/// Pure config loading and validation pipeline. Issue #387: returns
+/// every target the config declares (1 for legacy single-target,
+/// N for multi-target). CLI overrides (`--mode`, `--output`) are
+/// applied uniformly to every target; `--output` over a multi-
+/// target config is rejected because each target already declares
+/// its own per-package output directory.
+fn load_configs(
   config_path: String,
   mode_opt: Option(String),
   output_opt: Option(String),
-) -> Result(config.Config, LoadConfigError) {
-  use cfg <- result.try(
-    config.load(config_path)
+) -> Result(List(config.Config), LoadConfigError) {
+  use cfgs <- result.try(
+    config.load_all(config_path)
     |> result.map_error(ConfigLoadError),
   )
-  use cfg <- result.try(case mode_opt {
-    None -> Ok(cfg)
+  use cfgs <- result.try(case mode_opt {
+    None -> Ok(cfgs)
     Some(mode_str) ->
       config.parse_mode(mode_str)
-      |> result.map(fn(parsed) { config.with_mode(cfg, parsed) })
+      |> result.map(fn(parsed) {
+        list.map(cfgs, fn(c) { config.with_mode(c, parsed) })
+      })
       |> result.map_error(ModeParseError)
   })
-  let cfg = case output_opt {
-    None -> cfg
-    Some(path) -> config.with_output(cfg, Some(path))
-  }
+  use cfgs <- result.try(case output_opt, cfgs {
+    None, _ -> Ok(cfgs)
+    Some(path), [single] -> Ok([config.with_output(single, Some(path))])
+    Some(_), [_, _, ..] ->
+      Error(
+        OutputValidationError(error: config.InvalidValue(
+          field: "--output",
+          detail: "cannot override the output directory for a multi-target config; each target already declares its own output (set per-target output: in oaspec.yaml or drop the --output flag)",
+        )),
+      )
+    Some(_), [] ->
+      Error(
+        OutputValidationError(error: config.InvalidValue(
+          field: "targets",
+          detail: "must declare at least one target",
+        )),
+      )
+  })
+  // Each target's own server/client paths must satisfy the per-
+  // target invariants (basename matches package, src placement is
+  // safe). Run both validators on every target.
+  use _ <- result.try(
+    cfgs
+    |> list.try_map(fn(cfg) { validate_target_paths(cfg) })
+    |> result.map(fn(_) { Nil }),
+  )
+  Ok(cfgs)
+}
+
+fn validate_target_paths(cfg: config.Config) -> Result(Nil, LoadConfigError) {
   use _ <- result.try(
     config.validate_output_package_match(cfg)
     |> result.map_error(OutputValidationError),
   )
   config.validate_output_dir_layout(cfg)
-  |> result.map(fn(_) { cfg })
   |> result.map_error(OutputValidationError)
 }
 
