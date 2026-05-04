@@ -1,5 +1,7 @@
 import gleam/dict
+import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import gleeunit
 import gleeunit/should
 import oaspec/codegen/writer
@@ -8,6 +10,7 @@ import oaspec/internal/codegen/context
 import oaspec/internal/codegen/import_analysis
 import oaspec/internal/openapi/schema
 import oaspec/internal/openapi/spec
+import simplifile
 
 pub fn main() {
   gleeunit.main()
@@ -115,6 +118,151 @@ pub fn error_to_string_file_write_error_test() {
     detail: "disk full",
   ))
   |> should.equal("Failed to write file /tmp/out/types.gleam: disk full")
+}
+
+// ===================================================================
+// Issue #401: writer.write_all real-filesystem tests
+//
+// The pre-existing writer_test cases above only exercise the pure
+// helpers (resolve_paths / output_dirs / error_to_string). The actual
+// disk-writing function — with ensure_directory, Overwrite vs
+// SkipIfExists semantics, and the on_write callback — was previously
+// only covered end-to-end through the CLI integration suite. The
+// tests below pin each policy + side-effect path against a real
+// temp directory so a regression in writer.write_all surfaces here
+// instead of only through the CLI suite.
+// ===================================================================
+
+const writer_test_root = "/tmp/oaspec_writer_test"
+
+fn writer_test_config(
+  mode: config.GenerateMode,
+  scratch: String,
+) -> config.Config {
+  config.new(
+    input: "test.yaml",
+    output_server: scratch <> "/server",
+    output_client: scratch <> "/client",
+    package: "api",
+    mode: mode,
+    validate: False,
+  )
+}
+
+fn writer_scratch(suffix: String) -> String {
+  let path = writer_test_root <> "/" <> suffix
+  let _ignored_delete = simplifile.delete(path)
+  path
+}
+
+fn writer_cleanup(path: String) -> Nil {
+  let _ignored_delete = simplifile.delete(path)
+  Nil
+}
+
+fn writer_payload() -> List(context.GeneratedFile) {
+  [
+    context.GeneratedFile(
+      path: "types.gleam",
+      content: "// types module\n",
+      target: context.SharedTarget,
+      write_mode: context.Overwrite,
+    ),
+    context.GeneratedFile(
+      path: "handlers.gleam",
+      content: "// fresh handler stub\n",
+      target: context.ServerTarget,
+      write_mode: context.SkipIfExists,
+    ),
+    context.GeneratedFile(
+      path: "router.gleam",
+      content: "// router\n",
+      target: context.ServerTarget,
+      write_mode: context.Overwrite,
+    ),
+  ]
+}
+
+pub fn write_all_creates_directories_and_writes_files_test() {
+  let scratch = writer_scratch("write_all_creates")
+  let cfg = writer_test_config(config.Server, scratch)
+  let assert Ok(written) =
+    writer.write_all(writer_payload(), cfg, fn(_) { Nil })
+
+  // Server-mode emits SharedTarget + ServerTarget files under the
+  // server directory.
+  list.length(written) |> should.equal(3)
+
+  let assert Ok(types_content) =
+    simplifile.read(scratch <> "/server/types.gleam")
+  types_content |> should.equal("// types module\n")
+
+  let assert Ok(router_content) =
+    simplifile.read(scratch <> "/server/router.gleam")
+  router_content |> should.equal("// router\n")
+
+  let assert Ok(handlers_content) =
+    simplifile.read(scratch <> "/server/handlers.gleam")
+  handlers_content |> should.equal("// fresh handler stub\n")
+
+  writer_cleanup(scratch)
+}
+
+pub fn write_all_skip_if_exists_preserves_user_handler_test() {
+  // Issue #247 contract: if handlers.gleam already exists on disk, the
+  // generator must NOT overwrite it. Pre-populate the target file with
+  // user-edited content and assert it survives a write_all run.
+  let scratch = writer_scratch("write_all_skip_if_exists")
+  let assert Ok(Nil) = simplifile.create_directory_all(scratch <> "/server")
+  let user_owned = "// user-owned handler with real domain logic\n"
+  let assert Ok(Nil) =
+    simplifile.write(scratch <> "/server/handlers.gleam", user_owned)
+
+  let cfg = writer_test_config(config.Server, scratch)
+  let assert Ok(_) = writer.write_all(writer_payload(), cfg, fn(_) { Nil })
+
+  let assert Ok(content) = simplifile.read(scratch <> "/server/handlers.gleam")
+  content |> should.equal(user_owned)
+
+  writer_cleanup(scratch)
+}
+
+pub fn write_all_on_write_callback_fires_per_written_file_test() {
+  // The on_write callback is the hook the CLI uses for "Generated:
+  // <path>" output. Every Overwrite file must trigger it exactly once;
+  // SkipIfExists files that are skipped must NOT trigger it (otherwise
+  // the CLI lies about which files it touched).
+  let scratch = writer_scratch("write_all_on_write")
+  let assert Ok(Nil) = simplifile.create_directory_all(scratch <> "/server")
+  // Pre-populate handlers.gleam so its SkipIfExists branch fires.
+  let assert Ok(Nil) =
+    simplifile.write(scratch <> "/server/handlers.gleam", "// pre-existing\n")
+
+  let counter_path = scratch <> "/.callback_log"
+  let assert Ok(Nil) = simplifile.write(counter_path, "")
+  let on_write = fn(p: String) {
+    let _ignored_log_write = case simplifile.read(counter_path) {
+      Ok(prior) -> simplifile.write(counter_path, prior <> p <> "\n")
+      // nolint: thrown_away_error -- callback can only swallow read errors; the surrounding test asserts on log content
+      Error(_) -> Ok(Nil)
+    }
+    Nil
+  }
+
+  let cfg = writer_test_config(config.Server, scratch)
+  let assert Ok(written) = writer.write_all(writer_payload(), cfg, on_write)
+
+  // 2 Overwrite files (types, router); handlers.gleam was skipped.
+  list.length(written) |> should.equal(2)
+
+  let assert Ok(log) = simplifile.read(counter_path)
+  // The callback log must mention types.gleam and router.gleam, but
+  // NOT handlers.gleam (the skipped file).
+  log |> string.contains("types.gleam") |> should.be_true()
+  log |> string.contains("router.gleam") |> should.be_true()
+  log |> string.contains("handlers.gleam") |> should.be_false()
+
+  writer_cleanup(scratch)
 }
 
 // ===================================================================

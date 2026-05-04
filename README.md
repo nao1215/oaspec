@@ -34,7 +34,7 @@ stops with a diagnostic instead of emitting partial code.
 - Produce readable Gleam types, encoders, decoders, request types, and response
   types
 - Keep unsupported spec shapes explicit and testable
-- Backed by 349 unit tests, ShellSpec CLI tests, 40 integration compile tests,
+- Backed by 352 unit tests, ShellSpec CLI tests, 40 integration compile tests,
   and 257 test fixtures (including 98 OSS-derived edge-case specs)
 
 API reference: <https://hexdocs.pm/oaspec/>
@@ -656,9 +656,11 @@ case generate.generate(spec, cfg) {
     // summary.files: List(GeneratedFile) — path and content for each file
     // summary.warnings: List(Diagnostic) — non-blocking warnings
     // summary.spec_title: String
+    Nil
   }
   Error(generate.ValidationErrors(errors:)) -> {
     // errors: List(Diagnostic) — blocking validation errors
+    Nil
   }
 }
 ```
@@ -667,8 +669,9 @@ case generate.generate(spec, cfg) {
 
 ```gleam
 case generate.validate_only(spec, cfg) {
-  Ok(summary) -> // spec is valid; summary.warnings may be non-empty
-  Error(generate.ValidationErrors(errors:)) -> // spec has errors
+  Ok(_summary) -> Nil
+  // spec has errors; surface `errors` to the user
+  Error(generate.ValidationErrors(errors: _errors)) -> Nil
 }
 ```
 

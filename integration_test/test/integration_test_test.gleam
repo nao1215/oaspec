@@ -1,10 +1,14 @@
 import api/decode
 import api/encode
+import api/guards
 import api/handlers
 import api/request_types
 import api/response_types
+import api/router
 import api/types
+import gleam/dict
 import gleam/option.{None, Some}
+import gleam/string
 import gleeunit
 import gleeunit/should
 
@@ -50,11 +54,7 @@ pub fn create_pet_request_type_test() {
 }
 
 pub fn error_type_test() {
-  let err =
-    types.Error(
-      code: 404,
-      message: "Not found",
-    )
+  let err = types.Error(code: 404, message: "Not found")
   err.code |> should.equal(404)
   err.message |> should.equal("Not found")
 }
@@ -96,12 +96,7 @@ pub fn list_pets_response_unauthorized_variant_test() {
 
 pub fn create_pet_response_created_variant_test() {
   let pet =
-    types.Pet(
-      id: 1,
-      name: "Rex",
-      status: types.PetStatusAvailable,
-      tag: None,
-    )
+    types.Pet(id: 1, name: "Rex", status: types.PetStatusAvailable, tag: None)
   let response_types.CreatePetResponseCreated(p) =
     response_types.CreatePetResponseCreated(pet)
   p.name |> should.equal("Rex")
@@ -229,12 +224,7 @@ pub fn roundtrip_pet_test() {
 
 pub fn roundtrip_pet_without_tag_test() {
   let original =
-    types.Pet(
-      id: 1,
-      name: "Rex",
-      status: types.PetStatusPending,
-      tag: None,
-    )
+    types.Pet(id: 1, name: "Rex", status: types.PetStatusPending, tag: None)
   let encoded = encode.encode_pet(original)
   let assert Ok(decoded) = decode.decode_pet(encoded)
   decoded |> should.equal(original)
@@ -263,12 +253,7 @@ pub fn handler_list_pets_test() {
 }
 
 pub fn handler_create_pet_test() {
-  let body =
-    types.CreatePetRequest(
-      name: "NewPet",
-      status: None,
-      tag: None,
-    )
+  let body = types.CreatePetRequest(name: "NewPet", status: None, tag: None)
   let req = request_types.CreatePetRequest(body:)
   let resp = handlers.create_pet(handlers.State, req)
   case resp {
@@ -341,6 +326,163 @@ pub fn e2e_request_response_cycle_test() {
       decoded_pet.name |> should.equal("Fido")
     }
     _ -> should.fail()
+  }
+}
+
+// ===================================================================
+// Issue #422: exercise the generated router and guards from gleeunit
+// rather than only through run.sh. Without these, a regression that
+// broke router.route's happy path or a guard's reject path on the
+// committed petstore project wouldn't show up in `gleam test` —
+// only in the bash-driven `integration_test/run.sh`.
+// ===================================================================
+
+fn empty_dict() -> dict.Dict(String, List(String)) {
+  dict.new()
+}
+
+fn empty_headers() -> dict.Dict(String, String) {
+  dict.new()
+}
+
+pub fn router_get_pets_happy_path_test() {
+  let resp =
+    router.route(
+      handlers.State,
+      "GET",
+      ["pets"],
+      empty_dict(),
+      empty_headers(),
+      "",
+    )
+  resp.status |> should.equal(200)
+  case resp.body {
+    router.TextBody(body) -> {
+      // The stub handler returns at least one pet; the JSON should
+      // mention "Fido" or be a JSON array prefix.
+      body |> string.contains("\"name\"") |> should.be_true()
+    }
+    _ -> should.fail()
+  }
+}
+
+pub fn router_get_pet_by_id_happy_path_test() {
+  let resp =
+    router.route(
+      handlers.State,
+      "GET",
+      ["pets", "1"],
+      empty_dict(),
+      empty_headers(),
+      "",
+    )
+  resp.status |> should.equal(200)
+}
+
+pub fn router_get_pet_by_id_not_found_test() {
+  let resp =
+    router.route(
+      handlers.State,
+      "GET",
+      ["pets", "999"],
+      empty_dict(),
+      empty_headers(),
+      "",
+    )
+  resp.status |> should.equal(404)
+}
+
+pub fn router_unknown_path_returns_404_test() {
+  let resp =
+    router.route(
+      handlers.State,
+      "GET",
+      ["unknown", "path"],
+      empty_dict(),
+      empty_headers(),
+      "",
+    )
+  resp.status |> should.equal(404)
+  case resp.body {
+    router.TextBody(body) -> {
+      body |> string.contains("not found") |> should.be_true()
+    }
+    _ -> should.fail()
+  }
+}
+
+pub fn router_unknown_method_returns_404_test() {
+  // The generated router collapses unknown method+path into the
+  // 404 fallback (single `_, _ -> 404` arm). 405 is not surfaced.
+  let resp =
+    router.route(
+      handlers.State,
+      "PATCH",
+      ["pets"],
+      empty_dict(),
+      empty_headers(),
+      "",
+    )
+  resp.status |> should.equal(404)
+}
+
+pub fn router_query_param_parsing_test() {
+  let query =
+    dict.from_list([
+      #("limit", ["5"]),
+      #("offset", ["10"]),
+    ])
+  let resp =
+    router.route(handlers.State, "GET", ["pets"], query, empty_headers(), "")
+  resp.status |> should.equal(200)
+}
+
+pub fn guards_validate_pet_name_accepts_valid_test() {
+  let result = guards.validate_pet_name_length("Fido")
+  result |> should.equal(Ok("Fido"))
+}
+
+pub fn guards_validate_pet_name_rejects_empty_test() {
+  let result = guards.validate_pet_name_length("")
+  case result {
+    Error(failure) -> {
+      failure.field |> should.equal("name")
+      failure.code |> should.equal("minLength")
+    }
+    Ok(_) -> should.fail()
+  }
+}
+
+pub fn guards_validate_pet_name_rejects_too_long_test() {
+  let too_long = string.repeat("x", 101)
+  let result = guards.validate_pet_name_length(too_long)
+  case result {
+    Error(failure) -> {
+      failure.field |> should.equal("name")
+      failure.code |> should.equal("maxLength")
+    }
+    Ok(_) -> should.fail()
+  }
+}
+
+pub fn guards_validate_pet_aggregates_failures_test() {
+  // Whole-record validator collects failures and returns Result(_, List(ValidationFailure)).
+  let bad_pet =
+    types.Pet(
+      id: 1,
+      name: "",
+      // empty: triggers minLength
+      status: types.PetStatusAvailable,
+      tag: None,
+    )
+  case guards.validate_pet(bad_pet) {
+    Error(failures) ->
+      // At least one failure surfaced.
+      case failures {
+        [] -> should.fail()
+        _ -> Nil
+      }
+    Ok(_) -> should.fail()
   }
 }
 
