@@ -256,23 +256,24 @@ include:
     - "/repos/**"
 ```
 
-- Both lists are optional. Empty or omitted = no filter on that
-  axis. Both empty = no filtering applied.
-- Operations pass when their tag list intersects `include.tags`
-  **OR** their path matches one of `include.paths` (the two lists
-  are unioned, not intersected).
-- Path patterns ending in `/**` match any path that extends the
-  prefix with a `/<rest>` segment (`"/repos/**"` matches
-  `/repos/foo` and `/repos/foo/bar`, but **not** the bare
-  `/repos` — list it explicitly when needed). Other patterns are
-  compared by exact equality.
+Both lists are optional; omitting one means there is no constraint on
+that axis, and omitting both leaves the filter inactive. An operation
+is kept when its tag list intersects `include.tags` or its path matches
+one of `include.paths`; the two lists are unioned rather than
+intersected, so adding entries to either list widens the result.
+
+Path patterns ending in `/**` match any path that extends the prefix
+with a `/<rest>` segment, so `"/repos/**"` matches `/repos/foo` and
+`/repos/foo/bar` but does not match the bare `/repos` — list `/repos`
+explicitly when you also need it. Other patterns are compared by exact
+equality.
 
 ### Splitting one spec into multiple packages with `targets:`
 
-`targets:` is an array of per-target overrides. The same input
-spec gets generated once per entry, each with its own
-`package` / `output` / `include`. The top-level `input`, `mode`,
-and `validate` are shared across every target.
+`targets:` is an array of per-target overrides. The same input spec is
+generated once per entry, each with its own `package`, `output`, and
+`include`. The top-level `input`, `mode`, and `validate` are shared
+across every target.
 
 ```yaml
 input: github.yaml
@@ -288,21 +289,19 @@ targets:
       paths: ["/repos/**"]
 ```
 
-Above, one `oaspec generate` run produces two packages:
-`./src/dco_check/github/issues/...` and
+The example above produces two packages from one `oaspec generate` run,
+at `./src/dco_check/github/issues/...` and
 `./src/dco_check/github/repos/...`. Callers consume them as
 `import dco_check/github/issues/client` and
 `import dco_check/github/repos/client`.
 
-Notes:
-- Each target must declare its own `package` — there is no
-  fallback default for multi-target configs (otherwise two
-  targets without a package would overwrite each other).
-- The CLI rejects configs whose targets resolve to overlapping
-  output paths, before any file is written.
-- `--output` cannot be used with multi-target configs (each target
-  already declares its own per-package output directory). Use the
-  per-target `output:` blocks instead.
+Each target must declare its own `package`; there is no fallback default
+for multi-target configs because two targets sharing the same default
+would overwrite each other. The CLI rejects configs whose targets
+resolve to overlapping output directories before writing any file. The
+`--output` CLI flag is also rejected with multi-target configs because
+each target already declares its own per-package output directory; use
+per-target `output:` blocks instead.
 
 ### Configuration paths
 
