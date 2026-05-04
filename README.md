@@ -48,13 +48,14 @@ API reference: <https://hexdocs.pm/oaspec/>
 - CLI (the `oaspec` binary that drives `init` / `generate` / `validate`
   on the command line) — install from a GitHub release or build from source.
 
-Most users want both: `gleam add oaspec` in the project that consumes the
-generated code, and the CLI installed system-wide to run `oaspec generate`.
+Most users want both: `gleam add oaspec gleam_json` in the project that
+consumes the generated code, and the CLI installed system-wide to run
+`oaspec generate`.
 
 ### Library (Hex)
 
 ```sh
-gleam add oaspec
+gleam add oaspec gleam_json
 ```
 
 This pulls the published [hex.pm package](https://hex.pm/packages/oaspec)
@@ -62,6 +63,13 @@ and gives you the public modules under `oaspec/transport`, `oaspec/mock`,
 `oaspec/config`, `oaspec/generate`, `oaspec/openapi/parser`, and
 `oaspec/openapi/diagnostic`. See [Library API](#library-api) below for the
 full module list.
+
+`gleam_json` is added in the same step because the generated `decode.gleam`,
+`encode.gleam`, `guards.gleam`, and `router.gleam` modules `import gleam/json`
+directly. Without `gleam_json` listed as a direct dependency of the consumer
+project, `gleam check` prints a "Transitive dependency imported" warning for
+each generated file, and a future Gleam release will turn the warning into a
+compile error. Adding it up front avoids both.
 
 ### CLI — GitHub release
 

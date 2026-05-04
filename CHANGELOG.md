@@ -10,6 +10,16 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Changed
+
+- **docs(readme)**: install snippet now adds `gleam_json` alongside
+  `oaspec` (`gleam add oaspec gleam_json`) and explains why — the
+  generated `decode.gleam`, `encode.gleam`, `guards.gleam`, and
+  `router.gleam` modules `import gleam/json` directly, so consumers
+  must list `gleam_json` as a direct dependency to avoid a
+  "Transitive dependency imported" warning on every `gleam check`
+  (and a hard compile error in a future Gleam release). Closes #469.
+
 ## [0.48.0] - 2026-05-04
 
 ### Added
