@@ -367,7 +367,7 @@ pub fn handle(
     |> list.fold(dict.new(), fn(acc, kv) {
       dict.upsert(acc, kv.0, fn(prev) {
         case prev {
-          Some(values) -> [kv.1, ..values]
+          Some(values) -> list.append(values, [kv.1])
           None -> [kv.1]
         }
       })

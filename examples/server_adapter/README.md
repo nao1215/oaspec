@@ -16,7 +16,9 @@ A Gleam project that shows how to bridge the oaspec-generated
 The shape of the router is deliberately framework-free. Any wisp / mist
 adapter is the same three-step pattern:
 
-1. Decompose the framework's request into the six primitives.
+1. Decompose the framework's request into five primitives
+   (`method`, `path`, `query`, `headers`, `body`) and supply the
+   application `state` (your DB pool, config, etc.).
 2. `let response = router.route(state, method, path, query, headers, body)`.
 3. Render `response.status` / `response.body` / `response.headers` back
    into the framework's response type.
