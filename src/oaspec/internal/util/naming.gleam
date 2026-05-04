@@ -5,13 +5,34 @@ import gleam/regexp.{type Regexp}
 import gleam/string
 
 /// Pre-compiled regexes used by naming functions.
-/// Compiled once per public function call instead of on every internal call.
+///
+/// Issue #405: previously these were compiled on every public-call
+/// entry (`to_pascal_case` / `to_snake_case`). On a 10k-schema spec
+/// that's 30k+ regex compiles per `oaspec generate`. The FFI helper
+/// `memoize_regexes` below stashes the first-ever computed value in
+/// `persistent_term` so subsequent calls are O(1) lookups with no GC
+/// pressure.
 type Regexes {
   Regexes(
     word_separator: Regexp,
     camel_case: Regexp,
     underscore_before_caps: Regexp,
   )
+}
+
+/// Cache key for the persistent_term store. Zero-arg constructors map
+/// to atoms in Erlang; we only need the type to be unique to oaspec
+/// so the key cannot collide with anything else stored in
+/// persistent_term by other applications.
+type RegexCacheKey {
+  OaspecNamingRegexes
+}
+
+@external(erlang, "oaspec_naming_ffi", "memoize")
+fn memoize_regexes(key: RegexCacheKey, compute: fn() -> Regexes) -> Regexes
+
+fn cached_regexes() -> Regexes {
+  memoize_regexes(OaspecNamingRegexes, compile_regexes)
 }
 
 fn compile_regexes() -> Regexes {
@@ -57,7 +78,7 @@ fn compile_regexes() -> Regexes {
 /// `Minus1`, `N404`) instead of `1`, `1`, `404` — the latter would
 /// be rejected by the parser at the type-constructor position.
 pub fn to_pascal_case(input: String) -> String {
-  let re = compile_regexes()
+  let re = cached_regexes()
   input
   |> rewrite_leading_signs
   |> split_words(re)
@@ -100,7 +121,7 @@ fn ensure_letter_start_pascal(input: String) -> String {
 /// REST API spec, where `+1` and `-1` both collapsed to `1` (issue
 /// #352).
 pub fn to_snake_case(input: String) -> String {
-  let re = compile_regexes()
+  let re = cached_regexes()
   let result =
     input
     |> rewrite_leading_signs
