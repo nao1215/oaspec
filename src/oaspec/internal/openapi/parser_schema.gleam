@@ -40,33 +40,12 @@ fn parse_schema_object(
   path: String,
   index: LocationIndex,
 ) -> Result(SchemaObject, Diagnostic) {
-  let nullable =
-    yay.extract_optional_bool(node, "nullable")
-    |> result.unwrap(None)
-    |> option.unwrap(False)
-
-  let description =
-    yay.extract_optional_string(node, "description")
-    |> result.unwrap(None)
-
-  let deprecated =
-    yay.extract_optional_bool(node, "deprecated")
-    |> result.unwrap(None)
-    |> option.unwrap(False)
-
-  let title =
-    yay.extract_optional_string(node, "title")
-    |> result.unwrap(None)
-
-  let read_only =
-    yay.extract_optional_bool(node, "readOnly")
-    |> result.unwrap(None)
-    |> option.unwrap(False)
-
-  let write_only =
-    yay.extract_optional_bool(node, "writeOnly")
-    |> result.unwrap(None)
-    |> option.unwrap(False)
+  let nullable = parser_value.bool_default(node, "nullable", False)
+  let description = parser_value.optional_string(node, "description")
+  let deprecated = parser_value.bool_default(node, "deprecated", False)
+  let title = parser_value.optional_string(node, "title")
+  let read_only = parser_value.bool_default(node, "readOnly", False)
+  let write_only = parser_value.bool_default(node, "writeOnly", False)
 
   let default = parser_value.extract_optional(node, "default")
 
@@ -289,18 +268,13 @@ fn parse_typed_schema(
         // Unsupported keywords (const, if/then/else, etc.) are already caught
         // by check_unsupported_schema_keywords before reaching this point,
         // so this fallback is safe for legitimate type-less schemas.
-        let type_name =
-          yay.extract_optional_string(node, "type")
-          |> result.unwrap(None)
-          |> option.unwrap("object")
+        let type_name = parser_value.string_default(node, "type", "object")
         Ok(#(type_name, metadata))
       }
     },
   )
 
-  let format =
-    yay.extract_optional_string(node, "format")
-    |> result.unwrap(None)
+  let format = parser_value.optional_string(node, "format")
 
   case type_str {
     "string" -> {
@@ -308,12 +282,9 @@ fn parse_typed_schema(
         Ok(values) -> values
         _ -> []
       }
-      let min_length =
-        yay.extract_optional_int(node, "minLength") |> result.unwrap(None)
-      let max_length =
-        yay.extract_optional_int(node, "maxLength") |> result.unwrap(None)
-      let pattern =
-        yay.extract_optional_string(node, "pattern") |> result.unwrap(None)
+      let min_length = parser_value.optional_int(node, "minLength")
+      let max_length = parser_value.optional_int(node, "maxLength")
+      let pattern = parser_value.optional_string(node, "pattern")
       Ok(StringSchema(
         metadata:,
         format:,
@@ -325,18 +296,13 @@ fn parse_typed_schema(
     }
 
     "integer" -> {
-      let minimum =
-        yay.extract_optional_int(node, "minimum") |> result.unwrap(None)
-      let maximum =
-        yay.extract_optional_int(node, "maximum") |> result.unwrap(None)
+      let minimum = parser_value.optional_int(node, "minimum")
+      let maximum = parser_value.optional_int(node, "maximum")
       let exclusive_minimum =
-        yay.extract_optional_int(node, "exclusiveMinimum")
-        |> result.unwrap(None)
+        parser_value.optional_int(node, "exclusiveMinimum")
       let exclusive_maximum =
-        yay.extract_optional_int(node, "exclusiveMaximum")
-        |> result.unwrap(None)
-      let multiple_of =
-        yay.extract_optional_int(node, "multipleOf") |> result.unwrap(None)
+        parser_value.optional_int(node, "exclusiveMaximum")
+      let multiple_of = parser_value.optional_int(node, "multipleOf")
       Ok(IntegerSchema(
         metadata:,
         format:,
@@ -349,19 +315,13 @@ fn parse_typed_schema(
     }
 
     "number" -> {
-      let minimum =
-        yay.extract_optional_float(node, "minimum") |> result.unwrap(None)
-      let maximum =
-        yay.extract_optional_float(node, "maximum") |> result.unwrap(None)
+      let minimum = parser_value.optional_float(node, "minimum")
+      let maximum = parser_value.optional_float(node, "maximum")
       let exclusive_minimum =
-        yay.extract_optional_float(node, "exclusiveMinimum")
-        |> result.unwrap(None)
+        parser_value.optional_float(node, "exclusiveMinimum")
       let exclusive_maximum =
-        yay.extract_optional_float(node, "exclusiveMaximum")
-        |> result.unwrap(None)
-      let multiple_of =
-        yay.extract_optional_float(node, "multipleOf")
-        |> result.unwrap(None)
+        parser_value.optional_float(node, "exclusiveMaximum")
+      let multiple_of = parser_value.optional_float(node, "multipleOf")
       Ok(NumberSchema(
         metadata:,
         format:,
@@ -388,14 +348,9 @@ fn parse_typed_schema(
             ))
         },
       )
-      let min_items =
-        yay.extract_optional_int(node, "minItems") |> result.unwrap(None)
-      let max_items =
-        yay.extract_optional_int(node, "maxItems") |> result.unwrap(None)
-      let unique_items =
-        yay.extract_optional_bool(node, "uniqueItems")
-        |> result.unwrap(None)
-        |> option.unwrap(False)
+      let min_items = parser_value.optional_int(node, "minItems")
+      let max_items = parser_value.optional_int(node, "maxItems")
+      let unique_items = parser_value.bool_default(node, "uniqueItems", False)
       Ok(ArraySchema(metadata:, items:, min_items:, max_items:, unique_items:))
     }
 
@@ -423,12 +378,8 @@ fn parse_typed_schema(
           _ -> Ok(schema.Unspecified)
         },
       )
-      let min_properties =
-        yay.extract_optional_int(node, "minProperties")
-        |> result.unwrap(None)
-      let max_properties =
-        yay.extract_optional_int(node, "maxProperties")
-        |> result.unwrap(None)
+      let min_properties = parser_value.optional_int(node, "minProperties")
+      let max_properties = parser_value.optional_int(node, "maxProperties")
       Ok(ObjectSchema(
         metadata:,
         properties:,

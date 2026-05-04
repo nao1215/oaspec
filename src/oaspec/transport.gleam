@@ -239,15 +239,20 @@ pub fn with_default_headers(
   headers headers: List(#(String, String)),
 ) -> fn(Request) -> a {
   fn(req: Request) {
-    let merged =
-      list.fold(headers, req.headers, fn(acc, kv) {
+    // Build with prepend + final reverse so the fold is O(N) over the
+    // header list instead of the O(N²) shape we get from
+    // `list.append(acc, [...])`. has_header is order-independent
+    // (a name lookup), so checking against the reversed accumulator
+    // preserves the original "first-occurrence wins" behavior.
+    let merged_rev =
+      list.fold(headers, list.reverse(req.headers), fn(acc_rev, kv) {
         let #(name, value) = kv
-        case has_header(acc, name) {
-          True -> acc
-          False -> list.append(acc, [#(name, value)])
+        case has_header(acc_rev, name) {
+          True -> acc_rev
+          False -> [#(name, value), ..acc_rev]
         }
       })
-    send(Request(..req, headers: merged))
+    send(Request(..req, headers: list.reverse(merged_rev)))
   }
 }
 
