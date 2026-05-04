@@ -596,6 +596,99 @@ rm -rf "$ENUM_MULTI_DIR"
 info "Issue #482 multipart enum-field integration test passed."
 
 # -------------------------------------------------------
+# Step 10c: Issue #483 — the OpenAPI `default` response variant
+# now carries a runtime status code as its first positional field,
+# so handlers can return any 4xx/5xx through the catch-all branch
+# instead of being pinned to 500. Compile a generated server +
+# handler that exercises this end-to-end.
+# -------------------------------------------------------
+info "Testing Issue #483 default response status code generation..."
+
+DEF_DIR="$SCRIPT_DIR/default_status_test"
+rm -rf "$DEF_DIR"
+mkdir -p "$DEF_DIR/src"
+
+cat > "$DEF_DIR/oaspec-default-status.yaml" << 'YAML_EOF'
+input: test/fixtures/server_default_response_status.yaml
+output:
+  server: ./integration_test/default_status_test/src/api
+package: api
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$DEF_DIR/oaspec-default-status.yaml" \
+  --mode=server
+
+cat > "$DEF_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
+import api/request_types
+import api/response_types
+import api/types
+
+pub type State {
+  State
+}
+
+pub fn delete_artifact(
+  state: State,
+  req: request_types.DeleteArtifactRequest,
+) -> response_types.DeleteArtifactResponse {
+  let _ = state
+  // Issue #483: return 401 (not 500) through the default branch.
+  case req.id {
+    "" ->
+      response_types.DeleteArtifactResponseDefault(
+        401,
+        types.Error(code: "unauthorized", message: "missing id"),
+      )
+    _ -> response_types.DeleteArtifactResponseNoContent
+  }
+}
+
+pub fn list_things(
+  state: State,
+) -> response_types.ListThingsResponse {
+  let _ = state
+  // Empty default body: variant collapses to `Default(Int)`.
+  response_types.ListThingsResponseDefault(503)
+}
+GLEAM_EOF
+
+cat > "$DEF_DIR/gleam.toml" << 'TOML_EOF'
+name = "default_status_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$DEF_DIR/src/default_status_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$DEF_DIR"
+gleam deps download
+
+if gleam build --warnings-as-errors; then
+  info "PASS: Generated default-response-status server compiles (#483)."
+else
+  fail "Generated default-response-status server failed to compile (#483 regression)."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$DEF_DIR"
+
+info "Issue #483 default response status integration test passed."
+
+# -------------------------------------------------------
 # Step 11: Generate callback spec and verify it compiles
 # -------------------------------------------------------
 info "Testing callback handler code generation..."

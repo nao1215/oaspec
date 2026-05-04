@@ -10,6 +10,29 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Breaking
+
+- **codegen(default-response)**: the generated `XxxResponseDefault`
+  variant now carries a runtime `Int` status code as its first
+  positional field, so handlers can pick any 4xx/5xx for the
+  catch-all branch instead of being pinned to 500. Concretely:
+
+      // before
+      DeleteArtifactResponseDefault(types.Error)
+      // after
+      DeleteArtifactResponseDefault(Int, types.Error)
+
+  Variants without a body collapse to `Default(Int)`; variants with
+  declared response headers append the headers record as the last
+  positional field exactly as the other response variants do. The
+  router's `ServerResponse.status` is now sourced from the bound
+  `status` rather than the previous hardcoded `500`, and the client
+  decoder captures the actual response `Int` and threads it back
+  through the variant. **Migration**: every handler that constructs
+  a `Default` variant must be updated to supply the status code
+  (`401`, `404`, …) as the first argument; every caller pattern-
+  matching the variant must add the `status` binding. (#483)
+
 ### Fixed
 
 - **server-codegen(multipart)**: a `multipart/form-data` request body
