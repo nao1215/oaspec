@@ -1,0 +1,50 @@
+openapi: 3.0.3
+info:
+  title: Server Octet-Stream Request Body Test API
+  version: 1.0.0
+paths:
+  /webhooks/binary:
+    post:
+      operationId: ingestBinaryWebhook
+      parameters:
+        - name: X-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "204":
+          description: ok
+  /artifacts:
+    post:
+      operationId: createArtifact
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                properties:
+                  id:
+                    type: string

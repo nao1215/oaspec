@@ -186,13 +186,21 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
       case operation.request_body {
         Some(Value(rb)) ->
           list.any(dict.to_list(rb.content), fn(ce) {
-            let #(_, mt) = ce
-            case mt.schema {
-              Some(Inline(schema.StringSchema(..))) -> True
-              Some(Inline(schema.IntegerSchema(..))) -> True
-              Some(Inline(schema.NumberSchema(..))) -> True
-              Some(Inline(schema.BooleanSchema(..))) -> True
-              _ -> False
+            let #(ct_name, mt) = ce
+            // Issue #485: an `application/octet-stream` body is
+            // wrapped via `transport.BytesBody`, not
+            // `json.to_string`, so a `type: string, format: binary`
+            // request body must not pull in `gleam/json`.
+            case ct_util.from_string(ct_name) {
+              ct_util.ApplicationOctetStream -> False
+              _ ->
+                case mt.schema {
+                  Some(Inline(schema.StringSchema(..))) -> True
+                  Some(Inline(schema.IntegerSchema(..))) -> True
+                  Some(Inline(schema.NumberSchema(..))) -> True
+                  Some(Inline(schema.BooleanSchema(..))) -> True
+                  _ -> False
+                }
             }
           })
         _ -> False

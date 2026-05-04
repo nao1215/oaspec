@@ -188,12 +188,28 @@ fn request_body_type(
 ) -> String {
   let content_entries = sorted_entries(rb.content)
   case content_entries {
-    [#(_media_type, media_type), ..] ->
-      case media_type.schema {
-        Some(Reference(name:, ..)) ->
-          "types." <> naming.schema_to_type_name(name)
-        Some(Inline(schema_obj)) -> inline_request_body_type(schema_obj, op_id)
-        _ -> "String"
+    [#(media_type_name, media_type), ..] ->
+      // Issue #485: an `application/octet-stream` request body is
+      // raw bytes — the README's mode-specific table promises
+      // `BitArray`, the client wraps it in `transport.BytesBody`
+      // (which expects `BitArray`), and forcing it through `String`
+      // means arbitrary binary payloads cannot round-trip. The
+      // response side already does this correctly via
+      // `response_inner_type` above; mirror that for the request.
+      case content_type.from_string(media_type_name) {
+        content_type.ApplicationOctetStream ->
+          case media_type.schema {
+            Some(_) -> "BitArray"
+            None -> "BitArray"
+          }
+        _ ->
+          case media_type.schema {
+            Some(Reference(name:, ..)) ->
+              "types." <> naming.schema_to_type_name(name)
+            Some(Inline(schema_obj)) ->
+              inline_request_body_type(schema_obj, op_id)
+            _ -> "String"
+          }
       }
     [] -> "String"
   }

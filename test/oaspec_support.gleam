@@ -13133,6 +13133,60 @@ pub fn server_default_response_only_generates_case() {
   list.length(server_files) |> should.not_equal(0)
 }
 
+pub fn octet_stream_request_body_emits_bit_array_case() {
+  // Issue #485: a `application/octet-stream` request body must
+  // surface as `body: BitArray` on both server and client request
+  // types — `String` forces arbitrary binary payloads through
+  // `bit_array.to_string |> result.unwrap("")`, which silently
+  // drops non-UTF-8 bytes, and breaks the client's
+  // `transport.BytesBody` wrap with a type mismatch.
+  let ctx = make_ctx("test/fixtures/server_octet_stream_request_body.yaml")
+  let type_files = types.generate(ctx)
+  let assert Ok(request_types_file) =
+    list.find(type_files, fn(f) { f.path == "request_types.gleam" })
+  let request_types_content = request_types_file.content
+  string.contains(request_types_content, "body: BitArray")
+  |> should.be_true()
+  string.contains(
+    request_types_content,
+    "IngestBinaryWebhookRequest(x_signature: String, body: BitArray)",
+  )
+  |> should.be_true()
+
+  // Server router signature switches to BitArray when any
+  // operation declares octet-stream, and shadows `body` with the
+  // String conversion at the top of every non-binary arm.
+  let server_files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(server_files, fn(f) { f.path == "router.gleam" })
+  let router_content = router_file.content
+  // Unformatted output is single-line; substring check is enough.
+  string.contains(router_content, "body: BitArray)")
+  |> should.be_true()
+  // Non-binary arm shadows the param so the rest of the codegen
+  // can keep treating `body` as a String.
+  string.contains(
+    router_content,
+    "let body = bit_array.to_string(body) |> result.unwrap(\"\")",
+  )
+  |> should.be_true()
+  // Binary arm uses `body` directly without the conversion.
+  string.contains(router_content, "body: body,")
+  |> should.be_true()
+
+  // Client: function takes `body body: BitArray` and the wrap
+  // around `transport.BytesBody(body)` no longer produces a type
+  // mismatch.
+  let client_files = client_gen.generate(ctx)
+  let assert Ok(client_file) =
+    list.find(client_files, fn(f) { f.path == "client.gleam" })
+  let client_content = client_file.content
+  string.contains(client_content, "body body: BitArray")
+  |> should.be_true()
+  string.contains(client_content, "transport.BytesBody(body)")
+  |> should.be_true()
+}
+
 pub fn server_default_response_carries_status_field_case() {
   // Issue #483: the OpenAPI `default` response variant must carry the
   // runtime status code as its first positional field, and the router
