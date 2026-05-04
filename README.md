@@ -11,7 +11,7 @@ stops with a diagnostic instead of emitting partial code.
 - Produce readable Gleam types, encoders, decoders, request types, and response
   types
 - Keep unsupported spec shapes explicit and testable
-- Backed by 331 unit tests, ShellSpec CLI tests, 40 integration compile tests,
+- Backed by 336 unit tests, ShellSpec CLI tests, 40 integration compile tests,
   and 251 test fixtures (including 98 OSS-derived edge-case specs)
 
 ## Install
@@ -68,6 +68,13 @@ oaspec generate --config=oaspec.yaml
 ```
 
 You can also run `gleam run -- generate --config=oaspec.yaml`.
+
+Important: all path-valued config fields (`input`, `output.dir`,
+`output.server`, `output.client`) are resolved relative to the current
+working directory when `oaspec` runs, not relative to the config file
+location. If `oaspec.yaml` lives in a subdirectory, either invoke
+`oaspec` from that directory or write paths relative to the directory
+you run the command from.
 
 ## Generated files
 

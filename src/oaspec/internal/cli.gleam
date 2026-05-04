@@ -1,3 +1,4 @@
+import filepath
 import gleam/int
 import gleam/io
 import gleam/list
@@ -275,6 +276,7 @@ fn run_generate(
     False -> cfg
   }
 
+  print_resolved_paths(config_path, cfg)
   io.println("Parsing OpenAPI spec: " <> config.input(cfg))
   let reporter = progress.stdout_with_elapsed()
   use spec <- require(
@@ -300,6 +302,103 @@ fn run_generate(
   case check_mode {
     True -> run_check(summary.files, cfg)
     False -> write_files(summary.files, cfg)
+  }
+}
+
+fn print_resolved_paths(config_path: String, cfg: config.Config) -> Nil {
+  case simplifile.current_directory() {
+    Ok(cwd) -> {
+      io.println("Resolved paths:")
+      resolved_path_entries(config_path, cfg, cwd)
+      |> list.each(fn(entry) {
+        let #(label, path) = entry
+        io.println("  " <> label <> ": " <> path)
+      })
+    }
+    // nolint: thrown_away_error -- path printing is best-effort; if the cwd cannot be read we silently skip rather than abort generation.
+    Error(_) -> Nil
+  }
+}
+
+@internal
+pub fn resolved_path_entries(
+  config_path: String,
+  cfg: config.Config,
+  cwd: String,
+) -> List(#(String, String)) {
+  let base_entries = [
+    #("config", resolve_path_from_cwd(config_path, cwd)),
+    #("input", resolve_path_from_cwd(config.input(cfg), cwd)),
+  ]
+  let output_entries = case config.mode(cfg) {
+    config.Server -> [
+      #("output.server", resolve_path_from_cwd(config.output_server(cfg), cwd)),
+    ]
+    config.Client -> [
+      #("output.client", resolve_path_from_cwd(config.output_client(cfg), cwd)),
+    ]
+    config.Both -> [
+      #("output.server", resolve_path_from_cwd(config.output_server(cfg), cwd)),
+      #("output.client", resolve_path_from_cwd(config.output_client(cfg), cwd)),
+    ]
+  }
+  list.append(base_entries, output_entries)
+}
+
+@internal
+pub fn resolve_path_from_cwd(path: String, cwd: String) -> String {
+  let candidate = case path_is_absolute(path) {
+    True -> path
+    False -> filepath.join(cwd, path)
+  }
+  filepath.expand(candidate) |> result.unwrap(candidate)
+}
+
+fn path_is_absolute(path: String) -> Bool {
+  filepath.is_absolute(path)
+  || string.starts_with(path, "\\\\")
+  || string.starts_with(path, "//")
+  || is_windows_drive_absolute(path)
+}
+
+fn is_windows_drive_absolute(path: String) -> Bool {
+  let prefix = string.slice(from: path, at_index: 0, length: 3)
+  case string.to_graphemes(prefix) {
+    [drive, ":", slash] ->
+      is_ascii_letter(drive) && { slash == "/" || slash == "\\" }
+    _ -> False
+  }
+}
+
+fn is_ascii_letter(value: String) -> Bool {
+  case string.lowercase(value) {
+    "a"
+    | "b"
+    | "c"
+    | "d"
+    | "e"
+    | "f"
+    | "g"
+    | "h"
+    | "i"
+    | "j"
+    | "k"
+    | "l"
+    | "m"
+    | "n"
+    | "o"
+    | "p"
+    | "q"
+    | "r"
+    | "s"
+    | "t"
+    | "u"
+    | "v"
+    | "w"
+    | "x"
+    | "y"
+    | "z" -> True
+    _ -> False
   }
 }
 
