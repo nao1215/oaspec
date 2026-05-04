@@ -229,6 +229,37 @@ package: api
 #                                 # picks up both.
 #   server: ./gen/api             # Override server output path
 #   client: ./gen/api_client      # Override client output path
+
+# Operation filter (optional, Issue #387). When set, codegen only
+# emits operations whose tag list intersects `tags` OR whose path
+# matches one of `paths` (the two lists are unioned, not
+# intersected). Path patterns ending in `/**` match any path that
+# extends the prefix with a `/<rest>` segment. Both lists empty /
+# both keys omitted = no filter.
+# include:
+#   tags:
+#     - issues
+#   paths:
+#     - \"/users/{username}\"
+#     - \"/repos/**\"
+
+# Multi-target codegen (optional, Issue #387). When `targets:` is
+# set, the same input spec is generated once per entry, each with
+# its own `package`, `output`, and `include`. The top-level
+# `input`, `mode`, and `validate` are shared across every target.
+# Targets whose output paths overlap are rejected at config-load
+# time. `--output` cannot be used with multi-target configs.
+# targets:
+#   - package: my_app/issues
+#     output:
+#       dir: ./src
+#     include:
+#       tags: [issues]
+#   - package: my_app/repos
+#     output:
+#       dir: ./src
+#     include:
+#       paths: [\"/repos/**\"]
 "
 
   case simplifile.is_file(path) {

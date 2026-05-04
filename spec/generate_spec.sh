@@ -628,6 +628,55 @@ EOF
 End
 
 # ===================================================================
+# `oaspec init` round-trip — Issue #387 follow-up
+# ===================================================================
+#
+# `init` creates a default oaspec.yaml. After Issue #387 added
+# `include:` and `targets:` to the schema, the template grew new
+# commented-out blocks documenting both. The parser must still load
+# the shipped template cleanly (the new blocks are comments, but a
+# stray colon or indent slip would only surface in a CI run).
+
+Describe 'oaspec init round-trip'
+  Include "$SHELLSPEC_SPECDIR/spec_helper.sh"
+
+  setup_init_round_trip() {
+    rm -rf "$PROJECT_ROOT/test_init_round_trip"
+    mkdir -p "$PROJECT_ROOT/test_init_round_trip"
+    cp "$PROJECT_ROOT/test/fixtures/petstore.yaml" \
+       "$PROJECT_ROOT/test_init_round_trip/openapi.yaml"
+  }
+
+  cleanup_init_round_trip() {
+    rm -rf "$PROJECT_ROOT/test_init_round_trip"
+  }
+
+  Before 'setup_init_round_trip'
+  After 'cleanup_init_round_trip'
+
+  It 'creates an oaspec.yaml that the validator can load and parse'
+    cd "$PROJECT_ROOT/test_init_round_trip" || exit 1
+    # `oaspec init` writes ./oaspec.yaml in the current directory.
+    When run gleam run --no-print-progress -- init --output=./oaspec.yaml
+    The status should be success
+    The output should include 'Created'
+    The path "$PROJECT_ROOT/test_init_round_trip/oaspec.yaml" should be file
+  End
+
+  It 'validates against a real spec without parse errors'
+    cd "$PROJECT_ROOT/test_init_round_trip" || exit 1
+    # Generate the template via init, then run validate against
+    # the petstore stub copied as openapi.yaml above. If the
+    # template's commented include / targets blocks broke the
+    # YAML parser, this would fail before any validation logic ran.
+    gleam run --no-print-progress -- init --output=./oaspec.yaml > /dev/null 2>&1
+    When run gleam run --no-print-progress -- validate --config=./oaspec.yaml
+    The status should be success
+    The output should include 'Validation passed'
+  End
+End
+
+# ===================================================================
 # Issue #387 — `include:` filter (subset of operations)
 # ===================================================================
 #
