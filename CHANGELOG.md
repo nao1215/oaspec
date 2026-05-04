@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-05-04
+
 ### Changed
 
 - **codegen**: lifted the static runtime helper blobs that
