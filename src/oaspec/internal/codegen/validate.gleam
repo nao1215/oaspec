@@ -14,9 +14,7 @@ import oaspec/internal/openapi/spec.{type Resolved}
 import oaspec/internal/util/content_type
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
-import oaspec/openapi/diagnostic.{
-  type Diagnostic, SeverityError, SeverityWarning, TargetBoth, TargetServer,
-}
+import oaspec/openapi/diagnostic.{type Diagnostic}
 
 /// Validate the parsed spec for unsupported patterns.
 /// Returns a list of errors; empty list means validation passed.
@@ -62,9 +60,7 @@ fn validate_decode_list_collisions(ctx: Context) -> List(Diagnostic) {
       False -> Error(Nil)
       True -> {
         let snake = naming.to_snake_case(base_name)
-        Ok(diagnostic.validation(
-          severity: SeverityError,
-          target: TargetBoth,
+        Ok(diagnostic.validation_error_both(
           path: "components.schemas." <> collider_name,
           detail: "Schema name '"
             <> collider_name
@@ -225,9 +221,7 @@ fn validate_operations(
     let response_errors = validate_responses(op_id, resolved_responses, ctx)
     let missing_responses_errors = case dict.is_empty(resolved_responses) {
       True -> [
-        diagnostic.validation(
-          severity: SeverityError,
-          target: TargetBoth,
+        diagnostic.validation_error_both(
           path: op_id,
           detail: "Operation has no responses defined. OpenAPI 3.x requires at least one response.",
           hint: Some(
@@ -272,9 +266,7 @@ fn validate_path_template_params(
           names ->
             " Defined path parameters: " <> string.join(names, ", ") <> "."
         }
-        Ok(diagnostic.validation(
-          severity: SeverityError,
-          target: TargetBoth,
+        Ok(diagnostic.validation_error_both(
           path: op_id <> ".path",
           detail: "Path template parameter '{"
             <> name
@@ -317,9 +309,7 @@ fn validate_parameters(
     let path = op_id <> ".parameters." <> p.name
     let style_errors = case p.style {
       Some(spec.MatrixStyle) | Some(spec.LabelStyle) -> [
-        diagnostic.validation(
-          severity: SeverityError,
-          target: TargetBoth,
+        diagnostic.validation_error_both(
           path: path,
           detail: "Parameter style is not supported. Supported styles: form, simple, deepObject, pipeDelimited, spaceDelimited.",
           hint: Some(
@@ -337,9 +327,7 @@ fn validate_parameters(
     // We don't support the content-based parameter serialization.
     let content_errors = case p.payload {
       spec.ParameterContent(_) -> [
-        diagnostic.validation(
-          severity: SeverityError,
-          target: TargetBoth,
+        diagnostic.validation_error_both(
           path: path,
           detail: "Parameters using 'content' instead of 'schema' are not supported.",
           hint: Some(
@@ -377,9 +365,7 @@ fn validate_delimited_style(
   let location_errors = case param.in_ {
     spec.InQuery -> []
     _ -> [
-      diagnostic.validation(
-        severity: SeverityError,
-        target: TargetBoth,
+      diagnostic.validation_error_both(
         path: path,
         detail: "Parameter style '"
           <> style_name
@@ -395,9 +381,7 @@ fn validate_delimited_style(
   {
     Some(ArraySchema(..)) -> []
     _ -> [
-      diagnostic.validation(
-        severity: SeverityError,
-        target: TargetBoth,
+      diagnostic.validation_error_both(
         path: path,
         detail: "Parameter style '"
           <> style_name
@@ -427,9 +411,7 @@ fn validate_server_structured_param(
         | spec.InQuery, Some(ArraySchema(items: Inline(BooleanSchema(..)), ..))
         -> []
         spec.InQuery, Some(ArraySchema(..)) -> [
-          diagnostic.validation(
-            severity: SeverityError,
-            target: TargetServer,
+          diagnostic.validation_error_server(
             path: path,
             detail: "Query array parameters are only supported for inline primitive items in server code generation.",
             hint: Some(
@@ -443,9 +425,7 @@ fn validate_server_structured_param(
         | spec.InHeader, Some(ArraySchema(items: Inline(BooleanSchema(..)), ..))
         -> []
         spec.InHeader, Some(ArraySchema(..)) -> [
-          diagnostic.validation(
-            severity: SeverityError,
-            target: TargetServer,
+          diagnostic.validation_error_server(
             path: path,
             detail: "Header array parameters are only supported for inline primitive items in server code generation.",
             hint: Some(
@@ -482,9 +462,7 @@ fn validate_server_deep_object_param(
         case deep_object_server_leaf_supported(prop_ref, ctx) {
           True -> []
           False -> [
-            diagnostic.validation(
-              severity: SeverityError,
-              target: TargetServer,
+            diagnostic.validation_error_server(
               path: path <> "." <> prop_name,
               detail: "deepObject properties are only supported for inline primitive scalars and inline primitive array leaves in server code generation.",
               hint: Some(
@@ -578,9 +556,7 @@ fn validate_complex_param_schema(
               case config.mode(context.config(ctx)) {
                 config.Client -> []
                 _ -> [
-                  diagnostic.validation(
-                    severity: SeverityError,
-                    target: TargetServer,
+                  diagnostic.validation_error_server(
                     path: path,
                     detail: "Complex path parameters are not supported for server code generation.",
                     hint: Some(
@@ -590,9 +566,7 @@ fn validate_complex_param_schema(
                 ]
               }
             _ -> [
-              diagnostic.validation(
-                severity: SeverityWarning,
-                target: TargetBoth,
+              diagnostic.validation_warning_both(
                 path: path,
                 detail: "Complex schema (object/oneOf/allOf/anyOf) parameter has no explicit 'style'; falling back to form-style serialization. This works for oneOf-of-primitives and shallow objects but may not match the spec author's intent for deeply nested objects.",
                 hint: Some(
@@ -622,9 +596,7 @@ fn validate_deep_object_no_nested_objects(
           | Some(AllOfSchema(..))
           | Some(OneOfSchema(..))
           | Some(AnyOfSchema(..)) -> [
-            diagnostic.validation(
-              severity: SeverityError,
-              target: TargetBoth,
+            diagnostic.validation_error_both(
               path: path <> "." <> prop_name,
               detail: "Nested object properties in deepObject parameters are not supported. Only one level of object nesting is supported (e.g., filter[name]=value).",
               hint: Some(
@@ -672,9 +644,7 @@ fn validate_request_body(
       let content_type_errors = case unsupported {
         [] -> []
         [media_type, ..] -> [
-          diagnostic.validation(
-            severity: SeverityError,
-            target: TargetBoth,
+          diagnostic.validation_error_both(
             path: op_id <> ".requestBody",
             detail: "Content type '"
               <> media_type
@@ -752,9 +722,7 @@ fn validate_multipart_request_body_fields(
             case multipart_field_is_stringifiable(field_schema, ctx) {
               True -> []
               False -> [
-                diagnostic.validation(
-                  severity: SeverityError,
-                  target: TargetBoth,
+                diagnostic.validation_error_both(
                   path: op_id <> ".requestBody.multipart." <> field_name,
                   detail: "multipart/form-data fields must be string, integer, number, boolean, binary, or string enums.",
                   hint: Some(
@@ -765,9 +733,7 @@ fn validate_multipart_request_body_fields(
             }
           })
         Some(_) -> [
-          diagnostic.validation(
-            severity: SeverityError,
-            target: TargetBoth,
+          diagnostic.validation_error_both(
             path: op_id <> ".requestBody",
             detail: "multipart/form-data request bodies must use an object schema.",
             hint: Some(
@@ -794,9 +760,7 @@ fn validate_form_urlencoded_schema(
       case resolve_schema_object(media_type.schema, ctx) {
         Some(ObjectSchema(..)) -> []
         Some(_) -> [
-          diagnostic.validation(
-            severity: SeverityError,
-            target: TargetBoth,
+          diagnostic.validation_error_both(
             path: op_id <> ".requestBody",
             detail: "application/x-www-form-urlencoded request bodies must use an object schema.",
             hint: Some(
@@ -829,9 +793,7 @@ fn validate_server_form_urlencoded_request_body(
         Ok(media_type) -> {
           let content_type_errors = case list.length(content_keys) > 1 {
             True -> [
-              diagnostic.validation(
-                severity: SeverityError,
-                target: TargetServer,
+              diagnostic.validation_error_server(
                 path: op_id <> ".requestBody",
                 detail: "application/x-www-form-urlencoded request bodies are only supported as the sole request content type for server code generation.",
                 hint: Some(
@@ -853,9 +815,7 @@ fn validate_server_form_urlencoded_request_body(
                 {
                   True -> []
                   False -> [
-                    diagnostic.validation(
-                      severity: SeverityError,
-                      target: TargetServer,
+                    diagnostic.validation_error_server(
                       path: op_id <> ".requestBody.form." <> field_name,
                       detail: "application/x-www-form-urlencoded server request bodies only support primitive scalars, primitive arrays, and nested objects with primitive leaves (max 5 levels).",
                       hint: Some(
@@ -893,9 +853,7 @@ fn validate_server_request_body_content_types(
           && content_type.is_supported_request(content_type.from_string(key))
         })
       list.map(non_json_but_supported, fn(media_type) {
-        diagnostic.validation(
-          severity: SeverityError,
-          target: TargetServer,
+        diagnostic.validation_error_server(
           path: op_id <> ".requestBody",
           detail: "Content type '"
             <> media_type
@@ -922,9 +880,7 @@ fn validate_server_multipart_request_body(
         Ok(media_type) -> {
           let content_type_errors = case list.length(content_keys) > 1 {
             True -> [
-              diagnostic.validation(
-                severity: SeverityError,
-                target: TargetServer,
+              diagnostic.validation_error_server(
                 path: op_id <> ".requestBody",
                 detail: "multipart/form-data request bodies are only supported as the sole request content type for server code generation.",
                 hint: Some(
@@ -944,9 +900,7 @@ fn validate_server_multipart_request_body(
                 case multipart_server_field_supported(field_schema, ctx) {
                   True -> []
                   False -> [
-                    diagnostic.validation(
-                      severity: SeverityError,
-                      target: TargetServer,
+                    diagnostic.validation_error_server(
                       path: op_id <> ".requestBody.multipart." <> field_name,
                       detail: "multipart/form-data server request bodies only support primitive scalar fields.",
                       hint: Some(
@@ -1057,9 +1011,7 @@ fn validate_responses(
       {
         True -> []
         False -> [
-          diagnostic.validation(
-            severity: SeverityError,
-            target: TargetBoth,
+          diagnostic.validation_error_both(
             path: path,
             detail: "Response content type '"
               <> media_type_name
@@ -1153,9 +1105,7 @@ fn validate_schema_ref_recursive(
         False -> [
           case is_url_style_ref(ref) {
             True ->
-              diagnostic.validation(
-                severity: SeverityError,
-                target: TargetBoth,
+              diagnostic.validation_error_both(
                 path: path,
                 detail: "URL-style $ref '"
                   <> ref
@@ -1165,9 +1115,7 @@ fn validate_schema_ref_recursive(
                 ),
               )
             False ->
-              diagnostic.validation(
-                severity: SeverityError,
-                target: TargetBoth,
+              diagnostic.validation_error_both(
                 path: path,
                 detail: "External $ref '"
                   <> ref
@@ -1183,9 +1131,7 @@ fn validate_schema_ref_recursive(
             Ok(_) -> []
             // nolint: thrown_away_error -- resolver error is replaced with a user-facing diagnostic that conveys the same failure
             Error(_) -> [
-              diagnostic.validation(
-                severity: SeverityError,
-                target: TargetBoth,
+              diagnostic.validation_error_both(
                 path: path,
                 detail: "Unresolved schema reference: '"
                   <> ref
@@ -1275,9 +1221,7 @@ fn validate_security_schemes(
         case list.contains(scheme_names, scheme_ref.scheme_name) {
           True -> Error(Nil)
           False ->
-            Ok(diagnostic.validation(
-              severity: SeverityError,
-              target: TargetBoth,
+            Ok(diagnostic.validation_error_both(
               path: "security." <> scheme_ref.scheme_name,
               detail: "Security requirement references scheme '"
                 <> scheme_ref.scheme_name
@@ -1300,9 +1244,7 @@ fn validate_security_schemes(
               case list.contains(scheme_names, scheme_ref.scheme_name) {
                 True -> Error(Nil)
                 False ->
-                  Ok(diagnostic.validation(
-                    severity: SeverityError,
-                    target: TargetBoth,
+                  Ok(diagnostic.validation_error_both(
                     path: op_id <> ".security." <> scheme_ref.scheme_name,
                     detail: "Security requirement references scheme '"
                       <> scheme_ref.scheme_name
