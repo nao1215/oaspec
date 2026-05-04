@@ -10,6 +10,7 @@ import oaspec/internal/codegen/context.{
 }
 import oaspec/internal/codegen/guards
 import oaspec/internal/codegen/router_ir
+import oaspec/internal/codegen/runtime_snippets
 import oaspec/internal/codegen/server_request_decode as decode_helpers
 import oaspec/internal/openapi/dedup
 import oaspec/internal/openapi/schema.{Inline, Reference}
@@ -279,237 +280,36 @@ String.",
 
   // deep_object_present: only when optional deep object params without AP exist
   let sb = case requirements.needs_deep_object_present {
-    True ->
-      sb
-      |> se.line(
-        "fn deep_object_present(query: Dict(String, List(String)), prefix: String, props: List(String)) -> Bool {",
-      )
-      |> se.indent(
-        1,
-        "list.any(props, fn(prop) { dict.has_key(query, prefix <> \"[\" <> prop <> \"]\") })",
-      )
-      |> se.line("}")
-      |> se.blank_line()
+    True -> se.raw(sb, runtime_snippets.deep_object_present)
     False -> sb
   }
 
   // deep_object_present_any and deep_object_additional_properties:
   // only when deep object params with additional_properties exist
   let sb = case requirements.has_deep_object_with_ap {
-    True ->
-      sb
-      |> se.line(
-        "fn deep_object_present_any(query: Dict(String, List(String)), prefix: String) -> Bool {",
-      )
-      |> se.indent(1, "let prefix_bracket = prefix <> \"[\"")
-      |> se.indent(
-        1,
-        "dict.fold(query, False, fn(found, k, _v) { found || string.starts_with(k, prefix_bracket) })",
-      )
-      |> se.line("}")
-      |> se.blank_line()
-      |> se.line(
-        "fn deep_object_additional_properties(query: Dict(String, List(String)), prefix: String, known_props: List(String)) -> Dict(String, List(String)) {",
-      )
-      |> se.indent(1, "let prefix_bracket = prefix <> \"[\"")
-      |> se.indent(1, "let prefix_len = string.length(prefix_bracket)")
-      |> se.indent(1, "dict.fold(query, dict.new(), fn(acc, k, v) {")
-      |> se.indent(
-        2,
-        "case string.starts_with(k, prefix_bracket) && string.ends_with(k, \"]\") {",
-      )
-      |> se.indent(3, "True -> {")
-      |> se.indent(
-        4,
-        "let prop = string.slice(k, prefix_len, string.length(k) - prefix_len - 1)",
-      )
-      |> se.indent(
-        4,
-        "case list.contains(known_props, prop) { True -> acc False -> dict.insert(acc, prop, v) }",
-      )
-      |> se.indent(3, "}")
-      |> se.indent(3, "False -> acc")
-      |> se.indent(2, "}")
-      |> se.indent(1, "})")
-      |> se.line("}")
-      |> se.blank_line()
+    True -> se.raw(sb, runtime_snippets.deep_object_present_any)
     False -> sb
   }
 
   // coerce_dict: type-safe identity for converting Dict value types at compile time
   // Only needed when deepObject params with Untyped additional_properties exist
   let sb = case requirements.has_deep_object_untyped_ap {
-    True ->
-      sb
-      |> se.line("@external(erlang, \"gleam_stdlib\", \"identity\")")
-      |> se.line(
-        "fn coerce_dict(value: Dict(String, List(String))) -> Dict(String, dynamic.Dynamic)",
-      )
-      |> se.blank_line()
+    True -> se.raw(sb, runtime_snippets.coerce_dict)
     False -> sb
   }
 
   let sb = case requirements.has_form_urlencoded_body {
-    True ->
-      sb
-      |> se.line("fn form_url_decode(value: String) -> String {")
-      |> se.indent(1, "let value = string.replace(value, \"+\", \" \")")
-      |> se.indent(
-        1,
-        "case uri.percent_decode(value) { Ok(decoded) -> decoded Error(_) -> value }",
-      )
-      |> se.line("}")
-      |> se.blank_line()
-      |> se.line(
-        "fn parse_form_body(body: String) -> Dict(String, List(String)) {",
-      )
-      |> se.indent(
-        1,
-        "let parts = case body { \"\" -> [] _ -> string.split(body, \"&\") }",
-      )
-      |> se.indent(1, "list.fold(parts, dict.new(), fn(acc, part) {")
-      |> se.indent(2, "case part {")
-      |> se.indent(3, "\"\" -> acc")
-      |> se.indent(3, "_ ->")
-      |> se.indent(4, "case string.split_once(part, on: \"=\") {")
-      |> se.indent(5, "Ok(#(raw_key, raw_value)) -> {")
-      |> se.indent(6, "let key = form_url_decode(raw_key)")
-      |> se.indent(6, "let value = form_url_decode(raw_value)")
-      |> se.indent(6, "case dict.get(acc, key) {")
-      |> se.indent(
-        7,
-        "Ok(existing) -> dict.insert(acc, key, list.append(existing, [value]))",
-      )
-      |> se.indent(7, "Error(_) -> dict.insert(acc, key, [value])")
-      |> se.indent(6, "}")
-      |> se.indent(5, "}")
-      |> se.indent(5, "Error(_) -> {")
-      |> se.indent(6, "let key = form_url_decode(part)")
-      |> se.indent(6, "case dict.get(acc, key) {")
-      |> se.indent(
-        7,
-        "Ok(existing) -> dict.insert(acc, key, list.append(existing, [\"\"]))",
-      )
-      |> se.indent(7, "Error(_) -> dict.insert(acc, key, [\"\"])")
-      |> se.indent(6, "}")
-      |> se.indent(5, "}")
-      |> se.indent(4, "}")
-      |> se.indent(2, "}")
-      |> se.indent(1, "})")
-      |> se.line("}")
-      |> se.blank_line()
+    True -> se.raw(sb, runtime_snippets.form_url_decode_and_parse_form_body)
     False -> sb
   }
 
   let sb = case requirements.has_multipart_body {
-    True ->
-      sb
-      |> se.line(
-        "fn multipart_boundary(headers: Dict(String, String)) -> Result(String, Nil) {",
-      )
-      |> se.indent(1, "case dict.get(headers, \"content-type\") {")
-      |> se.indent(2, "Ok(content_type) ->")
-      |> se.indent(
-        3,
-        "list.find_map(string.split(content_type, \";\"), fn(part) {",
-      )
-      |> se.indent(4, "let trimmed = string.trim(part)")
-      |> se.indent(4, "case string.starts_with(trimmed, \"boundary=\") {")
-      |> se.indent(
-        5,
-        "True -> Ok(string.replace(trimmed, \"boundary=\", \"\"))",
-      )
-      |> se.indent(5, "False -> Error(Nil)")
-      |> se.indent(4, "}")
-      |> se.indent(3, "})")
-      |> se.indent(2, "Error(_) -> Error(Nil)")
-      |> se.indent(1, "}")
-      |> se.line("}")
-      |> se.blank_line()
-      |> se.line(
-        "fn multipart_name(raw_headers: String) -> Result(String, Nil) {",
-      )
-      |> se.indent(
-        1,
-        "list.find_map(string.split(raw_headers, \"\\r\\n\"), fn(line) {",
-      )
-      |> se.indent(2, "case string.contains(line, \"name=\") {")
-      |> se.indent(3, "True ->")
-      |> se.indent(4, "list.find_map(string.split(line, \";\"), fn(part) {")
-      |> se.indent(5, "let trimmed = string.trim(part)")
-      |> se.indent(5, "case string.starts_with(trimmed, \"name=\") {")
-      |> se.indent(
-        6,
-        "True -> Ok(string.replace(string.replace(trimmed, \"name=\", \"\"), \"\\\"\", \"\"))",
-      )
-      |> se.indent(6, "False -> Error(Nil)")
-      |> se.indent(5, "}")
-      |> se.indent(4, "})")
-      |> se.indent(3, "False -> Error(Nil)")
-      |> se.indent(2, "}")
-      |> se.indent(1, "})")
-      |> se.line("}")
-      |> se.blank_line()
-      |> se.line(
-        "fn parse_multipart_body(body: String, headers: Dict(String, String)) -> Dict(String, List(String)) {",
-      )
-      |> se.indent(1, "case multipart_boundary(headers) {")
-      |> se.indent(2, "Ok(boundary) -> {")
-      |> se.indent(3, "let delimiter = \"--\" <> boundary")
-      |> se.indent(3, "let parts = string.split(body, delimiter)")
-      |> se.indent(3, "list.fold(parts, dict.new(), fn(acc, part) {")
-      |> se.indent(
-        4,
-        "let normalized_part = part |> string.remove_prefix(\"\\r\\n\") |> string.remove_suffix(\"\\r\\n\")",
-      )
-      |> se.indent(
-        4,
-        "case normalized_part == \"\" || normalized_part == \"--\" {",
-      )
-      |> se.indent(5, "True -> acc")
-      |> se.indent(5, "False ->")
-      |> se.indent(
-        6,
-        "case string.split_once(normalized_part, on: \"\\r\\n\\r\\n\") {",
-      )
-      |> se.indent(7, "Ok(#(raw_part_headers, raw_value)) ->")
-      |> se.indent(8, "case multipart_name(raw_part_headers) {")
-      |> se.indent(9, "Ok(name) -> {")
-      |> se.indent(10, "let value = raw_value")
-      |> se.indent(10, "case dict.get(acc, name) {")
-      |> se.indent(
-        11,
-        "Ok(existing) -> dict.insert(acc, name, list.append(existing, [value]))",
-      )
-      |> se.indent(11, "Error(_) -> dict.insert(acc, name, [value])")
-      |> se.indent(10, "}")
-      |> se.indent(9, "}")
-      |> se.indent(9, "Error(_) -> acc")
-      |> se.indent(8, "}")
-      |> se.indent(7, "Error(_) -> acc")
-      |> se.indent(6, "}")
-      |> se.indent(4, "}")
-      |> se.indent(3, "})")
-      |> se.indent(2, "}")
-      |> se.indent(2, "Error(_) -> dict.new()")
-      |> se.indent(1, "}")
-      |> se.line("}")
-      |> se.blank_line()
+    True -> se.raw(sb, runtime_snippets.multipart_helpers)
     False -> sb
   }
 
   let sb = case requirements.has_nested_form_urlencoded_body {
-    True ->
-      sb
-      |> se.line(
-        "fn form_object_present(form_body: Dict(String, List(String)), prefix: String, props: List(String)) -> Bool {",
-      )
-      |> se.indent(
-        1,
-        "list.any(props, fn(prop) { dict.has_key(form_body, prefix <> \"[\" <> prop <> \"]\") })",
-      )
-      |> se.line("}")
-      |> se.blank_line()
+    True -> se.raw(sb, runtime_snippets.form_object_present)
     False -> sb
   }
 
@@ -572,26 +372,7 @@ fn route_arg_name(name: String, used: Bool) -> String {
 fn generate_cookie_lookup(sb: se.StringBuilder) -> se.StringBuilder {
   sb
   |> se.doc_comment("Extract a cookie value from the Cookie header.")
-  |> se.line(
-    "fn cookie_lookup(headers: Dict(String, String), key: String) -> Result(String, Nil) {",
-  )
-  |> se.indent(1, "case dict.get(headers, \"cookie\") {")
-  |> se.indent(2, "Ok(raw) ->")
-  |> se.indent(3, "list.find_map(string.split(raw, \";\"), fn(part) {")
-  |> se.indent(4, "let trimmed = string.trim(part)")
-  |> se.indent(4, "case string.split_once(trimmed, on: \"=\") {")
-  |> se.indent(5, "Ok(#(cookie_key, cookie_value)) ->")
-  |> se.indent(6, "case string.trim(cookie_key) == key {")
-  |> se.indent(7, "True -> uri.percent_decode(string.trim(cookie_value))")
-  |> se.indent(7, "False -> Error(Nil)")
-  |> se.indent(6, "}")
-  |> se.indent(5, "Error(_) -> Error(Nil)")
-  |> se.indent(4, "}")
-  |> se.indent(3, "})")
-  |> se.indent(2, "Error(_) -> Error(Nil)")
-  |> se.indent(1, "}")
-  |> se.line("}")
-  |> se.blank_line()
+  |> se.raw(runtime_snippets.cookie_lookup)
 }
 
 /// Generate the body of a single route case branch.

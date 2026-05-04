@@ -33,6 +33,13 @@ pub fn blank_line(sb: StringTree) -> StringTree {
   |> string_tree.append("\n")
 }
 
+/// Append a pre-built block of source text verbatim (no implicit newlines).
+/// Used by codegen to splice in static `runtime_snippets` constants without
+/// going through `line` / `indent` chains.
+pub fn raw(sb: StringTree, text: String) -> StringTree {
+  string_tree.append(sb, text)
+}
+
 /// Generate a file header with auto-generation notice.
 pub fn file_header(version: String) -> StringTree {
   new()

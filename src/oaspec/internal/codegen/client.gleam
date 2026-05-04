@@ -13,6 +13,7 @@ import oaspec/internal/codegen/context.{
 }
 import oaspec/internal/codegen/guards
 import oaspec/internal/codegen/ir_build
+import oaspec/internal/codegen/runtime_snippets
 import oaspec/internal/openapi/schema
 import oaspec/internal/openapi/spec.{type Resolved, Value}
 import oaspec/internal/util/http
@@ -149,64 +150,18 @@ fn generate_default_base_url(
 /// Emit the text_body helper that extracts a UTF-8 string from a
 /// `transport.Body`, surfacing `InvalidResponse` for non-text bodies.
 fn generate_text_body_helper(sb: se.StringBuilder) -> se.StringBuilder {
-  sb
-  |> se.line(
-    "fn text_body(body: transport.Body) -> Result(String, ClientError) {",
-  )
-  |> se.indent(1, "case body {")
-  |> se.indent(2, "transport.TextBody(text) -> Ok(text)")
-  |> se.indent(
-    2,
-    "transport.BytesBody(_) -> Error(InvalidResponse(detail: \"expected text body, got bytes\"))",
-  )
-  |> se.indent(
-    2,
-    "transport.EmptyBody -> Error(InvalidResponse(detail: \"expected text body, got empty body\"))",
-  )
-  |> se.indent(1, "}")
-  |> se.line("}")
-  |> se.blank_line()
+  se.raw(sb, runtime_snippets.text_body)
 }
 
 /// Emit the bytes_body helper for binary response bodies.
 fn generate_bytes_body_helper(sb: se.StringBuilder) -> se.StringBuilder {
-  sb
-  |> se.line(
-    "fn bytes_body(body: transport.Body) -> Result(BitArray, ClientError) {",
-  )
-  |> se.indent(1, "case body {")
-  |> se.indent(2, "transport.BytesBody(bytes) -> Ok(bytes)")
-  |> se.indent(
-    2,
-    "transport.TextBody(_) -> Error(InvalidResponse(detail: \"expected binary body, got text\"))",
-  )
-  |> se.indent(
-    2,
-    "transport.EmptyBody -> Error(InvalidResponse(detail: \"expected binary body, got empty body\"))",
-  )
-  |> se.indent(1, "}")
-  |> se.line("}")
-  |> se.blank_line()
+  se.raw(sb, runtime_snippets.bytes_body)
 }
 
 /// Emit the async helper that maps an async transport result into the
 /// generated response type.
 fn generate_async_response_helper(sb: se.StringBuilder) -> se.StringBuilder {
-  sb
-  |> se.line("fn await_response(")
-  |> se.indent(
-    1,
-    "response_async: transport.Async(Result(transport.Response, transport.TransportError)),",
-  )
-  |> se.indent(1, "decode: fn(transport.Response) -> Result(a, ClientError),")
-  |> se.line(") -> transport.Async(Result(a, ClientError)) {")
-  |> se.indent(1, "response_async")
-  |> se.indent(1, "|> transport.map(fn(resp_result) {")
-  |> se.indent(2, "resp_result |> result.map_error(TransportError)")
-  |> se.indent(1, "})")
-  |> se.indent(1, "|> transport.map_try(decode)")
-  |> se.line("}")
-  |> se.blank_line()
+  se.raw(sb, runtime_snippets.await_response)
 }
 
 fn emit_simple_query_param(
