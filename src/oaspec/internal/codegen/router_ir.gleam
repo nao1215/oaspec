@@ -492,7 +492,7 @@ fn operation_needs_guard_validation(
 }
 
 fn operations_have_response_headers(
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> Bool {
   list.any(operations, fn(op) {
     let #(_, operation, _, _) = op
@@ -507,7 +507,7 @@ fn operations_have_response_headers(
 }
 
 fn operations_have_response_header_of_type(
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
   type_name: String,
 ) -> Bool {
   list.any(operations, fn(op) {
@@ -526,7 +526,7 @@ fn operations_have_response_header_of_type(
 }
 
 fn operations_have_optional_response_header(
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> Bool {
   list.any(operations, fn(op) {
     let #(_, operation, _, _) = op

@@ -99,7 +99,7 @@ fn validate_decode_list_collisions(ctx: Context) -> List(Diagnostic) {
 /// name. Returns one diagnostic per distinct colliding name, listing all
 /// `METHOD /path` sites that claimed it.
 fn validate_unique_operation_ids(
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> List(Diagnostic) {
   let literal = group_operations_by_id(operations, fn(op_id) { op_id })
   let by_function =
@@ -139,7 +139,7 @@ fn validate_unique_operation_ids(
 }
 
 fn group_operations_by_id(
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
   key_fn: fn(String) -> String,
 ) -> Dict(String, List(String)) {
   // Accumulate site lists in reverse (prepend is O(1)) then reverse each
@@ -219,7 +219,7 @@ pub fn error_to_string(error: Diagnostic) -> String {
 /// Validate all operations for unsupported patterns.
 fn validate_operations(
   ctx: Context,
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> List(Diagnostic) {
   list.flat_map(operations, fn(op) {
     let #(op_id, operation, path, _method) = op
@@ -1280,7 +1280,7 @@ fn validate_schema_recursive(
 /// security requirements point to schemes defined in components.securitySchemes.
 fn validate_security_schemes(
   ctx: Context,
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> List(Diagnostic) {
   let scheme_names = case context.spec(ctx).components {
     Some(components) -> dict.keys(components.security_schemes)

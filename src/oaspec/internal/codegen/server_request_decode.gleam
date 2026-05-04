@@ -330,7 +330,7 @@ pub fn schema_ref_string_enum(
 /// of my emitted code reference `types`?" without re-implementing the
 /// per-param dispatch.
 pub fn operations_have_enum_ref_params(
-  operations: List(#(String, spec.Operation(Resolved), String, spec.HttpMethod)),
+  operations: List(context.AnalyzedOperation),
   ctx: Context,
 ) -> Bool {
   list.any(operations, fn(op) {
