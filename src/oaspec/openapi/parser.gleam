@@ -32,10 +32,13 @@ import yay
 
 /// Parse an OpenAPI spec from a file path.
 /// Supports both YAML (.yaml, .yml) and JSON (.json) files.
-/// After parsing, resolves relative-file `$ref` values in
-/// `components.schemas` by loading the referenced files from disk and
-/// merging their schemas. Nested or parameter/response external refs are
-/// left to downstream validation.
+/// After parsing, resolves relative-file `$ref` values across schemas,
+/// parameters, request bodies, responses, and path items — including
+/// nested object/array properties and composition branches — by loading
+/// the referenced files from disk and merging their definitions into the
+/// main spec. Cyclic external ref graphs (`A.yaml → B.yaml → A.yaml`)
+/// fail fast with a dedicated diagnostic. HTTP/HTTPS URLs are not
+/// followed.
 pub fn parse_file(path: String) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
   parse_file_with_progress(path, progress.noop())
 }
