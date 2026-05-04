@@ -10,6 +10,37 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Added
+
+- tests: real-filesystem coverage for `writer.write_all` against a
+  temp directory under `/tmp/oaspec_writer_test/`. Pins the
+  Overwrite path (creates dirs + writes content), the SkipIfExists
+  contract for user-owned `handlers.gleam` (Issue #247), and the
+  `on_write` callback's per-file invocation. The pure
+  `resolve_paths` / `output_dirs` / `error_to_string` cases that
+  pre-existed continue to cover the IO-free side of the module.
+  (#401)
+- tests: a new `Describe 'oaspec init'` block was already added in
+  v0.42.0; this round adds gleeunit coverage for the generated
+  `api/router.route/5` happy paths (`GET /pets`, `GET /pets/{id}`),
+  the 404 fallback for unknown paths and unknown methods, query-
+  parameter parsing, and `api/guards.validate_pet_name_length` /
+  `validate_pet` accept-and-reject paths against the committed
+  `integration_test/` petstore project. The pre-existing committed
+  gleeunit suite never imported `api/router` or `api/guards`; a
+  regression that broke router happy-path matching or guard
+  rejection would only have surfaced via `integration_test/run.sh`
+  before. (#422)
+
+### Changed
+
+- `scripts/check_readme_examples.sh` now extracts the README's two
+  Library API gleam fences at runtime via awk instead of carrying a
+  hardcoded copy of the snippets. Closes the drift hazard flagged
+  in #410. The README's example case arms are also tightened to be
+  legal Gleam (`Nil` / `_summary` / `_errors`) so the smoke compile
+  is warning-free. (#410)
+
 ## [0.43.0] - 2026-05-04
 
 ### Performance
