@@ -10,6 +10,19 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Changed
+
+- **codegen**: introduced three severity / target shortcut builders
+  on `oaspec/openapi/diagnostic` —
+  `validation_error_both`, `validation_error_server`,
+  `validation_warning_both` — and migrated every
+  `diagnostic.validation(...)` call site in
+  `internal/codegen/validate` (28 sites) onto them. Each call site
+  now focuses on the variable bits (`path` / `detail` / `hint`)
+  instead of restating the same `severity:` / `target:` pair. The
+  `Severity*` / `Target*` re-exports in validate.gleam's import
+  block become unused as a result and are dropped. Closes #416.
+
 ## [0.45.0] - 2026-05-04
 
 ### Documentation

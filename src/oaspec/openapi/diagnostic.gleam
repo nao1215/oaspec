@@ -180,6 +180,60 @@ pub fn validation(
   )
 }
 
+/// Issue #416: severity / target shortcut builders for the common
+/// `validation` shapes used in `internal/codegen/validate`. The
+/// project review noted that the 5-field validation/5 constructor
+/// gets called 28+ times with the same severity / target pair on
+/// almost every site; these helpers collapse the common shape and
+/// let call sites focus on the variable bits (path / detail / hint).
+/// SeverityError + TargetBoth — the most common shape across
+/// validate.gleam.
+pub fn validation_error_both(
+  path path: String,
+  detail detail: String,
+  hint hint: Option(String),
+) -> Diagnostic {
+  validation(
+    path: path,
+    detail: detail,
+    severity: SeverityError,
+    target: TargetBoth,
+    hint: hint,
+  )
+}
+
+/// SeverityError + TargetServer — the second most common shape
+/// (server-only feature restrictions).
+pub fn validation_error_server(
+  path path: String,
+  detail detail: String,
+  hint hint: Option(String),
+) -> Diagnostic {
+  validation(
+    path: path,
+    detail: detail,
+    severity: SeverityError,
+    target: TargetServer,
+    hint: hint,
+  )
+}
+
+/// SeverityWarning + TargetBoth — used when a spec shape is
+/// supported but the user should know about it.
+pub fn validation_warning_both(
+  path path: String,
+  detail detail: String,
+  hint hint: Option(String),
+) -> Diagnostic {
+  validation(
+    path: path,
+    detail: detail,
+    severity: SeverityWarning,
+    target: TargetBoth,
+    hint: hint,
+  )
+}
+
 // ============================================================================
 // Filtering
 // ============================================================================
