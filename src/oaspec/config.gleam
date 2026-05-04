@@ -209,19 +209,17 @@ pub fn load_all(path: String) -> Result(List(Config), ConfigError) {
     |> result.map_error(fn(_) { MissingField(field: "input") }),
   )
 
-  use mode <- result.try(
-    case parser_value.optional_string(root, "mode") {
-      Some("server") -> Ok(Server)
-      Some("client") -> Ok(Client)
-      Some("both") -> Ok(Both)
-      None -> Ok(Both)
-      Some(other) ->
-        Error(InvalidValue(
-          field: "mode",
-          detail: "must be one of: server, client, both (got: " <> other <> ")",
-        ))
-    },
-  )
+  use mode <- result.try(case parser_value.optional_string(root, "mode") {
+    Some("server") -> Ok(Server)
+    Some("client") -> Ok(Client)
+    Some("both") -> Ok(Both)
+    None -> Ok(Both)
+    Some(other) ->
+      Error(InvalidValue(
+        field: "mode",
+        detail: "must be one of: server, client, both (got: " <> other <> ")",
+      ))
+  })
 
   // When `validate:` is omitted, the default is mode-dependent (issue #268).
   // Server-mode codegen with `validate: false` lets schema-invalid input
