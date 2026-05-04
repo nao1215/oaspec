@@ -29,10 +29,7 @@ type RegexCacheKey {
 }
 
 @external(erlang, "oaspec_naming_ffi", "memoize")
-fn memoize_regexes(
-  key: RegexCacheKey,
-  compute: fn() -> Regexes,
-) -> Regexes
+fn memoize_regexes(key: RegexCacheKey, compute: fn() -> Regexes) -> Regexes
 
 fn cached_regexes() -> Regexes {
   memoize_regexes(OaspecNamingRegexes, compile_regexes)
