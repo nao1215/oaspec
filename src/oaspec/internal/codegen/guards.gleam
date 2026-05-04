@@ -811,76 +811,179 @@ fn character_word(n: Int) -> String {
   }
 }
 
+// Issue #403: shared range-guard skeleton. The 7 build_*_guard_function
+// helpers below differ only in: function-name suffix, docs phrase,
+// param / return type, the value-extraction prelude (e.g.
+// `let len = string.length(value)`), the variable that gets compared,
+// the comparison operator and value-to-string conversion, and the
+// failure keyword / phrase. RangeGuardSpec collects every per-call
+// difference so the case-block emission lives in exactly one place.
+
+type RangeBound {
+  RangeBound(
+    /// Operator placed between `compare_var` and `value_str`. The
+    /// emitted shape is always `True -> failure / False -> Ok(value)`,
+    /// so callers express "this is a failure when …" via the operator:
+    /// inclusive guards use `<` / `>` (and `<.` / `>.` for floats),
+    /// exclusive guards use `<=` / `>=` (and `<=.` / `>=.`).
+    operator: String,
+    value_str: String,
+    keyword: String,
+    phrase: String,
+  )
+}
+
+type RangeGuardSpec {
+  RangeGuardSpec(
+    name_suffix: String,
+    doc_what: String,
+    param_decl: String,
+    return_type: String,
+    /// Lines emitted before the case block (e.g.
+    /// `let len = string.length(value)`). Empty for guards that
+    /// compare `value` directly.
+    value_prelude: List(String),
+    compare_var: String,
+    min: Option(RangeBound),
+    max: Option(RangeBound),
+  )
+}
+
+fn build_range_guard(
+  schema_name: String,
+  prop_name: String,
+  spec: RangeGuardSpec,
+) -> Option(GuardFunction) {
+  case spec.min, spec.max {
+    None, None -> None
+    _, _ -> {
+      let fn_name =
+        guard_function_name(schema_name, prop_name, spec.name_suffix)
+      let lines =
+        list.append(
+          spec.value_prelude,
+          range_check_lines(spec.compare_var, prop_name, spec.min, spec.max),
+        )
+      Some(GuardFunction(
+        name: fn_name,
+        docs: [
+          "Validate "
+          <> spec.doc_what
+          <> " for "
+          <> schema_name
+          <> field_label(prop_name)
+          <> ".",
+        ],
+        param_decl: spec.param_decl,
+        return_type: spec.return_type,
+        body: string.join(lines, "\n"),
+        kind: FieldValidator,
+      ))
+    }
+  }
+}
+
+fn range_check_lines(
+  compare_var: String,
+  prop_name: String,
+  min: Option(RangeBound),
+  max: Option(RangeBound),
+) -> List(String) {
+  case min, max {
+    Some(lo), Some(hi) -> [
+      "  case "
+        <> compare_var
+        <> " "
+        <> lo.operator
+        <> " "
+        <> lo.value_str
+        <> " {",
+      "    True -> "
+        <> validation_failure_literal(prop_name, lo.keyword, lo.phrase),
+      "    False ->",
+      "      case "
+        <> compare_var
+        <> " "
+        <> hi.operator
+        <> " "
+        <> hi.value_str
+        <> " {",
+      "        True -> "
+        <> validation_failure_literal(prop_name, hi.keyword, hi.phrase),
+      "        False -> Ok(value)",
+      "      }",
+      "  }",
+    ]
+    Some(lo), None -> [
+      "  case "
+        <> compare_var
+        <> " "
+        <> lo.operator
+        <> " "
+        <> lo.value_str
+        <> " {",
+      "    True -> "
+        <> validation_failure_literal(prop_name, lo.keyword, lo.phrase),
+      "    False -> Ok(value)",
+      "  }",
+    ]
+    None, Some(hi) -> [
+      "  case "
+        <> compare_var
+        <> " "
+        <> hi.operator
+        <> " "
+        <> hi.value_str
+        <> " {",
+      "    True -> "
+        <> validation_failure_literal(prop_name, hi.keyword, hi.phrase),
+      "    False -> Ok(value)",
+      "  }",
+    ]
+    None, None -> []
+  }
+}
+
 fn build_string_guard_function(
   schema_name: String,
   prop_name: String,
   min_length: Option(Int),
   max_length: Option(Int),
 ) -> Option(GuardFunction) {
-  case min_length, max_length {
-    None, None -> None
-    _, _ -> {
-      let fn_name = guard_function_name(schema_name, prop_name, "length")
-      let min_failure = fn(min) {
-        validation_failure_literal(
-          prop_name,
-          "minLength",
-          "must be at least "
-            <> int.to_string(min)
+  build_range_guard(
+    schema_name,
+    prop_name,
+    RangeGuardSpec(
+      name_suffix: "length",
+      doc_what: "string length",
+      param_decl: "value: String",
+      return_type: "Result(String, ValidationFailure)",
+      value_prelude: ["  let len = string.length(value)"],
+      compare_var: "len",
+      min: option.map(min_length, fn(n) {
+        RangeBound(
+          operator: "<",
+          value_str: int.to_string(n),
+          keyword: "minLength",
+          phrase: "must be at least "
+            <> int.to_string(n)
             <> " "
-            <> character_word(min),
+            <> character_word(n),
         )
-      }
-      let max_failure = fn(max) {
-        validation_failure_literal(
-          prop_name,
-          "maxLength",
-          "must be at most " <> int.to_string(max) <> " " <> character_word(max),
+      }),
+      max: option.map(max_length, fn(n) {
+        RangeBound(
+          operator: ">",
+          value_str: int.to_string(n),
+          keyword: "maxLength",
+          phrase: "must be at most "
+            <> int.to_string(n)
+            <> " "
+            <> character_word(n),
         )
-      }
-      let lines = case min_length, max_length {
-        Some(min), Some(max) -> [
-          "  let len = string.length(value)",
-          "  case len < " <> int.to_string(min) <> " {",
-          "    True -> " <> min_failure(min),
-          "    False ->",
-          "      case len > " <> int.to_string(max) <> " {",
-          "        True -> " <> max_failure(max),
-          "        False -> Ok(value)",
-          "      }",
-          "  }",
-        ]
-        Some(min), None -> [
-          "  let len = string.length(value)",
-          "  case len < " <> int.to_string(min) <> " {",
-          "    True -> " <> min_failure(min),
-          "    False -> Ok(value)",
-          "  }",
-        ]
-        None, Some(max) -> [
-          "  let len = string.length(value)",
-          "  case len > " <> int.to_string(max) <> " {",
-          "    True -> " <> max_failure(max),
-          "    False -> Ok(value)",
-          "  }",
-        ]
-        None, None -> []
-      }
-      Some(GuardFunction(
-        name: fn_name,
-        docs: [
-          "Validate string length for "
-          <> schema_name
-          <> field_label(prop_name)
-          <> ".",
-        ],
-        param_decl: "value: String",
-        return_type: "Result(String, ValidationFailure)",
-        body: string.join(lines, "\n"),
-        kind: FieldValidator,
-      ))
-    }
-  }
+      }),
+    ),
+  )
 }
 
 fn build_integer_guard_function(
@@ -889,64 +992,34 @@ fn build_integer_guard_function(
   minimum: Option(Int),
   maximum: Option(Int),
 ) -> Option(GuardFunction) {
-  case minimum, maximum {
-    None, None -> None
-    _, _ -> {
-      let fn_name = guard_function_name(schema_name, prop_name, "range")
-      let min_failure = fn(min) {
-        validation_failure_literal(
-          prop_name,
-          "minimum",
-          "must be at least " <> int.to_string(min),
+  build_range_guard(
+    schema_name,
+    prop_name,
+    RangeGuardSpec(
+      name_suffix: "range",
+      doc_what: "integer range",
+      param_decl: "value: Int",
+      return_type: "Result(Int, ValidationFailure)",
+      value_prelude: [],
+      compare_var: "value",
+      min: option.map(minimum, fn(n) {
+        RangeBound(
+          operator: "<",
+          value_str: int.to_string(n),
+          keyword: "minimum",
+          phrase: "must be at least " <> int.to_string(n),
         )
-      }
-      let max_failure = fn(max) {
-        validation_failure_literal(
-          prop_name,
-          "maximum",
-          "must be at most " <> int.to_string(max),
+      }),
+      max: option.map(maximum, fn(n) {
+        RangeBound(
+          operator: ">",
+          value_str: int.to_string(n),
+          keyword: "maximum",
+          phrase: "must be at most " <> int.to_string(n),
         )
-      }
-      let lines = case minimum, maximum {
-        Some(min), Some(max) -> [
-          "  case value < " <> int.to_string(min) <> " {",
-          "    True -> " <> min_failure(min),
-          "    False ->",
-          "      case value > " <> int.to_string(max) <> " {",
-          "        True -> " <> max_failure(max),
-          "        False -> Ok(value)",
-          "      }",
-          "  }",
-        ]
-        Some(min), None -> [
-          "  case value < " <> int.to_string(min) <> " {",
-          "    True -> " <> min_failure(min),
-          "    False -> Ok(value)",
-          "  }",
-        ]
-        None, Some(max) -> [
-          "  case value > " <> int.to_string(max) <> " {",
-          "    True -> " <> max_failure(max),
-          "    False -> Ok(value)",
-          "  }",
-        ]
-        None, None -> []
-      }
-      Some(GuardFunction(
-        name: fn_name,
-        docs: [
-          "Validate integer range for "
-          <> schema_name
-          <> field_label(prop_name)
-          <> ".",
-        ],
-        param_decl: "value: Int",
-        return_type: "Result(Int, ValidationFailure)",
-        body: string.join(lines, "\n"),
-        kind: FieldValidator,
-      ))
-    }
-  }
+      }),
+    ),
+  )
 }
 
 fn build_float_guard_function(
@@ -955,64 +1028,34 @@ fn build_float_guard_function(
   minimum: Option(Float),
   maximum: Option(Float),
 ) -> Option(GuardFunction) {
-  case minimum, maximum {
-    None, None -> None
-    _, _ -> {
-      let fn_name = guard_function_name(schema_name, prop_name, "range")
-      let min_failure = fn(min) {
-        validation_failure_literal(
-          prop_name,
-          "minimum",
-          "must be at least " <> float.to_string(min),
+  build_range_guard(
+    schema_name,
+    prop_name,
+    RangeGuardSpec(
+      name_suffix: "range",
+      doc_what: "float range",
+      param_decl: "value: Float",
+      return_type: "Result(Float, ValidationFailure)",
+      value_prelude: [],
+      compare_var: "value",
+      min: option.map(minimum, fn(n) {
+        RangeBound(
+          operator: "<.",
+          value_str: float.to_string(n),
+          keyword: "minimum",
+          phrase: "must be at least " <> float.to_string(n),
         )
-      }
-      let max_failure = fn(max) {
-        validation_failure_literal(
-          prop_name,
-          "maximum",
-          "must be at most " <> float.to_string(max),
+      }),
+      max: option.map(maximum, fn(n) {
+        RangeBound(
+          operator: ">.",
+          value_str: float.to_string(n),
+          keyword: "maximum",
+          phrase: "must be at most " <> float.to_string(n),
         )
-      }
-      let lines = case minimum, maximum {
-        Some(min), Some(max) -> [
-          "  case value <. " <> float.to_string(min) <> " {",
-          "    True -> " <> min_failure(min),
-          "    False ->",
-          "      case value >. " <> float.to_string(max) <> " {",
-          "        True -> " <> max_failure(max),
-          "        False -> Ok(value)",
-          "      }",
-          "  }",
-        ]
-        Some(min), None -> [
-          "  case value <. " <> float.to_string(min) <> " {",
-          "    True -> " <> min_failure(min),
-          "    False -> Ok(value)",
-          "  }",
-        ]
-        None, Some(max) -> [
-          "  case value >. " <> float.to_string(max) <> " {",
-          "    True -> " <> max_failure(max),
-          "    False -> Ok(value)",
-          "  }",
-        ]
-        None, None -> []
-      }
-      Some(GuardFunction(
-        name: fn_name,
-        docs: [
-          "Validate float range for "
-          <> schema_name
-          <> field_label(prop_name)
-          <> ".",
-        ],
-        param_decl: "value: Float",
-        return_type: "Result(Float, ValidationFailure)",
-        body: string.join(lines, "\n"),
-        kind: FieldValidator,
-      ))
-    }
-  }
+      }),
+    ),
+  )
 }
 
 fn build_integer_exclusive_guard_function(
@@ -1021,65 +1064,36 @@ fn build_integer_exclusive_guard_function(
   exclusive_minimum: Option(Int),
   exclusive_maximum: Option(Int),
 ) -> Option(GuardFunction) {
-  case exclusive_minimum, exclusive_maximum {
-    None, None -> None
-    _, _ -> {
-      let fn_name =
-        guard_function_name(schema_name, prop_name, "exclusive_range")
-      let min_failure = fn(min) {
-        validation_failure_literal(
-          prop_name,
-          "exclusiveMinimum",
-          "must be greater than " <> int.to_string(min),
+  // Exclusive bounds are expressed via `<=` / `>=` so the same
+  // `True -> failure / False -> Ok(value)` shape applies.
+  build_range_guard(
+    schema_name,
+    prop_name,
+    RangeGuardSpec(
+      name_suffix: "exclusive_range",
+      doc_what: "integer exclusive range",
+      param_decl: "value: Int",
+      return_type: "Result(Int, ValidationFailure)",
+      value_prelude: [],
+      compare_var: "value",
+      min: option.map(exclusive_minimum, fn(n) {
+        RangeBound(
+          operator: "<=",
+          value_str: int.to_string(n),
+          keyword: "exclusiveMinimum",
+          phrase: "must be greater than " <> int.to_string(n),
         )
-      }
-      let max_failure = fn(max) {
-        validation_failure_literal(
-          prop_name,
-          "exclusiveMaximum",
-          "must be less than " <> int.to_string(max),
+      }),
+      max: option.map(exclusive_maximum, fn(n) {
+        RangeBound(
+          operator: ">=",
+          value_str: int.to_string(n),
+          keyword: "exclusiveMaximum",
+          phrase: "must be less than " <> int.to_string(n),
         )
-      }
-      let lines = case exclusive_minimum, exclusive_maximum {
-        Some(min), Some(max) -> [
-          "  case value > " <> int.to_string(min) <> " {",
-          "    False -> " <> min_failure(min),
-          "    True ->",
-          "      case value < " <> int.to_string(max) <> " {",
-          "        False -> " <> max_failure(max),
-          "        True -> Ok(value)",
-          "      }",
-          "  }",
-        ]
-        Some(min), None -> [
-          "  case value > " <> int.to_string(min) <> " {",
-          "    False -> " <> min_failure(min),
-          "    True -> Ok(value)",
-          "  }",
-        ]
-        None, Some(max) -> [
-          "  case value < " <> int.to_string(max) <> " {",
-          "    False -> " <> max_failure(max),
-          "    True -> Ok(value)",
-          "  }",
-        ]
-        None, None -> []
-      }
-      Some(GuardFunction(
-        name: fn_name,
-        docs: [
-          "Validate integer exclusive range for "
-          <> schema_name
-          <> field_label(prop_name)
-          <> ".",
-        ],
-        param_decl: "value: Int",
-        return_type: "Result(Int, ValidationFailure)",
-        body: string.join(lines, "\n"),
-        kind: FieldValidator,
-      ))
-    }
-  }
+      }),
+    ),
+  )
 }
 
 fn build_integer_multiple_of_guard_function(
@@ -1125,65 +1139,34 @@ fn build_float_exclusive_guard_function(
   exclusive_minimum: Option(Float),
   exclusive_maximum: Option(Float),
 ) -> Option(GuardFunction) {
-  case exclusive_minimum, exclusive_maximum {
-    None, None -> None
-    _, _ -> {
-      let fn_name =
-        guard_function_name(schema_name, prop_name, "exclusive_range")
-      let min_failure = fn(min) {
-        validation_failure_literal(
-          prop_name,
-          "exclusiveMinimum",
-          "must be greater than " <> float.to_string(min),
+  build_range_guard(
+    schema_name,
+    prop_name,
+    RangeGuardSpec(
+      name_suffix: "exclusive_range",
+      doc_what: "float exclusive range",
+      param_decl: "value: Float",
+      return_type: "Result(Float, ValidationFailure)",
+      value_prelude: [],
+      compare_var: "value",
+      min: option.map(exclusive_minimum, fn(n) {
+        RangeBound(
+          operator: "<=.",
+          value_str: float.to_string(n),
+          keyword: "exclusiveMinimum",
+          phrase: "must be greater than " <> float.to_string(n),
         )
-      }
-      let max_failure = fn(max) {
-        validation_failure_literal(
-          prop_name,
-          "exclusiveMaximum",
-          "must be less than " <> float.to_string(max),
+      }),
+      max: option.map(exclusive_maximum, fn(n) {
+        RangeBound(
+          operator: ">=.",
+          value_str: float.to_string(n),
+          keyword: "exclusiveMaximum",
+          phrase: "must be less than " <> float.to_string(n),
         )
-      }
-      let lines = case exclusive_minimum, exclusive_maximum {
-        Some(min), Some(max) -> [
-          "  case value >. " <> float.to_string(min) <> " {",
-          "    False -> " <> min_failure(min),
-          "    True ->",
-          "      case value <. " <> float.to_string(max) <> " {",
-          "        False -> " <> max_failure(max),
-          "        True -> Ok(value)",
-          "      }",
-          "  }",
-        ]
-        Some(min), None -> [
-          "  case value >. " <> float.to_string(min) <> " {",
-          "    False -> " <> min_failure(min),
-          "    True -> Ok(value)",
-          "  }",
-        ]
-        None, Some(max) -> [
-          "  case value <. " <> float.to_string(max) <> " {",
-          "    False -> " <> max_failure(max),
-          "    True -> Ok(value)",
-          "  }",
-        ]
-        None, None -> []
-      }
-      Some(GuardFunction(
-        name: fn_name,
-        docs: [
-          "Validate float exclusive range for "
-          <> schema_name
-          <> field_label(prop_name)
-          <> ".",
-        ],
-        param_decl: "value: Float",
-        return_type: "Result(Float, ValidationFailure)",
-        body: string.join(lines, "\n"),
-        kind: FieldValidator,
-      ))
-    }
-  }
+      }),
+    ),
+  )
 }
 
 fn build_float_multiple_of_guard_function(
@@ -1233,67 +1216,34 @@ fn build_list_guard_function(
   min_items: Option(Int),
   max_items: Option(Int),
 ) -> Option(GuardFunction) {
-  case min_items, max_items {
-    None, None -> None
-    _, _ -> {
-      let fn_name = guard_function_name(schema_name, prop_name, "length")
-      let min_failure = fn(min) {
-        validation_failure_literal(
-          prop_name,
-          "minItems",
-          "must have at least " <> int.to_string(min) <> " items",
+  build_range_guard(
+    schema_name,
+    prop_name,
+    RangeGuardSpec(
+      name_suffix: "length",
+      doc_what: "list length",
+      param_decl: "value: List(a)",
+      return_type: "Result(List(a), ValidationFailure)",
+      value_prelude: ["  let len = list.length(value)"],
+      compare_var: "len",
+      min: option.map(min_items, fn(n) {
+        RangeBound(
+          operator: "<",
+          value_str: int.to_string(n),
+          keyword: "minItems",
+          phrase: "must have at least " <> int.to_string(n) <> " items",
         )
-      }
-      let max_failure = fn(max) {
-        validation_failure_literal(
-          prop_name,
-          "maxItems",
-          "must have at most " <> int.to_string(max) <> " items",
+      }),
+      max: option.map(max_items, fn(n) {
+        RangeBound(
+          operator: ">",
+          value_str: int.to_string(n),
+          keyword: "maxItems",
+          phrase: "must have at most " <> int.to_string(n) <> " items",
         )
-      }
-      let lines = case min_items, max_items {
-        Some(min), Some(max) -> [
-          "  let len = list.length(value)",
-          "  case len < " <> int.to_string(min) <> " {",
-          "    True -> " <> min_failure(min),
-          "    False ->",
-          "      case len > " <> int.to_string(max) <> " {",
-          "        True -> " <> max_failure(max),
-          "        False -> Ok(value)",
-          "      }",
-          "  }",
-        ]
-        Some(min), None -> [
-          "  let len = list.length(value)",
-          "  case len < " <> int.to_string(min) <> " {",
-          "    True -> " <> min_failure(min),
-          "    False -> Ok(value)",
-          "  }",
-        ]
-        None, Some(max) -> [
-          "  let len = list.length(value)",
-          "  case len > " <> int.to_string(max) <> " {",
-          "    True -> " <> max_failure(max),
-          "    False -> Ok(value)",
-          "  }",
-        ]
-        None, None -> []
-      }
-      Some(GuardFunction(
-        name: fn_name,
-        docs: [
-          "Validate list length for "
-          <> schema_name
-          <> field_label(prop_name)
-          <> ".",
-        ],
-        param_decl: "value: List(a)",
-        return_type: "Result(List(a), ValidationFailure)",
-        body: string.join(lines, "\n"),
-        kind: FieldValidator,
-      ))
-    }
-  }
+      }),
+    ),
+  )
 }
 
 fn build_unique_items_guard_function(
@@ -1336,67 +1286,34 @@ fn build_properties_count_guard_function(
   min_properties: Option(Int),
   max_properties: Option(Int),
 ) -> Option(GuardFunction) {
-  case min_properties, max_properties {
-    None, None -> None
-    _, _ -> {
-      let fn_name = guard_function_name(schema_name, prop_name, "properties")
-      let min_failure = fn(min) {
-        validation_failure_literal(
-          prop_name,
-          "minProperties",
-          "must have at least " <> int.to_string(min) <> " properties",
+  build_range_guard(
+    schema_name,
+    prop_name,
+    RangeGuardSpec(
+      name_suffix: "properties",
+      doc_what: "property count",
+      param_decl: "value: Dict(k, v)",
+      return_type: "Result(Dict(k, v), ValidationFailure)",
+      value_prelude: ["  let count = dict.size(value)"],
+      compare_var: "count",
+      min: option.map(min_properties, fn(n) {
+        RangeBound(
+          operator: "<",
+          value_str: int.to_string(n),
+          keyword: "minProperties",
+          phrase: "must have at least " <> int.to_string(n) <> " properties",
         )
-      }
-      let max_failure = fn(max) {
-        validation_failure_literal(
-          prop_name,
-          "maxProperties",
-          "must have at most " <> int.to_string(max) <> " properties",
+      }),
+      max: option.map(max_properties, fn(n) {
+        RangeBound(
+          operator: ">",
+          value_str: int.to_string(n),
+          keyword: "maxProperties",
+          phrase: "must have at most " <> int.to_string(n) <> " properties",
         )
-      }
-      let lines = case min_properties, max_properties {
-        Some(min), Some(max) -> [
-          "  let count = dict.size(value)",
-          "  case count < " <> int.to_string(min) <> " {",
-          "    True -> " <> min_failure(min),
-          "    False ->",
-          "      case count > " <> int.to_string(max) <> " {",
-          "        True -> " <> max_failure(max),
-          "        False -> Ok(value)",
-          "      }",
-          "  }",
-        ]
-        Some(min), None -> [
-          "  let count = dict.size(value)",
-          "  case count < " <> int.to_string(min) <> " {",
-          "    True -> " <> min_failure(min),
-          "    False -> Ok(value)",
-          "  }",
-        ]
-        None, Some(max) -> [
-          "  let count = dict.size(value)",
-          "  case count > " <> int.to_string(max) <> " {",
-          "    True -> " <> max_failure(max),
-          "    False -> Ok(value)",
-          "  }",
-        ]
-        None, None -> []
-      }
-      Some(GuardFunction(
-        name: fn_name,
-        docs: [
-          "Validate property count for "
-          <> schema_name
-          <> field_label(prop_name)
-          <> ".",
-        ],
-        param_decl: "value: Dict(k, v)",
-        return_type: "Result(Dict(k, v), ValidationFailure)",
-        body: string.join(lines, "\n"),
-        kind: FieldValidator,
-      ))
-    }
-  }
+      }),
+    ),
+  )
 }
 
 /// Determine the Gleam type for the composite validator parameter.
