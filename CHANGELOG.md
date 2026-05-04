@@ -10,6 +10,21 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Changed
+
+- **codegen**: collapsed the seven near-identical
+  `build_*_guard_function` range builders in `internal/codegen/guards`
+  (string length, integer range, integer exclusive range, float range,
+  float exclusive range, list length, property count) onto a single
+  `build_range_guard` helper plus a small `RangeGuardSpec` record. The
+  exclusive-bound emit shape is now `True -> failure / False -> Ok(value)`
+  via `<=` / `>=` instead of the prior `False -> failure / True -> Ok(value)`
+  via `>` / `<`; the generated guards are equivalent at runtime but
+  the test suite's three exclusive-range substring assertions are
+  updated to match the new operators. Adding a new range-shaped
+  validator keyword now changes one helper instead of duplicating a
+  ~70-line skeleton. (#403)
+
 ### Added
 
 - tests: real-filesystem coverage for `writer.write_all` against a

@@ -8595,10 +8595,12 @@ components:
   // Should contain exclusive range guard for score
   string.contains(content, "validate_item_score_exclusive_range")
   |> should.be_true()
-  // Should use strict comparison (> not >=)
-  string.contains(content, "value > 0")
+  // After the build_range_guard refactor (#403) the exclusive bound
+  // is expressed via `<=` / `>=` so the emit shape lines up with
+  // inclusive guards (`True -> failure / False -> Ok(value)`).
+  string.contains(content, "value <= 0")
   |> should.be_true()
-  string.contains(content, "value < 100")
+  string.contains(content, "value >= 100")
   |> should.be_true()
 
   // Should contain multipleOf guard for quantity
@@ -8650,8 +8652,9 @@ components:
   // Should contain exclusive range guard for weight
   string.contains(content, "validate_measure_weight_exclusive_range")
   |> should.be_true()
-  // Should use float comparison operators
-  string.contains(content, "value >. 0.0")
+  // Float exclusive bounds use `<=.` / `>=.` (build_range_guard
+  // refactor #403 normalizes the case shape across all range guards).
+  string.contains(content, "value <=. 0.0")
   |> should.be_true()
 
   // Should contain multipleOf guard for step
