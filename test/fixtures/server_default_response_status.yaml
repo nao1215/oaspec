@@ -1,0 +1,43 @@
+openapi: 3.0.3
+info:
+  title: Server Default Response Status Test API
+  version: 1.0.0
+paths:
+  /artifacts/{id}:
+    delete:
+      operationId: deleteArtifact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: deleted
+        default:
+          description: any error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /things:
+    get:
+      operationId: listThings
+      responses:
+        "200":
+          description: ok
+        default:
+          description: any error
+components:
+  schemas:
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string

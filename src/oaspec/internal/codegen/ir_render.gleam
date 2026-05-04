@@ -6,7 +6,7 @@ import gleam/string
 import oaspec/internal/codegen/context
 import oaspec/internal/codegen/ir.{
   type Declaration, type Module, type TypeDef, EnumType, RecordType, TypeAlias,
-  UnionType, VariantEmpty, VariantWithHeaders, VariantWithType,
+  UnionType, VariantDefault, VariantEmpty, VariantWithHeaders, VariantWithType,
   VariantWithTypeAndHeaders,
 }
 import oaspec/internal/util/string_extra as se
@@ -77,6 +77,16 @@ fn render_type_def(sb: se.StringBuilder, type_def: TypeDef) -> se.StringBuilder 
               )
             VariantWithHeaders(name: vname, headers_type:) ->
               sb |> se.indent(1, vname <> "(" <> headers_type <> ")")
+            VariantDefault(name: vname, inner_type:, headers_type:) -> {
+              let parts = case inner_type, headers_type {
+                None, None -> ["Int"]
+                Some(t), None -> ["Int", t]
+                None, Some(h) -> ["Int", h]
+                Some(t), Some(h) -> ["Int", t, h]
+              }
+              sb
+              |> se.indent(1, vname <> "(" <> string.join(parts, ", ") <> ")")
+            }
           }
         })
       sb

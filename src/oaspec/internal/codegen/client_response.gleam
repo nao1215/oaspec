@@ -14,6 +14,36 @@ import oaspec/internal/util/http
 import oaspec/internal/util/naming
 import oaspec/internal/util/string_extra as se
 
+/// Issue #483: the `default` response branch must capture the actual
+/// runtime status code so the decoded `XxxResponseDefault(...)`
+/// variant can carry it through to the caller. For all non-default
+/// branches the case pattern is the matched status int (or guard
+/// expression for `2xx` ranges); the default branch binds `status`
+/// instead of using `_` so the variant constructor can pass it on.
+fn status_branch_pattern(status_code: http.HttpStatusCode) -> String {
+  case status_code {
+    http.DefaultStatus -> "status"
+    _ -> http.status_code_to_int_pattern(status_code)
+  }
+}
+
+/// Issue #483: prepend the runtime status binding to a variant
+/// constructor's argument list when the status code is `default`. For
+/// every other status the variant arity is unchanged.
+fn prepend_default_status(
+  arg: String,
+  status_code: http.HttpStatusCode,
+) -> String {
+  case status_code {
+    http.DefaultStatus ->
+      case arg {
+        "" -> "status"
+        _ -> "status, " <> arg
+      }
+    _ -> arg
+  }
+}
+
 /// Issue #387: assembled response-headers record. Tracks both the
 /// pre-statements (let bindings or `use` chains that extract each
 /// header field from `resp.headers`) and the final constructor
@@ -72,10 +102,7 @@ pub fn generate_single_content_response(
             get_response_decode_expr(schema_ref, op_id, status_code, ctx)
           let sb =
             sb
-            |> se.indent(
-              2,
-              http.status_code_to_int_pattern(status_code) <> " -> {",
-            )
+            |> se.indent(2, status_branch_pattern(status_code) <> " -> {")
             |> se.indent(3, "use text <- result.try(text_body(resp.body))")
             |> emit_pre_statements(headers)
           sb
@@ -85,7 +112,10 @@ pub fn generate_single_content_response(
             "Ok(decoded) -> Ok("
               <> variant_name
               <> "("
-              <> append_headers_arg("decoded", headers)
+              <> prepend_default_status(
+              append_headers_arg("decoded", headers),
+              status_code,
+            )
               <> "))",
           )
           |> se.indent(
@@ -114,7 +144,7 @@ fn body_branch(
   extract_body: fn(se.StringBuilder) -> se.StringBuilder,
 ) -> se.StringBuilder {
   sb
-  |> se.indent(2, http.status_code_to_int_pattern(status_code) <> " -> {")
+  |> se.indent(2, status_branch_pattern(status_code) <> " -> {")
   |> extract_body
   |> emit_pre_statements(headers)
   |> se.indent(
@@ -122,7 +152,10 @@ fn body_branch(
     "Ok("
       <> variant_name
       <> "("
-      <> append_headers_arg(body_arg, headers)
+      <> prepend_default_status(
+      append_headers_arg(body_arg, headers),
+      status_code,
+    )
       <> "))",
   )
   |> se.indent(2, "}")
@@ -142,28 +175,39 @@ fn empty_body_branch(
   case headers {
     Some(HeadersRecord(pre_statements: [_, ..], record_expr: expr)) ->
       sb
-      |> se.indent(2, http.status_code_to_int_pattern(status_code) <> " -> {")
+      |> se.indent(2, status_branch_pattern(status_code) <> " -> {")
       |> emit_pre_statements(headers)
-      |> se.indent(3, "Ok(" <> variant_name <> "(" <> expr <> "))")
+      |> se.indent(
+        3,
+        "Ok("
+          <> variant_name
+          <> "("
+          <> prepend_default_status(expr, status_code)
+          <> "))",
+      )
       |> se.indent(2, "}")
     Some(HeadersRecord(record_expr: expr, ..)) ->
       sb
       |> se.indent(
         2,
-        http.status_code_to_int_pattern(status_code)
+        status_branch_pattern(status_code)
           <> " -> Ok("
           <> variant_name
           <> "("
-          <> expr
+          <> prepend_default_status(expr, status_code)
           <> "))",
       )
     None ->
       sb
       |> se.indent(
         2,
-        http.status_code_to_int_pattern(status_code)
+        status_branch_pattern(status_code)
           <> " -> Ok("
           <> variant_name
+          <> case status_code {
+          http.DefaultStatus -> "(status)"
+          _ -> ""
+        }
           <> ")",
       )
   }

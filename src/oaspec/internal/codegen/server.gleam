@@ -1068,6 +1068,16 @@ fn generate_response_conversion(
               let variant_name =
                 response_type_name <> http.status_code_suffix(status_code)
               let status_int = http.status_code_to_int(status_code)
+              // Issue #483: the OpenAPI `default` response is the only
+              // status whose generated variant carries a runtime status
+              // code (`Foo(Int [, body] [, headers])`). The router
+              // pattern grows a `status` binding and uses it as the
+              // outgoing `ServerResponse.status` instead of the
+              // hardcoded representative-int (which was always 500).
+              let is_default = case status_code {
+                http.DefaultStatus -> True
+                _ -> False
+              }
               let content_entries = dict.to_list(response.content)
               let header_specs = sorted_header_specs(response.headers)
               let has_headers = !list.is_empty(header_specs)
@@ -1084,6 +1094,7 @@ fn generate_response_conversion(
                     body_expr: "EmptyBody",
                     content_type_header: None,
                     header_specs: header_specs,
+                    is_default: is_default,
                   )
                 [#(media_type_name, media_type)] ->
                   case content_type.from_string(media_type_name) {
@@ -1103,6 +1114,7 @@ fn generate_response_conversion(
                               <> "(data)))",
                             content_type_header: Some(media_type_name),
                             header_specs: header_specs,
+                            is_default: is_default,
                           )
                         }
                         None ->
@@ -1115,6 +1127,7 @@ fn generate_response_conversion(
                             body_expr: "EmptyBody",
                             content_type_header: None,
                             header_specs: header_specs,
+                            is_default: is_default,
                           )
                       }
                     content_type.TextPlain
@@ -1131,6 +1144,7 @@ fn generate_response_conversion(
                             body_expr: "TextBody(data)",
                             content_type_header: Some(media_type_name),
                             header_specs: header_specs,
+                            is_default: is_default,
                           )
                         None ->
                           emit_response_arm(
@@ -1142,6 +1156,7 @@ fn generate_response_conversion(
                             body_expr: "EmptyBody",
                             content_type_header: None,
                             header_specs: header_specs,
+                            is_default: is_default,
                           )
                       }
                     content_type.ApplicationOctetStream ->
@@ -1160,6 +1175,7 @@ fn generate_response_conversion(
                             body_expr: "BytesBody(data)",
                             content_type_header: Some(media_type_name),
                             header_specs: header_specs,
+                            is_default: is_default,
                           )
                         None ->
                           emit_response_arm(
@@ -1171,6 +1187,7 @@ fn generate_response_conversion(
                             body_expr: "EmptyBody",
                             content_type_header: None,
                             header_specs: header_specs,
+                            is_default: is_default,
                           )
                       }
                     _ ->
@@ -1189,6 +1206,7 @@ fn generate_response_conversion(
                               <> "(data)))",
                             content_type_header: Some(media_type_name),
                             header_specs: header_specs,
+                            is_default: is_default,
                           )
                         }
                         None ->
@@ -1201,6 +1219,7 @@ fn generate_response_conversion(
                             body_expr: "EmptyBody",
                             content_type_header: None,
                             header_specs: header_specs,
+                            is_default: is_default,
                           )
                       }
                   }
@@ -1216,6 +1235,7 @@ fn generate_response_conversion(
                     body_expr: "TextBody(data)",
                     content_type_header: Some(first_media_type),
                     header_specs: header_specs,
+                    is_default: is_default,
                   )
               }
             }
@@ -1284,6 +1304,12 @@ fn response_header_field_type(
 /// True the variant pattern grows an `hdrs` binding and the headers
 /// list is materialised via `list.flatten` so spec-declared response
 /// headers are appended to the implicit `content-type` tuple.
+///
+/// Issue #483: when `is_default` is True the variant pattern grows a
+/// leading `status` binding and the outgoing `ServerResponse.status`
+/// uses that bound value instead of the precomputed `status_int`. The
+/// `Foo(Int [, body] [, headers])` shape comes from `VariantDefault`
+/// in the IR.
 fn emit_response_arm(
   sb: se.StringBuilder,
   variant_name: String,
@@ -1293,12 +1319,21 @@ fn emit_response_arm(
   body_expr body_expr: String,
   content_type_header content_type_header: option.Option(String),
   header_specs header_specs: List(HeaderSpec),
+  is_default is_default: Bool,
 ) -> se.StringBuilder {
-  let pattern_args = case has_data, has_headers {
-    True, True -> "(data, hdrs)"
-    True, False -> "(data)"
-    False, True -> "(hdrs)"
-    False, False -> ""
+  let pattern_args = case is_default, has_data, has_headers {
+    False, True, True -> "(data, hdrs)"
+    False, True, False -> "(data)"
+    False, False, True -> "(hdrs)"
+    False, False, False -> ""
+    True, True, True -> "(status, data, hdrs)"
+    True, True, False -> "(status, data)"
+    True, False, True -> "(status, hdrs)"
+    True, False, False -> "(status)"
+  }
+  let status_expr = case is_default {
+    True -> "status"
+    False -> status_int
   }
   let headers_expr = headers_slot_expr(content_type_header, header_specs)
   sb
@@ -1308,7 +1343,7 @@ fn emit_response_arm(
       <> variant_name
       <> pattern_args
       <> " -> ServerResponse(status: "
-      <> status_int
+      <> status_expr
       <> ", body: "
       <> body_expr
       <> ", headers: "

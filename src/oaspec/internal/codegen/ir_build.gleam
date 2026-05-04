@@ -12,8 +12,8 @@ import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/import_analysis
 import oaspec/internal/codegen/ir.{
   type Declaration, type Field, type Module, type Variant, EnumType, Field,
-  RecordType, TypeAlias, UnionType, VariantEmpty, VariantWithHeaders,
-  VariantWithType, VariantWithTypeAndHeaders,
+  RecordType, TypeAlias, UnionType, VariantDefault, VariantEmpty,
+  VariantWithHeaders, VariantWithType, VariantWithTypeAndHeaders,
 }
 import oaspec/internal/codegen/schema_dispatch
 import oaspec/internal/codegen/schema_utils
@@ -375,65 +375,71 @@ fn response_variant(
     [] -> None
     _ -> Some(variant_name <> "Headers")
   }
-  case content_entries {
-    [] -> empty_variant_with_optional_headers(variant_name, headers_type_opt)
-    [_, _, ..] ->
-      typed_variant_with_optional_headers(
-        variant_name,
-        "String",
-        headers_type_opt,
+  let inner_type_opt = response_inner_type(content_entries, status_code, op_id)
+  // Issue #483: the OpenAPI `default` response is the catch-all for
+  // status codes not declared explicitly. Until now its variant
+  // looked like every other variant (`FooDefault(Body)`) and the
+  // router pinned it to status 500, so a handler could not surface
+  // 401/403/404/...  through the default branch. The `VariantDefault`
+  // shape adds a leading `Int` field that the router and client
+  // decoder both pass through.
+  case status_code {
+    http.DefaultStatus ->
+      VariantDefault(
+        name: variant_name,
+        inner_type: inner_type_opt,
+        headers_type: headers_type_opt,
       )
+    _ ->
+      case inner_type_opt {
+        Some(inner_type) ->
+          typed_variant_with_optional_headers(
+            variant_name,
+            inner_type,
+            headers_type_opt,
+          )
+        None ->
+          empty_variant_with_optional_headers(variant_name, headers_type_opt)
+      }
+  }
+}
+
+/// Resolve a response's `content` entries to the body type that the
+/// generated variant carries, or `None` for empty responses. Extracted
+/// from `response_variant` so the DefaultStatus dispatch (#483) can
+/// reuse the same per-content-type logic.
+fn response_inner_type(
+  content_entries: List(#(String, spec.MediaType)),
+  status_code: http.HttpStatusCode,
+  op_id: String,
+) -> option.Option(String) {
+  case content_entries {
+    [] -> None
+    [_, _, ..] -> Some("String")
     [#(media_type_name, media_type)] ->
       case content_type.from_string(media_type_name) {
         content_type.TextPlain
         | content_type.ApplicationXml
         | content_type.TextXml ->
           case media_type.schema {
-            Some(_) ->
-              typed_variant_with_optional_headers(
-                variant_name,
-                "String",
-                headers_type_opt,
-              )
-            None ->
-              empty_variant_with_optional_headers(
-                variant_name,
-                headers_type_opt,
-              )
+            Some(_) -> Some("String")
+            None -> None
           }
         // Issue #304: binary response payloads ride a BitArray variant
         // so handlers can produce real bytes instead of forcing the
         // payload through `String`.
         content_type.ApplicationOctetStream ->
           case media_type.schema {
-            Some(_) ->
-              typed_variant_with_optional_headers(
-                variant_name,
-                "BitArray",
-                headers_type_opt,
-              )
-            None ->
-              empty_variant_with_optional_headers(
-                variant_name,
-                headers_type_opt,
-              )
+            Some(_) -> Some("BitArray")
+            None -> None
           }
         _ ->
           case media_type.schema {
             Some(ref) -> {
               let suffix = "Response" <> http.status_code_suffix(status_code)
-              let inner_type = schema_ref_to_type_qualified(ref, op_id, suffix)
-              typed_variant_with_optional_headers(
-                variant_name,
-                inner_type,
-                headers_type_opt,
-              )
+              Some(schema_ref_to_type_qualified(ref, op_id, suffix))
             }
-            None ->
-              empty_variant_with_optional_headers(
-                variant_name,
-                headers_type_opt,
-              )
+            None -> None
           }
       }
   }

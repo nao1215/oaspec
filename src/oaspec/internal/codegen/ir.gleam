@@ -106,6 +106,22 @@ pub type Variant {
   /// Response variant carrying only a typed headers record (no body):
   /// `FooBar(FooBarHeaders)` (issue #306).
   VariantWithHeaders(name: String, headers_type: String)
+  /// Response variant for the OpenAPI `default` catch-all. Always
+  /// carries an Int status code as the first positional field, so
+  /// handlers can pick any 4xx/5xx for the catch-all branch instead
+  /// of the router pinning every response to 500. The body and
+  /// headers types are optional, mirroring the four shapes of the
+  /// other variant kinds (issue #483):
+  ///
+  /// * neither            → `FooDefault(Int)`
+  /// * body only          → `FooDefault(Int, Body)`
+  /// * headers only       → `FooDefault(Int, FooDefaultHeaders)`
+  /// * body + headers     → `FooDefault(Int, Body, FooDefaultHeaders)`
+  VariantDefault(
+    name: String,
+    inner_type: Option(String),
+    headers_type: Option(String),
+  )
 }
 
 /// A typed record for response headers.

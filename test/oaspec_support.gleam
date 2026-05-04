@@ -13133,6 +13133,79 @@ pub fn server_default_response_only_generates_case() {
   list.length(server_files) |> should.not_equal(0)
 }
 
+pub fn server_default_response_carries_status_field_case() {
+  // Issue #483: the OpenAPI `default` response variant must carry the
+  // runtime status code as its first positional field, and the router
+  // must pass that bound `status` straight through to the outgoing
+  // ServerResponse instead of pinning every `default` branch to 500.
+  let ctx = make_ctx("test/fixtures/server_default_response_status.yaml")
+  let type_files = types.generate(ctx)
+  let assert Ok(response_types_file) =
+    list.find(type_files, fn(f) { f.path == "response_types.gleam" })
+  let response_types_content = response_types_file.content
+  let files = server_gen.generate(ctx)
+
+  // With body: variant signature is `Foo(Int, types.Error)`.
+  string.contains(
+    response_types_content,
+    "DeleteArtifactResponseDefault(Int, types.Error)",
+  )
+  |> should.be_true()
+  // Empty default: signature collapses to `Foo(Int)`.
+  string.contains(response_types_content, "ListThingsResponseDefault(Int)")
+  |> should.be_true()
+
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let router_content = router_file.content
+
+  // Router pattern binds `status` and forwards it as the outgoing
+  // status — no more hardcoded 500.
+  string.contains(
+    router_content,
+    "DeleteArtifactResponseDefault(status, data) -> ServerResponse(status: status,",
+  )
+  |> should.be_true()
+  string.contains(
+    router_content,
+    "ListThingsResponseDefault(status) -> ServerResponse(status: status,",
+  )
+  |> should.be_true()
+  // The previous shape — `status: 500` for the default branch — must
+  // be gone for these operations.
+  string.contains(
+    router_content,
+    "DeleteArtifactResponseDefault(data) -> ServerResponse(status: 500,",
+  )
+  |> should.be_false()
+}
+
+pub fn client_default_response_passes_status_through_case() {
+  // Issue #483: the client decoder must capture the actual runtime
+  // status int and pass it as the first arg to the generated
+  // `XxxResponseDefault(...)` variant, instead of dropping it on the
+  // floor.
+  let ctx = make_ctx("test/fixtures/server_default_response_status.yaml")
+  let files = client_gen.generate(ctx)
+  let assert Ok(client_file) =
+    list.find(files, fn(f) { f.path == "client.gleam" })
+  let content = client_file.content
+
+  // Default branch binds `status` (instead of `_`) and threads it.
+  string.contains(content, "status -> {")
+  |> should.be_true()
+  string.contains(
+    content,
+    "Ok(response_types.DeleteArtifactResponseDefault(status, decoded))",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "Ok(response_types.ListThingsResponseDefault(status))",
+  )
+  |> should.be_true()
+}
+
 // ===========================================================================
 // Validation for edge-case fixtures
 // ===========================================================================

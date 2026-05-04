@@ -41,6 +41,8 @@ pub fn response_types_and_server_outputs_test() {
   let _ = support.server_empty_response_body_generates_case()
   let _ = support.client_default_response_only_generates_case()
   let _ = support.server_default_response_only_generates_case()
+  let _ = support.server_default_response_carries_status_field_case()
+  let _ = support.client_default_response_passes_status_through_case()
   let _ = support.server_router_uses_underscored_unused_route_args_case()
 }
 
