@@ -7,9 +7,11 @@ Petstore OpenAPI spec at `test/fixtures/petstore.yaml`.
 
 - Generating a client from an OpenAPI 3.x spec via `oaspec.yaml`.
 - Importing the generated client and response types.
-- Building a `ClientConfig` with a custom `send` function (here a stub
-  that returns a canned JSON body — swap in `gleam_httpc`, `mist`, or
-  `wisp` for real traffic).
+- Building a `transport.Send` value with `mock.from(...)` and a custom
+  request handler (here a stub that returns a canned JSON body — swap
+  in the [`oaspec_httpc`](../../adapters/httpc/) adapter for real
+  BEAM-side traffic, or the [`oaspec_fetch`](../../adapters/fetch/)
+  adapter for the JavaScript target).
 - Handling the typed response variants that oaspec generates for each
   operation.
 

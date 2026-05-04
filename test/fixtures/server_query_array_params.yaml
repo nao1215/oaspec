@@ -1,0 +1,27 @@
+openapi: 3.0.3
+info:
+  title: Server Query Array Params Test API
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: search
+      parameters:
+        - name: tags
+          in: query
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+        - name: scores
+          in: query
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: integer
+      responses:
+        "200":
+          description: ok

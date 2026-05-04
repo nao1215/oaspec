@@ -4,7 +4,7 @@
 ////
 //// Split out of `parser_error` so the diagnostic-assembly logic itself
 //// stays target-neutral and only the yay-specific detail extraction
-//// carries the BEAM coupling. See ARCHITECTURE.md for the boundary.
+//// carries the BEAM coupling.
 
 import gleam/int
 import oaspec/internal/openapi/parser_error

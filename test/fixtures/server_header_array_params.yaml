@@ -1,0 +1,33 @@
+openapi: 3.0.3
+info:
+  title: Server Header Array Params Test API
+  version: 1.0.0
+paths:
+  /headers:
+    get:
+      operationId: getHeaders
+      parameters:
+        - name: x-tags
+          in: header
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+        - name: x-scores
+          in: header
+          required: false
+          schema:
+            type: array
+            items:
+              type: integer
+        - name: x-flags
+          in: header
+          required: true
+          schema:
+            type: array
+            items:
+              type: boolean
+      responses:
+        "200":
+          description: ok

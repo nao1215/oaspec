@@ -1,0 +1,26 @@
+openapi: 3.0.3
+info:
+  title: Server Multipart Mixed Content Test API
+  version: 1.0.0
+paths:
+  /upload:
+    post:
+      operationId: uploadMultipart
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        "200":
+          description: ok

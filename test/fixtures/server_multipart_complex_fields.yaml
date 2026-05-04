@@ -1,0 +1,23 @@
+openapi: 3.0.3
+info:
+  title: Server Multipart Complex Fields Test API
+  version: 1.0.0
+paths:
+  /upload:
+    post:
+      operationId: uploadMultipart
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                meta:
+                  type: object
+                  properties:
+                    filename:
+                      type: string
+      responses:
+        "200":
+          description: ok

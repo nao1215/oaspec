@@ -1,0 +1,20 @@
+openapi: 3.0.3
+info:
+  title: Server Problem JSON Request Test API
+  version: 1.0.0
+paths:
+  /problems:
+    post:
+      operationId: submitProblem
+      requestBody:
+        required: true
+        content:
+          application/problem+json:
+            schema:
+              type: object
+              properties:
+                detail:
+                  type: string
+      responses:
+        "202":
+          description: accepted

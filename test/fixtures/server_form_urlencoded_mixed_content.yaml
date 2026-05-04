@@ -1,0 +1,26 @@
+openapi: 3.0.3
+info:
+  title: Server Form Urlencoded Mixed Content Test API
+  version: 1.0.0
+paths:
+  /submit:
+    post:
+      operationId: submitForm
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        "200":
+          description: ok

@@ -55,6 +55,7 @@ pub fn validator_server_codegen_boundaries_test() {
   let _ =
     support.validate_form_urlencoded_body_multi_level_nesting_accepted_case()
   let _ = support.validate_json_request_body_ok_for_server_case()
+  let _ = support.server_request_shape_boundary_fixtures_case()
   let _ = support.validate_rejects_array_params_for_server_codegen_case()
   let _ = support.validate_accepts_deep_object_params_for_server_codegen_case()
   let _ = support.validate_rejects_path_complex_params_for_server_codegen_case()

@@ -1,0 +1,22 @@
+openapi: 3.0.3
+info:
+  title: Server Query Array Object Items Test API
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: tags
+          in: query
+          required: true
+          schema:
+            type: array
+            items:
+              type: object
+              properties:
+                label:
+                  type: string
+      responses:
+        "200":
+          description: ok

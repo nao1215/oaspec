@@ -4951,6 +4951,99 @@ pub fn capability_registry_names_appear_in_readme_boundaries_case() {
   })
 }
 
+fn server_request_shape_boundary_fixtures() -> List(#(String, String, String)) {
+  [
+    #(
+      "server: complex path parameters",
+      "test/fixtures/server_complex_path_parameter.yaml",
+      "Complex path parameters are not supported",
+    ),
+    #(
+      "server: non-primitive query array items",
+      "test/fixtures/server_query_array_object_items.yaml",
+      "Query array parameters are only supported",
+    ),
+    #(
+      "server: non-primitive header array items",
+      "test/fixtures/server_header_array_object_items.yaml",
+      "Header array parameters are only supported",
+    ),
+    #(
+      "server: complex deepObject properties",
+      "test/fixtures/server_deep_object_complex_properties.yaml",
+      "deepObject properties are only supported",
+    ),
+    #(
+      "server: mixed form-urlencoded request",
+      "test/fixtures/server_form_urlencoded_mixed_content.yaml",
+      "application/x-www-form-urlencoded request bodies are only supported as the sole request content type",
+    ),
+    #(
+      "server: complex form-urlencoded fields",
+      "test/fixtures/server_form_urlencoded_complex_fields.yaml",
+      "application/x-www-form-urlencoded server request bodies only support",
+    ),
+    #(
+      "server: mixed multipart request",
+      "test/fixtures/server_multipart_mixed_content.yaml",
+      "multipart/form-data request bodies are only supported as the sole request content type",
+    ),
+    #(
+      "server: complex multipart fields",
+      "test/fixtures/server_multipart_complex_fields.yaml",
+      "multipart/form-data server request bodies only support",
+    ),
+    #(
+      "server: unsupported request content type",
+      "test/fixtures/server_request_body_problem_json.yaml",
+      "is not supported for server code generation",
+    ),
+  ]
+}
+
+pub fn server_boundary_checklist_matches_registry_case() {
+  let assert Ok(readme) = simplifile.read("README.md")
+  let assert Ok(checklist) = simplifile.read("doc/server-mode-boundaries.md")
+  string.contains(readme, "doc/server-mode-boundaries.md")
+  |> should.be_true()
+
+  let server_capabilities =
+    capability.registry()
+    |> list.filter(fn(c) { c.category == "server-validation" })
+
+  list.length(server_capabilities)
+  |> should.equal(list.length(server_request_shape_boundary_fixtures()))
+
+  list.each(server_capabilities, fn(c) {
+    string.contains(checklist, c.name)
+    |> should.be_true()
+  })
+
+  list.each(server_request_shape_boundary_fixtures(), fn(entry) {
+    let #(_capability_name, fixture_path, _expected_message) = entry
+    string.contains(checklist, fixture_path)
+    |> should.be_true()
+  })
+}
+
+pub fn server_request_shape_boundary_fixtures_case() {
+  list.each(server_request_shape_boundary_fixtures(), fn(entry) {
+    let #(capability_name, fixture_path, expected_message) = entry
+    let ctx = make_ctx(fixture_path)
+    let server_errors =
+      validate.validate(ctx)
+      |> list.filter(fn(e) {
+        e.target == diagnostic.TargetServer
+        && string.contains(e.message, expected_message)
+      })
+
+    case server_errors != [] {
+      True -> Nil
+      False -> capability_name |> should.equal("<missing server validation>")
+    }
+  })
+}
+
 // --- Finding 3: README says optional path params supported but parser rejects ---
 pub fn readme_no_optional_path_param_claim_case() {
   let assert Ok(readme) = simplifile.read("README.md")
@@ -8506,32 +8599,7 @@ paths:
 }
 
 pub fn validate_rejects_array_params_for_server_codegen_case() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /items:
-    get:
-      operationId: listItems
-      parameters:
-        - name: tags
-          in: query
-          required: true
-          schema:
-            type: array
-            items:
-              type: object
-              properties:
-                label:
-                  type: string
-      responses:
-        '200': { description: ok }
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let ctx = make_ctx_from_spec(spec)
+  let ctx = make_ctx("test/fixtures/server_query_array_object_items.yaml")
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
@@ -8555,30 +8623,7 @@ pub fn validate_accepts_deep_object_params_for_server_codegen_case() {
 }
 
 pub fn validate_rejects_path_complex_params_for_server_codegen_case() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /items/{filter}:
-    get:
-      operationId: getItems
-      parameters:
-        - name: filter
-          in: path
-          required: true
-          schema:
-            type: object
-            properties:
-              name:
-                type: string
-      responses:
-        '200': { description: ok }
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let ctx = make_ctx_from_spec(spec)
+  let ctx = make_ctx("test/fixtures/server_complex_path_parameter.yaml")
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
@@ -8906,29 +8951,7 @@ paths:
 }
 
 pub fn validate_accepts_header_array_params_for_server_codegen_case() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /items:
-    get:
-      operationId: listItems
-      parameters:
-        - name: x-tags
-          in: header
-          required: true
-          schema:
-            type: array
-            items:
-              type: string
-      responses:
-        '200': { description: ok }
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let ctx = make_ctx_from_spec(spec)
+  let ctx = make_ctx("test/fixtures/server_header_array_params.yaml")
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
@@ -8940,43 +8963,7 @@ paths:
 }
 
 pub fn server_header_array_params_are_parsed_case() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /headers:
-    get:
-      operationId: getHeaders
-      parameters:
-        - name: x-tags
-          in: header
-          required: true
-          schema:
-            type: array
-            items:
-              type: string
-        - name: x-scores
-          in: header
-          required: false
-          schema:
-            type: array
-            items:
-              type: integer
-        - name: x-flags
-          in: header
-          required: true
-          schema:
-            type: array
-            items:
-              type: boolean
-      responses:
-        '200': { description: ok }
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let ctx = make_ctx_from_spec(spec)
+  let ctx = make_ctx("test/fixtures/server_header_array_params.yaml")
   let files = server_gen.generate(ctx)
   let assert Ok(router_file) =
     list.find(files, fn(f) { f.path == "router.gleam" })
@@ -9014,29 +9001,7 @@ paths:
 }
 
 pub fn validate_accepts_query_array_params_for_server_codegen_case() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /items:
-    get:
-      operationId: listItems
-      parameters:
-        - name: tags
-          in: query
-          required: true
-          schema:
-            type: array
-            items:
-              type: string
-      responses:
-        '200': { description: ok }
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let ctx = make_ctx_from_spec(spec)
+  let ctx = make_ctx("test/fixtures/server_query_array_params.yaml")
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
@@ -9048,37 +9013,7 @@ paths:
 }
 
 pub fn server_query_array_params_use_query_multimap_case() {
-  let yaml =
-    "
-openapi: 3.0.3
-info:
-  title: Test
-  version: 1.0.0
-paths:
-  /search:
-    get:
-      operationId: search
-      parameters:
-        - name: tags
-          in: query
-          required: true
-          schema:
-            type: array
-            items:
-              type: string
-        - name: scores
-          in: query
-          required: false
-          explode: false
-          schema:
-            type: array
-            items:
-              type: integer
-      responses:
-        '200': { description: ok }
-"
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let ctx = make_ctx_from_spec(spec)
+  let ctx = make_ctx("test/fixtures/server_query_array_params.yaml")
   let files = server_gen.generate(ctx)
   let assert Ok(router_file) =
     list.find(files, fn(f) { f.path == "router.gleam" })

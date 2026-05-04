@@ -65,7 +65,7 @@ This project follows these standards:
 4. **Separate concerns** -- types, decoding, transport, and business logic in separate modules
 5. **Add doc comments to all public functions and types**
 6. **No runtime reflection** -- compile-time safety is prioritized
-7. **Respect the core / shell boundary** -- modules listed as "Pure" in [`ARCHITECTURE.md`](./ARCHITECTURE.md) must not gain `simplifile`, `yay`, `glint`, `argv`, or `@external(erlang, ...)` dependencies. If new IO is required, add it in the shell layer and pass the result into the core as a value.
+7. **Keep target-neutral modules target-neutral** -- public runtime modules such as [`src/oaspec/transport.gleam`](./src/oaspec/transport.gleam), [`src/oaspec/mock.gleam`](./src/oaspec/mock.gleam), and the pure codegen / utility modules under `src/oaspec/internal/` should not gain `simplifile`, `yay`, `glint`, `argv`, or BEAM-only `@external(erlang, ...)` dependencies. If new IO is required, add it at the CLI / parser / writer boundary and pass the result inward as a value.
 
 ### Writing Tests
 
@@ -88,7 +88,9 @@ just check        # format check, typecheck, build, unit tests
 
 When changing how code is generated:
 
-1. Make your changes in `src/oaspec/codegen/`
+1. Make your changes in `src/oaspec/internal/codegen/` (the only module
+   directly under `src/oaspec/codegen/` is `writer.gleam`, which writes
+   files to disk; everything else lives under `internal/codegen/`)
 2. Run `just check` to verify the generator compiles
 3. Run `just shellspec` to verify generated file structure and content
 4. Run `just integration` to verify generated code compiles and works correctly
@@ -98,10 +100,13 @@ When changing how code is generated:
 
 When adding support for a new OpenAPI feature:
 
-1. Add types to `src/oaspec/openapi/spec.gleam` or `schema.gleam`
-2. Add parsing logic in `src/oaspec/openapi/parser.gleam`
-3. Add resolution logic in `src/oaspec/openapi/resolver.gleam` if needed
-4. Update code generation in the relevant `src/oaspec/codegen/` module
+1. Add types to `src/oaspec/internal/openapi/spec.gleam` or `schema.gleam`
+2. Add parsing logic in `src/oaspec/openapi/parser.gleam` (public surface)
+   or its internal helpers under `src/oaspec/internal/openapi/`
+3. Add resolution logic in `src/oaspec/internal/openapi/resolver.gleam`
+   if needed
+4. Update code generation in the relevant `src/oaspec/internal/codegen/`
+   module
 5. Add a test case to the petstore fixture (`test/fixtures/petstore.yaml`)
 6. Add unit tests, ShellSpec checks, and integration tests
 

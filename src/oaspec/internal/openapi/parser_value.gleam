@@ -3,7 +3,6 @@
 //// Split out of `oaspec/internal/openapi/value` so the JsonValue type itself
 //// stays target-neutral (pure Gleam, no yay/BEAM dependency) and only the
 //// extraction helpers that touch yay nodes carry the BEAM-only coupling.
-//// See ARCHITECTURE.md for the overall core / shell boundary.
 
 import gleam/dict.{type Dict}
 import gleam/list

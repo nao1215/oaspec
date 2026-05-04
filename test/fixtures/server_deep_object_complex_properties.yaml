@@ -1,0 +1,27 @@
+openapi: 3.0.3
+info:
+  title: Server Deep Object Complex Properties Test API
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: searchItems
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          required: true
+          schema:
+            type: object
+            required:
+              - meta
+            properties:
+              meta:
+                type: object
+                properties:
+                  name:
+                    type: string
+      responses:
+        "200":
+          description: ok

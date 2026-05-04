@@ -2,11 +2,10 @@
 ////
 //// The point of this example is not to demonstrate end-user usage —
 //// for that, see `examples/petstore_client`. The point is to keep the
-//// documented "Pure" classification in `ARCHITECTURE.md` honest:
-//// this project is built and run with `target = "javascript"` in CI,
-//// so any future change that re-couples one of the touched pure
-//// modules to BEAM-only code (yay, simplifile, glint, BEAM-only FFI)
-//// will fail this build.
+//// public target-neutral runtime surface honest: this project is
+//// built and run with `target = "javascript"` in CI, so any future
+//// change that re-couples one of the touched modules to BEAM-only
+//// code (yay, simplifile, glint, BEAM-only FFI) will fail this build.
 ////
 //// Today the demonstrably JS-runnable surface is the public client
 //// runtime: `oaspec/transport` and `oaspec/mock`. Other modules

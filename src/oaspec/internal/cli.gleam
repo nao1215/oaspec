@@ -106,7 +106,7 @@ fn generate_command() -> glint.Command(Nil) {
       glint.bool_flag("validate")
       |> glint.flag_default(False)
       |> glint.flag_help(
-        "Enable guard validation in generated server/client code",
+        "Force-enable guard validation in generated server/client code. One-way override: cannot disable validation set by oaspec.yaml. Set validate: false in the config to turn it off.",
       ),
     )
 

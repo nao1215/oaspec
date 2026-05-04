@@ -1,137 +1,25 @@
 # oaspec
+Generate Gleam client and server modules from OpenAPI 3.x specs.
 
-[![Hex](https://img.shields.io/hexpm/v/oaspec)](https://hex.pm/packages/oaspec)
-[![Hex Downloads](https://img.shields.io/hexpm/dt/oaspec)](https://hex.pm/packages/oaspec)
-[![CI](https://github.com/nao1215/oaspec/actions/workflows/ci.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci.yml)
-
-Generate usable Gleam code from OpenAPI 3.x specifications.
-
-`oaspec` is aimed at practical, typed code generation rather than a feature checklist. It handles the OpenAPI cases that tend to break real projects, such as `$ref` resolution, `allOf`, `oneOf` and `anyOf`, `deepObject` query parameters, form bodies, multipart bodies, and multiple security schemes, while failing fast when a spec goes outside the supported subset.
+`oaspec` focuses on the parts of OpenAPI that affect generated code in real
+projects: `$ref`, `allOf`, `oneOf`, `anyOf`, typed request and response
+bodies, `deepObject` query parameters, form bodies, multipart bodies, and
+security schemes. When a spec falls outside the supported subset, generation
+stops with a diagnostic instead of emitting partial code.
 
 - Generate client and server-side modules from a single spec
-- Produce readable Gleam types, encoders, decoders, request types, and response types
-- Handle real-world OpenAPI patterns: unions, nullable fields, `additionalProperties`, form bodies, multipart, and security
-- Backed by 328 unit tests, ShellSpec CLI tests, 40 integration compile tests, and 240 test fixtures (including 98 OSS-derived edge-case specs)
+- Produce readable Gleam types, encoders, decoders, request types, and response
+  types
+- Keep unsupported spec shapes explicit and testable
+- Backed by 331 unit tests, ShellSpec CLI tests, 40 integration compile tests,
+  and 251 test fixtures (including 98 OSS-derived edge-case specs)
 
-## Why oaspec?
+## Install
 
-**oaspec is the OpenAPI code generator built for Gleam.** Generated code
-is regular Gleam: no templates, no runtime magic, type-safe end to end.
+### GitHub release
 
-|                                                           | `oaspec` | Generic multi-language generators (e.g. openapi-generator) | Single-language generators for other targets (e.g. oapi-codegen for Go) |
-|-----------------------------------------------------------|:--------:|:----------------------------------------------------------:|:----------------------------------------------------------------------:|
-| First-class Gleam output                                  |    Yes   |                             No                             |                                   No                                   |
-| Idiomatic types, decoders, encoders, and request/response records |    Yes   |                 Templated, not always idiomatic            |                           Language-specific                           |
-| Refuses to emit broken code on unsupported spec patterns  |    Yes   |                          Sometimes                         |                                Partial                                 |
-
-- Built for Gleam: the generated code is shaped like normal Gleam modules, not generic templates awkwardly translated from another ecosystem.
-- Focused on practical OpenAPI: coverage is strongest around the features teams actually ship with, not just toy Petstore specs.
-- Strict by default: unsupported features are reported explicitly instead of being silently dropped into broken output.
-
-## What you get
-
-Given one OpenAPI spec, `oaspec` generates modules you can keep in your repository:
-
-```text
-gen/my_api/
-  types.gleam
-  decode.gleam
-  encode.gleam
-  request_types.gleam
-  response_types.gleam
-  guards.gleam          (only if schemas have validation constraints)
-  handlers.gleam        (user-owned: written once with panic stubs, skipped on regeneration)
-  handlers_generated.gleam (sealed delegator; router imports this)
-  router.gleam
-
-gen_client/my_api/
-  types.gleam
-  decode.gleam
-  encode.gleam
-  request_types.gleam
-  response_types.gleam
-  guards.gleam          (only if schemas have validation constraints)
-  client.gleam
-```
-
-Example generated code:
-
-```gleam
-/// A pet in the store
-pub type Pet {
-  Pet(
-    id: Int,
-    name: String,
-    status: PetStatus,
-    tag: Option(String),
-  )
-}
-
-pub type PetStatus {
-  PetStatusAvailable
-  PetStatusPending
-  PetStatusSold
-}
-
-pub fn create_pet(config: ClientConfig, body: types.CreatePetRequest)
-  -> Result(response_types.CreatePetResponse, ClientError) {
-  // ...
-}
-
-pub fn list_pets(req: request_types.ListPetsRequest)
-  -> response_types.ListPetsResponse {
-  let _ = req
-  panic as "unimplemented: list_pets"
-}
-```
-
-## Is oaspec right for your spec?
-
-A one-minute check before you paste in your OpenAPI document — if your
-spec stays inside the green list below, `oaspec` will generate code; if
-it relies on anything in the red list, generation stops with a clear
-diagnostic instead of producing broken output.
-
-**Generates code for:**
-
-- Schemas: `object`, primitives, arrays, enums, nullable, `allOf`,
-  `oneOf`, `anyOf`, typed `additionalProperties`
-- Local `$ref` (and relative-file external `$ref`) across schemas,
-  parameters, request bodies, responses, and path items. External ref
-  graphs must be acyclic — cycles such as `A.yaml → B.yaml → A.yaml`
-  fail fast with a dedicated diagnostic that shows the visited chain.
-- Parameters: path, query, header, cookie, plus array styles (`form`,
-  `pipeDelimited`, `spaceDelimited`) and objects via `deepObject`
-- Request bodies: `application/json`, `text/plain`,
-  `application/x-www-form-urlencoded`, `multipart/form-data`
-- Typed response variants, typed response headers, and `$ref` /
-  `default` responses
-- Security: `apiKey`, HTTP (bearer/basic/digest), OAuth2, OpenID Connect
-  (bearer token attachment)
-
-**Stops with a diagnostic for:**
-
-- JSON Schema 2020 keywords: `$defs`, `prefixItems`, `if/then/else`,
-  `dependentSchemas`, `not`, `unevaluatedProperties` /
-  `unevaluatedItems`, `contentEncoding` / `contentMediaType` /
-  `contentSchema`
-- XML request/response bodies with structural decoding, `xml`
-  annotations, and `mutualTLS` security
-
-**Parsed but not yet turned into code:** callbacks, webhooks,
-`externalDocs`, tags, examples, links, `encoding` metadata.
-
-See [Current Boundaries](#current-boundaries) for the full list,
-including server-mode restrictions and normalization rules. The
-boundaries are kept in sync with the capability registry at
-[`src/oaspec/internal/capability.gleam`](src/oaspec/internal/capability.gleam) by a
-drift-detection test.
-
-## Quickstart
-
-### Install from GitHub release (Linux / macOS)
-
-Requires Erlang/OTP 27+. The release binary is an Erlang escript that runs on any platform with Erlang installed.
+Requires Erlang/OTP 27+. The release artifact is an Erlang escript, so the
+same binary runs anywhere Erlang is available.
 
 ```sh
 curl -fSL -o oaspec https://github.com/nao1215/oaspec/releases/latest/download/oaspec
@@ -139,11 +27,11 @@ chmod +x oaspec
 sudo mv oaspec /usr/local/bin/
 ```
 
-> On Windows, download `oaspec` from the [latest release](https://github.com/nao1215/oaspec/releases/latest) and run it with `escript oaspec <command>`. Erlang/OTP 27+ must be on your `PATH`.
+On Windows, download `oaspec` from the [latest release](https://github.com/nao1215/oaspec/releases/latest) and run it with `escript oaspec <command>`. Erlang/OTP 27+ must be on your `PATH`.
 
-### Build from source (all platforms)
+### Build from source
 
-Requires Gleam 1.15+, Erlang/OTP 27+, and `rebar3`. Works on Linux, macOS, and Windows.
+Requires Gleam 1.15+, Erlang/OTP 27+, and `rebar3`.
 
 ```sh
 git clone https://github.com/nao1215/oaspec.git
@@ -152,15 +40,11 @@ gleam deps download
 gleam run -m gleescript
 ```
 
-On Linux/macOS, move the binary into your PATH:
+On Linux and macOS, move the built `oaspec` binary into your `PATH` with
+`sudo mv oaspec /usr/local/bin/`. On Windows, move `oaspec` to a directory on
+your `PATH` and run it with `escript oaspec <command>`.
 
-```sh
-sudo mv oaspec /usr/local/bin/
-```
-
-On Windows, move `oaspec` to a directory on your `PATH` and run it with `escript oaspec <command>`.
-
-### Generate code
+## Quickstart
 
 1. Create a config file.
 
@@ -191,6 +75,69 @@ working directory when `oaspec` runs, not relative to the config file
 location. If `oaspec.yaml` lives in a subdirectory, either invoke
 `oaspec` from that directory or write paths relative to the directory
 you run the command from.
+
+## Generated files
+
+Given one OpenAPI spec, `oaspec` writes modules you can keep in your
+repository:
+
+```text
+gen/my_api/
+  types.gleam
+  decode.gleam
+  encode.gleam
+  request_types.gleam
+  response_types.gleam
+  guards.gleam
+  handlers.gleam
+  handlers_generated.gleam
+  router.gleam
+
+gen/my_api_client/
+  types.gleam
+  decode.gleam
+  encode.gleam
+  request_types.gleam
+  response_types.gleam
+  guards.gleam
+  client.gleam
+```
+
+## Supported input
+
+`oaspec` handles the following OpenAPI shapes today:
+
+- Schemas: `object`, primitives, arrays, enums, nullable, `allOf`,
+  `oneOf`, `anyOf`, typed `additionalProperties`
+- Local `$ref` (and relative-file external `$ref`) across schemas,
+  parameters, request bodies, responses, and path items. External ref
+  graphs must be acyclic — cycles such as `A.yaml → B.yaml → A.yaml`
+  fail fast with a dedicated diagnostic that shows the visited chain.
+- Parameters: path, query, header, cookie, plus array styles (`form`,
+  `pipeDelimited`, `spaceDelimited`) and objects via `deepObject`
+- Request bodies: `application/json`, `text/plain`,
+  `application/x-www-form-urlencoded`, `multipart/form-data`
+- Typed response variants, typed response headers, and `$ref` /
+  `default` responses
+- Security: `apiKey`, HTTP (bearer/basic/digest), OAuth2, OpenID Connect
+  (bearer token attachment)
+
+Generation stops with a diagnostic for:
+
+- JSON Schema 2020 keywords: `$defs`, `prefixItems`, `if/then/else`,
+  `dependentSchemas`, `not`, `unevaluatedProperties` /
+  `unevaluatedItems`, `contentEncoding` / `contentMediaType` /
+  `contentSchema`
+- XML request/response bodies with structural decoding, `xml`
+  annotations, and `mutualTLS` security
+
+Parsed but not yet turned into code: callbacks, webhooks, `externalDocs`,
+tags, examples, links, and `encoding` metadata.
+
+See [Current Boundaries](#current-boundaries) for the full list, including
+server-mode restrictions and normalization rules. That section stays in sync
+with the capability registry at
+[`src/oaspec/internal/capability.gleam`](src/oaspec/internal/capability.gleam).
 
 ### Runnable examples
 
@@ -293,9 +240,8 @@ Generated server code is written to `<dir>/<package>` and generated client code 
 ### Configuration paths
 
 All path-valued fields — `input`, `output.dir`, `output.server`,
-`output.client` — are resolved **relative to the current working
-directory** when oaspec runs, not the directory the config file lives
-in.
+`output.client` — are resolved relative to the current working
+directory when oaspec runs, not the directory the config file lives in.
 
 A config at the repo root that refers to a sibling spec works with no
 prefix:
@@ -346,6 +292,13 @@ includes the path it attempted to read.
 | `oaspec generate` | Generate Gleam code from an OpenAPI specification |
 | `oaspec validate` | Validate an OpenAPI specification without generating code |
 | `oaspec init` | Create a default `oaspec.yaml` config file |
+| `oaspec version` | Print the installed `oaspec` version (also available as `--version`) |
+
+### CLI options for `init`
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--output=<path>` | `./oaspec.yaml` | Output path for the generated config file |
 
 ### CLI options for `generate`
 
@@ -356,7 +309,7 @@ includes the path it attempted to read.
 | `--output=<path>` | - | Override output base directory |
 | `--check` | `false` | Check that generated code matches existing files without writing |
 | `--fail-on-warnings` | `false` | Treat warnings as errors |
-| `--validate` | `false` | Enable guard validation in generated server/client code |
+| `--validate` | `false` | Force-enable guard validation in generated server/client code. One-way override — passing this flag turns validation **on**, but it cannot turn it off. To disable validation when the config sets `validate: true` (the default for `server` / `both` modes), edit `validate: false` in `oaspec.yaml`. |
 
 ### CLI options for `validate`
 
@@ -434,8 +387,8 @@ Coverage is strongest in these areas:
 
 ### `format: byte` and `format: binary`
 
-The OpenAPI `format` keyword on a `string` schema is **passed through as
-metadata only** in the current release. Generated fields keep the Gleam
+The OpenAPI `format` keyword on a `string` schema is passed through as
+metadata only in the current release. Generated fields keep the Gleam
 type `String`; the encoded contract (`format: byte` = base64 per OAS 3.0
 §4.7.4 / OAS 3.1 alignment with JSON Schema, `format: binary` = raw
 bytes) is not enforced or materialised by the generator.
@@ -445,7 +398,7 @@ Practical implications:
 - `format: byte`: the field is decoded and emitted as the literal
   base64 character string. Callers that need the underlying bytes must
   base64-decode themselves (e.g. with `yabase/facade.decode_base64`).
-  Invalid base64 input is **not rejected** at decode time.
+  Invalid base64 input is not rejected at decode time.
 - `format: binary`: the field is decoded and emitted as a plain
   `String`. For `multipart/form-data` request bodies, the higher-level
   body codepath (`client_request`) already handles binary bodies
@@ -460,21 +413,16 @@ a `format` docstring on the generated field; tracking issue
 <!-- BEGIN GENERATED:BOUNDARIES -->
 ## Current Boundaries
 
-These boundaries are generated from the capability registry in `src/oaspec/internal/capability.gleam`.
+This section stays in sync with `src/oaspec/internal/capability.gleam`.
 
-These are the most important limitations today:
-
-- The following keywords are detected and rejected: `$defs`, `prefixItems`, `if/then/else`, `dependentSchemas`, `not`, `unevaluatedProperties`, `unevaluatedItems`, `contentEncoding`, `contentMediaType`, `contentSchema`, `mutualTLS`, `$id`, `const (non-string)`, `type: [T1, T2] with type-specific constraints`
-- OpenAPI 3.1 `$id`-backed URL refs (e.g. `$ref: https://example.com/Box` paired with `$id: https://example.com/Box` inside `components.schemas`) are an explicit boundary: the parser accepts them, but validation rejects them with a dedicated URL-ref diagnostic. Rewrite to local `#/components/schemas/...` refs.
-- `const` is only supported on string schemas (lowered to a single-value enum). Non-string `const` (bool, int, number, object, array, null) and multi-type schemas that carry type-specific constraints (`pattern`, `minLength`, `minimum`, etc.) are rejected explicitly during `generate` / `validate` so semantic loss never slips into generated code.
-- `xml` annotations are not handled by the parser
-- Some fields are parsed and preserved but not yet used by codegen: callbacks, webhooks, externalDocs, tags, examples, links, encoding
-- Operation-level and path-level server overrides are supported in generated clients (precedence: operation > path > top-level)
-- Server-mode code generation rejects the following spec configurations (supported in client mode): `server: complex path parameters`, `server: non-primitive query array items`, `server: non-primitive header array items`, `server: complex deepObject properties`, `server: mixed form-urlencoded request`, `server: complex form-urlencoded fields`, `server: mixed multipart request`, `server: complex multipart fields`, `server: unsupported request content type`
-- The following are normalized to supported equivalents:
-- `const`: String const normalized to single-value enum
-- `type: [T, null]`: Normalized to nullable
-- `type: [T1, T2]`: Normalized to oneOf
+- Detected and rejected keywords: `$defs`, `prefixItems`, `if/then/else`, `dependentSchemas`, `not`, `unevaluatedProperties`, `unevaluatedItems`, `contentEncoding`, `contentMediaType`, `contentSchema`, `mutualTLS`, `$id`, `const (non-string)`, `type: [T1, T2] with type-specific constraints`
+- OpenAPI 3.1 `$id`-backed URL refs are still rejected during validation. Rewrite them to local `#/components/schemas/...` refs.
+- `const` is only supported on string schemas. Non-string `const` values and multi-type schemas with type-specific constraints are rejected explicitly.
+- Parsed but not used by codegen: callbacks, webhooks, externalDocs, tags, examples, links, encoding
+- `xml` annotations are ignored by the parser
+- Remaining server-mode request-shape boundaries: `server: complex path parameters`, `server: non-primitive query array items`, `server: non-primitive header array items`, `server: complex deepObject properties`, `server: mixed form-urlencoded request`, `server: complex form-urlencoded fields`, `server: mixed multipart request`, `server: complex multipart fields`, `server: unsupported request content type`
+- Detailed server-mode decisions and fixture coverage live in [doc/server-mode-boundaries.md](./doc/server-mode-boundaries.md)
+- Normalized to supported equivalents: `const` string values become single-value enums, `type: [T, null]` becomes nullable, and `type: [T1, T2]` becomes `oneOf`
 <!-- END GENERATED:BOUNDARIES -->
 
 ## Mode-Specific Support
@@ -496,7 +444,10 @@ These are the most important limitations today:
 | `router.gleam` | yes | - |
 | `client.gleam` | - | yes |
 
-`handlers.gleam` is **user-owned**: the generator writes panic stubs on the first run and skips the file on every subsequent run, so your implementations survive regeneration. `handlers_generated.gleam` is the sealed delegator the router imports — each operation forwards to `handlers.<op_name>(req)`, so router/handler wiring stays in sync with the spec without ever touching your code.
+`handlers.gleam` is user-owned. The generator writes panic stubs on the first
+run and skips the file on every subsequent run, so your implementations survive
+regeneration. `handlers_generated.gleam` is the sealed delegator the router
+imports, and each operation forwards to `handlers.<op_name>(req)`.
 
 ### Feature restrictions by mode
 

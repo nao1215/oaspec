@@ -1,0 +1,20 @@
+openapi: 3.0.3
+info:
+  title: Server Complex Path Parameter Test API
+  version: 1.0.0
+paths:
+  /items/{filter}:
+    get:
+      operationId: getItems
+      parameters:
+        - name: filter
+          in: path
+          required: true
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+      responses:
+        "200":
+          description: ok

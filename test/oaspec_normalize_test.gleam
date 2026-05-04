@@ -6,6 +6,7 @@ pub fn capability_registry_and_pipeline_test() {
   let _ = support.capability_registry_names_appear_in_readme_boundaries_case()
   let _ = support.capability_check_uses_registry_case()
   let _ = support.readme_boundaries_match_registry_case()
+  let _ = support.server_boundary_checklist_matches_registry_case()
   let _ = support.pure_generate_pipeline_case()
   let _ = support.pipeline_end_to_end_case()
   let _ = support.capability_check_warns_on_callbacks_case()
