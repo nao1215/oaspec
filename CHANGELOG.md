@@ -4,15 +4,40 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
+Going forward, breaking changes are listed under a dedicated `Breaking`
+section per release (issue #434). Older entries inline `BREAKING:` prefixes
+within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Added
+
+- community files: a Contributor Covenant `CODE_OF_CONDUCT.md`, plus
+  minimal issue templates (bug report, feature request) and a pull
+  request template under `.github/`. The templates only ask for what
+  is genuinely useful (version info, what was tried, what happened) —
+  no checklists or boilerplate. (#415)
+
 ### Documentation
 
-- **readme**: top-of-README rewrite — added the `doc/img/gleam-oas-logo.png`
-  logo, Hex / HexDocs / license / CI badges, a 30-second pitch with a
-  runnable 5-line client example, and a HexDocs link near the install
-  section. (#397)
+- changelog: adopted a dedicated `Breaking` subsection convention for
+  future releases — older `BREAKING:`-prefixed entries within
+  `Changed` / `Fixed` stay as historical record. The README pointer
+  to the latest breaking section is added once the first such release
+  ships. (#434)
+- examples: every example README (`petstore_client`,
+  `petstore_client_fetch`, `server_adapter`) now includes a
+  "What the generator produces" section with a short signature
+  excerpt of the generated `client.gleam` / `router.gleam` /
+  `response_types.gleam`, so a reader can preview the shape before
+  cloning. (#424)
+- readme: dropped the inline logo `<img>` from the top-of-README
+  rewrite, collapsed the centered badge block back to inline shields,
+  and removed gratuitous bold-text emphasis to match the project's
+  plain-prose voice.
+- **readme**: top-of-README rewrite — Hex / HexDocs / license / CI
+  badges, a 30-second pitch with a runnable 5-line client example,
+  and a HexDocs link near the install section. (#397)
 - **readme**: install section now leads with the Hex library install
   (`gleam add oaspec`) for consumers of the runtime / generator API,
   and the GitHub-release / build-from-source paths are scoped to the

@@ -6,7 +6,7 @@ A Gleam project that shows how to bridge the oaspec-generated
 ## What it shows
 
 - Generating a server from an OpenAPI 3.x spec via `oaspec.yaml`.
-- A **regeneration-safe handler layout**: domain logic lives in
+- A regeneration-safe handler layout: domain logic lives in
   `src/example_handlers.gleam`, which the generator never touches.
   `src/api/handlers.gleam` is a thin delegator owned by the generator.
 - Calling the generated router with primitive request pieces
@@ -23,6 +23,36 @@ adapter is the same three-step pattern:
 
 This program runs that adapter against a canned request instead of
 spinning up an HTTP server, so the example has no framework dependency.
+
+## What the generator produces
+
+`oaspec generate` writes `src/api/router.gleam`, `handlers_generated.gleam`,
+the request/response types, decoders/encoders, guards, and the first-time
+`handlers.gleam` panic stub. The router entry point looks like:
+
+```gleam
+// src/api/router.gleam (excerpt)
+pub fn route(
+  app_state: handlers.State,
+  method: String,
+  path: List(String),
+  query: Dict(String, List(String)),
+  _headers: Dict(String, String),
+  body: String,
+) -> ServerResponse
+```
+
+```gleam
+// src/api/response_types.gleam (excerpt)
+pub type ListPetsResponse {
+  ListPetsResponseOk(List(types.Pet))
+  ListPetsResponseUnauthorized
+}
+```
+
+Per-operation request types (`ListPetsRequest`, `CreatePetRequest`, …)
+are emitted into `src/api/request_types.gleam` and consumed by the
+delegator pattern below.
 
 ## Recommended handler layout
 

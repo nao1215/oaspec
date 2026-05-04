@@ -43,6 +43,33 @@ Got 2 pet(s):
   - Whiskers (id=2)
 ```
 
+## What the generator produces
+
+A snippet from the checked-in [`src/api/client.gleam`](./src/api/client.gleam)
+and [`src/api/response_types.gleam`](./src/api/response_types.gleam) — these
+are emitted by `oaspec generate` from [`oaspec.yaml`](./oaspec.yaml):
+
+```gleam
+// src/api/client.gleam
+pub fn list_pets(
+  send send: transport.Send,
+  limit limit: Option(Int),
+  offset offset: Option(Int),
+) -> Result(response_types.ListPetsResponse, ClientError)
+```
+
+```gleam
+// src/api/response_types.gleam
+pub type ListPetsResponse {
+  ListPetsResponseOk(List(types.Pet))
+  ListPetsResponseUnauthorized
+}
+```
+
+The full generated tree (`types.gleam`, `decode.gleam`, `encode.gleam`,
+`request_types.gleam`, `response_types.gleam`, `guards.gleam`,
+`client.gleam`) lives under `src/api/`.
+
 ## File layout
 
 ```text

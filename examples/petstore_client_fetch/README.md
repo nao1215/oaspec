@@ -37,3 +37,28 @@ Got 2 pet(s):
   - Fido (id=1)
   - Whiskers (id=2)
 ```
+
+## What the generator produces
+
+The async client and shared response types are emitted by `oaspec generate`
+into [`src/api/`](./src/api/). Excerpt:
+
+```gleam
+// src/api/client.gleam
+pub fn list_pets_async(
+  async_send async_send: transport.AsyncSend,
+  limit limit: Option(Int),
+  offset offset: Option(Int),
+) -> transport.Async(Result(response_types.ListPetsResponse, ClientError))
+```
+
+```gleam
+// src/api/response_types.gleam
+pub type ListPetsResponse {
+  ListPetsResponseOk(List(types.Pet))
+  ListPetsResponseUnauthorized
+}
+```
+
+The non-async `list_pets/3` is generated alongside the async variant, so
+the same module can drive sync BEAM and async JavaScript callers.
