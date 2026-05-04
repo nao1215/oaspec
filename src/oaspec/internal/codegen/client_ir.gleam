@@ -164,8 +164,15 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
                 "text/plain" -> False
                 _ ->
                   case mt.schema {
-                    Some(Inline(schema.ArraySchema(items: Inline(_), ..))) ->
-                      True
+                    // Issue #493 / CodeRabbit follow-up: array
+                    // responses keyed by `$ref` items also go
+                    // through `dyn_decode.list(...)` now (instead
+                    // of the synthetic `decode_<name>_list`
+                    // wrapper), so the import must fire for them
+                    // too. Without this, generated client code
+                    // references `dyn_decode.list` without
+                    // importing the module.
+                    Some(Inline(schema.ArraySchema(items: _, ..))) -> True
                     Some(Inline(schema.StringSchema(..))) -> True
                     Some(Inline(schema.IntegerSchema(..))) -> True
                     Some(Inline(schema.NumberSchema(..))) -> True

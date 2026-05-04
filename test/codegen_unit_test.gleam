@@ -167,7 +167,7 @@ pub fn client_response_get_response_decode_expr_array_ref_test() {
     http.Status(200),
     ctx,
   )
-  |> should.equal("decode.decode_pet_list(text)")
+  |> should.equal("json.parse(text, dyn_decode.list(decode.pet_decoder()))")
 }
 
 pub fn client_response_get_response_decode_expr_array_inline_test() {

@@ -3,7 +3,6 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/internal/codegen/context.{type Context}
-import oaspec/internal/codegen/decoders
 import oaspec/internal/openapi/schema.{
   type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema, BooleanSchema, Inline,
   IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema, Reference,
@@ -477,7 +476,7 @@ pub fn get_response_decode_expr(
   schema_ref: schema.SchemaRef,
   op_id: String,
   status_code: http.HttpStatusCode,
-  ctx: Context,
+  _ctx: Context,
 ) -> String {
   case schema_ref {
     Reference(name:, ..) -> {
@@ -486,14 +485,17 @@ pub fn get_response_decode_expr(
     Inline(schema.ArraySchema(items:, ..)) ->
       case items {
         Reference(name:, ..) -> {
-          // Issue #493: pick the disambiguated `_list_items` suffix
-          // when the spec also declares a `<Name>List` component
-          // schema, so we call the synthetic decoder rather than
-          // colliding with the user-named one.
-          "decode.decode_"
+          // Issue #493 / CodeRabbit follow-up: parse with
+          // `decode.list(<schema>_decoder())` directly instead of
+          // calling the synthetic `decode_<schema>_list` wrapper.
+          // The wrapper is only emitted for object schemas, so an
+          // array of `$ref` to an enum / primitive / oneOf / anyOf
+          // would otherwise reference a non-existent function.
+          // Going through the per-schema decoder works for every
+          // schema kind and also dodges the `XxxList` rename pass.
+          "json.parse(text, dyn_decode.list(decode."
           <> naming.to_snake_case(name)
-          <> decoders.synthetic_list_suffix_for(name, ctx)
-          <> "(text)"
+          <> "_decoder()))"
         }
         Inline(inner) -> {
           let inner_decoder = inline_schema_to_decoder(inner)

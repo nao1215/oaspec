@@ -1400,10 +1400,8 @@ fn schema_ref_to_decoder(
 /// Resolve the synthetic list-decoder suffix for `<base>` against the
 /// current context's component schemas (issue #493). Returns
 /// `_list_items` when `<base>List` is declared as a component schema,
-/// `_list` otherwise. Centralised so both the decoder emitter and the
-/// client response decoder share one source of truth for the chosen
-/// suffix.
-pub fn synthetic_list_suffix_for(base: String, ctx: Context) -> String {
+/// `_list` otherwise.
+fn synthetic_list_suffix_for(base: String, ctx: Context) -> String {
   let schema_names = case context.spec(ctx).components {
     Some(components) -> components.schemas |> dict.keys
     None -> []
