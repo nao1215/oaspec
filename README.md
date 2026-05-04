@@ -302,7 +302,7 @@ includes the path it attempted to read.
 | `--output=<path>` | - | Override output base directory |
 | `--check` | `false` | Check that generated code matches existing files without writing |
 | `--fail-on-warnings` | `false` | Treat warnings as errors |
-| `--validate` | `false` | Enable guard validation in generated server/client code |
+| `--validate` | `false` | Force-enable guard validation in generated server/client code. One-way override — passing this flag turns validation **on**, but it cannot turn it off. To disable validation when the config sets `validate: true` (the default for `server` / `both` modes), edit `validate: false` in `oaspec.yaml`. |
 
 ### CLI options for `validate`
 
