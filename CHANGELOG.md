@@ -34,8 +34,6 @@ within `Changed` / `Fixed` and stay as-is.
   `bit_array.to_string` step; client callers pass
   `BitArray` instead of `String` for binary bodies. (#485)
 
-### Breaking
-
 - **codegen(default-response)**: the generated `XxxResponseDefault`
   variant now carries a runtime `Int` status code as its first
   positional field, so handlers can pick any 4xx/5xx for the
