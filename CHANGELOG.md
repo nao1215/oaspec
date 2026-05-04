@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-05-05
+
 ### Breaking
 
 - **codegen(octet-stream)**: an `application/octet-stream` request
