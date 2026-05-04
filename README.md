@@ -1,17 +1,11 @@
 # oaspec
 
-<p align="center">
-  <img src="doc/img/gleam-oas-logo.png" alt="oaspec logo" width="180">
-</p>
+[![Hex package](https://img.shields.io/hexpm/v/oaspec)](https://hex.pm/packages/oaspec)
+[![HexDocs](https://img.shields.io/badge/hexdocs-latest-blue)](https://hexdocs.pm/oaspec/)
+[![License](https://img.shields.io/github/license/nao1215/oaspec)](https://github.com/nao1215/oaspec/blob/main/LICENSE)
+[![CI](https://github.com/nao1215/oaspec/actions/workflows/ci.yml/badge.svg)](https://github.com/nao1215/oaspec/actions)
 
-<p align="center">
-  <a href="https://hex.pm/packages/oaspec"><img src="https://img.shields.io/hexpm/v/oaspec" alt="Hex package"></a>
-  <a href="https://hexdocs.pm/oaspec/"><img src="https://img.shields.io/badge/hexdocs-latest-blue" alt="HexDocs"></a>
-  <a href="https://github.com/nao1215/oaspec/blob/main/LICENSE"><img src="https://img.shields.io/github/license/nao1215/oaspec" alt="License"></a>
-  <a href="https://github.com/nao1215/oaspec/actions"><img src="https://github.com/nao1215/oaspec/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-</p>
-
-**Generate Gleam client and server modules from OpenAPI 3.x specs.**
+Generate Gleam client and server modules from OpenAPI 3.x specs.
 
 OpenAPI in → typed Gleam client and server out, with no per-operation glue
 code to write or maintain. The generator owns request and response types,
@@ -49,9 +43,9 @@ API reference: <https://hexdocs.pm/oaspec/>
 
 `oaspec` ships in two flavors:
 
-- **Library API** (the runtime contract for generated clients, plus the
+- Library API (the runtime contract for generated clients, plus the
   generator itself for in-process use) — install via `gleam add` from Hex.
-- **CLI** (the `oaspec` binary that drives `init` / `generate` / `validate`
+- CLI (the `oaspec` binary that drives `init` / `generate` / `validate`
   on the command line) — install from a GitHub release or build from source.
 
 Most users want both: `gleam add oaspec` in the project that consumes the
@@ -284,8 +278,8 @@ HTTP runtime:
   `gleam_fetch`, with helpers to bridge `transport.Async` and native
   JavaScript promises.
 
-> **Note** — `oaspec_httpc` and `oaspec_fetch` are **not yet published on
-> Hex**. `gleam add oaspec_httpc` / `gleam add oaspec_fetch` will fail
+> Note: `oaspec_httpc` and `oaspec_fetch` are not yet published on
+> Hex. `gleam add oaspec_httpc` / `gleam add oaspec_fetch` will fail
 > with "package not found". Until they are published, depend on them
 > from a local checkout via a path or git dependency in your
 > consumer project's `gleam.toml`:
@@ -453,7 +447,7 @@ includes the path it attempted to read.
 | `--output=<path>` | - | Override output base directory |
 | `--check` | `false` | Check that generated code matches existing files without writing |
 | `--fail-on-warnings` | `false` | Treat warnings as errors |
-| `--validate` | `false` | Force-enable guard validation in generated server/client code. One-way override — passing this flag turns validation **on**, but it cannot turn it off. To disable validation when the config sets `validate: true` (the default for `server` / `both` modes), edit `validate: false` in `oaspec.yaml`. |
+| `--validate` | `false` | Force-enable guard validation in generated server/client code. One-way override — passing this flag turns validation on, but it cannot turn it off. To disable validation when the config sets `validate: true` (the default for `server` / `both` modes), edit `validate: false` in `oaspec.yaml`. |
 
 ### CLI options for `validate`
 
