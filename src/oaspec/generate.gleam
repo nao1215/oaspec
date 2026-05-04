@@ -13,6 +13,7 @@ import oaspec/internal/openapi/capability_check
 import oaspec/internal/openapi/dedup
 import oaspec/internal/openapi/filter
 import oaspec/internal/openapi/hoist
+import oaspec/internal/openapi/location_index.{type LocationIndex}
 import oaspec/internal/openapi/normalize
 import oaspec/internal/openapi/resolve
 import oaspec/internal/openapi/spec.{type OpenApiSpec, type Unresolved}
@@ -55,6 +56,7 @@ fn prepare_context(
   spec: OpenApiSpec(Unresolved),
   cfg: Config,
   reporter: Reporter,
+  index: LocationIndex,
 ) -> Result(PreparedContext, GenerateError) {
   let spec_title = spec.info.title <> " v" <> spec.info.version
 
@@ -93,7 +95,7 @@ fn prepare_context(
   // Check for unsupported features using capability registry
   let #(elapsed, capability_issues) =
     progress.timed(fn() {
-      capability_check.check(spec)
+      capability_check.check(spec, index)
       |> diagnostic.filter_by_mode(config.mode(cfg))
     })
   progress.report(
@@ -127,7 +129,7 @@ fn prepare_context(
   // Check for parsed-but-unused features (capability warnings)
   let #(elapsed, preserved_warnings) =
     progress.timed(fn() {
-      capability_check.check_preserved(ctx)
+      capability_check.check_preserved(ctx, index)
       |> diagnostic.filter_by_mode(config.mode(cfg))
     })
   progress.report(
@@ -162,23 +164,36 @@ fn prepare_context(
 /// Pure generation pipeline: parse → normalize → resolve → capability_check → hoist → dedup → validate → codegen.
 /// Takes an already-parsed spec and config; returns generated files or errors.
 /// Does not perform IO — callers handle writing files and printing output.
+///
+/// Capability-check diagnostics from this entry point carry no source
+/// location information. Callers that already have a YAML
+/// `LocationIndex` (e.g. via `parser.parse_file_with_locations`)
+/// should prefer `generate_with_locations` so capability-check errors
+/// surface line/column for the offending spec node (Issue #411).
 pub fn generate(
   spec: OpenApiSpec(Unresolved),
   cfg: Config,
 ) -> Result(GenerationSummary, GenerateError) {
-  generate_with_progress(spec, cfg, progress.noop())
+  generate_with_progress_and_locations(
+    spec,
+    location_index.empty(),
+    cfg,
+    progress.noop(),
+  )
 }
 
-/// Same as `generate`, with a `Reporter` that receives one line per
-/// pipeline stage with elapsed time. Used by the CLI to surface
-/// progress for large specs (issue #352); library callers should
-/// prefer `generate` and pass `progress.noop()` if needed.
-pub fn generate_with_progress(
+/// Combined entry point that accepts both a `LocationIndex` and a
+/// `Reporter`. Issue #411 + #352. The CLI uses this so it can show
+/// per-stage progress AND surface `path:line:column:` in capability
+/// errors at the same time. Library callers that need only one of the
+/// two can pass `location_index.empty()` or `progress.noop()`.
+pub fn generate_with_progress_and_locations(
   spec: OpenApiSpec(Unresolved),
+  index: LocationIndex,
   cfg: Config,
   reporter: Reporter,
 ) -> Result(GenerationSummary, GenerateError) {
-  use prepared <- result.try(prepare_context(spec, cfg, reporter))
+  use prepared <- result.try(prepare_context(spec, cfg, reporter, index))
   let #(elapsed, files) =
     progress.timed(fn() { generate_all_files(prepared.ctx) })
   progress.report(
@@ -198,17 +213,23 @@ pub fn validate_only(
   spec: OpenApiSpec(Unresolved),
   cfg: Config,
 ) -> Result(ValidationSummary, GenerateError) {
-  validate_only_with_progress(spec, cfg, progress.noop())
+  validate_only_with_progress_and_locations(
+    spec,
+    location_index.empty(),
+    cfg,
+    progress.noop(),
+  )
 }
 
-/// Same as `validate_only`, with a `Reporter` that receives one line
-/// per pipeline stage with elapsed time. See `generate_with_progress`.
-pub fn validate_only_with_progress(
+/// Combined `validate_only` entry point that accepts both a
+/// `LocationIndex` and a `Reporter`. Issue #411 + #352.
+pub fn validate_only_with_progress_and_locations(
   spec: OpenApiSpec(Unresolved),
+  index: LocationIndex,
   cfg: Config,
   reporter: Reporter,
 ) -> Result(ValidationSummary, GenerateError) {
-  use prepared <- result.try(prepare_context(spec, cfg, reporter))
+  use prepared <- result.try(prepare_context(spec, cfg, reporter, index))
   Ok(ValidationSummary(
     spec_title: prepared.spec_title,
     warnings: prepared.warnings,

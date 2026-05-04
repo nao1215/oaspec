@@ -138,12 +138,18 @@ pub fn resolve_error(
 // Convenience constructors for capability_check phase
 // ============================================================================
 
+/// Issue #411: capability checks now thread a YAML `SourceLoc` through
+/// every diagnostic. Pass `NoSourceLoc` only when the caller genuinely
+/// has no LocationIndex available (e.g. tests that bypass the parser
+/// path); production code always has one because it goes through
+/// `parser.parse_file_with_locations` / `generate.generate_with_locations`.
 pub fn capability(
   path path: String,
   detail detail: String,
   severity severity: Severity,
   target target: Target,
   hint hint: Option(String),
+  loc loc: SourceLoc,
 ) -> Diagnostic {
   Diagnostic(
     code: "capability",
@@ -151,7 +157,7 @@ pub fn capability(
     severity: severity,
     target: target,
     pointer: path,
-    source_loc: NoSourceLoc,
+    source_loc: loc,
     message: detail,
     hint: hint,
   )
@@ -304,6 +310,28 @@ pub fn to_string(d: Diagnostic) -> String {
   <> d.message
   <> loc_str
   <> hint_str
+}
+
+/// Render a diagnostic with an editor-clickable `path:line:column:`
+/// prefix when the spec file path and a `SourceLoc` are both known.
+/// Falls back to plain `to_string` otherwise.
+///
+/// Issue #411: CI runs that process several specs need a breadcrumb to
+/// which file produced an error; editors recognise the `path:line:col:`
+/// prefix and let users jump straight to the offending YAML line.
+pub fn render(d: Diagnostic, file_path file_path: Option(String)) -> String {
+  case file_path, d.source_loc {
+    Some(path), SourceLoc(line:, column:) ->
+      path
+      <> ":"
+      <> int.to_string(line)
+      <> ":"
+      <> int.to_string(column)
+      <> ": "
+      <> to_string(d)
+    Some(path), NoSourceLoc -> path <> ": " <> to_string(d)
+    None, _ -> to_string(d)
+  }
 }
 
 /// Convert a diagnostic to a short string (for backward-compatible display).
