@@ -126,11 +126,25 @@ fn generate_encoders(
     True, False -> ["gleam/dict", "gleam/json", "gleam/list"]
     _, _ -> ["gleam/json"]
   }
+  // Issue #387: a top-level encoder for a `nullable: true` primitive
+  // or array schema is generated with a bare `Option(...)` parameter
+  // type. Bringing `type Option` into scope is only needed in that
+  // case; the more common record-encoder path that uses
+  // `option.None`/`option.Some` is fine with just `gleam/option`.
+  let needs_bare_option_type =
+    list.any(schemas, fn(entry) {
+      let #(_, schema_ref) = entry
+      schema_ref_has_bare_option_encoder_type(schema_ref)
+    })
+  let option_import_line = case needs_bare_option_type {
+    True -> "gleam/option.{type Option}"
+    False -> "gleam/option"
+  }
   let base_imports = case needs_option_and_list {
     True ->
       base_imports
       |> ensure_import("gleam/list")
-      |> ensure_import("gleam/option")
+      |> ensure_import(option_import_line)
     False -> base_imports
   }
   let imports = case needs_types {
@@ -819,16 +833,28 @@ fn generate_encoder(
       )
     }
 
-    Inline(ArraySchema(items:, ..)) -> {
+    Inline(ArraySchema(metadata:, items:, ..)) -> {
+      // Issue #387: a top-level nullable array schema gets its type
+      // alias rendered as `Option(List(T))`, so the encoder must accept
+      // `Option(List(T))` and use `json.nullable(value, ...)` instead
+      // of the bare `json.array(...)` it had been emitting.
       let inner_type = qualified_schema_ref_type(items, ctx)
-      let gleam_type = "List(" <> inner_type <> ")"
+      let list_type = "List(" <> inner_type <> ")"
       let inner_encoder = schema_ref_to_json_encoder_fn(items, name, "")
+      let array_expr = "json.array(value, " <> inner_encoder <> ")"
+      let #(gleam_type, json_expr) = case metadata.nullable {
+        True -> #(
+          "Option(" <> list_type <> ")",
+          "json.nullable(value, fn(value) { " <> array_expr <> " })",
+        )
+        False -> #(list_type, array_expr)
+      }
       generate_primitive_encoder(
         sb,
         fn_name,
         json_fn_name,
         gleam_type,
-        "json.array(value, " <> inner_encoder <> ")",
+        json_expr,
       )
     }
 
@@ -919,6 +945,24 @@ fn schema_ref_to_json_encoder_fn(
 fn ensure_import(imports: List(String), name: String) -> List(String) {
   use <- bool.guard(list.contains(imports, name), imports)
   list.append(imports, [name])
+}
+
+/// Issue #387: True when the top-level encoder for this schema would
+/// emit a bare `Option(...)` parameter type. Mirrors the decoder
+/// counterpart in `decoders.gleam`. Only primitive / array component
+/// schemas with `nullable: true` reach this shape; object / allOf /
+/// oneOf / anyOf / enum schemas wrap optionality through
+/// `json.nullable(...)` inside their encoder bodies and never declare
+/// `Option(...)` as the outer parameter type.
+fn schema_ref_has_bare_option_encoder_type(ref: SchemaRef) -> Bool {
+  case ref {
+    Inline(StringSchema(metadata:, enum_values: [], ..)) -> metadata.nullable
+    Inline(IntegerSchema(metadata:, ..)) -> metadata.nullable
+    Inline(NumberSchema(metadata:, ..)) -> metadata.nullable
+    Inline(BooleanSchema(metadata:)) -> metadata.nullable
+    Inline(ArraySchema(metadata:, ..)) -> metadata.nullable
+    _ -> False
+  }
 }
 
 /// Escape a spec-derived string so it can be safely interpolated

@@ -129,9 +129,22 @@ fn generate_decoders(
       ])
     False -> base_imports
   }
-  let imports = case needs_option {
-    True -> list.append(base_imports, ["gleam/option"])
-    False -> base_imports
+  // Issue #387: when any top-level component schema is a `nullable: true`
+  // primitive or array (or anyOf/oneOf hoists one), the generated decoder
+  // emits a bare `decode.Decoder(Option(<inner>))` type expression. The
+  // bare `Option` only resolves if `type Option` is brought into scope
+  // explicitly, so include the type in that case. For specs that only
+  // use `Option` indirectly (e.g. via `decode.optional`), the plain
+  // `gleam/option` import is enough.
+  let needs_bare_option_type =
+    list.any(schemas, fn(entry) {
+      let #(_, schema_ref) = entry
+      schema_ref_has_bare_option_decoder_type(schema_ref)
+    })
+  let imports = case needs_option, needs_bare_option_type {
+    True, True -> list.append(base_imports, ["gleam/option.{type Option}"])
+    True, False -> list.append(base_imports, ["gleam/option"])
+    False, _ -> base_imports
   }
 
   let sb =
@@ -483,8 +496,16 @@ fn generate_decoder(
       )
     }
 
-    Inline(ArraySchema(items:, ..)) ->
-      generate_array_decoder(sb, name, fn_name, decoder_fn_name, items, ctx)
+    Inline(ArraySchema(metadata:, items:, ..)) ->
+      generate_array_decoder(
+        sb,
+        name,
+        fn_name,
+        decoder_fn_name,
+        items,
+        metadata.nullable,
+        ctx,
+      )
 
     _ -> sb
   }
@@ -848,14 +869,17 @@ fn generate_anyof_decoder(
 ) -> se.StringBuilder {
   let sb = maybe_doc_comment(sb, description)
 
-  // Generate field decoders that try each variant
+  // Generate field decoders that try each variant. The decoder
+  // function for a top-level component schema named `Foo` is emitted
+  // as `foo_decoder()`; the previous `decode_<snake>_decoder` form
+  // referenced a function that never exists and broke compilation
+  // for every anyOf union that survives hoisting (Issue #387).
   let variant_fields =
     list.map(schemas, fn(s_ref) {
       case s_ref {
         Reference(name: ref_name, ..) -> {
           let field_name = naming.to_snake_case(ref_name)
-          let decoder_name =
-            "decode_" <> naming.to_snake_case(ref_name) <> "_decoder"
+          let decoder_name = naming.to_snake_case(ref_name) <> "_decoder"
           #(field_name, decoder_name, ref_name)
         }
         Inline(_) -> #("unknown", "decode.string", "Unknown")
@@ -949,18 +973,34 @@ fn generate_primitive_decoder(
   |> se.blank_line()
 }
 
-/// Generate decoder for an ArraySchema.
+/// Generate decoder for an ArraySchema. Issue #387: when the array
+/// schema itself carries `nullable: true`, the type generator wraps
+/// the resulting type alias in `Option(List(T))` (via
+/// `schema_dispatch.schema_type`), so the decoder must wrap its
+/// `decode.list(...)` body in `decode.optional(...)` to match.
+/// Otherwise the emitted variant decoder returns
+/// `Decoder(List(T))` while every caller treats it as
+/// `Decoder(Option(List(T)))`.
 fn generate_array_decoder(
   sb: se.StringBuilder,
   name: String,
   fn_name: String,
   decoder_fn_name: String,
   items: SchemaRef,
+  nullable: Bool,
   ctx: Context,
 ) -> se.StringBuilder {
   let inner_decoder = schema_ref_to_decoder(items, name, "")
   let inner_type = qualified_schema_ref_type(items, ctx)
-  let gleam_type = "List(" <> inner_type <> ")"
+  let list_type = "List(" <> inner_type <> ")"
+  let list_decoder = "decode.list(" <> inner_decoder <> ")"
+  let #(gleam_type, decoder_expr) = case nullable {
+    True -> #(
+      "Option(" <> list_type <> ")",
+      "decode.optional(" <> list_decoder <> ")",
+    )
+    False -> #(list_type, list_decoder)
+  }
   sb
   |> se.line(
     "pub fn "
@@ -969,7 +1009,7 @@ fn generate_array_decoder(
     <> gleam_type
     <> ") {",
   )
-  |> se.indent(1, "decode.list(" <> inner_decoder <> ")")
+  |> se.indent(1, decoder_expr)
   |> se.line("}")
   |> se.blank_line()
   |> se.line(
@@ -1343,6 +1383,25 @@ fn qualified_schema_ref_type(ref: SchemaRef, ctx: Context) -> String {
   case ref {
     Inline(schema) -> type_gen.schema_to_gleam_type(schema, ctx)
     _ -> schema_dispatch.schema_ref_qualified_type(ref)
+  }
+}
+
+/// Issue #387: True when the top-level decoder for this schema would
+/// emit a bare `decode.Decoder(Option(...))` annotation. That happens
+/// only for primitive / array component schemas with `nullable: true`,
+/// since those produce a top-level type alias wrapped in `Option(...)`
+/// and the matching decoder declares the same type. Object / allOf /
+/// oneOf / anyOf / enum schemas wrap any optionality through
+/// `decode.optional(...)` inside `decode.field`, so the bare `Option`
+/// type never appears in their decoder bodies.
+fn schema_ref_has_bare_option_decoder_type(ref: SchemaRef) -> Bool {
+  case ref {
+    Inline(StringSchema(metadata:, enum_values: [], ..)) -> metadata.nullable
+    Inline(IntegerSchema(metadata:, ..)) -> metadata.nullable
+    Inline(NumberSchema(metadata:, ..)) -> metadata.nullable
+    Inline(BooleanSchema(metadata:)) -> metadata.nullable
+    Inline(ArraySchema(metadata:, ..)) -> metadata.nullable
+    _ -> False
   }
 }
 

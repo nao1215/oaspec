@@ -628,6 +628,48 @@ EOF
 End
 
 # ===================================================================
+# Issue #387 — Reference-typed response header refused at codegen
+# ===================================================================
+#
+# The client extractor today supports inline String / Int / Float /
+# Bool response header schemas. A `$ref` header schema has no
+# extractor wired up; the generator must abort with a clear error
+# message rather than silently emit broken client code. This block
+# pins the failure mode so a future regression cannot quietly start
+# producing uncompilable output again.
+
+Describe 'oaspec response header schema'
+  Include "$SHELLSPEC_SPECDIR/spec_helper.sh"
+
+  setup_ref_header_config() {
+    rm -rf "$PROJECT_ROOT/test_ref_header"
+    mkdir -p "$PROJECT_ROOT/test_ref_header"
+    cat > "$PROJECT_ROOT/test_ref_header.yaml" <<EOF
+input: test/fixtures/issue_387_response_header_ref.yaml
+package: ref_header
+mode: client
+output:
+  dir: ./test_ref_header
+EOF
+  }
+
+  cleanup_ref_header_config() {
+    rm -rf "$PROJECT_ROOT/test_ref_header" "$PROJECT_ROOT/test_ref_header.yaml"
+  }
+
+  Before 'setup_ref_header_config'
+  After 'cleanup_ref_header_config'
+
+  It 'refuses to generate a client when a response header uses a $ref schema'
+    When run generate --config=./test_ref_header.yaml
+    The status should be failure
+    The output should include "Cannot generate client extractor for response header"
+    The output should include "X-Item-Kind"
+    The output should include "issue #387"
+  End
+End
+
+# ===================================================================
 # generate --check tests
 # ===================================================================
 

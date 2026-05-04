@@ -1014,9 +1014,22 @@ fn schema_ref_to_type_with_inline_enum(
   ctx: Context,
 ) -> String {
   case ref {
-    Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
-      naming.schema_to_type_name(parent_name)
-      <> naming.schema_to_type_name(prop_name)
+    // Issue #387: inline string-enum properties produce a per-property
+    // enum type and a bare type expression. When the spec also marks
+    // the property `nullable: true`, the surrounding record wraps it
+    // through `is_already_optional` — but that path assumes the type
+    // expression already contains the `Option(...)` wrapper (matching
+    // what `schema_dispatch.schema_type` returns for non-enum inline
+    // schemas). Wrap explicitly here so the type, decoder, and
+    // encoder agree on `Option(EnumType)`.
+    Inline(StringSchema(metadata:, enum_values:, ..)) if enum_values != [] -> {
+      let base =
+        naming.schema_to_type_name(parent_name)
+        <> naming.schema_to_type_name(prop_name)
+      case metadata.nullable {
+        True -> "Option(" <> base <> ")"
+        False -> base
+      }
     }
     _ -> schema_ref_to_type(ref, ctx)
   }

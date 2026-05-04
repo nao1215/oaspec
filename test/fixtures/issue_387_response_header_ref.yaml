@@ -1,0 +1,42 @@
+openapi: 3.0.3
+info:
+  title: Reference-typed response header (Issue #387 negative fixture)
+  version: 1.0.0
+  description: |
+    Response declares a header whose `schema` is a `$ref` to a
+    component schema. Issue #387 explicitly does not handle this
+    shape yet — generation MUST abort with a clear error message
+    rather than silently produce broken client code. This fixture
+    pins the failure mode so a future regression cannot reintroduce
+    silent breakage.
+paths:
+  /items:
+    get:
+      operationId: listItems
+      responses:
+        '200':
+          description: Items.
+          headers:
+            X-Item-Kind:
+              description: Reference-typed header — not supported.
+              schema:
+                $ref: '#/components/schemas/ItemKind'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Item'
+
+components:
+  schemas:
+    ItemKind:
+      type: string
+      enum:
+        - regular
+        - vip
+    Item:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: integer
