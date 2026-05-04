@@ -128,7 +128,7 @@ need its own directory in the meantime.
   Petstore client flow on the JavaScript target using the first-party
   fetch adapter.
 - [`examples/server_adapter`](../server_adapter/) — a framework-free runnable
-  example that bridges the generated `router.route/5` to a canned
+  example that bridges the generated `router.route/6` to a canned
   request/response pair. Run it with `just example-server-adapter`.
 
 A `security_client` example is still to come; see Issue #26.

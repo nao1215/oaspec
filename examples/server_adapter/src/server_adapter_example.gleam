@@ -1,4 +1,4 @@
-//// Runnable example: wiring the oaspec-generated `router.route/5` into a
+//// Runnable example: wiring the oaspec-generated `router.route/6` into a
 //// minimal adapter.
 ////
 //// The generated router is HTTP-framework-agnostic: it takes the primitive

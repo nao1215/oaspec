@@ -208,7 +208,7 @@ Working examples live under [`examples/`](./examples):
 
 - [`examples/petstore_client`](./examples/petstore_client) — generated client / decoder roundtrip demo against a stub transport (no network). The example's README shows the one-liner swap to `oaspec_httpc` for real BEAM HTTP. Run it from the repo root with `just example-petstore`.
 - [`examples/petstore_client_fetch`](./examples/petstore_client_fetch) — JavaScript-target client usage through the first-party fetch adapter. Run it from the repo root with `just example-petstore-fetch`.
-- [`examples/server_adapter`](./examples/server_adapter) — wires the generated `router.route/5` to a framework-free adapter. Run it from the repo root with `just example-server-adapter`.
+- [`examples/server_adapter`](./examples/server_adapter) — wires the generated `router.route/6` to a framework-free adapter. Run it from the repo root with `just example-server-adapter`.
 
 ### Client transport
 
@@ -320,6 +320,89 @@ Gleam 1.16, so the build tool cannot locate the adapter's
 See [`examples/petstore_client_fetch/gleam.toml`](./examples/petstore_client_fetch/gleam.toml)
 for the canonical path-dependency layout used in the bundled
 examples.
+
+### Server transport
+
+Generated server code is the dual of the client side: the codegen
+emits a single pure router function, and adapters bridge it to a real
+HTTP framework. `api/router.route/6` takes the primitive pieces of a
+request — `state`, `method`, `path`, `query`, `headers`, `body` — and
+returns a `ServerResponse` whose `body` is a sum
+(`TextBody(String)`, `BytesBody(BitArray)`, `EmptyBody`), so binary
+endpoints carry real bytes through without a String round-trip.
+
+A canonical [`mist`](https://hexdocs.pm/mist/) adapter looks like
+this:
+
+```gleam
+import api/handlers
+import api/router as oas_router
+import gleam/bit_array
+import gleam/bytes_tree
+import gleam/dict
+import gleam/http
+import gleam/http/request.{type Request}
+import gleam/http/response.{type Response}
+import gleam/list
+import gleam/option.{None, Some}
+import gleam/result
+import gleam/string
+import gleam/uri
+import mist
+
+pub fn handle(
+  req: Request(mist.Connection),
+  state: handlers.State,
+) -> Response(mist.ResponseData) {
+  let method = req.method |> http.method_to_string |> string.uppercase
+  let path =
+    req.path
+    |> string.split(on: "/")
+    |> list.filter(fn(segment) { segment != "" })
+  let query =
+    req.query
+    |> option.unwrap("")
+    |> uri.parse_query
+    |> result.unwrap([])
+    |> list.fold(dict.new(), fn(acc, kv) {
+      dict.upsert(acc, kv.0, fn(prev) {
+        case prev {
+          Some(values) -> list.append(values, [kv.1])
+          None -> [kv.1]
+        }
+      })
+    })
+  let headers = req.headers |> dict.from_list
+  let body =
+    mist.read_body(req, 16_000_000)
+    |> result.map(fn(read) { read.body })
+    |> result.unwrap(<<>>)
+    |> bit_array.to_string
+    |> result.unwrap("")
+
+  let resp = oas_router.route(state, method, path, query, headers, body)
+
+  let mist_body = case resp.body {
+    oas_router.TextBody(text) -> mist.Bytes(bytes_tree.from_string(text))
+    oas_router.BytesBody(bytes) ->
+      mist.Bytes(bytes_tree.from_bit_array(bytes))
+    oas_router.EmptyBody -> mist.Bytes(bytes_tree.new())
+  }
+  resp.headers
+  |> list.fold(response.new(resp.status), fn(r, header) {
+    response.set_header(r, header.0, header.1)
+  })
+  |> response.set_body(mist_body)
+}
+```
+
+The same shape works for [`wisp`](https://hexdocs.pm/wisp/): decompose
+its request into the six primitives, call `oas_router.route(...)`,
+render the returned `ServerResponse` back into the framework's
+response type. Because the router is pure and synchronous, it is also
+trivial to test in isolation without an HTTP server — see
+[`examples/server_adapter`](./examples/server_adapter) for a
+framework-free runnable example.
 
 ## Configuration
 
