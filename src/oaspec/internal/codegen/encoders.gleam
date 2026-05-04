@@ -109,7 +109,7 @@ fn generate_encoders(
           |> list.any(fn(p) {
             let #(prop_name, prop_ref) = p
             !list.contains(required, prop_name)
-            && !schema_ref_is_nullable(prop_ref)
+            && !schema_utils.schema_ref_is_nullable(prop_ref, ctx)
           })
         _ -> False
       }
@@ -353,7 +353,7 @@ fn generate_encoder(
         list.any(props_with_names, fn(entry) {
           let #(prop_name, prop_ref, _) = entry
           !list.contains(required, prop_name)
-          && !schema_ref_is_nullable(prop_ref)
+          && !schema_utils.schema_ref_is_nullable(prop_ref, ctx)
         })
 
       let sb = case has_ap, has_omittable {
@@ -404,7 +404,7 @@ fn generate_encoder(
 
           // Issue #296: required+nullable properties have Gleam type
           // Option(T) and must use json.nullable, not the bare encoder.
-          let is_nullable = schema_ref_is_nullable(prop_ref)
+          let is_nullable = schema_utils.schema_ref_is_nullable(prop_ref, ctx)
           let is_omittable = !is_required && !is_nullable
           case has_omittable, is_required, is_nullable, is_omittable {
             // No optional-non-nullable in the schema → static list, current shape.
@@ -908,16 +908,6 @@ fn schema_ref_to_json_encoder_fn(
       "fn(items) { json.array(items, " <> inner <> ") }"
     }
     _ -> schema_dispatch.json_encoder_fn(ref)
-  }
-}
-
-/// Check if a SchemaRef is nullable (inline schemas only — references are
-/// assumed non-nullable here since the ref target's nullability is baked
-/// into the generated type elsewhere).
-fn schema_ref_is_nullable(ref: SchemaRef) -> Bool {
-  case ref {
-    Inline(inline_schema) -> schema.is_nullable(inline_schema)
-    Reference(..) -> False
   }
 }
 

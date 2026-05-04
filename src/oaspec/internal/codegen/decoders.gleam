@@ -526,7 +526,8 @@ fn generate_object_decoder(
       let is_write_only = type_gen.schema_ref_is_write_only(prop_ref, ctx)
       let is_required = list.contains(required, prop_name) && !is_write_only
       let field_decoder = schema_ref_to_decoder(prop_ref, name, prop_name)
-      let is_nullable_schema = schema_ref_is_nullable(prop_ref, ctx)
+      let is_nullable_schema =
+        schema_utils.schema_ref_is_nullable(prop_ref, ctx)
 
       // For nullable schemas, the Gleam type is Option(T),
       // so the decoder must be decode.optional(inner_decoder).
@@ -1325,14 +1326,6 @@ fn schema_ref_to_decoder(
       "decode.list(" <> inner <> ")"
     }
     _ -> schema_dispatch.decoder_expr(ref)
-  }
-}
-
-/// Check if a SchemaRef has nullable: true.
-fn schema_ref_is_nullable(ref: SchemaRef, ctx: Context) -> Bool {
-  case context.schema_metadata(ref, ctx) {
-    Some(metadata) -> metadata.nullable
-    None -> False
   }
 }
 

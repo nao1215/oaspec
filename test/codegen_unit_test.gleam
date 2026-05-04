@@ -1299,6 +1299,140 @@ components:
 }
 
 // ===================================================================
+// $ref + nullable encode/decode parity (issue #389)
+// ===================================================================
+
+/// A `$ref` property whose target schema has `nullable: true` must be
+/// treated as nullable on both sides: the decoder wraps the field in
+/// `decode.optional` and the encoder wraps the value in `json.nullable`.
+/// Issue #389: prior to the fix, the encoder helper returned `False` for
+/// any `Reference(..)` without resolving it, so the encoder emitted the
+/// bare encoder for a field whose Gleam type was already `Option(T)`.
+pub fn encoders_required_ref_to_nullable_uses_json_nullable_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    NullableInt:
+      type: integer
+      nullable: true
+    Wrapper:
+      type: object
+      required: [value]
+      properties:
+        value:
+          $ref: '#/components/schemas/NullableInt'
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let files = encoders.generate(ctx)
+  let assert Ok(encode_file) =
+    list.find(files, fn(f) { f.path == "encode.gleam" })
+
+  // Required + $ref-to-nullable must wrap with json.nullable, NOT call
+  // the bare encoder on a value that is actually Option(Int).
+  string.contains(
+    encode_file.content,
+    "json.nullable(value.value, encode_nullable_int_json)",
+  )
+  |> should.be_true()
+
+  // The buggy fallback would emit a bare encoder call instead.
+  string.contains(
+    encode_file.content,
+    "#(\"value\", encode_nullable_int_json(value.value))",
+  )
+  |> should.be_false()
+}
+
+/// Optional + `$ref` to nullable schema must use the omit-on-None list
+/// shape with `json.nullable` (None → wire null is permitted because the
+/// referenced schema is nullable).
+pub fn encoders_optional_ref_to_nullable_uses_json_nullable_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    NullableInt:
+      type: integer
+      nullable: true
+    Wrapper:
+      type: object
+      required: []
+      properties:
+        value:
+          $ref: '#/components/schemas/NullableInt'
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let files = encoders.generate(ctx)
+  let assert Ok(encode_file) =
+    list.find(files, fn(f) { f.path == "encode.gleam" })
+
+  // Optional + $ref-to-nullable: emit json.nullable wrapping (the entire
+  // property keeps wire-format null on None because the ref target
+  // declares `nullable: true`).
+  string.contains(
+    encode_file.content,
+    "json.nullable(value.value, encode_nullable_int_json)",
+  )
+  |> should.be_true()
+
+  // It must NOT fall into the optional+non-nullable case-omit shape.
+  string.contains(encode_file.content, "case value.value {")
+  |> should.be_false()
+}
+
+/// A `$ref` to a nullable schema must produce `decode.optional(...)` in
+/// the decoder so the decoded record holds `Option(T)` (matching the
+/// generated Gleam type for a nullable field).
+pub fn decoders_ref_to_nullable_uses_decode_optional_test() {
+  let assert Ok(spec) =
+    parser.parse_string(
+      "
+openapi: '3.0.3'
+info:
+  title: Test
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    NullableInt:
+      type: integer
+      nullable: true
+    Wrapper:
+      type: object
+      required: [value]
+      properties:
+        value:
+          $ref: '#/components/schemas/NullableInt'
+",
+    )
+  let spec = hoist.hoist(spec)
+  let ctx = test_helpers.make_ctx_from_spec(spec)
+  let files = decoders.generate(ctx)
+  let assert Ok(decode_file) =
+    list.find(files, fn(f) { f.path == "decode.gleam" })
+
+  string.contains(decode_file.content, "decode.optional(")
+  |> should.be_true()
+}
+
+// ===================================================================
 // Enum query parameter codegen (issue #305)
 // ===================================================================
 
