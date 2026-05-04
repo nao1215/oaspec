@@ -749,16 +749,23 @@ fn generate_object_decoder(
     Forbidden | Unspecified -> param_names
   }
 
-  let sb =
-    sb
-    |> se.indent(
-      1,
+  // Issue #474: schemas with no constructor params (e.g. an empty
+  // object `type: object, properties: {}, additionalProperties: false`)
+  // surface in the type module as a no-arg variant — `pub type
+  // EmptyObject { EmptyObject }`. Calling such a constructor with `()`
+  // is invalid Gleam ("This value is being called as a function but
+  // its type is: types.EmptyObject"). Emit the bare constructor
+  // reference in that case.
+  let constructor_call = case list.is_empty(param_names) {
+    True -> "decode.success(types." <> type_name <> ")"
+    False ->
       "decode.success(types."
-        <> type_name
-        <> "("
-        <> se.join_with(param_names, ", ")
-        <> "))",
-    )
+      <> type_name
+      <> "("
+      <> se.join_with(param_names, ", ")
+      <> "))"
+  }
+  let sb = sb |> se.indent(1, constructor_call)
 
   let sb = sb |> se.line("}") |> se.blank_line()
 
