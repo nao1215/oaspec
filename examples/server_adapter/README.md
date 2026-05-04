@@ -1,7 +1,7 @@
 # server_adapter — minimal HTTP adapter for the generated router
 
 A Gleam project that shows how to bridge the oaspec-generated
-`router.route/5` function to any real HTTP stack (wisp, mist, …).
+`router.route/6` function to any real HTTP stack (wisp, mist, …).
 
 ## What it shows
 
@@ -16,8 +16,8 @@ A Gleam project that shows how to bridge the oaspec-generated
 The shape of the router is deliberately framework-free. Any wisp / mist
 adapter is the same three-step pattern:
 
-1. Decompose the framework's request into the five primitives.
-2. `let response = router.route(method, path, query, headers, body)`.
+1. Decompose the framework's request into the six primitives.
+2. `let response = router.route(state, method, path, query, headers, body)`.
 3. Render `response.status` / `response.body` / `response.headers` back
    into the framework's response type.
 
