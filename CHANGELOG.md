@@ -10,18 +10,23 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-05-05
+
 ### Fixed
 
-- **codegen(non-primitive query/header array items)**: query and
-  header parameters whose `items` resolved to a non-primitive
-  schema (e.g. `tags: array of object`) used to crash the client
-  generator with `oaspec: inline object schema reached
+- **codegen(non-primitive query/header/cookie array items)**: query,
+  header, and cookie parameters whose `items` resolved to a
+  non-primitive schema (e.g. `tags: array of object`) panicked the
+  client generator with `oaspec: inline composite schema reached
   to_string_fn after hoist`. The validator only blocked the shape
-  in server mode, so `mode: client` codegen ran unimpeded into
-  the panic. The validator now rejects non-primitive item
-  schemas in BOTH modes for query and header array params, and
-  the rejection follows hoisted `Reference`s through to their
-  resolved shape rather than treating any `Reference` as safe.
+  in server mode, so `mode: client` codegen ran unimpeded into the
+  panic; even the existing server gate let `Reference(_, hoisted)`
+  through unconditionally even though hoist may have promoted a
+  composite into the component. The rejection now follows hoisted
+  `Reference`s through to their resolved shape and fires in BOTH
+  modes for query, header, and cookie array params (cookies share
+  the exploded-array codegen path so they're covered too).
+  Surfaced by a new fixture-sweep regression test.
 - **codegen(form-urlencoded nested arrays)**: an
   `application/x-www-form-urlencoded` request body whose nested
   object property contained an array (`profile.aliases: array of
