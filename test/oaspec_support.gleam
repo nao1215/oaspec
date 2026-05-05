@@ -6967,6 +6967,11 @@ fn fixtures_sweep_includes_path(name: String) -> Bool {
   && !string.starts_with(name, "broken_")
   && !string.starts_with(name, "oaspec-")
   && !string.starts_with(name, "oaspec_")
+  // The bare `oaspec.yaml` config file lives next to the spec
+  // fixtures by historical accident; it's an oaspec.yaml config,
+  // not an OpenAPI document, and would parse as garbage. Exclude
+  // explicitly so the prefix filter above doesn't miss it.
+  && name != "oaspec.yaml"
   // `error_invalid_yaml.yaml` is intentionally invalid YAML so the
   // CLI's "we surface a SourceLoc on YAML parse errors" path can be
   // exercised — it raises a yamerl-level exception rather than

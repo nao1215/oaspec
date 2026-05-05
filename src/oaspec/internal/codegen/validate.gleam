@@ -393,6 +393,24 @@ fn validate_server_structured_param(
           ),
         ]
       }
+    // CodeRabbit follow-up: cookie array params take the same
+    // exploded-array codegen path as query/header (see
+    // `client_request.generate_exploded_array_query_param`-style
+    // emission), so a non-primitive item schema would panic in
+    // `to_string_fn` for them too. Reject in both modes.
+    spec.InCookie, Some(ArraySchema(items:, ..)) ->
+      case array_items_resolve_primitive(items, ctx) {
+        True -> []
+        False -> [
+          diagnostic.validation_error_both(
+            path: path,
+            detail: "Cookie array parameters are only supported for primitive items (string, integer, number, boolean), whether inline or via $ref.",
+            hint: Some(
+              "Replace the item schema with a primitive type (string, integer, number, boolean).",
+            ),
+          ),
+        ]
+      }
     _, _ -> []
   }
   // The deepObject server-only constraint (primitive scalars /
