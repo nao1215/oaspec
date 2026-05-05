@@ -12,7 +12,7 @@ import oaspec/internal/openapi/spec.{
 }
 
 /// The version of oaspec used for generated code headers.
-pub const version = "0.53.0"
+pub const version = "0.54.0"
 
 /// One analyzed operation: its `operationId` (synthesized when missing),
 /// the operation record with path-level parameters, security, and servers
