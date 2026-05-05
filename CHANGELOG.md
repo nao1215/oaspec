@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-05-05
+
 ### Added
 
 - **codegen(deepObject nested objects)**: `style: deepObject` query
