@@ -354,8 +354,7 @@ fn generate_inline_enum_decoders(
         case prop_ref {
           Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
             let enum_name =
-              naming.schema_to_type_name(parent_name)
-              <> naming.schema_to_type_name(prop_name)
+              ir_build.inline_enum_type_name_for(parent_name, prop_name, ctx)
             generate_decoder(sb, enum_name, prop_ref, ctx)
           }
           _ -> sb
@@ -553,7 +552,7 @@ fn generate_object_decoder(
       // as optional even if listed in required
       let is_write_only = schema_utils.schema_ref_is_write_only(prop_ref, ctx)
       let is_required = list.contains(required, prop_name) && !is_write_only
-      let field_decoder = schema_ref_to_decoder(prop_ref, name, prop_name)
+      let field_decoder = schema_ref_to_decoder(prop_ref, name, prop_name, ctx)
       let is_nullable_schema =
         schema_utils.schema_ref_is_nullable(prop_ref, ctx)
 
@@ -642,7 +641,7 @@ fn generate_object_decoder(
   let sb = case additional_properties {
     Typed(ap_ref) -> {
       let inner_decoder =
-        schema_ref_to_decoder(ap_ref, name, "additional_properties")
+        schema_ref_to_decoder(ap_ref, name, "additional_properties", ctx)
       sb
       |> se.indent(
         1,
@@ -1018,7 +1017,7 @@ fn generate_array_decoder(
   nullable: Bool,
   ctx: Context,
 ) -> se.StringBuilder {
-  let inner_decoder = schema_ref_to_decoder(items, name, "")
+  let inner_decoder = schema_ref_to_decoder(items, name, "", ctx)
   let inner_type = codec_helpers.qualified_schema_ref_type(items, ctx)
   let list_type = "List(" <> inner_type <> ")"
   let list_decoder = "decode.list(" <> inner_decoder <> ")"
@@ -1373,24 +1372,28 @@ fn get_discriminator_value(
 }
 
 /// Convert a SchemaRef to a decoder expression string.
-/// parent_name is used to resolve inline enum decoder names.
+/// parent_name is used to resolve inline enum decoder names; `ctx` is
+/// threaded so inline-enum names can be disambiguated against
+/// existing component schema names (Issue #492).
 fn schema_ref_to_decoder(
   ref: SchemaRef,
   parent_name: String,
   prop_name: String,
+  ctx: Context,
 ) -> String {
   case ref {
     Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
       // Inline enum: use the generated enum decoder
       let decoder_name =
-        naming.to_snake_case(
-          naming.schema_to_type_name(parent_name)
-          <> naming.schema_to_type_name(prop_name),
-        )
+        naming.to_snake_case(ir_build.inline_enum_type_name_for(
+          parent_name,
+          prop_name,
+          ctx,
+        ))
       decoder_name <> "_decoder()"
     }
     Inline(ArraySchema(items:, ..)) -> {
-      let inner = schema_ref_to_decoder(items, parent_name, prop_name)
+      let inner = schema_ref_to_decoder(items, parent_name, prop_name, ctx)
       "decode.list(" <> inner <> ")"
     }
     _ -> schema_dispatch.decoder_expr(ref)

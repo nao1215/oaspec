@@ -225,8 +225,7 @@ fn generate_inline_enum_encoders(
         case prop_ref {
           Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
             let enum_name =
-              naming.schema_to_type_name(parent_name)
-              <> naming.schema_to_type_name(prop_name)
+              ir_build.inline_enum_type_name_for(parent_name, prop_name, ctx)
             generate_encoder(sb, enum_name, prop_ref, ctx)
           }
           _ -> sb
@@ -392,6 +391,7 @@ fn generate_encoder(
                 prop_ref,
                 name,
                 prop_name,
+                ctx,
               )
           }
 
@@ -416,7 +416,12 @@ fn generate_encoder(
                   <> "\", json.nullable(value."
                   <> field_name
                   <> ", "
-                  <> schema_ref_to_json_encoder_fn(prop_ref, name, prop_name)
+                  <> schema_ref_to_json_encoder_fn(
+                  prop_ref,
+                  name,
+                  prop_name,
+                  ctx,
+                )
                   <> "))"
                   <> trailing,
               )
@@ -426,7 +431,7 @@ fn generate_encoder(
               // Re-derive the encoder expression with `x` substituted for
               // `value.<field>` so we encode the unwrapped Some value.
               let some_encoder_expr =
-                schema_ref_to_json_encoder("x", prop_ref, name, prop_name)
+                schema_ref_to_json_encoder("x", prop_ref, name, prop_name, ctx)
               sb
               |> se.indent(2, "case value." <> field_name <> " {")
               |> se.indent(3, "option.None -> []")
@@ -462,7 +467,12 @@ fn generate_encoder(
                   <> "\", json.nullable(value."
                   <> field_name
                   <> ", "
-                  <> schema_ref_to_json_encoder_fn(prop_ref, name, prop_name)
+                  <> schema_ref_to_json_encoder_fn(
+                  prop_ref,
+                  name,
+                  prop_name,
+                  ctx,
+                )
                   <> "))]"
                   <> trailing,
               )
@@ -476,7 +486,12 @@ fn generate_encoder(
       let sb = case additional_properties {
         Typed(ap_ref) -> {
           let inner_encoder_fn =
-            schema_ref_to_json_encoder_fn(ap_ref, name, "additional_properties")
+            schema_ref_to_json_encoder_fn(
+              ap_ref,
+              name,
+              "additional_properties",
+              ctx,
+            )
           // Issue #320: each statement of the lambda body is emitted via
           // a separate `se.indent` call rather than as embedded `\n`
           // inside one string. The previous form was easy to misread
@@ -827,7 +842,7 @@ fn generate_encoder(
       // of the bare `json.array(...)` it had been emitting.
       let inner_type = codec_helpers.qualified_schema_ref_type(items, ctx)
       let list_type = "List(" <> inner_type <> ")"
-      let inner_encoder = schema_ref_to_json_encoder_fn(items, name, "")
+      let inner_encoder = schema_ref_to_json_encoder_fn(items, name, "", ctx)
       let array_expr = "json.array(value, " <> inner_encoder <> ")"
       let #(gleam_type, json_expr) = case metadata.nullable {
         True -> #(
@@ -873,27 +888,31 @@ fn generate_primitive_encoder(
 }
 
 /// Convert a SchemaRef to a json.Json encoder expression.
-/// Returns an expression that produces json.Json (not String).
+/// Returns an expression that produces json.Json (not String). `ctx`
+/// is threaded so inline-enum encoder names can be disambiguated
+/// against existing component schema names (Issue #492).
 fn schema_ref_to_json_encoder(
   value_expr: String,
   ref: SchemaRef,
   parent_name: String,
   prop_name: String,
+  ctx: Context,
 ) -> String {
   case ref {
     Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
       let fn_name =
         "encode_"
-        <> naming.to_snake_case(
-          naming.schema_to_type_name(parent_name)
-          <> naming.schema_to_type_name(prop_name),
-        )
+        <> naming.to_snake_case(ir_build.inline_enum_type_name_for(
+          parent_name,
+          prop_name,
+          ctx,
+        ))
         <> "_json"
       fn_name <> "(" <> value_expr <> ")"
     }
     Inline(ArraySchema(items:, ..)) -> {
       let inner_fn =
-        schema_ref_to_json_encoder_fn(items, parent_name, prop_name)
+        schema_ref_to_json_encoder_fn(items, parent_name, prop_name, ctx)
       "json.array(" <> value_expr <> ", " <> inner_fn <> ")"
     }
     _ -> schema_dispatch.json_encoder_expr(ref, value_expr)
@@ -906,18 +925,21 @@ fn schema_ref_to_json_encoder_fn(
   ref: SchemaRef,
   parent_name: String,
   prop_name: String,
+  ctx: Context,
 ) -> String {
   case ref {
     Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
       "encode_"
-      <> naming.to_snake_case(
-        naming.schema_to_type_name(parent_name)
-        <> naming.schema_to_type_name(prop_name),
-      )
+      <> naming.to_snake_case(ir_build.inline_enum_type_name_for(
+        parent_name,
+        prop_name,
+        ctx,
+      ))
       <> "_json"
     }
     Inline(ArraySchema(items:, ..)) -> {
-      let inner = schema_ref_to_json_encoder_fn(items, parent_name, prop_name)
+      let inner =
+        schema_ref_to_json_encoder_fn(items, parent_name, prop_name, ctx)
       "fn(items) { json.array(items, " <> inner <> ") }"
     }
     _ -> schema_dispatch.json_encoder_fn(ref)
