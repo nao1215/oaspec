@@ -299,23 +299,29 @@ pub fn server_request_decode_query_schema_needs_string_test() {
 }
 
 pub fn server_request_decode_query_schema_needs_int_test() {
+  let ctx = test_helpers.make_minimal_ctx()
   server_request_decode.query_schema_needs_int(
     Some(schema.Inline(test_helpers.int_schema())),
+    ctx,
   )
   |> should.be_true()
   server_request_decode.query_schema_needs_int(
     Some(schema.Inline(test_helpers.string_schema())),
+    ctx,
   )
   |> should.be_false()
 }
 
 pub fn server_request_decode_query_schema_needs_float_test() {
+  let ctx = test_helpers.make_minimal_ctx()
   server_request_decode.query_schema_needs_float(
     Some(schema.Inline(test_helpers.float_schema())),
+    ctx,
   )
   |> should.be_true()
   server_request_decode.query_schema_needs_float(
     Some(schema.Inline(test_helpers.int_schema())),
+    ctx,
   )
   |> should.be_false()
 }

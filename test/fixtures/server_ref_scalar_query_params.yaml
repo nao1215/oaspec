@@ -1,0 +1,44 @@
+openapi: "3.0.3"
+info:
+  title: Server $ref scalar query parameters test
+  description: |
+    Issue #522. Exercises optional query parameters whose schema is
+    a `$ref` to an Integer / Number / Boolean component schema.
+    Pre-fix the server router emitted `Some(v)` (where v is String)
+    into `Option(Int|Float|Bool)` slots, breaking `gleam build`.
+  version: "1.0.0"
+paths:
+  /entries:
+    get:
+      operationId: listEntries
+      parameters:
+        - name: type
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/EntryType" }
+        - name: ratio_min
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/Ratio" }
+        - name: active
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/Active" }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { count: { type: integer } }
+components:
+  schemas:
+    EntryType:
+      type: integer
+      enum: [1, 2]
+    Ratio:
+      type: number
+      format: double
+    Active:
+      type: boolean
