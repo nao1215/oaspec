@@ -296,12 +296,37 @@ fn parse_typed_schema(
     }
 
     "integer" -> {
-      let minimum = parser_value.optional_int(node, "minimum")
-      let maximum = parser_value.optional_int(node, "maximum")
-      let exclusive_minimum =
-        parser_value.optional_int(node, "exclusiveMinimum")
-      let exclusive_maximum =
-        parser_value.optional_int(node, "exclusiveMaximum")
+      let raw_minimum = parser_value.optional_int(node, "minimum")
+      let raw_maximum = parser_value.optional_int(node, "maximum")
+      let numeric_excl_min = parser_value.optional_int(node, "exclusiveMinimum")
+      let numeric_excl_max = parser_value.optional_int(node, "exclusiveMaximum")
+      // Issue #523: OAS 3.0 expresses exclusive bounds as a boolean
+      // companion to `minimum` / `maximum` (`exclusiveMinimum: true`
+      // → `minimum` becomes a strict lower bound). OAS 3.1 expresses
+      // them as a numeric value with no separate `minimum`. Accept
+      // both: if the numeric form is present, use it; otherwise look
+      // for the boolean companion and promote `minimum` (or
+      // `maximum`) accordingly.
+      let bool_excl_min = parser_value.optional_bool(node, "exclusiveMinimum")
+      let bool_excl_max = parser_value.optional_bool(node, "exclusiveMaximum")
+      let #(minimum, exclusive_minimum) = case
+        numeric_excl_min,
+        bool_excl_min,
+        raw_minimum
+      {
+        Some(_), _, _ -> #(raw_minimum, numeric_excl_min)
+        None, Some(True), Some(_) -> #(None, raw_minimum)
+        _, _, _ -> #(raw_minimum, None)
+      }
+      let #(maximum, exclusive_maximum) = case
+        numeric_excl_max,
+        bool_excl_max,
+        raw_maximum
+      {
+        Some(_), _, _ -> #(raw_maximum, numeric_excl_max)
+        None, Some(True), Some(_) -> #(None, raw_maximum)
+        _, _, _ -> #(raw_maximum, None)
+      }
       let multiple_of = parser_value.optional_int(node, "multipleOf")
       Ok(IntegerSchema(
         metadata:,
@@ -315,12 +340,34 @@ fn parse_typed_schema(
     }
 
     "number" -> {
-      let minimum = parser_value.optional_float(node, "minimum")
-      let maximum = parser_value.optional_float(node, "maximum")
-      let exclusive_minimum =
+      let raw_minimum = parser_value.optional_float(node, "minimum")
+      let raw_maximum = parser_value.optional_float(node, "maximum")
+      let numeric_excl_min =
         parser_value.optional_float(node, "exclusiveMinimum")
-      let exclusive_maximum =
+      let numeric_excl_max =
         parser_value.optional_float(node, "exclusiveMaximum")
+      // Issue #523: OAS 3.0 boolean form for `exclusiveMinimum` /
+      // `exclusiveMaximum`. See the integer branch above.
+      let bool_excl_min = parser_value.optional_bool(node, "exclusiveMinimum")
+      let bool_excl_max = parser_value.optional_bool(node, "exclusiveMaximum")
+      let #(minimum, exclusive_minimum) = case
+        numeric_excl_min,
+        bool_excl_min,
+        raw_minimum
+      {
+        Some(_), _, _ -> #(raw_minimum, numeric_excl_min)
+        None, Some(True), Some(_) -> #(None, raw_minimum)
+        _, _, _ -> #(raw_minimum, None)
+      }
+      let #(maximum, exclusive_maximum) = case
+        numeric_excl_max,
+        bool_excl_max,
+        raw_maximum
+      {
+        Some(_), _, _ -> #(raw_maximum, numeric_excl_max)
+        None, Some(True), Some(_) -> #(None, raw_maximum)
+        _, _, _ -> #(raw_maximum, None)
+      }
       let multiple_of = parser_value.optional_float(node, "multipleOf")
       Ok(NumberSchema(
         metadata:,
