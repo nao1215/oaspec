@@ -14328,6 +14328,115 @@ components:
             $ref: '#/components/schemas/Card'
 "
 
+/// Issue #492: GitHub's OpenAPI spec declares
+/// `code-scanning-variant-analysis-status` as a top-level component
+/// (4 enum values) AND a separate `code-scanning-variant-analysis`
+/// component whose inline `status` property is a 6-value enum. Both
+/// previously mapped to the Gleam type name
+/// `CodeScanningVariantAnalysisStatus`, producing a `Duplicate type
+/// definition` at `gleam build`. The fixture below is a minimised
+/// reproduction.
+const inline_enum_component_collision_spec = "
+openapi: 3.0.3
+info:
+  title: Inline Enum Component Collision
+  version: 1.0.0
+servers:
+  - url: https://example.com
+paths:
+  /things:
+    get:
+      operationId: listThings
+      responses:
+        '200':
+          description: ok
+components:
+  schemas:
+    code-scanning-variant-analysis-status:
+      type: string
+      enum: [pending, succeeded, failed, canceled]
+    code-scanning-variant-analysis:
+      type: object
+      required: [id, status]
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+          enum: [pending, in_progress, succeeded, failed, canceled, timed_out]
+"
+
+pub fn validate_inline_enum_component_collision_auto_disambiguates_case() {
+  // Issue #492: the inline enum's generated type name used to collide
+  // with the same-named component schema's type name, breaking the
+  // generated module's `gleam build`. The codegen now appends a
+  // numeric suffix to the inline enum and leaves the component
+  // schema alone.
+  let assert Ok(spec) =
+    parser.parse_string(inline_enum_component_collision_spec)
+  let assert Ok(resolved) = resolve.resolve(spec)
+  let resolved = hoist.hoist(resolved)
+  let resolved = dedup.dedup(resolved)
+  let cfg =
+    config.new(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Both,
+      validate: False,
+    )
+  let ctx = context.new(resolved, cfg)
+  let errors = validate.validate(ctx)
+  errors |> should.equal([])
+
+  // Generated types.gleam carries the component-schema enum at its
+  // natural name and the disambiguated inline enum at the suffixed
+  // name; neither name appears twice.
+  let type_files = types.generate(ctx)
+  let assert Ok(types_file) =
+    list.find(type_files, fn(f) { f.path == "types.gleam" })
+  let content = types_file.content
+  // Component schema keeps the natural name.
+  string.contains(content, "pub type CodeScanningVariantAnalysisStatus {")
+  |> should.be_true()
+  // Inline enum yields and gets the numeric suffix.
+  string.contains(content, "pub type CodeScanningVariantAnalysisStatus2 {")
+  |> should.be_true()
+  // Single definition of each, not a duplicate.
+  list.length(string.split(
+    content,
+    "pub type CodeScanningVariantAnalysisStatus {",
+  ))
+  |> should.equal(2)
+  list.length(string.split(
+    content,
+    "pub type CodeScanningVariantAnalysisStatus2 {",
+  ))
+  |> should.equal(2)
+
+  // The decoder/encoder for the inline enum point at the suffixed
+  // name (so they line up with the type definition above). The
+  // trailing digit attaches to the preceding word per the naming
+  // pipeline's rule (`Status2` → `status2`, not `status_2`).
+  let decoder_files = decoders.generate(ctx)
+  let assert Ok(decode_file) =
+    list.find(decoder_files, fn(f) { f.path == "decode.gleam" })
+  string.contains(
+    decode_file.content,
+    "code_scanning_variant_analysis_status2_decoder",
+  )
+  |> should.be_true()
+  let encoder_files = encoders.generate(ctx)
+  let assert Ok(encode_file) =
+    list.find(encoder_files, fn(f) { f.path == "encode.gleam" })
+  string.contains(
+    encode_file.content,
+    "encode_code_scanning_variant_analysis_status2",
+  )
+  |> should.be_true()
+}
+
 pub fn validate_decode_list_collision_auto_disambiguates_case() {
   // Issue #493: previously this collision was a hard validation
   // error. The codegen now auto-disambiguates the synthetic list

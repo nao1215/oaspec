@@ -156,6 +156,46 @@ pub fn synthetic_list_suffix(
   "_list"
 }
 
+/// Compute the Gleam type name for an inline string-enum property,
+/// disambiguating against existing component schema names so the
+/// generated `pub type` does not collide with a same-named component
+/// schema. Issue #492 — GitHub's OpenAPI spec declares
+/// `code-scanning-variant-analysis` (with an inline `status` enum) AND
+/// a separate `code-scanning-variant-analysis-status` component. Both
+/// previously mapped to the Gleam type `CodeScanningVariantAnalysisStatus`,
+/// producing a `Duplicate type definition` at `gleam build`.
+///
+/// Disambiguation appends a numeric suffix (`2`, `3`, ...) to the
+/// inline enum's name when a component schema already claims the bare
+/// name. The component schema keeps its natural name; the inline
+/// enum yields, since the user does not own upstream specs and cannot
+/// rename the component.
+pub fn inline_enum_type_name(
+  parent_name: String,
+  prop_name: String,
+  component_schema_names: List(String),
+) -> String {
+  let base = schema_to_type_name(parent_name) <> schema_to_type_name(prop_name)
+  let component_type_names =
+    list.map(component_schema_names, schema_to_type_name)
+  case list.contains(component_type_names, base) {
+    False -> base
+    True -> bump_inline_enum_suffix(base, 2, component_type_names)
+  }
+}
+
+fn bump_inline_enum_suffix(
+  base: String,
+  suffix: Int,
+  taken: List(String),
+) -> String {
+  let candidate = base <> int.to_string(suffix)
+  case list.contains(taken, candidate) {
+    False -> candidate
+    True -> bump_inline_enum_suffix(base, suffix + 1, taken)
+  }
+}
+
 /// Map a leading `+` to `plus_` and a leading `-` to `minus_` so
 /// `+1` / `-1` style property names survive the snake_case pipeline
 /// as `plus_1` / `minus_1` instead of colliding on a bare `1`.

@@ -654,7 +654,7 @@ fn inline_enums_from_properties(
   parent_name: String,
   properties: dict.Dict(String, SchemaRef),
   required: List(String),
-  _ctx: Context,
+  ctx: Context,
 ) -> List(Declaration) {
   let entries = sorted_entries(properties)
   list.filter_map(entries, fn(entry) {
@@ -672,8 +672,7 @@ fn inline_enums_from_properties(
             if enum_values != []
           -> {
             let type_name =
-              naming.schema_to_type_name(parent_name)
-              <> naming.schema_to_type_name(prop_name)
+              inline_enum_type_name_for(parent_name, prop_name, ctx)
             let deduped_variants = dedup.dedup_enum_variants(enum_values)
             let variants =
               list.zip(enum_values, deduped_variants)
@@ -1045,9 +1044,7 @@ fn schema_ref_to_type_with_inline_enum(
     // schemas). Wrap explicitly here so the type, decoder, and
     // encoder agree on `Option(EnumType)`.
     Inline(StringSchema(metadata:, enum_values:, ..)) if enum_values != [] -> {
-      let base =
-        naming.schema_to_type_name(parent_name)
-        <> naming.schema_to_type_name(prop_name)
+      let base = inline_enum_type_name_for(parent_name, prop_name, ctx)
       case metadata.nullable {
         True -> "Option(" <> base <> ")"
         False -> base
@@ -1055,6 +1052,23 @@ fn schema_ref_to_type_with_inline_enum(
     }
     _ -> schema_ref_to_type(ref, ctx)
   }
+}
+
+/// Resolve the disambiguated inline-enum type name for `<parent_name>.<prop_name>`
+/// against the current context's component schema names (Issue #492). Returns
+/// the bare `<Parent><Prop>` PascalCase concat when no collision exists, or a
+/// numerically-suffixed variant (`<Parent><Prop>2`, `<Parent><Prop>3`, …) when
+/// a component schema already maps to the same Gleam type name.
+pub fn inline_enum_type_name_for(
+  parent_name: String,
+  prop_name: String,
+  ctx: Context,
+) -> String {
+  let schema_names = case context.spec(ctx).components {
+    Some(components) -> components.schemas |> dict.keys
+    None -> []
+  }
+  naming.inline_enum_type_name(parent_name, prop_name, schema_names)
 }
 
 fn schema_ref_to_type(ref: SchemaRef, _ctx: Context) -> String {
