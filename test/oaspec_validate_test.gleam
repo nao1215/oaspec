@@ -10,7 +10,7 @@ pub fn validator_core_acceptance_test() {
   let _ = support.validate_accepts_complex_schema_parameter_case()
   let _ = support.validate_accepts_referenced_parameter_schemas_case()
   let _ = support.validate_accepts_multipart_form_data_case()
-  let _ = support.validate_rejects_unstringifiable_multipart_fields_case()
+  let _ = support.validate_accepts_object_multipart_fields_in_client_mode_case()
   let _ =
     support.validate_broken_spec_accepts_inline_oneof_after_hoisting_case()
   let _ =

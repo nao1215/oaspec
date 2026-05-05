@@ -116,6 +116,8 @@ pub fn content_type_helpers_test() {
   let _ = support.wildcard_content_type_passes_validation_case()
   let _ = support.wildcard_content_type_classified_as_supported_case()
   let _ = support.wildcard_content_type_generates_bitarray_bodies_case()
+  let _ = support.multipart_object_array_fields_pass_validation_case()
+  let _ = support.multipart_object_array_fields_emit_expected_parts_case()
 }
 
 pub fn location_index_source_loc_test() {

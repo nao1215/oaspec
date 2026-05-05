@@ -948,6 +948,29 @@ fn multipart_field_is_stringifiable(schema_ref: SchemaRef, ctx: Context) -> Bool
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
     | Some(BooleanSchema(..)) -> True
+    // Issue #503: arrays of primitives are emitted as repeated parts
+    // (`name=v1`, `name=v2`, ...) per the OAS 3 multipart serialization
+    // rules, and objects are emitted as a single part with
+    // `Content-Type: application/json` carrying the JSON-encoded value.
+    // Both shapes appear in real specs (Stripe's `POST /v1/files`
+    // accepts `expand: array of strings` and `file_link_data: object`).
+    Some(ArraySchema(items:, ..)) ->
+      multipart_field_array_item_supported(items, ctx)
+    Some(ObjectSchema(..)) -> True
+    _ -> False
+  }
+}
+
+fn multipart_field_array_item_supported(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Bool {
+  case resolve_schema_object(Some(schema_ref), ctx) {
+    Some(StringSchema(..))
+    | Some(IntegerSchema(..))
+    | Some(NumberSchema(..))
+    | Some(BooleanSchema(..))
+    | Some(ObjectSchema(..)) -> True
     _ -> False
   }
 }
