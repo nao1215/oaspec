@@ -13,7 +13,9 @@ import oaspec/internal/codegen/context.{
 }
 import oaspec/internal/codegen/guards
 import oaspec/internal/codegen/ir_build
+import oaspec/internal/codegen/operation_ir
 import oaspec/internal/codegen/runtime_snippets
+import oaspec/internal/codegen/schema_dispatch
 import oaspec/internal/openapi/schema
 import oaspec/internal/openapi/spec.{type Resolved, Value}
 import oaspec/internal/util/http
@@ -162,6 +164,194 @@ fn generate_bytes_body_helper(sb: se.StringBuilder) -> se.StringBuilder {
 /// generated response type.
 fn generate_async_response_helper(sb: se.StringBuilder) -> se.StringBuilder {
   se.raw(sb, runtime_snippets.await_response)
+}
+
+/// Issue #502: emit one query entry per property of a deepObject
+/// parameter. Primitive properties become `name[prop]=value`; nested
+/// object properties recurse one level into `name[outer][inner]=value`
+/// for each inner field. Required vs optional wrapping mirrors the
+/// patterns in `emit_simple_query_param`.
+fn emit_deep_object_query_param(
+  sb: se.StringBuilder,
+  p: spec.Parameter(Resolved),
+  param_name: String,
+  ctx: Context,
+) -> se.StringBuilder {
+  let #(outer_props, required_set) = deep_object_properties_and_required(p, ctx)
+  let access_outer = case p.required {
+    True -> param_name
+    False -> "v"
+  }
+  let inner_emit = fn(sb: se.StringBuilder) -> se.StringBuilder {
+    list.fold(outer_props, sb, fn(sb, prop) {
+      let #(prop_name, prop_ref) = prop
+      let gleam_field = naming.to_snake_case(prop_name)
+      let field_access = access_outer <> "." <> gleam_field
+      let key = p.name <> "[" <> prop_name <> "]"
+      let is_required = list.contains(required_set, prop_name)
+      emit_deep_object_property(
+        sb,
+        key,
+        field_access,
+        prop_ref,
+        is_required,
+        ctx,
+      )
+    })
+  }
+  case p.required {
+    True -> inner_emit(sb)
+    False ->
+      sb
+      |> se.indent(1, "let query = case " <> param_name <> " {")
+      |> se.indent(2, "Some(v) -> {")
+      |> inner_emit
+      |> se.indent(2, "  query")
+      |> se.indent(2, "}")
+      |> se.indent(2, "None -> query")
+      |> se.indent(1, "}")
+  }
+}
+
+/// Pull the (name, schema) entries out of a deepObject parameter's
+/// outer schema, plus the parent's `required` list so callers can
+/// decide whether each property's emitted access path is wrapped in
+/// `Option(_)`. Returns empty + empty when the schema isn't an
+/// ObjectSchema (the validator already pins this shape, so the
+/// fallback is just defensive).
+fn deep_object_properties_and_required(
+  p: spec.Parameter(Resolved),
+  ctx: Context,
+) -> #(List(#(String, schema.SchemaRef)), List(String)) {
+  case spec.parameter_schema(p) {
+    Some(schema_ref) ->
+      case resolve_param_schema(schema_ref, ctx) {
+        Some(schema.ObjectSchema(properties:, required:, ..)) -> #(
+          ir_build.sorted_entries(properties),
+          required,
+        )
+        _ -> #([], [])
+      }
+    None -> #([], [])
+  }
+}
+
+fn resolve_param_schema(
+  schema_ref: schema.SchemaRef,
+  ctx: Context,
+) -> option.Option(schema.SchemaObject) {
+  case schema_ref {
+    schema.Inline(obj) -> Some(obj)
+    schema.Reference(..) ->
+      case context.resolve_schema_ref(schema_ref, ctx) {
+        Ok(obj) -> Some(obj)
+        // nolint: thrown_away_error -- broken refs surface elsewhere in the validator; the deepObject emitter just falls back to no expansion
+        Error(_) -> None
+      }
+  }
+}
+
+fn emit_deep_object_property(
+  sb: se.StringBuilder,
+  key: String,
+  field_access: String,
+  prop_ref: schema.SchemaRef,
+  is_required_prop: Bool,
+  ctx: Context,
+) -> se.StringBuilder {
+  // For non-required *properties* we unwrap the `Option(_)` wrapper
+  // through a `Some(v_inner) -> [...] None -> query` case, so optional
+  // properties of an outer that's already unwrapped to `v` still serialize
+  // through `v.<prop>` access.
+  case resolve_param_schema(prop_ref, ctx) {
+    Some(schema.ObjectSchema(properties: inner_props, ..)) ->
+      emit_deep_object_nested_object(
+        sb,
+        key,
+        field_access,
+        inner_props,
+        is_required_prop,
+        ctx,
+      )
+    Some(_) | None ->
+      emit_deep_object_primitive(
+        sb,
+        key,
+        field_access,
+        prop_ref,
+        is_required_prop,
+        ctx,
+      )
+  }
+}
+
+fn emit_deep_object_primitive(
+  sb: se.StringBuilder,
+  key: String,
+  field_access: String,
+  prop_ref: schema.SchemaRef,
+  is_required: Bool,
+  ctx: Context,
+) -> se.StringBuilder {
+  let value_expr =
+    schema_dispatch.schema_ref_to_string_expr(prop_ref, "v_inner", ctx)
+  case is_required {
+    True ->
+      sb
+      |> se.indent(1, "let query = {")
+      |> se.indent(2, "let v_inner = " <> field_access)
+      |> se.indent(2, "[#(\"" <> key <> "\", " <> value_expr <> "), ..query]")
+      |> se.indent(1, "}")
+    False ->
+      sb
+      |> se.indent(1, "let query = case " <> field_access <> " {")
+      |> se.indent(
+        2,
+        "Some(v_inner) -> [#(\"" <> key <> "\", " <> value_expr <> "), ..query]",
+      )
+      |> se.indent(2, "None -> query")
+      |> se.indent(1, "}")
+  }
+}
+
+fn emit_deep_object_nested_object(
+  sb: se.StringBuilder,
+  outer_key: String,
+  outer_access: String,
+  inner_props: dict.Dict(String, schema.SchemaRef),
+  outer_is_required: Bool,
+  ctx: Context,
+) -> se.StringBuilder {
+  let entries = ir_build.sorted_entries(inner_props)
+  // For an optional outer object the body unwraps via `Some(o) -> ...`;
+  // a required outer object dereferences directly through `outer_access`.
+  let inner_emit = fn(sb, scope_access) {
+    list.fold(entries, sb, fn(sb, entry) {
+      let #(inner_name, inner_ref) = entry
+      let gleam_field = naming.to_snake_case(inner_name)
+      let field_access = scope_access <> "." <> gleam_field
+      let key = outer_key <> "[" <> inner_name <> "]"
+      // Inner fields produced by `ir_build` are wrapped in `Option(_)`
+      // unless declared in the parent's `required` list. We don't have
+      // direct access to that list at this point, so treat every inner
+      // field as optional — matches the type `ir_build` emits and is
+      // safe for required fields too (the generated `Some` branch is
+      // unreachable but compiles).
+      emit_deep_object_primitive(sb, key, field_access, inner_ref, False, ctx)
+    })
+  }
+  case outer_is_required {
+    True -> inner_emit(sb, outer_access)
+    False ->
+      sb
+      |> se.indent(1, "let query = case " <> outer_access <> " {")
+      |> se.indent(2, "Some(v_outer) -> {")
+      |> inner_emit("v_outer")
+      |> se.indent(2, "  query")
+      |> se.indent(2, "}")
+      |> se.indent(2, "None -> query")
+      |> se.indent(1, "}")
+  }
 }
 
 fn emit_simple_query_param(
@@ -697,25 +887,34 @@ fn generate_build_body(
       let sb =
         list.fold(query_params, sb, fn(sb, p) {
           let param_name = client_request.field_name_for(field_names, p)
-          case client_request.is_exploded_array_param(p, ctx) {
-            True ->
-              client_request.generate_exploded_array_query_param(
-                sb,
-                p,
-                param_name,
-                ctx,
-              )
+          // Issue #502: deepObject params expand each property into a
+          // bracketed-key query entry (`filter[name]=value` …) instead
+          // of trying to stringify the typed record into a single
+          // tuple. Nested-object properties recurse one more level
+          // (`filter[outer][inner]=value`).
+          case operation_ir.is_deep_object_param(p, ctx) {
+            True -> emit_deep_object_query_param(sb, p, param_name, ctx)
             False ->
-              case client_request.is_delimited_array_param(p, ctx) {
-                Some(joiner) ->
-                  client_request.generate_delimited_array_query_param(
+              case client_request.is_exploded_array_param(p, ctx) {
+                True ->
+                  client_request.generate_exploded_array_query_param(
                     sb,
                     p,
                     param_name,
-                    joiner,
                     ctx,
                   )
-                None -> emit_simple_query_param(sb, p, param_name, ctx)
+                False ->
+                  case client_request.is_delimited_array_param(p, ctx) {
+                    Some(joiner) ->
+                      client_request.generate_delimited_array_query_param(
+                        sb,
+                        p,
+                        param_name,
+                        joiner,
+                        ctx,
+                      )
+                    None -> emit_simple_query_param(sb, p, param_name, ctx)
+                  }
               }
           }
         })

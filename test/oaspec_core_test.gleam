@@ -118,6 +118,8 @@ pub fn content_type_helpers_test() {
   let _ = support.wildcard_content_type_generates_bitarray_bodies_case()
   let _ = support.multipart_object_array_fields_pass_validation_case()
   let _ = support.multipart_object_array_fields_emit_expected_parts_case()
+  let _ = support.deep_object_nested_object_passes_client_validation_case()
+  let _ = support.deep_object_nested_object_emits_bracketed_query_case()
 }
 
 pub fn location_index_source_loc_test() {

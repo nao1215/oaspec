@@ -6708,6 +6708,65 @@ paths:
   |> should.be_true()
 }
 
+// --- Issue #502: deepObject nested object properties ---
+
+/// Stripe-style deepObject parameters whose properties are themselves
+/// objects must pass client-mode validation. Server-mode codegen is
+/// out of scope for this round; the server router still requires
+/// primitive scalars / primitive arrays.
+pub fn deep_object_nested_object_passes_client_validation_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/deep_object_nested.yaml")
+  let assert Ok(resolved) = resolve.resolve(unresolved)
+  let spec = hoist.hoist(resolved)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.new(
+        input: "test/fixtures/deep_object_nested.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+        validate: False,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  errors |> list.is_empty |> should.be_true()
+}
+
+/// Generated client must expand nested object properties into
+/// bracketed-bracketed query keys (`filter[applicability_scope][price_type]`)
+/// so the typed record actually serializes onto the wire instead of
+/// being smuggled into a tuple as a record value.
+pub fn deep_object_nested_object_emits_bracketed_query_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/deep_object_nested.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/deep_object_nested.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(client_file) =
+    list.find(summary.files, fn(f) { f.path == "client.gleam" })
+  // Nested object property is unwrapped through Some(v_outer) and
+  // emits the doubly-bracketed key.
+  string.contains(
+    client_file.content,
+    "#(\"filter[applicability_scope][price_type]\"",
+  )
+  |> should.be_true()
+  // Top-level primitive property emits a single-level bracketed key.
+  string.contains(client_file.content, "#(\"filter[customer]\"")
+  |> should.be_true()
+}
+
 // --- Issue #503: multipart/form-data object/array fields ---
 
 /// Object-typed and array-typed properties on a multipart/form-data
@@ -7047,6 +7106,10 @@ components:
 /// deepObject with nested object properties must be rejected
 /// since codegen can only handle one level of nesting.
 pub fn deep_object_nested_object_rejected_case() {
+  // Issue #502: nested object properties are now ACCEPTED (encoded
+  // as `parent[outer][inner]=value`); only oneOf / anyOf properties
+  // remain rejected because they don't fit the bracketed-string
+  // wire format. This test pins that boundary.
   let yaml =
     "
 openapi: 3.0.3
@@ -7065,11 +7128,10 @@ paths:
           schema:
             type: object
             properties:
-              meta:
-                type: object
-                properties:
-                  name:
-                    type: string
+              picker:
+                oneOf:
+                  - type: string
+                  - type: integer
       responses:
         '200': { description: ok }
 "
@@ -7078,7 +7140,7 @@ paths:
   let spec = dedup.dedup(spec)
   let ctx = make_ctx_from_spec(spec)
   let errors = validate.validate(ctx)
-  // Must detect nested object in deepObject param
+  // Must detect oneOf in deepObject param
   list.is_empty(errors)
   |> should.be_false()
 }
