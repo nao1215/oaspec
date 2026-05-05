@@ -45,12 +45,33 @@ pub type GuardModule {
 /// Check whether a named component schema has a composite validator.
 /// Used by server/client generators to decide whether to emit guard calls.
 pub fn schema_has_validator(name: String, ctx: Context) -> Bool {
+  schema_has_validator_visiting(name, ctx, [])
+}
+
+/// Cycle-aware variant. `visiting` is the stack of schema names whose
+/// `schema_has_validator` evaluation is currently in flight. When a
+/// nested-record check would recurse back into one of them (e.g. a
+/// recursive `Comment` schema whose `replies` is `array<Comment>`, or
+/// mutually-recursive `User` ↔ `Link`), we short-circuit the loop by
+/// returning `False` for that arm — the schema can still earn a
+/// validator through other (non-cyclic) constraints.
+fn schema_has_validator_visiting(
+  name: String,
+  ctx: Context,
+  visiting: List(String),
+) -> Bool {
+  use <- bool.guard(when: list.contains(visiting, name), return: False)
   case context.spec(ctx).components {
     Some(components) ->
       case dict.get(components.schemas, name) {
         Ok(schema_ref) ->
           !ir_build.is_internal_schema(schema_ref)
-          && !list.is_empty(collect_guard_calls(name, schema_ref, ctx))
+          && !list.is_empty(
+            collect_guard_calls_visiting(name, schema_ref, ctx, [
+              name,
+              ..visiting
+            ]),
+          )
         // nolint: thrown_away_error -- unknown schema name simply has no validator
         Error(_) -> False
       }
@@ -139,12 +160,35 @@ pub fn build_module(ctx: Context) -> GuardModule {
       let #(name, schema_ref) = entry
       let guard_calls = collect_guard_calls(name, schema_ref, ctx)
       list.any(guard_calls, fn(call) {
-        let #(_, _, is_required) = call
+        let #(_, _, is_required, _) = call
         !is_required
       })
     })
   let imports = case needs_option {
     True -> ["gleam/option", ..imports]
+    False -> imports
+  }
+
+  // Issue #520: nested-composite and composite-list emissions use
+  // `list.append`/`list.reverse`/`list.fold` to merge inner failures
+  // into the outer accumulator, so `gleam/list` becomes mandatory
+  // whenever any schema has a Composite or CompositeList call —
+  // independent of the existing `has_list` (which tracks array-length
+  // constraints).
+  let needs_list_for_composites =
+    list.any(schemas, fn(entry) {
+      let #(name, schema_ref) = entry
+      let guard_calls = collect_guard_calls(name, schema_ref, ctx)
+      list.any(guard_calls, fn(call) {
+        let #(_, _, _, kind) = call
+        case kind {
+          Composite | CompositeList -> True
+          Direct -> False
+        }
+      })
+    })
+  let imports = case needs_list_for_composites && !constraint_types.has_list {
+    True -> ["gleam/list", ..imports]
     False -> imports
   }
 
@@ -705,20 +749,61 @@ fn build_composite_guard_function(
       let gleam_type = composite_validator_type(name, schema_ref, ctx)
       let call_lines =
         list.flat_map(guard_calls, fn(call) {
-          let #(guard_fn, accessor, is_required) = call
-          case is_required {
-            True -> [
+          let #(guard_fn, accessor, is_required, kind) = call
+          case kind, is_required {
+            Direct, True -> [
               "  let errors = case " <> guard_fn <> "(" <> accessor <> ") {",
               "    Ok(_) -> errors",
               "    Error(failure) -> [failure, ..errors]",
               "  }",
             ]
-            False -> [
+            Direct, False -> [
               "  let errors = case " <> accessor <> " {",
               "    option.Some(v) -> case " <> guard_fn <> "(v) {",
               "      Ok(_) -> errors",
               "      Error(failure) -> [failure, ..errors]",
               "    }",
+              "    option.None -> errors",
+              "  }",
+            ]
+            // Issue #520: nested-record validators return
+            // `Result(_, List(ValidationFailure))`; merge their failure
+            // list into the outer accumulator.
+            Composite, True -> [
+              "  let errors = case " <> guard_fn <> "(" <> accessor <> ") {",
+              "    Ok(_) -> errors",
+              "    Error(failures) -> list.append(list.reverse(failures), errors)",
+              "  }",
+            ]
+            Composite, False -> [
+              "  let errors = case " <> accessor <> " {",
+              "    option.Some(v) -> case " <> guard_fn <> "(v) {",
+              "      Ok(_) -> errors",
+              "      Error(failures) -> list.append(list.reverse(failures), errors)",
+              "    }",
+              "    option.None -> errors",
+              "  }",
+            ]
+            // Issue #520: lists of validatable records are folded so
+            // every element runs through the inner composite validator.
+            CompositeList, True -> [
+              "  let errors = list.fold("
+                <> accessor
+                <> ", errors, fn(errs, item) {",
+              "    case " <> guard_fn <> "(item) {",
+              "      Ok(_) -> errs",
+              "      Error(failures) -> list.append(list.reverse(failures), errs)",
+              "    }",
+              "  })",
+            ]
+            CompositeList, False -> [
+              "  let errors = case " <> accessor <> " {",
+              "    option.Some(items) -> list.fold(items, errors, fn(errs, item) {",
+              "      case " <> guard_fn <> "(item) {",
+              "        Ok(_) -> errs",
+              "        Error(failures) -> list.append(list.reverse(failures), errs)",
+              "      }",
+              "    })",
               "    option.None -> errors",
               "  }",
             ]
@@ -1333,16 +1418,42 @@ fn composite_validator_type(
   }
 }
 
-/// A guard call with metadata about whether the field is optional.
-/// #(guard_fn_name, accessor_expr, is_optional)
+/// Shape of a generated guard invocation.
+///
+/// - `Direct`: the validator returns `Result(T, ValidationFailure)` —
+///   the historical leaf case (range / pattern / length / unique).
+/// - `Composite`: the validator returns
+///   `Result(T, List(ValidationFailure))` — the per-schema aggregator
+///   for a nested record. Issue #520.
+/// - `CompositeList`: the field is `List(T)` and each item must be
+///   recursively validated against its composite validator. Issue
+///   #520.
+type GuardCallKind {
+  Direct
+  Composite
+  CompositeList
+}
+
+/// A guard call with metadata about whether the field is optional and
+/// what shape its validator returns.
+/// #(guard_fn_name, accessor_expr, is_required, kind)
 type GuardCall =
-  #(String, String, Bool)
+  #(String, String, Bool, GuardCallKind)
 
 /// Collect all guard function calls for a schema's constrained fields.
 fn collect_guard_calls(
   name: String,
   schema_ref: SchemaRef,
   ctx: Context,
+) -> List(GuardCall) {
+  collect_guard_calls_visiting(name, schema_ref, ctx, [])
+}
+
+fn collect_guard_calls_visiting(
+  name: String,
+  schema_ref: SchemaRef,
+  ctx: Context,
+  visiting: List(String),
 ) -> List(GuardCall) {
   let schema = context.resolve_schema_ref(schema_ref, ctx)
   case schema {
@@ -1358,12 +1469,19 @@ fn collect_guard_calls(
         |> list.flat_map(fn(entry) {
           let #(prop_name, prop_ref) = entry
           let is_required = list.contains(required, prop_name)
-          collect_field_guard_calls(name, prop_name, prop_ref, is_required, ctx)
+          collect_field_guard_calls(
+            name,
+            prop_name,
+            prop_ref,
+            is_required,
+            ctx,
+            visiting,
+          )
         })
       let size_calls = case min_properties, max_properties {
         None, None -> []
         _, _ -> [
-          #(guard_function_name(name, "", "properties"), "value", True),
+          #(guard_function_name(name, "", "properties"), "value", True, Direct),
         ]
       }
       list.append(prop_calls, size_calls)
@@ -1374,21 +1492,28 @@ fn collect_guard_calls(
       |> list.flat_map(fn(entry) {
         let #(prop_name, prop_ref) = entry
         let is_required = list.contains(merged.required, prop_name)
-        collect_field_guard_calls(name, prop_name, prop_ref, is_required, ctx)
+        collect_field_guard_calls(
+          name,
+          prop_name,
+          prop_ref,
+          is_required,
+          ctx,
+          visiting,
+        )
       })
     }
     Ok(StringSchema(min_length:, max_length:, pattern:, ..)) -> {
       let calls = case min_length, max_length {
         None, None -> []
         _, _ -> [
-          #(guard_function_name(name, "", "length"), "value", True),
+          #(guard_function_name(name, "", "length"), "value", True, Direct),
         ]
       }
       case pattern {
         None -> calls
         Some(_) ->
           list.append(calls, [
-            #(guard_function_name(name, "", "pattern"), "value", True),
+            #(guard_function_name(name, "", "pattern"), "value", True, Direct),
           ])
       }
     }
@@ -1403,21 +1528,31 @@ fn collect_guard_calls(
       let calls = case minimum, maximum {
         None, None -> []
         _, _ -> [
-          #(guard_function_name(name, "", "range"), "value", True),
+          #(guard_function_name(name, "", "range"), "value", True, Direct),
         ]
       }
       let calls = case exclusive_minimum, exclusive_maximum {
         None, None -> calls
         _, _ ->
           list.append(calls, [
-            #(guard_function_name(name, "", "exclusive_range"), "value", True),
+            #(
+              guard_function_name(name, "", "exclusive_range"),
+              "value",
+              True,
+              Direct,
+            ),
           ])
       }
       case multiple_of {
         None -> calls
         Some(_) ->
           list.append(calls, [
-            #(guard_function_name(name, "", "multiple_of"), "value", True),
+            #(
+              guard_function_name(name, "", "multiple_of"),
+              "value",
+              True,
+              Direct,
+            ),
           ])
       }
     }
@@ -1432,21 +1567,31 @@ fn collect_guard_calls(
       let calls = case minimum, maximum {
         None, None -> []
         _, _ -> [
-          #(guard_function_name(name, "", "range"), "value", True),
+          #(guard_function_name(name, "", "range"), "value", True, Direct),
         ]
       }
       let calls = case exclusive_minimum, exclusive_maximum {
         None, None -> calls
         _, _ ->
           list.append(calls, [
-            #(guard_function_name(name, "", "exclusive_range"), "value", True),
+            #(
+              guard_function_name(name, "", "exclusive_range"),
+              "value",
+              True,
+              Direct,
+            ),
           ])
       }
       case multiple_of {
         None -> calls
         Some(_) ->
           list.append(calls, [
-            #(guard_function_name(name, "", "multiple_of"), "value", True),
+            #(
+              guard_function_name(name, "", "multiple_of"),
+              "value",
+              True,
+              Direct,
+            ),
           ])
       }
     }
@@ -1454,12 +1599,12 @@ fn collect_guard_calls(
       let length_calls = case min_items, max_items {
         None, None -> []
         _, _ -> [
-          #(guard_function_name(name, "", "length"), "value", True),
+          #(guard_function_name(name, "", "length"), "value", True, Direct),
         ]
       }
       let unique_calls = case unique_items {
         True -> [
-          #(guard_function_name(name, "", "unique"), "value", True),
+          #(guard_function_name(name, "", "unique"), "value", True, Direct),
         ]
         False -> []
       }
@@ -1470,12 +1615,17 @@ fn collect_guard_calls(
 }
 
 /// Collect guard calls for a single field.
+///
+/// `visiting` is propagated from `collect_guard_calls_visiting` so the
+/// nested-record (`Composite` / `CompositeList`) branches can break
+/// schema-graph cycles when deciding whether to emit a recursive call.
 fn collect_field_guard_calls(
   schema_name: String,
   prop_name: String,
   prop_ref: SchemaRef,
   is_required: Bool,
   ctx: Context,
+  visiting: List(String),
 ) -> List(GuardCall) {
   let resolved = context.resolve_schema_ref(prop_ref, ctx)
   let accessor = "value." <> naming.to_snake_case(prop_name)
@@ -1488,6 +1638,7 @@ fn collect_field_guard_calls(
             guard_function_name(schema_name, prop_name, "length"),
             accessor,
             is_required,
+            Direct,
           ),
         ]
       }
@@ -1499,6 +1650,7 @@ fn collect_field_guard_calls(
               guard_function_name(schema_name, prop_name, "pattern"),
               accessor,
               is_required,
+              Direct,
             ),
           ])
       }
@@ -1518,6 +1670,7 @@ fn collect_field_guard_calls(
             guard_function_name(schema_name, prop_name, "range"),
             accessor,
             is_required,
+            Direct,
           ),
         ]
       }
@@ -1529,6 +1682,7 @@ fn collect_field_guard_calls(
               guard_function_name(schema_name, prop_name, "exclusive_range"),
               accessor,
               is_required,
+              Direct,
             ),
           ])
       }
@@ -1540,6 +1694,7 @@ fn collect_field_guard_calls(
               guard_function_name(schema_name, prop_name, "multiple_of"),
               accessor,
               is_required,
+              Direct,
             ),
           ])
       }
@@ -1559,6 +1714,7 @@ fn collect_field_guard_calls(
             guard_function_name(schema_name, prop_name, "range"),
             accessor,
             is_required,
+            Direct,
           ),
         ]
       }
@@ -1570,6 +1726,7 @@ fn collect_field_guard_calls(
               guard_function_name(schema_name, prop_name, "exclusive_range"),
               accessor,
               is_required,
+              Direct,
             ),
           ])
       }
@@ -1581,11 +1738,12 @@ fn collect_field_guard_calls(
               guard_function_name(schema_name, prop_name, "multiple_of"),
               accessor,
               is_required,
+              Direct,
             ),
           ])
       }
     }
-    Ok(ArraySchema(min_items:, max_items:, unique_items:, ..)) -> {
+    Ok(ArraySchema(items:, min_items:, max_items:, unique_items:, ..)) -> {
       let length_calls = case min_items, max_items {
         None, None -> []
         _, _ -> [
@@ -1593,6 +1751,7 @@ fn collect_field_guard_calls(
             guard_function_name(schema_name, prop_name, "length"),
             accessor,
             is_required,
+            Direct,
           ),
         ]
       }
@@ -1602,12 +1761,55 @@ fn collect_field_guard_calls(
             guard_function_name(schema_name, prop_name, "unique"),
             accessor,
             is_required,
+            Direct,
           ),
         ]
         False -> []
       }
-      list.append(length_calls, unique_calls)
+      // Issue #520: when the array's items are a `$ref` to a schema
+      // that has its own composite validator, fold over the list and
+      // run the inner validator on every element. Without this, an
+      // out-of-range element in `Poll.options` (where each option has
+      // a constrained `weight`) silently passes the outer
+      // `validate_poll`.
+      let item_calls = case items {
+        Reference(name: item_name, ..) ->
+          case schema_has_validator_visiting(item_name, ctx, visiting) {
+            True -> [
+              #(
+                "validate_" <> naming.to_snake_case(item_name),
+                accessor,
+                is_required,
+                CompositeList,
+              ),
+            ]
+            False -> []
+          }
+        _ -> []
+      }
+      list.flatten([length_calls, unique_calls, item_calls])
     }
+    // Issue #520: a property whose schema is a `$ref` to a record
+    // type with its own composite validator should propagate that
+    // record's failures into the outer aggregator. Pre-fix,
+    // out-of-range nested fields slipped past `validate_<outer>`
+    // entirely.
+    Ok(ObjectSchema(..)) ->
+      case prop_ref {
+        Reference(name: ref_name, ..) ->
+          case schema_has_validator_visiting(ref_name, ctx, visiting) {
+            True -> [
+              #(
+                "validate_" <> naming.to_snake_case(ref_name),
+                accessor,
+                is_required,
+                Composite,
+              ),
+            ]
+            False -> []
+          }
+        _ -> []
+      }
     _ -> []
   }
 }
