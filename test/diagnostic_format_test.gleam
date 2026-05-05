@@ -219,3 +219,29 @@ pub fn slash_form_unknown_shape_test() {
   diagnostic_format.pointer_to_human("#/foo/bar")
   |> should.equal("foo.bar")
 }
+
+// --- deep-nest fidelity --------------------------------------------
+// `with_tail` joins every segment past the recognised prefix with `.`
+// — verbatim, no truncation, no info loss. These tests pin that
+// invariant so a future "shorten long tails" change does not silently
+// drop the segment that points at the actual broken field. Without
+// these, a regression that prints "schemas.Order (properties...)"
+// instead of the full path would slip past the suite.
+
+pub fn components_schemas_deep_nested_tail_preserved_test() {
+  diagnostic_format.pointer_to_human(
+    "components.schemas.Order.properties.items.items.properties.product.properties.tags.items",
+  )
+  |> should.equal(
+    "schemas.Order (properties.items.items.properties.product.properties.tags.items)",
+  )
+}
+
+pub fn paths_deep_nested_request_body_tail_preserved_test() {
+  diagnostic_format.pointer_to_human(
+    "paths.~1pets.post.requestBody.content.application~1json.schema.properties.children.items.properties.id",
+  )
+  |> should.equal(
+    "POST /pets, requestBody (content.application/json.schema.properties.children.items.properties.id)",
+  )
+}

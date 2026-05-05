@@ -64,6 +64,8 @@ pub fn oss_openapi_generator_cases_test() {
   let _ = support.oss_openapi_gen_issue_18516_generates_case()
   let _ = support.oss_openapi_gen_oneof_fruit_parses_case()
   let _ = support.oss_openapi_gen_array_nullable_items_parses_case()
+  let _ = support.combined_oneof_nullable_array_parses_case()
+  let _ = support.combined_oneof_nullable_array_generates_tagged_union_case()
   let _ = support.oss_openapi_gen_type_alias_parses_case()
   let _ = support.oss_openapi_gen_enum_uri_parses_case()
   let _ = support.oss_openapi_gen_missing_info_rejects_case()

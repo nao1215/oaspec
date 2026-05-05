@@ -19,6 +19,7 @@ pub fn validator_core_acceptance_test() {
   let _ = support.validate_deep_inline_oneof_in_request_body_accepted_case()
   let _ = support.validate_deep_additional_properties_in_response_case()
   let _ = support.validate_rejects_duplicate_operation_id_case()
+  let _ = support.validate_aggregates_multiple_errors_in_one_pass_case()
   let _ =
     support.validate_rejects_operation_ids_colliding_after_snake_case_case()
   let _ = support.validate_accepts_unique_operation_ids_case()

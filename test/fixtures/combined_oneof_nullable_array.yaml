@@ -1,0 +1,46 @@
+openapi: "3.0.3"
+info:
+  title: Combined oneOf + nullable + array
+  version: "1.0.0"
+paths:
+  /fruit:
+    get:
+      operationId: listFruit
+      responses:
+        "200":
+          description: A list whose elements are either an Apple or a Banana,
+            and individual entries may be null.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  nullable: true
+                  oneOf:
+                    - $ref: "#/components/schemas/Apple"
+                    - $ref: "#/components/schemas/Banana"
+                  discriminator:
+                    propertyName: kind
+                    mapping:
+                      apple: "#/components/schemas/Apple"
+                      banana: "#/components/schemas/Banana"
+components:
+  schemas:
+    Apple:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [apple]
+        weight_grams:
+          type: integer
+    Banana:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [banana]
+        length_cm:
+          type: integer

@@ -7,6 +7,7 @@ import api/response_types
 import api/router
 import api/types
 import gleam/dict
+import gleam/int
 import gleam/option.{None, Some}
 import gleam/string
 import gleeunit
@@ -484,6 +485,109 @@ pub fn guards_validate_pet_aggregates_failures_test() {
       }
     Ok(_) -> should.fail()
   }
+}
+
+// ===================================================================
+// QA expansion: encoder idempotency, optional-None invariant, fuzz
+//
+// These tests cover gaps that `decode(encode(x)) == x` alone cannot
+// catch:
+//   1. encode(decode(encode(x))) string-equal encode(x): protects against
+//      encoders that silently drop or reorder keys on a re-encode.
+//   2. Optional fields that are None must NOT appear as keys in the
+//      output JSON (and especially must not encode as `null`). A
+//      regression here breaks API compatibility but slips past the
+//      Some/None roundtrip tests.
+//   3. Seeded-fuzz roundtrip across 100 deterministic Pets — exercises
+//      enum variant cycling and Some/None on `tag` together rather
+//      than one configuration at a time.
+// ===================================================================
+
+pub fn pet_encode_is_idempotent_test() {
+  let original =
+    types.Pet(
+      id: 7,
+      name: "Buddy",
+      status: types.PetStatusSold,
+      tag: Some("golden"),
+    )
+  let once = encode.encode_pet(original)
+  let assert Ok(decoded) = decode.decode_pet(once)
+  let twice = encode.encode_pet(decoded)
+  twice |> should.equal(once)
+}
+
+pub fn pet_optional_none_omits_key_test() {
+  let pet =
+    types.Pet(id: 1, name: "x", status: types.PetStatusAvailable, tag: None)
+  let json = encode.encode_pet(pet)
+  string.contains(json, "\"tag\"") |> should.be_false()
+  string.contains(json, "null") |> should.be_false()
+}
+
+pub fn pet_optional_some_includes_key_test() {
+  let pet =
+    types.Pet(
+      id: 1,
+      name: "x",
+      status: types.PetStatusAvailable,
+      tag: Some("dog"),
+    )
+  let json = encode.encode_pet(pet)
+  string.contains(json, "\"tag\"") |> should.be_true()
+  string.contains(json, "\"dog\"") |> should.be_true()
+}
+
+fn pet_for_seed(seed: Int) -> types.Pet {
+  let status = case seed % 3 {
+    0 -> types.PetStatusAvailable
+    1 -> types.PetStatusPending
+    _ -> types.PetStatusSold
+  }
+  let tag = case seed % 5 == 0 {
+    True -> None
+    False -> Some("tag-" <> int.to_string(seed))
+  }
+  types.Pet(
+    id: seed,
+    name: "pet-" <> int.to_string(seed),
+    status: status,
+    tag: tag,
+  )
+}
+
+fn check_pet_roundtrip(seed: Int) -> Nil {
+  let pet = pet_for_seed(seed)
+  let encoded = encode.encode_pet(pet)
+  case decode.decode_pet(encoded) {
+    Ok(decoded) ->
+      case decoded == pet {
+        True -> Nil
+        False ->
+          // nolint: avoid_panic -- diagnostic abort for seed reproduction
+          panic as { "roundtrip mismatch for seed " <> int.to_string(seed) }
+      }
+    Error(_) ->
+      // nolint: avoid_panic -- diagnostic abort for seed reproduction
+      panic as { "decode failed for seed " <> int.to_string(seed) }
+  }
+}
+
+fn run_seeds(current: Int, stop: Int) -> Nil {
+  case current >= stop {
+    True -> Nil
+    False -> {
+      check_pet_roundtrip(current)
+      run_seeds(current + 1, stop)
+    }
+  }
+}
+
+pub fn pet_roundtrip_property_test() {
+  // Deterministic 100-seed fuzz: covers every PetStatus variant and both
+  // None/Some(tag) configurations. Failure prints the seed so the case
+  // reproduces with a single direct call to `pet_for_seed`.
+  run_seeds(0, 100)
 }
 
 // ===================================================================
