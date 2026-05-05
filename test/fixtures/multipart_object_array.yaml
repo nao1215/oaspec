@@ -26,9 +26,6 @@ paths:
                   format: binary
                 purpose:
                   type: string
-                  enum:
-                    - account_requirement
-                    - identity_document
                 expand:
                   type: array
                   items:

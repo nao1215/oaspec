@@ -41,3 +41,31 @@ paths:
                 properties:
                   total:
                     type: integer
+  /reports:
+    post:
+      operationId: createReport
+      summary: Companion JSON-bodied endpoint
+      description: |
+        Forces the generator to emit `encode_*` helpers — the deepObject
+        endpoint alone has no request body, and the integration build
+        is run with `--warnings-as-errors`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportInput"
+      responses:
+        "201":
+          description: created
+components:
+  schemas:
+    ReportInput:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+        notes:
+          type: string

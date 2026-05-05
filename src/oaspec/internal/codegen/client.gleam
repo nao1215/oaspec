@@ -1122,7 +1122,10 @@ fn generate_body_emission(
     }
     [#(content_type_key, _)] ->
       case content_type_key {
-        "application/octet-stream" ->
+        // Issue #504: `*/*` is treated as a synonym for
+        // application/octet-stream — body is `BitArray`, wrapped in
+        // `BytesBody` instead of being run through the JSON encoder.
+        "application/octet-stream" | "*/*" ->
           case rb.required {
             True -> sb |> se.indent(1, "let body = transport.BytesBody(body)")
             False ->

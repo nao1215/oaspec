@@ -5,6 +5,7 @@ import oaspec/config
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/guards
 import oaspec/internal/codegen/import_analysis
+import oaspec/internal/codegen/operation_ir
 import oaspec/internal/openapi/schema.{Inline, Reference}
 import oaspec/internal/openapi/spec.{ParameterSchema, Value}
 import oaspec/internal/util/content_type as ct_util
@@ -99,6 +100,43 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
       }
     })
 
+  // Issue #503: a multipart body with `array` properties uses
+  // `list.fold(...)` to expand into per-element parts, and `object`
+  // properties use `json.to_string(encode.encode_<schema>_json(...))`
+  // to emit a JSON-bodied part. Surface those needs to the import
+  // builder.
+  let has_multipart_array_field =
+    multipart_has_field(operations, ctx, fn(s) {
+      case s {
+        schema.ArraySchema(..) -> True
+        _ -> False
+      }
+    })
+  let has_multipart_object_field =
+    multipart_has_field(operations, ctx, fn(s) {
+      case s {
+        schema.ObjectSchema(..) -> True
+        _ -> False
+      }
+    })
+  let has_multipart_optional_complex_field =
+    multipart_has_optional_complex_field(operations, ctx)
+
+  // Issue #502: deepObject parameters expand each property into a
+  // bracketed-bracketed query entry; optional outer or inner
+  // properties wrap the emission in `Some(_) -> ... None -> query`
+  // arms so the import set must carry the option constructors.
+  let has_deep_object_param =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      list.any(operation.parameters, fn(rp) {
+        case rp {
+          Value(p) -> operation_ir.is_deep_object_param(p, ctx)
+          _ -> False
+        }
+      })
+    })
+
   // Issue #387: when any response declares `headers:`, the client
   // assembles a typed headers record by calling `list.key_find` on
   // `resp.headers`. That makes `gleam/list` mandatory and (for any
@@ -136,6 +174,9 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     has_form_urlencoded
     || has_multi_content_response
     || has_response_headers
+    // Issue #503: array fields fold the input via list.fold; object
+    // fields don't need list directly but other multipart paths might.
+    || has_multipart_array_field
     || list.any(all_params, fn(p) { p.in_ == spec.InQuery })
     || list.any(all_params, fn(p) { p.in_ == spec.InCookie })
     || list.any(all_params, fn(p) { p.in_ == spec.InHeader })
@@ -193,6 +234,9 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
 
   let needs_json =
     needs_dyn_decode
+    // Issue #503: object multipart fields are JSON-encoded into one part,
+    // pulling in json.to_string + the per-schema encoder.
+    || has_multipart_object_field
     || list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       case operation.request_body {
@@ -241,10 +285,18 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     needs_option_type
     || has_optional_response_headers
     || any_operation_has_server(ctx)
+    // Issue #503: optional multipart object/array fields wrap the
+    // per-field emission in a `Some(v) -> ... None -> parts` arm.
+    || has_multipart_optional_complex_field
+    // Issue #502: deepObject params unwrap optional outer / inner
+    // properties through `Some(...) -> ... None -> query`.
+    || has_deep_object_param
   let needs_none_ctor =
     needs_option_type
     || has_optional_response_headers
     || any_operation_has_no_server(ctx)
+    || has_multipart_optional_complex_field
+    || has_deep_object_param
 
   // Issue #387: typed response headers (`type: integer`, `type: number`)
   // are extracted via `int.parse` / `float.parse`, so we must import
@@ -393,6 +445,109 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     needs_uri: needs_uri,
     needs_guards: needs_guards,
   )
+}
+
+/// Issue #503: predicate helpers for multipart object/array fields.
+/// Detects whether any operation has a multipart/form-data body
+/// containing a property whose resolved schema matches `pred`.
+fn multipart_has_field(
+  operations: List(context.AnalyzedOperation),
+  ctx: Context,
+  pred: fn(schema.SchemaObject) -> Bool,
+) -> Bool {
+  list.any(operations, fn(op) {
+    let #(_, operation, _, _) = op
+    case operation.request_body {
+      Some(Value(rb)) ->
+        case dict.get(rb.content, "multipart/form-data") {
+          Ok(media_type) ->
+            multipart_object_props(media_type.schema, ctx)
+            |> list.any(fn(entry) {
+              let #(_, prop_ref) = entry
+              case resolve_to_object(prop_ref, ctx) {
+                Some(s) -> pred(s)
+                None -> False
+              }
+            })
+          // nolint: thrown_away_error -- absent multipart key just means no field to inspect
+          Error(_) -> False
+        }
+      _ -> False
+    }
+  })
+}
+
+fn multipart_has_optional_complex_field(
+  operations: List(context.AnalyzedOperation),
+  ctx: Context,
+) -> Bool {
+  list.any(operations, fn(op) {
+    let #(_, operation, _, _) = op
+    case operation.request_body {
+      Some(Value(rb)) ->
+        case dict.get(rb.content, "multipart/form-data") {
+          Ok(media_type) ->
+            case resolve_to_object(option_or_none(media_type.schema), ctx) {
+              Some(schema.ObjectSchema(properties:, required:, ..)) ->
+                dict.to_list(properties)
+                |> list.any(fn(entry) {
+                  let #(name, prop_ref) = entry
+                  let is_optional = !list.contains(required, name)
+                  is_optional
+                  && case resolve_to_object(prop_ref, ctx) {
+                    Some(schema.ArraySchema(..)) -> True
+                    Some(schema.ObjectSchema(..)) -> True
+                    _ -> False
+                  }
+                })
+              _ -> False
+            }
+          // nolint: thrown_away_error -- absent multipart key just means no field to inspect
+          Error(_) -> False
+        }
+      _ -> False
+    }
+  })
+}
+
+fn multipart_object_props(
+  media_schema: Option(schema.SchemaRef),
+  ctx: Context,
+) -> List(#(String, schema.SchemaRef)) {
+  case resolve_to_object(option_or_none(media_schema), ctx) {
+    Some(schema.ObjectSchema(properties:, ..)) -> dict.to_list(properties)
+    _ -> []
+  }
+}
+
+fn resolve_to_object(
+  ref: schema.SchemaRef,
+  ctx: Context,
+) -> Option(schema.SchemaObject) {
+  case ref {
+    schema.Inline(s) -> Some(s)
+    schema.Reference(..) ->
+      case context.resolve_schema_ref(ref, ctx) {
+        Ok(s) -> Some(s)
+        // nolint: thrown_away_error -- unresolved refs are reported by the resolver; the import gate just falls back to "no match"
+        Error(_) -> None
+      }
+  }
+}
+
+fn option_or_none(ref: Option(schema.SchemaRef)) -> schema.SchemaRef {
+  case ref {
+    Some(r) -> r
+    None ->
+      schema.Inline(schema.ObjectSchema(
+        metadata: schema.default_metadata(),
+        properties: dict.new(),
+        required: [],
+        additional_properties: schema.Unspecified,
+        min_properties: option.None,
+        max_properties: option.None,
+      ))
+  }
 }
 
 /// Optional `gleam/option` import line for client signatures and ctors.

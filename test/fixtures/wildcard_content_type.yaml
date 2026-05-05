@@ -39,3 +39,30 @@ paths:
               schema:
                 type: string
                 format: binary
+  /status:
+    get:
+      operationId: getServerStatus
+      summary: Companion JSON endpoint
+      description: |
+        Forces the generator to emit a typed `types.Status` and the
+        decode helper module — the wildcard endpoints alone wouldn't
+        exercise them, and the integration build is run with
+        `--warnings-as-errors`.
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+components:
+  schemas:
+    Status:
+      type: object
+      required:
+        - ok
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
