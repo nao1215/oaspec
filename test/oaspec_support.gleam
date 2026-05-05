@@ -687,12 +687,17 @@ pub fn reachability_prune_drops_unreferenced_components_case() {
   // operations, which reach Pet (and via Pet's `status` property,
   // PetStatus). CreatePetRequest is reachable only from POST /pets
   // and Error is never referenced in any operation's content, so
-  // both must be pruned.
+  // both must be pruned. The filter→hoist→prune sequence mirrors the
+  // production pipeline so any regression around hoisted inline
+  // schemas surfaces here too.
   let assert Ok(unresolved) = parser.parse_file("test/fixtures/petstore.yaml")
   let assert Ok(resolved) = resolve.resolve(unresolved)
   let include = config.Include(tags: [], paths: ["/pets/{petId}"])
-  let filtered = filter.apply(resolved, include)
-  let pruned = reachability.prune(filtered)
+  let pruned =
+    resolved
+    |> filter.apply(include)
+    |> hoist.hoist
+    |> reachability.prune
   let assert Some(comps) = pruned.components
   let names = dict.keys(comps.schemas) |> list.sort(string.compare)
   names |> should.equal(["Pet", "PetStatus"])
@@ -702,12 +707,16 @@ pub fn reachability_prune_keeps_transitively_reachable_components_case() {
   // GET /pets returns Pet[]; POST /pets takes a CreatePetRequest and
   // returns Pet. Pet itself references PetStatus via its `status`
   // property. So a /pets-only filter must keep CreatePetRequest, Pet,
-  // PetStatus and drop only Error.
+  // PetStatus and drop only Error. Pipeline order matches production
+  // (filter → hoist → prune).
   let assert Ok(unresolved) = parser.parse_file("test/fixtures/petstore.yaml")
   let assert Ok(resolved) = resolve.resolve(unresolved)
   let include = config.Include(tags: [], paths: ["/pets"])
-  let filtered = filter.apply(resolved, include)
-  let pruned = reachability.prune(filtered)
+  let pruned =
+    resolved
+    |> filter.apply(include)
+    |> hoist.hoist
+    |> reachability.prune
   let assert Some(comps) = pruned.components
   let names = dict.keys(comps.schemas) |> list.sort(string.compare)
   names |> should.equal(["CreatePetRequest", "Pet", "PetStatus"])
@@ -719,8 +728,11 @@ pub fn reachability_prune_with_no_surviving_operations_drops_everything_case() {
   let assert Ok(unresolved) = parser.parse_file("test/fixtures/petstore.yaml")
   let assert Ok(resolved) = resolve.resolve(unresolved)
   let include = config.Include(tags: [], paths: ["/no-such-path"])
-  let filtered = filter.apply(resolved, include)
-  let pruned = reachability.prune(filtered)
+  let pruned =
+    resolved
+    |> filter.apply(include)
+    |> hoist.hoist
+    |> reachability.prune
   let assert Some(comps) = pruned.components
   dict.size(comps.schemas) |> should.equal(0)
 }

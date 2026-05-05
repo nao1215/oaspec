@@ -99,16 +99,9 @@ fn refs_from_path_item(item: PathItem(Resolved)) -> List(SchemaRef) {
       item.options,
       item.trace,
     ]
-    |> list.filter_map(option_to_result)
+    |> list.filter_map(option.to_result(_, Nil))
     |> list.flat_map(refs_from_operation)
   list.flatten([path_param_refs, op_refs])
-}
-
-fn option_to_result(opt: Option(a)) -> Result(a, Nil) {
-  case opt {
-    Some(v) -> Ok(v)
-    None -> Error(Nil)
-  }
 }
 
 fn refs_from_operation(op: Operation(Resolved)) -> List(SchemaRef) {
@@ -156,13 +149,13 @@ fn refs_from_response(r: Response(Resolved)) -> List(SchemaRef) {
   let content_refs = refs_from_media_dict(r.content)
   let header_refs =
     dict.values(r.headers)
-    |> list.filter_map(fn(h) { option_to_result(h.schema) })
+    |> list.filter_map(fn(h) { option.to_result(h.schema, Nil) })
   list.flatten([content_refs, header_refs])
 }
 
 fn refs_from_media_dict(content: Dict(String, MediaType)) -> List(SchemaRef) {
   dict.values(content)
-  |> list.filter_map(fn(mt) { option_to_result(mt.schema) })
+  |> list.filter_map(fn(mt) { option.to_result(mt.schema, Nil) })
 }
 
 /// BFS walk: pop refs from the worklist, mark each named component
