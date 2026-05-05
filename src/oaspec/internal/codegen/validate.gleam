@@ -821,7 +821,7 @@ fn validate_server_request_body_content_types(
             <> media_type
             <> "' is not supported for server code generation. Server router only supports application/json request bodies with typed decoding.",
           hint: Some(
-            "Use application/json for typed server request bodies, or multipart/form-data, application/x-www-form-urlencoded, or application/octet-stream for non-JSON payloads.",
+            "Use application/json for typed server request bodies, or multipart/form-data, application/x-www-form-urlencoded, application/octet-stream, text/plain, or */* for non-JSON payloads.",
           ),
         )
       })
