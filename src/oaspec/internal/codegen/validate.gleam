@@ -438,6 +438,11 @@ fn deep_object_server_leaf_supported(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> Bool {
+  // Issue #502: client-mode codegen now expands nested object
+  // properties into bracketed-bracketed query keys, but server-mode
+  // decoding still requires primitive scalars / primitive arrays.
+  // Lifting the server constraint requires a router decoder rewrite
+  // and is tracked as a separate follow-up.
   case schema_ref {
     Inline(StringSchema(..))
     | Inline(IntegerSchema(..))
@@ -538,7 +543,11 @@ fn validate_complex_param_schema(
   }
 }
 
-/// Validate that a deepObject parameter has no nested object properties.
+/// Validate that a deepObject parameter has no unsupported property
+/// shapes. Issue #502: an object-typed property is now allowed (encoded
+/// as `parent[outer][inner]=value` and modeled as `Dict(String, String)`
+/// in the generated client). oneOf / anyOf / arrays of objects remain
+/// rejected because they don't fit the bracketed-string wire format.
 fn validate_deep_object_no_nested_objects(
   path: String,
   param: spec.Parameter(Resolved),
@@ -550,15 +559,17 @@ fn validate_deep_object_no_nested_objects(
       |> list.flat_map(fn(entry) {
         let #(prop_name, prop_ref) = entry
         case resolve_schema_object(Some(prop_ref), ctx) {
-          Some(ObjectSchema(..))
-          | Some(AllOfSchema(..))
-          | Some(OneOfSchema(..))
-          | Some(AnyOfSchema(..)) -> [
+          // Object and AllOf-of-objects: accepted (treated as
+          // bracketed-bracketed Dict(String, String)).
+          Some(ObjectSchema(..)) | Some(AllOfSchema(..)) -> []
+          // oneOf / anyOf / arrays at the property level still don't
+          // map to the bracketed-string wire format.
+          Some(OneOfSchema(..)) | Some(AnyOfSchema(..)) -> [
             diagnostic.validation_error_both(
               path: path <> "." <> prop_name,
-              detail: "Nested object properties in deepObject parameters are not supported. Only one level of object nesting is supported (e.g., filter[name]=value).",
+              detail: "Nested oneOf/anyOf properties in deepObject parameters are not supported. Only primitive scalars, primitive arrays, and single-level nested objects (Dict(String, String)) are supported.",
               hint: Some(
-                "Flatten the property structure to a single level of nesting.",
+                "Flatten the property structure or pick a concrete branch of the oneOf/anyOf.",
               ),
             ),
           ]

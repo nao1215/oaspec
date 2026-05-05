@@ -1,0 +1,43 @@
+openapi: "3.0.3"
+info:
+  title: deepObject Nested Properties Test
+  description: |
+    Issue #502. Stripe declares deepObject query parameters whose
+    properties are themselves objects (e.g.
+    `filter.applicability_scope` and `status_transitions.posted_at`).
+    These should pass validation and generate a working client where
+    the nested-object property is modeled as `Dict(String, String)`
+    and serialized as `parent[outer][inner]=value`.
+  version: "1.0.0"
+paths:
+  /credit-balance-summary:
+    get:
+      operationId: getBillingCreditBalanceSummary
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          required: true
+          schema:
+            type: object
+            properties:
+              applicability_scope:
+                type: object
+                properties:
+                  price_type:
+                    type: string
+                  transaction_type:
+                    type: string
+              customer:
+                type: string
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer

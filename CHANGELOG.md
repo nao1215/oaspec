@@ -12,6 +12,23 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Added
 
+- **codegen(deepObject nested objects)**: `style: deepObject` query
+  parameters with nested object properties (e.g. Stripe's
+  `filter.applicability_scope` and `status_transitions.posted_at`)
+  now pass client-mode validation and generate working client code.
+  The generator emits one bracketed-bracketed query entry per inner
+  primitive property
+  (`filter[applicability_scope][price_type]=value`), wrapping
+  optional outer / inner fields in matching `Some(_)` / `None` arms
+  so the typed record actually serialises onto the wire instead of
+  being smuggled into the query tuple as a record value (a latent
+  bug previously masked by the validator's hard rejection). oneOf /
+  anyOf properties on a deepObject parameter remain rejected because
+  they don't fit the bracketed-string wire format. Server-mode
+  routing still requires primitive scalars / primitive arrays for
+  deepObject properties; lifting that constraint requires a router
+  decoder rewrite and is tracked separately. Issue #502.
+
 - **codegen(multipart object/array fields)**: `multipart/form-data`
   request bodies whose individual fields are arrays or objects now
   pass client-mode validation and produce working client code. The
