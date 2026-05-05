@@ -150,7 +150,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
           Value(p) ->
-            decode_helpers.query_schema_needs_int(spec.parameter_schema(p))
+            decode_helpers.query_schema_needs_int(spec.parameter_schema(p), ctx)
             || decode_helpers.deep_object_param_needs_int(p, ctx)
           _ -> False
         }
@@ -173,7 +173,10 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
           Value(p) ->
-            decode_helpers.query_schema_needs_float(spec.parameter_schema(p))
+            decode_helpers.query_schema_needs_float(
+              spec.parameter_schema(p),
+              ctx,
+            )
             || decode_helpers.deep_object_param_needs_float(p, ctx)
           _ -> False
         }

@@ -6875,6 +6875,41 @@ pub fn deep_object_primitive_props_client_imports_primitives_case() {
   |> should.be_true()
 }
 
+// --- Issue #522: optional `$ref` scalar query params ---
+
+/// Regression guard for #522: an optional query parameter whose
+/// schema is a `$ref` to a non-enum integer / number / boolean
+/// component must be decoded with the scalar parse function (not
+/// dropped through to a raw String). The matching `gleam/int` /
+/// `gleam/float` import must also land in the router's import set.
+pub fn ref_scalar_query_params_decode_with_parse_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/server_ref_scalar_query_params.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/server_ref_scalar_query_params.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Server,
+      validate: False,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(router_file) =
+    list.find(summary.files, fn(f) { f.path == "router.gleam" })
+  // Integer ref → int.parse(v)
+  string.contains(router_file.content, "case int.parse(v)")
+  |> should.be_true()
+  // Number ref → float.parse(v)
+  string.contains(router_file.content, "case float.parse(v)")
+  |> should.be_true()
+  // Imports follow the parse calls.
+  string.contains(router_file.content, "import gleam/int")
+  |> should.be_true()
+  string.contains(router_file.content, "import gleam/float")
+  |> should.be_true()
+}
+
 // --- Issue #521: multipleOf codegen body + imports ---
 
 /// Regression guard for #521: a NumberSchema with both `minimum`

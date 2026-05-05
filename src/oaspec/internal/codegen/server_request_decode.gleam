@@ -297,6 +297,31 @@ pub fn query_optional_expr(
   )
 }
 
+/// Issue #522: classify the underlying scalar kind of a SchemaRef,
+/// resolving `$ref` to its target schema. Used by query / header /
+/// cookie parameter codegen so that ref-typed scalars get the same
+/// `int.parse` / `float.parse` / boolean parsing as their inline
+/// equivalents — not the raw-String fallback that pre-fix produced
+/// (resulting in `Expected Option(Int), Found Option(String)` build
+/// errors).
+type ScalarKind {
+  IntegerScalar
+  NumberScalar
+  BooleanScalar
+}
+
+fn schema_ref_scalar_kind(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Option(ScalarKind) {
+  case context.resolve_schema_ref(schema_ref, ctx) {
+    Ok(schema.IntegerSchema(..)) -> Some(IntegerScalar)
+    Ok(schema.NumberSchema(..)) -> Some(NumberScalar)
+    Ok(schema.BooleanSchema(..)) -> Some(BooleanScalar)
+    _ -> None
+  }
+}
+
 /// If `schema_ref` is a `$ref` to a string enum schema, return the
 /// generated Gleam type name and the list of enum values (in spec
 /// order). Used by query parameter codegen to emit a string→variant
@@ -494,9 +519,31 @@ fn query_optional_expr_with_schema(
           <> " _ -> None }"
         }
         None ->
-          "case dict.get(query, \""
-          <> key
-          <> "\") { Ok([v, ..]) -> Some(v) _ -> None }"
+          // Issue #522: when the `$ref` resolves to an integer /
+          // number / boolean schema, mirror the parse handling of
+          // the corresponding `Inline(...)` arms above. Pre-fix this
+          // path emitted `Some(v)` (a String) into a typed
+          // `Option(Int|Float|Bool)` slot, breaking `gleam build`.
+          case schema_ref_scalar_kind(ref, ctx) {
+            Some(IntegerScalar) ->
+              "case dict.get(query, \""
+              <> key
+              <> "\") { Ok([v, ..]) -> { case int.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }"
+            Some(NumberScalar) ->
+              "case dict.get(query, \""
+              <> key
+              <> "\") { Ok([v, ..]) -> { case float.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }"
+            Some(BooleanScalar) ->
+              "case dict.get(query, \""
+              <> key
+              <> "\") { Ok([v, ..]) -> Some("
+              <> bool_parse_expr
+              <> ") _ -> None }"
+            None ->
+              "case dict.get(query, \""
+              <> key
+              <> "\") { Ok([v, ..]) -> Some(v) _ -> None }"
+          }
       }
     None ->
       "case dict.get(query, \""
@@ -704,7 +751,7 @@ pub fn deep_object_param_needs_int(
   ctx: Context,
 ) -> Bool {
   deep_object_param_needs(param, ctx, fn(prop) {
-    query_schema_needs_int(Some(prop.schema_ref))
+    query_schema_needs_int(Some(prop.schema_ref), ctx)
   })
 }
 
@@ -713,7 +760,7 @@ pub fn deep_object_param_needs_float(
   ctx: Context,
 ) -> Bool {
   deep_object_param_needs(param, ctx, fn(prop) {
-    query_schema_needs_float(Some(prop.schema_ref))
+    query_schema_needs_float(Some(prop.schema_ref), ctx)
   })
 }
 
@@ -1238,20 +1285,39 @@ pub fn query_schema_needs_string(schema_ref: Option(SchemaRef)) -> Bool {
   }
 }
 
-pub fn query_schema_needs_int(schema_ref: Option(SchemaRef)) -> Bool {
+pub fn query_schema_needs_int(
+  schema_ref: Option(SchemaRef),
+  ctx: Context,
+) -> Bool {
   case schema_ref {
     Some(Inline(schema.IntegerSchema(..))) -> True
     Some(Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..))) ->
       True
+    // Issue #522: a `$ref` whose target is `type: integer` triggers
+    // `int.parse` emission downstream, so the router needs the
+    // `gleam/int` import. Pre-fix, only inline scalars were detected.
+    Some(Reference(..) as ref) ->
+      case schema_ref_scalar_kind(ref, ctx) {
+        Some(IntegerScalar) -> True
+        _ -> False
+      }
     _ -> False
   }
 }
 
-pub fn query_schema_needs_float(schema_ref: Option(SchemaRef)) -> Bool {
+pub fn query_schema_needs_float(
+  schema_ref: Option(SchemaRef),
+  ctx: Context,
+) -> Bool {
   case schema_ref {
     Some(Inline(schema.NumberSchema(..))) -> True
     Some(Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..))) ->
       True
+    Some(Reference(..) as ref) ->
+      case schema_ref_scalar_kind(ref, ctx) {
+        Some(NumberScalar) -> True
+        _ -> False
+      }
     _ -> False
   }
 }
