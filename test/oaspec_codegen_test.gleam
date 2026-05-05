@@ -41,6 +41,7 @@ pub fn codegen_core_regressions_test() {
   let _ = support.response_code_range_2xx_generates_valid_gleam_case()
   let _ = support.status_code_range_pattern_case()
   let _ = support.status_code_suffix_range_case()
+  let _ = support.status_code_suffix_full_iana_registry_case()
   let _ = support.anyof_generates_union_type_not_string_case()
   let _ = support.security_scopes_appear_as_comments_case()
   let _ = support.allow_reserved_skips_percent_encode_case()

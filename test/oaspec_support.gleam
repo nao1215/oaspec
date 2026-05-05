@@ -6459,6 +6459,34 @@ pub fn status_code_suffix_range_case() {
   |> should.equal("Status4xx")
 }
 
+/// Issue #525: status_code_suffix must produce semantic IANA reason
+/// phrases for the full registry, not just a hand-picked subset.
+/// Pre-fix, 200 → "Ok" but 202 → "Status202", which created
+/// inconsistent variant naming across response types.
+pub fn status_code_suffix_full_iana_registry_case() {
+  // Codes that previously fell through to the numeric form.
+  http.status_code_suffix(http.Status(202)) |> should.equal("Accepted")
+  http.status_code_suffix(http.Status(206)) |> should.equal("PartialContent")
+  http.status_code_suffix(http.Status(301)) |> should.equal("MovedPermanently")
+  http.status_code_suffix(http.Status(304)) |> should.equal("NotModified")
+  http.status_code_suffix(http.Status(308)) |> should.equal("PermanentRedirect")
+  http.status_code_suffix(http.Status(410)) |> should.equal("Gone")
+  http.status_code_suffix(http.Status(418)) |> should.equal("IAmATeapot")
+  http.status_code_suffix(http.Status(429)) |> should.equal("TooManyRequests")
+  http.status_code_suffix(http.Status(451))
+  |> should.equal("UnavailableForLegalReasons")
+  http.status_code_suffix(http.Status(503))
+  |> should.equal("ServiceUnavailable")
+  // Codes already named pre-fix should still produce the same suffix.
+  http.status_code_suffix(http.Status(200)) |> should.equal("Ok")
+  http.status_code_suffix(http.Status(204)) |> should.equal("NoContent")
+  http.status_code_suffix(http.Status(401)) |> should.equal("Unauthorized")
+  http.status_code_suffix(http.Status(500))
+  |> should.equal("InternalServerError")
+  // Non-standard codes keep the numeric fallback.
+  http.status_code_suffix(http.Status(599)) |> should.equal("Status599")
+}
+
 // --- additionalProperties: true encoder tests ---
 
 /// additionalProperties: true must NOT be silently dropped during encoding.
