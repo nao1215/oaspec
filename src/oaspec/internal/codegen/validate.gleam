@@ -606,9 +606,9 @@ fn validate_request_body(
             path: op_id <> ".requestBody",
             detail: "Content type '"
               <> media_type
-              <> "' is not supported. Supported request content types: application/json (and +json suffix types), text/plain, multipart/form-data, application/x-www-form-urlencoded, application/octet-stream.",
+              <> "' is not supported. Supported request content types: application/json (and +json suffix types), text/plain, multipart/form-data, application/x-www-form-urlencoded, application/octet-stream, */*.",
             hint: Some(
-              "Use application/json (or a +json suffix type like application/problem+json), text/plain, multipart/form-data, application/x-www-form-urlencoded, or application/octet-stream.",
+              "Use application/json (or a +json suffix type like application/problem+json), text/plain, multipart/form-data, application/x-www-form-urlencoded, application/octet-stream, or */*.",
             ),
           ),
         ]
@@ -808,6 +808,10 @@ fn validate_server_request_body_content_types(
           && key != "multipart/form-data"
           && key != "application/octet-stream"
           && key != "text/plain"
+          // Issue #504: */* lands in the same lane as
+          // application/octet-stream — raw bytes through the server's
+          // body parameter — so server codegen accepts it too.
+          && key != "*/*"
           && content_type.is_supported_request(content_type.from_string(key))
         })
       list.map(non_json_but_supported, fn(media_type) {
@@ -817,7 +821,7 @@ fn validate_server_request_body_content_types(
             <> media_type
             <> "' is not supported for server code generation. Server router only supports application/json request bodies with typed decoding.",
           hint: Some(
-            "Use application/json for typed server request bodies, or multipart/form-data, application/x-www-form-urlencoded, or application/octet-stream for non-JSON payloads.",
+            "Use application/json for typed server request bodies, or multipart/form-data, application/x-www-form-urlencoded, application/octet-stream, text/plain, or */* for non-JSON payloads.",
           ),
         )
       })
@@ -973,9 +977,9 @@ fn validate_responses(
             path: path,
             detail: "Response content type '"
               <> media_type_name
-              <> "' is not supported. Supported response content types: application/json (and +json suffix types), text/plain, application/x-ndjson, application/octet-stream, application/xml (and +xml suffix types), text/xml.",
+              <> "' is not supported. Supported response content types: application/json (and +json suffix types), text/plain, application/x-ndjson, application/octet-stream, application/xml (and +xml suffix types), text/xml, */*.",
             hint: Some(
-              "Use application/json (or a +json suffix type), text/plain, application/x-ndjson, application/octet-stream, application/xml (or a +xml suffix type), or text/xml.",
+              "Use application/json (or a +json suffix type), text/plain, application/x-ndjson, application/octet-stream, application/xml (or a +xml suffix type), text/xml, or */*.",
             ),
           ),
         ]

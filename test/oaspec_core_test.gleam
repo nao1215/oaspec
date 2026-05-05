@@ -113,6 +113,9 @@ pub fn content_type_helpers_test() {
     support.capability_registry_covers_content_type_response_helpers_case()
   let _ = support.capability_registry_covers_content_type_request_helpers_case()
   let _ = support.is_supported_request_rejects_unsupported_content_type_case()
+  let _ = support.wildcard_content_type_passes_validation_case()
+  let _ = support.wildcard_content_type_classified_as_supported_case()
+  let _ = support.wildcard_content_type_generates_bitarray_bodies_case()
 }
 
 pub fn location_index_source_loc_test() {

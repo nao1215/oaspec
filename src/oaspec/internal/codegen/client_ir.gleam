@@ -160,8 +160,13 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
           Value(response) ->
             list.any(dict.to_list(response.content), fn(ce) {
               let #(media_type_name, mt) = ce
-              case media_type_name {
-                "text/plain" -> False
+              // Issue #504: */* and application/octet-stream responses
+              // decode through `bytes_body`, not `dyn_decode`, so they
+              // must not pull the dynamic-decode import in even when
+              // their inline schema is a primitive.
+              case ct_util.from_string(media_type_name) {
+                ct_util.TextPlain -> False
+                ct_util.ApplicationOctetStream | ct_util.Wildcard -> False
                 _ ->
                   case mt.schema {
                     // Issue #493 / CodeRabbit follow-up: array
@@ -199,7 +204,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
             // `json.to_string`, so a `type: string, format: binary`
             // request body must not pull in `gleam/json`.
             case ct_util.from_string(ct_name) {
-              ct_util.ApplicationOctetStream -> False
+              ct_util.ApplicationOctetStream | ct_util.Wildcard -> False
               _ ->
                 case mt.schema {
                   Some(Inline(schema.StringSchema(..))) -> True
@@ -312,7 +317,10 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
           Value(response) ->
             list.any(dict.to_list(response.content), fn(ce) {
               let #(name, _) = ce
-              ct_util.from_string(name) == ct_util.ApplicationOctetStream
+              case ct_util.from_string(name) {
+                ct_util.ApplicationOctetStream | ct_util.Wildcard -> True
+                _ -> False
+              }
             })
           _ -> False
         }

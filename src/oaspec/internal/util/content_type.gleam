@@ -3,6 +3,14 @@ import gleam/string
 import oaspec/internal/capability
 
 /// Supported content types for code generation.
+///
+/// `Wildcard` represents the OpenAPI `*/*` media-type catch-all
+/// (Issue #504). Specs like Kubernetes' OpenAPI v3 use it for
+/// proxy-style endpoints and resource mutation handlers that accept or
+/// emit arbitrary bytes. oaspec treats `*/*` as `application/octet-stream`
+/// for codegen purposes — request body is `BitArray`, response body is
+/// `BitArray` — which matches the "any bytes" semantics without
+/// committing the SDK to a specific parser.
 pub type ContentType {
   ApplicationJson
   TextPlain
@@ -11,6 +19,7 @@ pub type ContentType {
   ApplicationOctetStream
   ApplicationXml
   TextXml
+  Wildcard
   UnsupportedContentType(String)
 }
 
@@ -57,6 +66,10 @@ pub fn from_string(content_type: String) -> ContentType {
     "application/octet-stream" -> ApplicationOctetStream
     "application/xml" -> ApplicationXml
     "text/xml" -> TextXml
+    // OpenAPI `*/*` catch-all (Issue #504). Treated as a synonym for
+    // application/octet-stream by the codegen so the generated code
+    // moves bytes through unchanged.
+    "*/*" -> Wildcard
     other ->
       case string.ends_with(other, "+json") {
         True -> ApplicationJson
@@ -99,6 +112,7 @@ pub fn to_string(content_type: ContentType) -> String {
     ApplicationOctetStream -> "application/octet-stream"
     ApplicationXml -> "application/xml"
     TextXml -> "text/xml"
+    Wildcard -> "*/*"
     UnsupportedContentType(s) -> s
   }
 }
@@ -113,6 +127,7 @@ pub fn is_supported(content_type: ContentType) -> Bool {
     ApplicationOctetStream -> True
     ApplicationXml -> True
     TextXml -> True
+    Wildcard -> True
     _ -> False
   }
 }

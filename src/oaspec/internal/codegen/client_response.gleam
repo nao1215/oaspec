@@ -77,7 +77,7 @@ pub fn generate_single_content_response(
   headers: Option(HeadersRecord),
 ) -> se.StringBuilder {
   case content_type.from_string(media_type_name) {
-    content_type.ApplicationOctetStream ->
+    content_type.ApplicationOctetStream | content_type.Wildcard ->
       case media_type.schema {
         Some(_) ->
           body_branch(sb, status_code, variant_name, "bytes", headers, fn(sb) {

@@ -197,7 +197,7 @@ fn request_body_type(
       // response side already does this correctly via
       // `response_inner_type` above; mirror that for the request.
       case content_type.from_string(media_type_name) {
-        content_type.ApplicationOctetStream ->
+        content_type.ApplicationOctetStream | content_type.Wildcard ->
           case media_type.schema {
             Some(_) -> "BitArray"
             None -> "BitArray"
@@ -330,7 +330,8 @@ fn responses_need_types_import(
                 content_type.TextPlain
                 | content_type.ApplicationXml
                 | content_type.TextXml
-                | content_type.ApplicationOctetStream -> False
+                | content_type.ApplicationOctetStream
+                | content_type.Wildcard -> False
                 _ ->
                   case media_type.schema {
                     Some(Reference(..)) -> True
@@ -443,8 +444,9 @@ fn response_inner_type(
           }
         // Issue #304: binary response payloads ride a BitArray variant
         // so handlers can produce real bytes instead of forcing the
-        // payload through `String`.
-        content_type.ApplicationOctetStream ->
+        // payload through `String`. Issue #504: */* shares the same
+        // path; wildcard responses are handed back as raw BitArray.
+        content_type.ApplicationOctetStream | content_type.Wildcard ->
           case media_type.schema {
             Some(_) -> Some("BitArray")
             None -> None

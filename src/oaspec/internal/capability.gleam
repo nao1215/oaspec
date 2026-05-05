@@ -186,6 +186,12 @@ pub fn registry() -> List(Capability) {
       "Plain text request bodies (raw string passthrough; no JSON encoding)",
     ),
     Capability(
+      "*/*",
+      "request",
+      Supported,
+      "Wildcard request bodies (treated as application/octet-stream — raw BitArray passthrough)",
+    ),
+    Capability(
       "+json/+xml suffix",
       "content-type",
       Supported,
@@ -217,6 +223,12 @@ pub fn registry() -> List(Capability) {
       "response",
       Supported,
       "XML passthrough; no structural decoding yet",
+    ),
+    Capability(
+      "*/*",
+      "response",
+      Supported,
+      "Wildcard responses (treated as application/octet-stream — raw BitArray passthrough)",
     ),
     // Server-mode validation restrictions — features the parser accepts
     // but the server-code generator rejects. Names match the phrasing
