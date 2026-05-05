@@ -34,8 +34,8 @@ stops with a diagnostic instead of emitting partial code.
 - Produce readable Gleam types, encoders, decoders, request types, and response
   types
 - Keep unsupported spec shapes explicit and testable
-- Backed by 361 unit tests, ShellSpec CLI tests, 40 integration compile tests,
-  and 264 test fixtures (including 98 OSS-derived edge-case specs)
+- Backed by 366 unit tests, ShellSpec CLI tests, 40 integration compile tests,
+  and 267 test fixtures (including 98 OSS-derived edge-case specs)
 
 API reference: <https://hexdocs.pm/oaspec/>
 
