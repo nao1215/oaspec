@@ -6875,6 +6875,53 @@ pub fn deep_object_primitive_props_client_imports_primitives_case() {
   |> should.be_true()
 }
 
+// --- Issue #523: OAS 3.0 boolean exclusiveMinimum/Maximum ---
+
+/// Regression guard for #523: when the spec uses the OAS 3.0
+/// boolean form `{minimum: N, exclusiveMinimum: true}` the parser
+/// must promote the numeric `minimum` value into the
+/// `exclusive_minimum` slot so the generated guard emits a strict
+/// inequality (`<=` / `>=`) and the failure message says "greater
+/// than" / "less than" (not "at least" / "at most"). Pre-fix the
+/// boolean was silently discarded and boundary values passed
+/// validation.
+pub fn oas30_exclusive_bool_emits_strict_guard_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/guard_oas30_exclusive_bool.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/guard_oas30_exclusive_bool.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Server,
+      validate: True,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(guards_file) =
+    list.find(summary.files, fn(f) { f.path == "guards.gleam" })
+  // Both Integer and Number exclusive-range validators are emitted.
+  string.contains(
+    guards_file.content,
+    "validate_visit_input_count_exclusive_range",
+  )
+  |> should.be_true()
+  string.contains(
+    guards_file.content,
+    "validate_visit_input_ratio_exclusive_range",
+  )
+  |> should.be_true()
+  // Strict-inequality language in the messages.
+  string.contains(guards_file.content, "must be greater than 0")
+  |> should.be_true()
+  string.contains(guards_file.content, "must be less than 100")
+  |> should.be_true()
+  string.contains(guards_file.content, "must be greater than 0.0")
+  |> should.be_true()
+  string.contains(guards_file.content, "must be less than 1.0")
+  |> should.be_true()
+}
+
 // --- Issue #522: optional `$ref` scalar query params ---
 
 /// Regression guard for #522: an optional query parameter whose

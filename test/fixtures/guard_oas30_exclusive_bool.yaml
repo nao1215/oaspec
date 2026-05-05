@@ -1,0 +1,44 @@
+openapi: "3.0.3"
+info:
+  title: OAS 3.0 boolean exclusiveMinimum/Maximum test
+  description: |
+    Issue #523. OAS 3.0 expresses exclusive bounds as a *boolean*
+    flag alongside `minimum` / `maximum`:
+      `minimum: 0, exclusiveMinimum: true` → strict `> 0`
+    Pre-fix the parser only handled OAS 3.1's numeric form, so the
+    boolean was silently dropped: the generated `validate_*_range`
+    used `<` / `>` (inclusive) and the boundary value (e.g.
+    `count == 0`) passed validation when the spec required it to
+    fail.
+  version: "1.0.0"
+paths:
+  /visits:
+    post:
+      operationId: recordVisit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VisitInput" }
+      responses:
+        "200":
+          description: ok
+components:
+  schemas:
+    VisitInput:
+      type: object
+      required: [count, ratio]
+      properties:
+        count:
+          type: integer
+          minimum: 0
+          exclusiveMinimum: true
+          maximum: 100
+          exclusiveMaximum: true
+        ratio:
+          type: number
+          format: double
+          minimum: 0
+          exclusiveMinimum: true
+          maximum: 1
+          exclusiveMaximum: true
