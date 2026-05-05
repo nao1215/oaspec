@@ -98,6 +98,7 @@ pub fn decoder_semantics_test() {
   let _ = support.validate_decode_list_collision_auto_disambiguates_case()
   let _ =
     support.validate_inline_enum_component_collision_auto_disambiguates_case()
+  let _ = support.validate_stripe_dotted_schema_no_longer_collides_case()
   let _ = support.additional_properties_false_emits_unknown_key_check_case()
   let _ = support.oneof_decoder_rejects_multi_branch_matches_case()
   let _ =

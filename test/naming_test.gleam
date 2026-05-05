@@ -147,3 +147,76 @@ pub fn naming_schema_to_type_name_keyword_becomes_pascal_test() {
     |> should.equal(expected)
   })
 }
+
+// Issue #494: a `.` in the schema name is encoded as a `Dot` word
+// boundary so the dot survives the snake/Pascal pipelines. Stripe's
+// `payment_intent.processing` and `payment_intent_processing` would
+// otherwise both map to `PaymentIntentProcessing` and trigger the
+// `validate_unique_schema_names` hard error.
+
+pub fn naming_to_pascal_case_dot_becomes_dot_word_boundary_test() {
+  naming.to_pascal_case("payment_intent.processing")
+  |> should.equal("PaymentIntentDotProcessing")
+  naming.to_pascal_case("payment_intent_processing")
+  |> should.equal("PaymentIntentProcessing")
+  naming.to_pascal_case("billing.alert.triggered")
+  |> should.equal("BillingDotAlertDotTriggered")
+  naming.to_pascal_case("billing.alert_triggered")
+  |> should.equal("BillingDotAlertTriggered")
+}
+
+pub fn naming_to_snake_case_dot_becomes_dot_word_boundary_test() {
+  naming.to_snake_case("payment_intent.processing")
+  |> should.equal("payment_intent_dot_processing")
+  naming.to_snake_case("payment_intent_processing")
+  |> should.equal("payment_intent_processing")
+}
+
+// Edge cases for the `.` → `_dot_` encoding (CodeRabbit on PR #499).
+// Behavior chosen for predictability; documenting it locks in the
+// shape so future refactors can't silently drift.
+
+pub fn naming_dot_encoding_consecutive_dots_test() {
+  // `foo..bar` becomes two consecutive `_dot_` segments. The
+  // word_separator regex collapses runs of `_`/`.`/etc. so the
+  // PascalCase output reads as `FooDotDotBar`.
+  naming.to_pascal_case("foo..bar") |> should.equal("FooDotDotBar")
+  naming.to_snake_case("foo..bar") |> should.equal("foo_dot_dot_bar")
+}
+
+pub fn naming_dot_encoding_leading_and_trailing_dot_test() {
+  // A leading `.` produces a leading `Dot` word; a trailing `.`
+  // produces a trailing `Dot` word. Both still PascalCase and
+  // snake_case to valid Gleam identifiers.
+  naming.to_pascal_case(".foo") |> should.equal("DotFoo")
+  naming.to_snake_case(".foo") |> should.equal("dot_foo")
+  naming.to_pascal_case("foo.") |> should.equal("FooDot")
+  naming.to_snake_case("foo.") |> should.equal("foo_dot")
+}
+
+pub fn naming_dot_encoding_literal_underscore_dot_underscore_test() {
+  // A literal `_dot_` already in the input is escaped to
+  // `_dot_literal_` so a spec that authored `a_dot_b` and a sibling
+  // `a.b` produce distinct Gleam type names.
+  naming.to_pascal_case("a_dot_b") |> should.equal("ADotLiteralB")
+  naming.to_pascal_case("a.b") |> should.equal("ADotB")
+  naming.to_snake_case("a_dot_b") |> should.equal("a_dot_literal_b")
+  naming.to_snake_case("a.b") |> should.equal("a_dot_b")
+}
+
+// Issue #492: inline-enum disambiguation against component schema names.
+
+pub fn naming_inline_enum_type_name_no_collision_returns_base_test() {
+  naming.inline_enum_type_name("foo", "status", ["bar", "baz"])
+  |> should.equal("FooStatus")
+}
+
+pub fn naming_inline_enum_type_name_collision_appends_numeric_suffix_test() {
+  naming.inline_enum_type_name("foo", "status", ["foo_status"])
+  |> should.equal("FooStatus2")
+}
+
+pub fn naming_inline_enum_type_name_chained_collision_bumps_suffix_test() {
+  naming.inline_enum_type_name("foo", "status", ["foo_status", "foo_status_2"])
+  |> should.equal("FooStatus3")
+}
