@@ -10,6 +10,51 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-05-05
+
+### Fixed
+
+- **codegen(`XxxList` decoder)**: when a spec declared both `Foo` and
+  `FooList` as component schemas, the synthetic
+  `decode_foo_list` helper collided with the user-named decoder
+  for `FooList` and the validator hard-rejected the spec with
+  `decode_foo_list ... collides with the synthetic list decoder`.
+  Real-world specs (Kubernetes hits this 30+ times in `api/v1`,
+  Stripe once) cannot be renamed. The synthetic decoder now shifts
+  to `decode_foo_list_items` when `<Schema>List` is also declared
+  and stays at `decode_foo_list` otherwise; the user-named
+  `FooList` decoder keeps the natural name. Issue #493 (PR #497).
+- **codegen(array-of-`$ref` responses)**: a response schema typed as
+  `array` with `items: $ref` decoded through a missing
+  `decode_<name>_list(text)` wrapper for any non-object item
+  schema (enum, primitive, oneOf, anyOf). It now parses with
+  `json.parse(text, dyn_decode.list(decode.<name>_decoder()))`
+  which is emitted unconditionally for every schema kind, fixing
+  a pre-existing bug surfaced during the issue #493 review (PR #497).
+- **codegen(inline-enum vs component collision)**: GitHub's spec
+  declares `code-scanning-variant-analysis-status` as a top-level
+  component (4-value enum) AND a separate
+  `code-scanning-variant-analysis` whose inline `status` property
+  is a 6-value enum. Both previously generated `pub type
+  CodeScanningVariantAnalysisStatus { ... }` and `gleam build`
+  rejected the output as a duplicate type definition. The codegen
+  now disambiguates the inline enum's name with a numeric suffix
+  (`CodeScanningVariantAnalysisStatus2`) when a component schema
+  already claims the bare name; the component schema keeps its
+  natural name. Issue #492 (PR #498).
+- **naming(dotted schema names)**: Stripe's spec declares pairs of
+  schemas that differ only by `.` vs `_` — e.g.
+  `payment_intent.processing` and `payment_intent_processing` —
+  and the validator hard-rejected them with `Schema names ... all
+  map to Gleam type ... — rename one to avoid the collision`. The
+  naming pipeline now encodes `.` as a `_dot_` word boundary so
+  the dot survives both PascalCase (`PaymentIntentDotProcessing`)
+  and snake_case (`payment_intent_dot_processing`) output, keeping
+  Stripe-style dotted-vs-underscored siblings distinguishable. A
+  literal `_dot_` already in the input is escaped to
+  `_dot_literal_` first so authors using both forms still produce
+  distinct names. Issue #494 (PR #499).
+
 ## [0.50.0] - 2026-05-05
 
 ### Breaking
