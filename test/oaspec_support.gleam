@@ -1526,6 +1526,10 @@ paths:
 }
 
 fn make_ctx_from_spec(spec) -> context.Context {
+  make_ctx_from_spec_with_mode(spec, config.Both)
+}
+
+fn make_ctx_from_spec_with_mode(spec, mode) -> context.Context {
   let assert Ok(resolved) = resolve.resolve(spec)
   let cfg =
     config.new(
@@ -1533,7 +1537,7 @@ fn make_ctx_from_spec(spec) -> context.Context {
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
-      mode: config.Both,
+      mode: mode,
       validate: False,
     )
   context.new(resolved, cfg)
@@ -1703,7 +1707,13 @@ pub fn validate_accepts_multipart_form_data_case() {
   |> should.be_false()
 }
 
-pub fn validate_rejects_unstringifiable_multipart_fields_case() {
+pub fn validate_accepts_object_multipart_fields_in_client_mode_case() {
+  // Issue #503: an object-typed multipart field (e.g. Stripe's
+  // `file_link_data: object`) is encoded as a JSON-bodied part and
+  // must pass client-mode validation. Server-mode validation still
+  // restricts multipart fields to primitive scalars / primitive
+  // arrays, so this test pins the client-mode acceptance boundary
+  // explicitly.
   let yaml =
     "
 openapi: 3.0.3
@@ -1734,13 +1744,13 @@ components:
         title: { type: string }
 "
   let assert Ok(spec) = parser.parse_string(yaml)
-  let ctx = make_ctx_from_spec(spec)
+  let ctx = make_ctx_from_spec_with_mode(spec, config.Client)
   let errors = validate.validate(ctx)
   let error_strings = list.map(errors, validate.error_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "multipart/form-data fields")
   })
-  |> should.be_true()
+  |> should.be_false()
 }
 
 pub fn validate_broken_spec_accepts_inline_oneof_after_hoisting_case() {
@@ -6695,6 +6705,75 @@ paths:
   let assert [Diagnostic(message: msg, ..)] = errors
   // Error message must mention XML as a supported type
   string.contains(msg, "xml")
+  |> should.be_true()
+}
+
+// --- Issue #503: multipart/form-data object/array fields ---
+
+/// Object-typed and array-typed properties on a multipart/form-data
+/// schema must pass validation in client mode (the OAS 3 spec
+/// allows them; Stripe's `POST /v1/files` is the motivating real-
+/// world example with `expand: array of strings` and
+/// `file_link_data: object`).
+pub fn multipart_object_array_fields_pass_validation_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/multipart_object_array.yaml")
+  let assert Ok(resolved) = resolve.resolve(unresolved)
+  let spec = hoist.hoist(resolved)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.new(
+        input: "test/fixtures/multipart_object_array.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Client,
+        validate: False,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  errors |> list.is_empty |> should.be_true()
+}
+
+/// End-to-end client generation must produce code that handles array
+/// fields by folding the input list into one part per element and
+/// object fields by emitting a single JSON-encoded part with
+/// `Content-Type: application/json`.
+pub fn multipart_object_array_fields_emit_expected_parts_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/multipart_object_array.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/multipart_object_array.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(client_file) =
+    list.find(summary.files, fn(f) { f.path == "client.gleam" })
+  // Array field `expand` is folded into per-element parts.
+  string.contains(client_file.content, "list.fold(v, parts, fn(acc, item)")
+  |> should.be_true()
+  string.contains(
+    client_file.content,
+    "form-data; name=\\\"expand\\\"\\r\\n\\r\\n",
+  )
+  |> should.be_true()
+  // Object field `file_link_data` is emitted as a JSON part.
+  string.contains(
+    client_file.content,
+    "form-data; name=\\\"file_link_data\\\"\\r\\nContent-Type: application/json",
+  )
+  |> should.be_true()
+  string.contains(
+    client_file.content,
+    "json.to_string(encode.encode_post_files_request_file_link_data_json(",
+  )
   |> should.be_true()
 }
 

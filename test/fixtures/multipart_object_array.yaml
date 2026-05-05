@@ -1,0 +1,56 @@
+openapi: "3.0.3"
+info:
+  title: Multipart Object/Array Fields Test
+  description: |
+    Issue #503. Stripe's `POST /v1/files` accepts a multipart/form-data
+    body whose fields include an `array of strings` (`expand`) and an
+    `object` (`file_link_data`). Both shapes should pass validation in
+    client mode and produce a working client.
+  version: "1.0.0"
+paths:
+  /files:
+    post:
+      operationId: postFiles
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+                - purpose
+              properties:
+                file:
+                  type: string
+                  format: binary
+                purpose:
+                  type: string
+                  enum:
+                    - account_requirement
+                    - identity_document
+                expand:
+                  type: array
+                  items:
+                    type: string
+                file_link_data:
+                  type: object
+                  properties:
+                    create:
+                      type: boolean
+                    expires_at:
+                      type: integer
+                    metadata:
+                      type: object
+                      additionalProperties:
+                        type: string
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string

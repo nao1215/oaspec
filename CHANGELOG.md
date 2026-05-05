@@ -12,6 +12,21 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Added
 
+- **codegen(multipart object/array fields)**: `multipart/form-data`
+  request bodies whose individual fields are arrays or objects now
+  pass client-mode validation and produce working client code. The
+  generator emits one part per element for array fields (`expand[]`
+  shaped, but with the literal field name repeated as the OAS 3
+  multipart serialization rules prescribe) and a single part with
+  `Content-Type: application/json` carrying the JSON-encoded value
+  for object fields. Stripe's `POST /v1/files` is the motivating
+  real-world endpoint — `expand: array of strings` and
+  `file_link_data: object` were previously rejected with
+  "multipart/form-data fields must be string, integer, number,
+  boolean, binary, or string enums." Server-mode multipart fields
+  are still restricted to primitive scalars / primitive arrays;
+  lifting that restriction is tracked separately. Issue #503.
+
 - **codegen(`*/*` content type)**: OpenAPI's `*/*` catch-all media type
   is now recognised as a supported request and response content type.
   Specs like Kubernetes' OpenAPI v3 use `*/*` heavily for proxy

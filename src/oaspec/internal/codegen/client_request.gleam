@@ -1,3 +1,4 @@
+import gleam/bool
 import gleam/dict.{type Dict}
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -317,61 +318,43 @@ pub fn generate_multipart_body(
       let #(field_name, field_schema) = prop
       let gleam_field = naming.to_snake_case(field_name)
       let is_required = list.contains(required_fields, field_name)
-      let is_binary = multipart_field_is_binary(field_schema, ctx)
-      // Convert value to string for multipart encoding
-      let to_string_fn = case is_binary {
-        True -> ""
-        False -> multipart_field_to_string_fn(field_schema, ctx)
-      }
-      let part_header_binary =
-        "\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
-        <> field_name
-        <> "\\\"; filename=\\\""
-        <> field_name
-        <> "\\\"\\r\\nContent-Type: application/octet-stream\\r\\n\\r\\n\""
-      let part_header_text =
-        "\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
-        <> field_name
-        <> "\\\"\\r\\n\\r\\n\""
-      let part_header = case is_binary {
-        True -> part_header_binary
-        False -> part_header_text
-      }
-      case is_required {
-        True -> {
-          let value_expr = case to_string_fn {
-            "" -> "body." <> gleam_field
-            fn_name -> fn_name <> "(body." <> gleam_field <> ")"
-          }
-          sb
-          |> se.indent(
-            1,
-            "let parts = ["
-              <> part_header
-              <> " <> "
-              <> value_expr
-              <> " <> \"\\r\\n\", ..parts]",
+      case multipart_field_kind(field_schema, ctx) {
+        MultipartArrayKind(items) ->
+          emit_multipart_array_field(
+            sb,
+            field_name,
+            gleam_field,
+            items,
+            is_required,
+            ctx,
           )
-        }
-        False -> {
-          // Optional field: wrap in case body.<field> { Some(v) -> ... None -> parts }
-          let value_expr = case to_string_fn {
-            "" -> "v"
-            fn_name -> fn_name <> "(v)"
-          }
-          sb
-          |> se.indent(1, "let parts = case body." <> gleam_field <> " {")
-          |> se.indent(
-            2,
-            "Some(v) -> ["
-              <> part_header
-              <> " <> "
-              <> value_expr
-              <> " <> \"\\r\\n\", ..parts]",
+        MultipartObjectKind ->
+          emit_multipart_object_field(
+            sb,
+            field_name,
+            gleam_field,
+            field_schema,
+            is_required,
+            ctx,
           )
-          |> se.indent(2, "None -> parts")
-          |> se.indent(1, "}")
-        }
+        MultipartBinaryKind ->
+          emit_multipart_simple_field(
+            sb,
+            field_name,
+            gleam_field,
+            "",
+            True,
+            is_required,
+          )
+        MultipartScalarKind ->
+          emit_multipart_simple_field(
+            sb,
+            field_name,
+            gleam_field,
+            multipart_field_to_string_fn(field_schema, ctx),
+            False,
+            is_required,
+          )
       }
     })
 
@@ -398,6 +381,218 @@ pub fn multipart_field_is_binary(
         _ -> False
       }
     _ -> False
+  }
+}
+
+/// Issue #503: dispatch each multipart field by its high-level shape so
+/// the generator can emit per-element parts for arrays and a single
+/// JSON-encoded part for objects, while keeping the existing scalar /
+/// binary paths unchanged.
+type MultipartFieldKind {
+  MultipartScalarKind
+  MultipartBinaryKind
+  MultipartArrayKind(items: schema.SchemaRef)
+  MultipartObjectKind
+}
+
+fn multipart_field_kind(
+  field_schema: schema.SchemaRef,
+  ctx: Context,
+) -> MultipartFieldKind {
+  use <- bool.guard(
+    multipart_field_is_binary(field_schema, ctx),
+    MultipartBinaryKind,
+  )
+  case field_schema {
+    Inline(schema.ArraySchema(items:, ..)) -> MultipartArrayKind(items)
+    Inline(schema.ObjectSchema(..)) -> MultipartObjectKind
+    Reference(..) as schema_ref ->
+      case context.resolve_schema_ref(schema_ref, ctx) {
+        Ok(schema.ArraySchema(items:, ..)) -> MultipartArrayKind(items)
+        Ok(schema.ObjectSchema(..)) -> MultipartObjectKind
+        _ -> MultipartScalarKind
+      }
+    _ -> MultipartScalarKind
+  }
+}
+
+/// Emit a single multipart part for a scalar or binary field. The
+/// scalar path stringifies the value (or uses it directly when the
+/// schema is already `String`); the binary path emits the
+/// `Content-Type: application/octet-stream` header and passes the
+/// value through unchanged.
+fn emit_multipart_simple_field(
+  sb: se.StringBuilder,
+  field_name: String,
+  gleam_field: String,
+  to_string_fn: String,
+  is_binary: Bool,
+  is_required: Bool,
+) -> se.StringBuilder {
+  let part_header_binary =
+    "\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
+    <> field_name
+    <> "\\\"; filename=\\\""
+    <> field_name
+    <> "\\\"\\r\\nContent-Type: application/octet-stream\\r\\n\\r\\n\""
+  let part_header_text =
+    "\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
+    <> field_name
+    <> "\\\"\\r\\n\\r\\n\""
+  let part_header = case is_binary {
+    True -> part_header_binary
+    False -> part_header_text
+  }
+  case is_required {
+    True -> {
+      let value_expr = case to_string_fn {
+        "" -> "body." <> gleam_field
+        fn_name -> fn_name <> "(body." <> gleam_field <> ")"
+      }
+      sb
+      |> se.indent(
+        1,
+        "let parts = ["
+          <> part_header
+          <> " <> "
+          <> value_expr
+          <> " <> \"\\r\\n\", ..parts]",
+      )
+    }
+    False -> {
+      let value_expr = case to_string_fn {
+        "" -> "v"
+        fn_name -> fn_name <> "(v)"
+      }
+      sb
+      |> se.indent(1, "let parts = case body." <> gleam_field <> " {")
+      |> se.indent(
+        2,
+        "Some(v) -> ["
+          <> part_header
+          <> " <> "
+          <> value_expr
+          <> " <> \"\\r\\n\", ..parts]",
+      )
+      |> se.indent(2, "None -> parts")
+      |> se.indent(1, "}")
+    }
+  }
+}
+
+/// Issue #503: emit one multipart part per element of an array field,
+/// folding the input list into the running `parts` accumulator. Each
+/// element shares the field name (`name="expand"` repeated) so the
+/// receiver assembles the array from the repeated parts. Optional
+/// arrays guard the fold behind a `Some(v) -> ... None -> parts` arm.
+fn emit_multipart_array_field(
+  sb: se.StringBuilder,
+  field_name: String,
+  gleam_field: String,
+  items: schema.SchemaRef,
+  is_required: Bool,
+  ctx: Context,
+) -> se.StringBuilder {
+  let part_header =
+    "\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
+    <> field_name
+    <> "\\\"\\r\\n\\r\\n\""
+  let item_to_string =
+    schema_dispatch.schema_ref_to_string_expr(items, "item", ctx)
+  let fold_expr = fn(list_expr: String) -> String {
+    "list.fold("
+    <> list_expr
+    <> ", parts, fn(acc, item) { ["
+    <> part_header
+    <> " <> "
+    <> item_to_string
+    <> " <> \"\\r\\n\", ..acc] })"
+  }
+  case is_required {
+    True ->
+      sb
+      |> se.indent(1, "let parts = " <> fold_expr("body." <> gleam_field))
+    False ->
+      sb
+      |> se.indent(1, "let parts = case body." <> gleam_field <> " {")
+      |> se.indent(2, "Some(v) -> " <> fold_expr("v"))
+      |> se.indent(2, "None -> parts")
+      |> se.indent(1, "}")
+  }
+}
+
+/// Issue #503: emit a multipart part for an object field. Per OAS 3
+/// the default serialization is a single part with
+/// `Content-Type: application/json` carrying the JSON-encoded value.
+/// The encoder name is derived from the post-hoist schema reference;
+/// inline objects survive only when they would not otherwise be
+/// hoisted (rare in real specs), in which case we fall back to the
+/// op-id-derived synthetic name produced by `ir_build`.
+fn emit_multipart_object_field(
+  sb: se.StringBuilder,
+  field_name: String,
+  gleam_field: String,
+  field_schema: schema.SchemaRef,
+  is_required: Bool,
+  ctx: Context,
+) -> se.StringBuilder {
+  let part_header =
+    "\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
+    <> field_name
+    <> "\\\"\\r\\nContent-Type: application/json\\r\\n\\r\\n\""
+  let encoded_value = fn(input_expr: String) -> String {
+    multipart_object_encode_expr(field_schema, input_expr, ctx)
+  }
+  case is_required {
+    True ->
+      sb
+      |> se.indent(
+        1,
+        "let parts = ["
+          <> part_header
+          <> " <> "
+          <> encoded_value("body." <> gleam_field)
+          <> " <> \"\\r\\n\", ..parts]",
+      )
+    False ->
+      sb
+      |> se.indent(1, "let parts = case body." <> gleam_field <> " {")
+      |> se.indent(
+        2,
+        "Some(v) -> ["
+          <> part_header
+          <> " <> "
+          <> encoded_value("v")
+          <> " <> \"\\r\\n\", ..parts]",
+      )
+      |> se.indent(2, "None -> parts")
+      |> se.indent(1, "}")
+  }
+}
+
+fn multipart_object_encode_expr(
+  field_schema: schema.SchemaRef,
+  input_expr: String,
+  _ctx: Context,
+) -> String {
+  case field_schema {
+    Reference(name:, ..) ->
+      // The encoder module exports `encode_<snake>_json/1` for every
+      // hoisted component schema; call it through the `encode` import
+      // alias so the generated client compiles unchanged regardless of
+      // whether `encode.gleam` lives in the same package.
+      "json.to_string(encode.encode_"
+      <> naming.to_snake_case(name)
+      <> "_json("
+      <> input_expr
+      <> "))"
+    _ ->
+      // Inline object schemas survive only when hoist intentionally
+      // left them inline; fall back to a `string.inspect` so the
+      // generated code at least compiles. Real specs (Stripe) put
+      // these objects under named components, which take the
+      // Reference branch above.
+      "string.inspect(" <> input_expr <> ")"
   }
 }
 
