@@ -42,18 +42,83 @@ pub fn status_code_to_string(code: HttpStatusCode) -> String {
 /// Shared HTTP status code utilities for code generation.
 /// Get a human-readable suffix for a given HTTP status code.
 /// Used to build anonymous type names like "ListPetsResponseOk".
+///
+/// Issue #525: every code in the IANA HTTP Status Code Registry (and
+/// RFC 9110 §15) gets a semantic PascalCased reason-phrase suffix —
+/// previously only a handful of common codes (200, 201, 204, 400,
+/// 401, 403, 404, 409, 422, 500) were named, and the rest fell back
+/// to the numeric `Status<N>` form, which made the generated
+/// response variants inconsistent (200 → `Ok`, 202 → `Status202`).
 pub fn status_code_suffix(code: HttpStatusCode) -> String {
   case code {
+    // 1xx Informational
+    Status(100) -> "Continue"
+    Status(101) -> "SwitchingProtocols"
+    Status(102) -> "Processing"
+    Status(103) -> "EarlyHints"
+    // 2xx Success
     Status(200) -> "Ok"
     Status(201) -> "Created"
+    Status(202) -> "Accepted"
+    Status(203) -> "NonAuthoritativeInformation"
     Status(204) -> "NoContent"
+    Status(205) -> "ResetContent"
+    Status(206) -> "PartialContent"
+    Status(207) -> "MultiStatus"
+    Status(208) -> "AlreadyReported"
+    Status(226) -> "ImUsed"
+    // 3xx Redirection
+    Status(300) -> "MultipleChoices"
+    Status(301) -> "MovedPermanently"
+    Status(302) -> "Found"
+    Status(303) -> "SeeOther"
+    Status(304) -> "NotModified"
+    Status(305) -> "UseProxy"
+    Status(307) -> "TemporaryRedirect"
+    Status(308) -> "PermanentRedirect"
+    // 4xx Client Error
     Status(400) -> "BadRequest"
     Status(401) -> "Unauthorized"
+    Status(402) -> "PaymentRequired"
     Status(403) -> "Forbidden"
     Status(404) -> "NotFound"
+    Status(405) -> "MethodNotAllowed"
+    Status(406) -> "NotAcceptable"
+    Status(407) -> "ProxyAuthenticationRequired"
+    Status(408) -> "RequestTimeout"
     Status(409) -> "Conflict"
+    Status(410) -> "Gone"
+    Status(411) -> "LengthRequired"
+    Status(412) -> "PreconditionFailed"
+    Status(413) -> "ContentTooLarge"
+    Status(414) -> "UriTooLong"
+    Status(415) -> "UnsupportedMediaType"
+    Status(416) -> "RangeNotSatisfiable"
+    Status(417) -> "ExpectationFailed"
+    Status(418) -> "IAmATeapot"
+    Status(421) -> "MisdirectedRequest"
     Status(422) -> "UnprocessableEntity"
+    Status(423) -> "Locked"
+    Status(424) -> "FailedDependency"
+    Status(425) -> "TooEarly"
+    Status(426) -> "UpgradeRequired"
+    Status(428) -> "PreconditionRequired"
+    Status(429) -> "TooManyRequests"
+    Status(431) -> "RequestHeaderFieldsTooLarge"
+    Status(451) -> "UnavailableForLegalReasons"
+    // 5xx Server Error
     Status(500) -> "InternalServerError"
+    Status(501) -> "NotImplemented"
+    Status(502) -> "BadGateway"
+    Status(503) -> "ServiceUnavailable"
+    Status(504) -> "GatewayTimeout"
+    Status(505) -> "HttpVersionNotSupported"
+    Status(506) -> "VariantAlsoNegotiates"
+    Status(507) -> "InsufficientStorage"
+    Status(508) -> "LoopDetected"
+    Status(510) -> "NotExtended"
+    Status(511) -> "NetworkAuthenticationRequired"
+    // Unknown / non-standard codes still fall back to Status<N>.
     Status(n) -> "Status" <> int.to_string(n)
     StatusRange(1) -> "Status1xx"
     StatusRange(2) -> "Status2xx"
