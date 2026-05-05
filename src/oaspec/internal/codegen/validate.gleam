@@ -358,45 +358,94 @@ fn validate_server_structured_param(
   param: spec.Parameter(Resolved),
   ctx: Context,
 ) -> List(Diagnostic) {
-  case config.mode(context.config(ctx)) {
-    config.Client -> []
-    _ -> {
-      let schema_obj = resolve_schema_object(spec.parameter_schema(param), ctx)
-      let array_errors = case param.in_, schema_obj {
-        spec.InQuery, Some(ArraySchema(items: Inline(StringSchema(..)), ..))
-        | spec.InQuery, Some(ArraySchema(items: Inline(IntegerSchema(..)), ..))
-        | spec.InQuery, Some(ArraySchema(items: Inline(NumberSchema(..)), ..))
-        | spec.InQuery, Some(ArraySchema(items: Inline(BooleanSchema(..)), ..))
-        -> []
-        spec.InQuery, Some(ArraySchema(..)) -> [
-          diagnostic.validation_error_server(
+  let schema_obj = resolve_schema_object(spec.parameter_schema(param), ctx)
+  // Bug fix: array parameters with non-primitive items panic in
+  // both client and server codegen with "inline composite schema
+  // reached to_string_fn after hoist" because `to_string_fn` has no
+  // path for composite item types — even after hoist promotes the
+  // item to a `$ref`, `to_string_fn` recurses into the resolved
+  // ObjectSchema and hits the same panic. Reject in BOTH modes
+  // when the items resolve to a non-primitive shape.
+  let array_errors = case param.in_, schema_obj {
+    spec.InQuery, Some(ArraySchema(items:, ..)) ->
+      case array_items_resolve_primitive(items, ctx) {
+        True -> []
+        False -> [
+          diagnostic.validation_error_both(
             path: path,
-            detail: "Query array parameters are only supported for inline primitive items in server code generation.",
+            detail: "Query array parameters are only supported for primitive items (string, integer, number, boolean), whether inline or via $ref.",
             hint: Some(
-              "Use inline primitive items (string, integer, number, boolean) for array query parameters.",
+              "Replace the item schema with a primitive type (string, integer, number, boolean).",
             ),
           ),
         ]
-        spec.InHeader, Some(ArraySchema(items: Inline(StringSchema(..)), ..))
-        | spec.InHeader, Some(ArraySchema(items: Inline(IntegerSchema(..)), ..))
-        | spec.InHeader, Some(ArraySchema(items: Inline(NumberSchema(..)), ..))
-        | spec.InHeader, Some(ArraySchema(items: Inline(BooleanSchema(..)), ..))
-        -> []
-        spec.InHeader, Some(ArraySchema(..)) -> [
-          diagnostic.validation_error_server(
-            path: path,
-            detail: "Header array parameters are only supported for inline primitive items in server code generation.",
-            hint: Some(
-              "Use inline primitive items (string, integer, number, boolean) for array header parameters.",
-            ),
-          ),
-        ]
-        _, _ -> []
       }
-      let deep_object_errors =
-        validate_server_deep_object_param(path, param, ctx)
-      list.flatten([array_errors, deep_object_errors])
-    }
+    spec.InHeader, Some(ArraySchema(items:, ..)) ->
+      case array_items_resolve_primitive(items, ctx) {
+        True -> []
+        False -> [
+          diagnostic.validation_error_both(
+            path: path,
+            detail: "Header array parameters are only supported for primitive items (string, integer, number, boolean), whether inline or via $ref.",
+            hint: Some(
+              "Replace the item schema with a primitive type (string, integer, number, boolean).",
+            ),
+          ),
+        ]
+      }
+    // CodeRabbit follow-up: cookie array params take the same
+    // exploded-array codegen path as query/header (see
+    // `client_request.generate_exploded_array_query_param`-style
+    // emission), so a non-primitive item schema would panic in
+    // `to_string_fn` for them too. Reject in both modes.
+    spec.InCookie, Some(ArraySchema(items:, ..)) ->
+      case array_items_resolve_primitive(items, ctx) {
+        True -> []
+        False -> [
+          diagnostic.validation_error_both(
+            path: path,
+            detail: "Cookie array parameters are only supported for primitive items (string, integer, number, boolean), whether inline or via $ref.",
+            hint: Some(
+              "Replace the item schema with a primitive type (string, integer, number, boolean).",
+            ),
+          ),
+        ]
+      }
+    _, _ -> []
+  }
+  // The deepObject server-only constraint (primitive scalars /
+  // primitive arrays only) stays gated to server mode — the client
+  // emitter handles nested objects post-#502.
+  let deep_object_errors = case config.mode(context.config(ctx)) {
+    config.Client -> []
+    _ -> validate_server_deep_object_param(path, param, ctx)
+  }
+  list.flatten([array_errors, deep_object_errors])
+}
+
+/// True iff `items` resolves to a primitive scalar shape (string,
+/// integer, number, boolean), whether the schema is inline or
+/// referenced through `$ref`. Hoist may have promoted an inline
+/// primitive into a component during preprocessing, so a
+/// `Reference` here is not automatically safe — we have to look at
+/// what the ref points at.
+fn array_items_resolve_primitive(items: SchemaRef, ctx: Context) -> Bool {
+  case items {
+    Inline(StringSchema(..))
+    | Inline(IntegerSchema(..))
+    | Inline(NumberSchema(..))
+    | Inline(BooleanSchema(..)) -> True
+    Reference(..) ->
+      case context.resolve_schema_ref(items, ctx) {
+        Ok(StringSchema(..))
+        | Ok(IntegerSchema(..))
+        | Ok(NumberSchema(..))
+        | Ok(BooleanSchema(..)) -> True
+        Ok(_) -> False
+        // nolint: thrown_away_error -- unresolved refs surface elsewhere; here we only need the primitive/non-primitive distinction
+        Error(_) -> False
+      }
+    _ -> False
   }
 }
 
@@ -755,12 +804,19 @@ fn validate_server_form_urlencoded_request_body(
   content_keys: List(String),
   ctx: Context,
 ) -> List(Diagnostic) {
-  case config.mode(context.config(ctx)) {
+  // Bug fix: nested arrays inside a form-urlencoded body's nested
+  // objects panic the client codegen too — `generate_form_nested_object`
+  // routes them through `multipart_field_to_string_fn`, which calls
+  // `to_string_fn` on an Inline ArraySchema and hits the
+  // "inline schema reached to_string_fn after hoist" panic. Reject
+  // those shapes in BOTH modes; the server-mode-only multi-content
+  // restriction stays gated to server.
+  let server_mode_errors = case config.mode(context.config(ctx)) {
     config.Client -> []
     _ ->
       case dict.get(content, "application/x-www-form-urlencoded") {
-        Ok(media_type) -> {
-          let content_type_errors = case list.length(content_keys) > 1 {
+        Ok(_) ->
+          case list.length(content_keys) > 1 {
             True -> [
               diagnostic.validation_error_server(
                 path: op_id <> ".requestBody",
@@ -772,35 +828,70 @@ fn validate_server_form_urlencoded_request_body(
             ]
             False -> []
           }
-          let field_errors = case
-            resolve_schema_object(media_type.schema, ctx)
-          {
-            Some(ObjectSchema(properties:, ..)) ->
-              dict.to_list(properties)
-              |> list.flat_map(fn(entry) {
-                let #(field_name, field_schema) = entry
-                case
-                  form_urlencoded_server_field_supported(field_schema, ctx, 0)
-                {
-                  True -> []
-                  False -> [
-                    diagnostic.validation_error_server(
-                      path: op_id <> ".requestBody.form." <> field_name,
-                      detail: "application/x-www-form-urlencoded server request bodies only support primitive scalars, primitive arrays, and nested objects with primitive leaves (max 5 levels).",
-                      hint: Some(
-                        "Simplify to primitive scalars, primitive arrays, or shallow nested objects.",
-                      ),
-                    ),
-                  ]
-                }
-              })
-            _ -> []
-          }
-          list.append(content_type_errors, field_errors)
-        }
         // nolint: thrown_away_error -- absence of the content type means there is nothing to validate here
         Error(_) -> []
       }
+  }
+
+  let field_errors = case
+    dict.get(content, "application/x-www-form-urlencoded")
+  {
+    Ok(media_type) ->
+      case resolve_schema_object(media_type.schema, ctx) {
+        Some(ObjectSchema(properties:, ..)) ->
+          dict.to_list(properties)
+          |> list.flat_map(fn(entry) {
+            let #(field_name, field_schema) = entry
+            case form_urlencoded_field_codegen_safe(field_schema, ctx, 0) {
+              True -> []
+              False -> [
+                diagnostic.validation_error_both(
+                  path: op_id <> ".requestBody.form." <> field_name,
+                  detail: "application/x-www-form-urlencoded request bodies only support primitive scalars, primitive arrays at the top level, and nested objects with primitive leaves (max 5 levels). Nested arrays-within-objects, oneOf, anyOf, and allOf properties are not supported in either client or server codegen.",
+                  hint: Some(
+                    "Simplify to primitive scalars, primitive arrays at the top level, or shallow nested objects with primitive leaves.",
+                  ),
+                ),
+              ]
+            }
+          })
+        _ -> []
+      }
+    // nolint: thrown_away_error -- absence of the content type means there is nothing to validate here
+    Error(_) -> []
+  }
+  list.append(server_mode_errors, field_errors)
+}
+
+/// Tighter form-urlencoded shape predicate that prevents the
+/// generator from recursing into a path it can't render. Mirrors
+/// `form_urlencoded_server_field_supported` but rejects nested
+/// arrays (an array nested inside an object property), which the
+/// client emitter otherwise sends through `to_string_fn` and
+/// crashes.
+fn form_urlencoded_field_codegen_safe(
+  schema_ref: SchemaRef,
+  ctx: Context,
+  depth: Int,
+) -> Bool {
+  case resolve_schema_object(Some(schema_ref), ctx) {
+    Some(StringSchema(..))
+    | Some(IntegerSchema(..))
+    | Some(NumberSchema(..))
+    | Some(BooleanSchema(..)) -> True
+    Some(ArraySchema(items:, ..)) if depth == 0 ->
+      form_urlencoded_server_array_item_supported(items, ctx)
+    // Arrays nested inside object properties are not handled by
+    // the generator (post-hoist they survive as Inline ArraySchema
+    // and `multipart_field_to_string_fn` panics on them).
+    Some(ArraySchema(..)) -> False
+    Some(ObjectSchema(properties:, ..)) if depth < 5 ->
+      dict.to_list(properties)
+      |> list.all(fn(entry) {
+        let #(_, child_schema) = entry
+        form_urlencoded_field_codegen_safe(child_schema, ctx, depth + 1)
+      })
+    _ -> False
   }
 }
 
@@ -890,28 +981,6 @@ fn validate_server_multipart_request_body(
         // nolint: thrown_away_error -- absence of the content type means there is nothing to validate here
         Error(_) -> []
       }
-  }
-}
-
-fn form_urlencoded_server_field_supported(
-  schema_ref: SchemaRef,
-  ctx: Context,
-  depth: Int,
-) -> Bool {
-  case resolve_schema_object(Some(schema_ref), ctx) {
-    Some(StringSchema(..))
-    | Some(IntegerSchema(..))
-    | Some(NumberSchema(..))
-    | Some(BooleanSchema(..)) -> True
-    Some(ArraySchema(items:, ..)) ->
-      form_urlencoded_server_array_item_supported(items, ctx)
-    Some(ObjectSchema(properties:, ..)) if depth < 5 ->
-      dict.to_list(properties)
-      |> list.all(fn(entry) {
-        let #(_, child_schema) = entry
-        form_urlencoded_server_field_supported(child_schema, ctx, depth + 1)
-      })
-    _ -> False
   }
 }
 

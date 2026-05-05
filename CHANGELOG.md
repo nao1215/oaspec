@@ -10,6 +10,51 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Fixed
+
+- **codegen(non-primitive query/header array items)**: query and
+  header parameters whose `items` resolved to a non-primitive
+  schema (e.g. `tags: array of object`) used to crash the client
+  generator with `oaspec: inline object schema reached
+  to_string_fn after hoist`. The validator only blocked the shape
+  in server mode, so `mode: client` codegen ran unimpeded into
+  the panic. The validator now rejects non-primitive item
+  schemas in BOTH modes for query and header array params, and
+  the rejection follows hoisted `Reference`s through to their
+  resolved shape rather than treating any `Reference` as safe.
+- **codegen(form-urlencoded nested arrays)**: an
+  `application/x-www-form-urlencoded` request body whose nested
+  object property contained an array (`profile.aliases: array of
+  string`) panicked the client generator the same way —
+  `generate_form_nested_object` routed the array through
+  `multipart_field_to_string_fn`, which has no path for inline
+  composite items. The form-urlencoded body validator now runs
+  in both modes and forbids arrays-within-objects regardless of
+  item type, so the spec is rejected with a clear diagnostic
+  before the generator can crash.
+
+### Tests
+
+- **fixture-sweep parse + resolve smoke test**: a new unit case
+  in `test/oaspec_support.gleam` enumerates every top-level
+  `.yaml` under `test/fixtures/` and runs each through
+  `parser.parse_file` and `resolve.resolve`, asserting the
+  pipeline never panics on the suite's 200+ specs. Intentionally
+  malformed fixtures (`broken*.yaml`, `error_invalid_yaml.yaml`,
+  `oaspec*.yaml` config files) are excluded by name. A regression
+  that breaks the parser entry point or the resolver on real-
+  world specs surfaces immediately, instead of waiting for a
+  hand-listed integration test to happen to cover the failing
+  shape.
+- **petstore client surface invariants**: a second unit case
+  enumerates the public API the petstore client exposes —
+  expected files (`client.gleam`, `decode.gleam`, …), one
+  generated `pub fn` per declared operation, one `pub type` per
+  declared component schema, plus the per-file non-empty +
+  provenance smoke checks. Catches a renaming or accidental drop
+  in the client codegen surface without needing a full
+  integration build.
+
 ## [0.55.0] - 2026-05-05
 
 ### Tests
