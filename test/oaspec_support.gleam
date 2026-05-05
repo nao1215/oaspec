@@ -1,6 +1,7 @@
 import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/result
 import gleam/string
 import gleeunit
 import gleeunit/should
@@ -5493,7 +5494,7 @@ fn server_request_shape_boundary_fixtures() -> List(#(String, String, String)) {
     #(
       "server: complex form-urlencoded fields",
       "test/fixtures/server_form_urlencoded_complex_fields.yaml",
-      "application/x-www-form-urlencoded server request bodies only support",
+      "application/x-www-form-urlencoded request bodies only support",
     ),
     #(
       "server: mixed multipart request",
@@ -5542,11 +5543,20 @@ pub fn server_request_shape_boundary_fixtures_case() {
   list.each(server_request_shape_boundary_fixtures(), fn(entry) {
     let #(capability_name, fixture_path, expected_message) = entry
     let ctx = make_ctx(fixture_path)
+    // Some boundaries are server-only (e.g. multipart object/array
+    // server fields), some are now both-mode (e.g. non-primitive
+    // query/header array items, since the client emitter panics on
+    // them too post-fix). Either target is acceptable here — what
+    // matters is that an error fires in server mode with the
+    // expected message.
     let server_errors =
       validate.validate(ctx)
       |> list.filter(fn(e) {
-        e.target == diagnostic.TargetServer
-        && string.contains(e.message, expected_message)
+        case e.target {
+          diagnostic.TargetServer | diagnostic.TargetBoth ->
+            string.contains(e.message, expected_message)
+          _ -> False
+        }
       })
 
     case server_errors != [] {
@@ -6822,6 +6832,146 @@ pub fn multipart_object_array_client_imports_list_json_case() {
   |> should.be_true()
   string.contains(client_file.content, "import gleam/option.{")
   |> should.be_true()
+}
+
+// --- Comprehensive fixture sweep (parse + resolve panic-free) ---
+
+/// Walk every fixture under `test/fixtures/` (top-level `.yaml` files
+/// only) and run them through `parser.parse_file` and
+/// `resolve.resolve`. Some fixtures intentionally trigger parse or
+/// resolve errors (e.g. `broken_openapi.yaml`); the gate here is
+/// that *neither stage panics*. A sanity floor on the success
+/// counts catches a regression that would otherwise turn silently
+/// bad parses into "0 fixtures parsed" without anyone noticing —
+/// pre-existing tests do not enumerate the directory, so a renamed
+/// module function would only surface in the few hand-listed
+/// fixtures the rest of the suite touches.
+pub fn fixtures_sweep_parse_resolve_no_panic_case() {
+  let assert Ok(entries) = simplifile.read_directory("test/fixtures")
+  let paths =
+    entries
+    |> list.filter(fn(name) { string.ends_with(name, ".yaml") })
+    // Some fixtures are intentionally malformed at the YAML level
+    // (`broken-*.yaml`, `broken_*.yaml`, oaspec-config-shaped files
+    // that aren't valid OpenAPI) — yamerl raises an Erlang exception
+    // for those rather than returning a typed error, so we keep them
+    // out of the structural sweep. They are still exercised by
+    // their dedicated unit tests.
+    |> list.filter(fixtures_sweep_includes_path)
+    |> list.map(fn(name) { "test/fixtures/" <> name })
+
+  let #(total, parsed_ok, resolved_ok) =
+    list.fold(paths, #(0, 0, 0), fn(acc, path) {
+      let #(t, p, r) = acc
+      case parser.parse_file(path) {
+        Ok(spec) ->
+          case resolve.resolve(spec) {
+            Ok(_resolved) -> #(t + 1, p + 1, r + 1)
+            // nolint: thrown_away_error -- some fixtures intentionally trigger resolve errors; the gate here is just panic-free traversal
+            Error(_) -> #(t + 1, p + 1, r)
+          }
+        // nolint: thrown_away_error -- broken fixtures are deliberately included
+        Error(_) -> #(t + 1, p, r)
+      }
+    })
+
+  // The fixtures directory has well over 200 valid YAML files; if a
+  // refactor accidentally short-circuits the loop or breaks the
+  // parser entry point we want the floor to fail loudly. The
+  // counts are intentionally conservative so adding a few new
+  // broken fixtures doesn't trip the gate.
+  should.be_true(total >= 200)
+  should.be_true(parsed_ok >= 200)
+  should.be_true(resolved_ok >= 180)
+}
+
+/// Structural invariants for `petstore.yaml` client output. The
+/// fixture is small enough to enumerate every operation exactly, so
+/// any drift in the codegen surface (a missing function, a renamed
+/// variant, a stray empty file) trips one of the explicit asserts.
+/// `string.contains` is a coarse gate, but it pins the public API
+/// shape that downstream users actually call.
+pub fn petstore_client_generated_surface_invariants_case() {
+  let assert Ok(unresolved) = parser.parse_file("test/fixtures/petstore.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/petstore.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+
+  // Every file expected from a client-mode generation must appear.
+  let expected_files = [
+    "types.gleam",
+    "request_types.gleam",
+    "response_types.gleam",
+    "decode.gleam",
+    "encode.gleam",
+    "guards.gleam",
+    "client.gleam",
+  ]
+  list.each(expected_files, fn(name) {
+    list.find(summary.files, fn(f) { f.path == name })
+    |> result.is_ok
+    |> should.be_true
+  })
+
+  // Every emitted file is non-empty and carries the codegen
+  // provenance header. Mirrors the integration-suite gate so a
+  // unit-level run picks up the same regressions.
+  list.each(summary.files, fn(f) {
+    should.be_true(string.length(f.content) > 0)
+    string.contains(f.content, "// Code generated by oaspec")
+    |> should.be_true
+  })
+
+  // Every operation defined in petstore.yaml maps to a generated
+  // client function. Hand-listing them here means a renaming or
+  // accidental drop is caught immediately.
+  let assert Ok(client_file) =
+    list.find(summary.files, fn(f) { f.path == "client.gleam" })
+  let expected_ops = ["list_pets", "create_pet", "get_pet", "delete_pet"]
+  list.each(expected_ops, fn(op) {
+    string.contains(client_file.content, "pub fn " <> op <> "(")
+    |> should.be_true
+  })
+
+  // Every component schema declared in petstore.yaml maps to a
+  // generated `pub type` in `types.gleam`.
+  let assert Ok(types_file) =
+    list.find(summary.files, fn(f) { f.path == "types.gleam" })
+  let expected_types = ["Pet", "CreatePetRequest", "PetStatus", "Error"]
+  list.each(expected_types, fn(t) {
+    string.contains(types_file.content, "pub type " <> t)
+    |> should.be_true
+  })
+}
+
+/// Files under `test/fixtures/` that are intentionally not valid
+/// OpenAPI documents (so calling `parser.parse_file` on them is
+/// expected to raise an Erlang-level exception, not return a typed
+/// error). They are excluded from the structural sweep but still
+/// covered by their dedicated unit tests.
+fn fixtures_sweep_includes_path(name: String) -> Bool {
+  // `broken-*.yaml` / `broken_*.yaml` are invalid OpenAPI on
+  // purpose. `oaspec*.yaml` and `oaspec-*.yaml` are *config* files
+  // (not specs) — they live in the same directory by historical
+  // accident and would parse as garbage if fed through the spec
+  // parser. Anything that happens to share that prefix and is a real
+  // spec keeps the sweep exposure via direct fixture tests.
+  !string.starts_with(name, "broken-")
+  && !string.starts_with(name, "broken_")
+  && !string.starts_with(name, "oaspec-")
+  && !string.starts_with(name, "oaspec_")
+  // `error_invalid_yaml.yaml` is intentionally invalid YAML so the
+  // CLI's "we surface a SourceLoc on YAML parse errors" path can be
+  // exercised — it raises a yamerl-level exception rather than
+  // returning a typed error, so it's incompatible with this sweep.
+  && name != "error_invalid_yaml.yaml"
 }
 
 /// Regression guard: a `*/*` request body must travel through
@@ -9402,12 +9552,23 @@ paths:
 pub fn validate_rejects_array_params_for_server_codegen_case() {
   let ctx = make_ctx("test/fixtures/server_query_array_object_items.yaml")
   let errors = validate.validate(ctx)
-  let server_errors =
+  // Bug fix: query array params with non-primitive items now error
+  // in BOTH modes because the client codegen also panics on them;
+  // the diagnostic target switched from `TargetServer` to
+  // `TargetBoth`. Accept either so this test pins the rejection
+  // shape regardless of how the gate is widened.
+  let array_errors =
     list.filter(errors, fn(e) {
-      e.target == diagnostic.TargetServer
-      && string.contains(e.message, "Query array parameters are only supported")
+      case e.target {
+        diagnostic.TargetServer | diagnostic.TargetBoth ->
+          string.contains(
+            e.message,
+            "Query array parameters are only supported",
+          )
+        _ -> False
+      }
     })
-  list.length(server_errors)
+  list.length(array_errors)
   |> should.equal(1)
 }
 
