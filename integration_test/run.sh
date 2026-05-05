@@ -19,6 +19,21 @@ oaspec_require_tool gleam
 info() { echo "==> $*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
+# Format compliance check for generated code. `oaspec generate` runs
+# `gleam format` during emission, so the produced sources must already
+# pass a no-op format check; a regression in the formatter step (stray
+# blank line, trailing space, etc.) would otherwise go unnoticed.
+# Usage: `verify_format <dir-containing-src/> <label-for-messages>`
+verify_format() {
+  local dir="$1"
+  local label="$2"
+  if (cd "$dir" && gleam format --check src); then
+    info "PASS: $label is gleam-formatted."
+  else
+    fail "$label is not gleam-formatted (regression)."
+  fi
+}
+
 cd "$PROJECT_ROOT"
 
 # -------------------------------------------------------
@@ -2400,5 +2415,186 @@ cd "$PROJECT_ROOT"
 rm -rf "$MULTI_DIR"
 
 info "Issue #387 multi-target integration tests passed."
+
+# -------------------------------------------------------
+# Step: Issue #504 — `*/*` wildcard content type. Verify the
+# generated client treats `*/*` as `application/octet-stream`
+# (request/response bodies become `BitArray`) and compiles
+# under `--warnings-as-errors`.
+# -------------------------------------------------------
+info "Testing Issue #504 wildcard content type code generation..."
+
+WILDCARD_DIR="$SCRIPT_DIR/wildcard_test"
+rm -rf "$WILDCARD_DIR"
+mkdir -p "$WILDCARD_DIR/src"
+
+cat > "$WILDCARD_DIR/oaspec-wildcard.yaml" << 'YAML_EOF'
+input: test/fixtures/wildcard_content_type.yaml
+output:
+  client: ./integration_test/wildcard_test/src/api
+package: api
+mode: client
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate --config="$WILDCARD_DIR/oaspec-wildcard.yaml"
+
+cat > "$WILDCARD_DIR/gleam.toml" << 'TOML_EOF'
+name = "wildcard_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+oaspec = { path = "../.." }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$WILDCARD_DIR/src/wildcard_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$WILDCARD_DIR"
+gleam deps download
+
+verify_format "$WILDCARD_DIR" "Generated wildcard content-type code (#504)"
+
+if gleam build --warnings-as-errors; then
+  info "PASS: Generated wildcard content-type client compiles (#504)."
+else
+  fail "Generated wildcard content-type client failed to compile (#504 regression)."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$WILDCARD_DIR"
+
+info "Issue #504 wildcard content type integration test passed."
+
+# -------------------------------------------------------
+# Step: Issue #503 — multipart/form-data object/array fields.
+# Verify the generated client folds array fields into per-element
+# parts and emits object fields as JSON-bodied parts, then
+# compiles under `--warnings-as-errors`.
+# -------------------------------------------------------
+info "Testing Issue #503 multipart object/array fields code generation..."
+
+MULTIPART_503_DIR="$SCRIPT_DIR/multipart_object_array_test"
+rm -rf "$MULTIPART_503_DIR"
+mkdir -p "$MULTIPART_503_DIR/src"
+
+cat > "$MULTIPART_503_DIR/oaspec-multipart.yaml" << 'YAML_EOF'
+input: test/fixtures/multipart_object_array.yaml
+output:
+  client: ./integration_test/multipart_object_array_test/src/api
+package: api
+mode: client
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate --config="$MULTIPART_503_DIR/oaspec-multipart.yaml"
+
+cat > "$MULTIPART_503_DIR/gleam.toml" << 'TOML_EOF'
+name = "multipart_object_array_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+oaspec = { path = "../.." }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$MULTIPART_503_DIR/src/multipart_object_array_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$MULTIPART_503_DIR"
+gleam deps download
+
+verify_format "$MULTIPART_503_DIR" "Generated multipart object/array code (#503)"
+
+if gleam build --warnings-as-errors; then
+  info "PASS: Generated multipart object/array client compiles (#503)."
+else
+  fail "Generated multipart object/array client failed to compile (#503 regression)."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$MULTIPART_503_DIR"
+
+info "Issue #503 multipart object/array integration test passed."
+
+# -------------------------------------------------------
+# Step: Issue #502 — deepObject nested object properties.
+# Verify the generated client expands nested-object properties
+# into bracketed-bracketed query keys
+# (`filter[applicability_scope][price_type]=value`) and
+# compiles under `--warnings-as-errors`.
+# -------------------------------------------------------
+info "Testing Issue #502 deepObject nested properties code generation..."
+
+DEEPOBJ_DIR="$SCRIPT_DIR/deep_object_nested_test"
+rm -rf "$DEEPOBJ_DIR"
+mkdir -p "$DEEPOBJ_DIR/src"
+
+cat > "$DEEPOBJ_DIR/oaspec-deepobj.yaml" << 'YAML_EOF'
+input: test/fixtures/deep_object_nested.yaml
+output:
+  client: ./integration_test/deep_object_nested_test/src/api
+package: api
+mode: client
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate --config="$DEEPOBJ_DIR/oaspec-deepobj.yaml"
+
+cat > "$DEEPOBJ_DIR/gleam.toml" << 'TOML_EOF'
+name = "deep_object_nested_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+oaspec = { path = "../.." }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$DEEPOBJ_DIR/src/deep_object_nested_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$DEEPOBJ_DIR"
+gleam deps download
+
+verify_format "$DEEPOBJ_DIR" "Generated deepObject nested properties code (#502)"
+
+if gleam build --warnings-as-errors; then
+  info "PASS: Generated deepObject nested properties client compiles (#502)."
+else
+  fail "Generated deepObject nested properties client failed to compile (#502 regression)."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$DEEPOBJ_DIR"
+
+info "Issue #502 deepObject nested properties integration test passed."
 
 info "All integration tests passed!"

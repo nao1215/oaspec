@@ -10,6 +10,33 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Fixed
+
+- **codegen(client imports)**: client modules generated for specs
+  that use multipart object/array fields (#503) or deepObject query
+  parameters (#502) now include `gleam/option.{None, Some}`,
+  `gleam/list`, and `gleam/json` whenever the emission path
+  references those modules. The previous import gate only counted
+  optional params / response headers, so multipart `Some(v) -> ...`
+  arms and deepObject `Some(v_outer) -> ...` arms compiled with
+  "constructor `Some` is not in scope" errors against
+  `--warnings-as-errors`.
+- **codegen(`*/*` request body)**: client request bodies declared
+  with `*/*` content type now travel through `transport.BytesBody`
+  instead of being routed through the JSON encoder fallback. The
+  previous emission tried `transport.TextBody(json.to_string(...))`
+  and failed because `gleam/json` was not in scope and the body type
+  was `BitArray` rather than a JSON-encodable value.
+
+### Tests
+
+- **integration coverage for #502 / #503 / #504**: each fixture is
+  now generated, gleam-formatted (no-op `gleam format --check`), and
+  compiled with `gleam build --warnings-as-errors` in
+  `integration_test/run.sh`. A new `verify_format` helper makes it a
+  one-liner to extend the same format gate to the rest of the
+  integration suite as a follow-up.
+
 ## [0.53.0] - 2026-05-05
 
 ### Added
