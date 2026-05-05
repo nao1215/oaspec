@@ -1,0 +1,48 @@
+openapi: "3.0.3"
+info:
+  title: multipleOf With Range Guard Test
+  description: |
+    Issue #521. Ensures the `multipleOf` validator codegen produces a
+    body that compiles, AND that the import-needs analyzer pulls in
+    `gleam/float` + `gleam/int` even when a NumberSchema declares
+    both `minimum` and `multipleOf` (the canonical "amount in cents"
+    pattern: `multipleOf: 0.01, minimum: 0`).
+
+    Pre-fix, the import-needs case-arm order put `minimum: Some(_)`
+    first, which shadowed the `multiple_of: Some(_)` arm and left
+    `has_float_multiple_of` False. The generated `guards.gleam` then
+    emitted `float.truncate(...)` / `int.to_float(...)` without the
+    matching imports. The body itself was also broken:
+    `value -. float.truncate(value /. m |> int.to_float) *. m` piped
+    a Float into `int.to_float` and tried to multiply an Int by `0.01`
+    with `*.`. Both halves are exercised here.
+  version: "1.0.0"
+paths:
+  /entries:
+    post:
+      operationId: appendEntry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Entry" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Entry" }
+components:
+  schemas:
+    Entry:
+      type: object
+      required: [amount, memo]
+      properties:
+        amount:
+          type: number
+          format: double
+          multipleOf: 0.01
+          minimum: 0
+        memo:
+          type: string
+          minLength: 1

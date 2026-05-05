@@ -600,13 +600,22 @@ fn collect_schema_constraint_types_inner(
     | Ok(IntegerSchema(exclusive_maximum: Some(_), ..))
     | Ok(IntegerSchema(multiple_of: Some(_), ..)) ->
       ConstraintTypes(..acc, has_integer: True)
+    // Issue #521: a NumberSchema with both `minimum` and
+    // `multipleOf` declared was hitting the range arm first (because
+    // pattern arms are tried top-down), which left
+    // `has_float_multiple_of` False — the resulting `guards.gleam`
+    // emitted `float.truncate` / `int.to_float` calls without the
+    // matching `gleam/float` / `gleam/int` imports. Putting the
+    // multipleOf arm first ensures both flags fire whenever
+    // `multiple_of` is Some, regardless of which other constraints
+    // happen to be present.
+    Ok(NumberSchema(multiple_of: Some(_), ..)) ->
+      ConstraintTypes(..acc, has_float: True, has_float_multiple_of: True)
     Ok(NumberSchema(minimum: Some(_), ..))
     | Ok(NumberSchema(maximum: Some(_), ..))
     | Ok(NumberSchema(exclusive_minimum: Some(_), ..))
     | Ok(NumberSchema(exclusive_maximum: Some(_), ..)) ->
       ConstraintTypes(..acc, has_float: True)
-    Ok(NumberSchema(multiple_of: Some(_), ..)) ->
-      ConstraintTypes(..acc, has_float: True, has_float_multiple_of: True)
     Ok(ArraySchema(min_items: Some(_), ..))
     | Ok(ArraySchema(max_items: Some(_), ..))
     | Ok(ArraySchema(unique_items: True, ..)) ->
@@ -1272,11 +1281,21 @@ fn build_float_multiple_of_guard_function(
         ],
         param_decl: "value: Float",
         return_type: "Result(Float, ValidationFailure)",
+        // Issue #521: the prior expression
+        //   value -. float.truncate(value /. m |> int.to_float) *. m
+        // was malformed — the `|> int.to_float` was applied to a
+        // Float (the result of `value /. m`) instead of the Int
+        // returned by `float.truncate`, and `float.truncate(_)` was
+        // multiplied by `m` (Float) with `*.` (which expects Float on
+        // both sides), so even with `gleam/float` and `gleam/int`
+        // imported the body did not type-check. The corrected form
+        // is `value -. int.to_float(float.truncate(value /. m)) *. m`,
+        // which computes truncation-toward-zero modulo.
         body: string.join(
           [
-            "  let remainder = value -. float.truncate(value /. "
+            "  let remainder = value -. int.to_float(float.truncate(value /. "
               <> float.to_string(m)
-              <> " |> int.to_float) *. "
+              <> ")) *. "
               <> float.to_string(m),
             "  case remainder == 0.0 || remainder == -0.0 {",
             "    False -> "

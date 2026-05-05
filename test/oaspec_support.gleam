@@ -6875,6 +6875,46 @@ pub fn deep_object_primitive_props_client_imports_primitives_case() {
   |> should.be_true()
 }
 
+// --- Issue #521: multipleOf codegen body + imports ---
+
+/// Regression guard for #521: a NumberSchema with both `minimum`
+/// (or any range constraint) AND `multipleOf` must produce
+/// (a) `gleam/float` + `gleam/int` imports in the generated
+///     `guards.gleam`, and
+/// (b) a `validate_*_multiple_of` body that compiles —
+///     `value -. int.to_float(float.truncate(value /. m)) *. m`,
+///     not the broken `... |> int.to_float ...` pipe form.
+pub fn multiple_of_with_range_guard_compiles_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/guard_multiple_of_with_range.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/guard_multiple_of_with_range.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Server,
+      validate: True,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(guards_file) =
+    list.find(summary.files, fn(f) { f.path == "guards.gleam" })
+  string.contains(guards_file.content, "import gleam/float")
+  |> should.be_true()
+  string.contains(guards_file.content, "import gleam/int")
+  |> should.be_true()
+  // The corrected body wraps `float.truncate(...)` in
+  // `int.to_float(...)` then multiplies by the divisor.
+  string.contains(
+    guards_file.content,
+    "int.to_float(float.truncate(value /. 0.01)) *. 0.01",
+  )
+  |> should.be_true()
+  // Negative guard: the broken pipe form must not appear.
+  string.contains(guards_file.content, "|> int.to_float)")
+  |> should.be_false()
+}
+
 // --- Issue #520: validate_<schema> recurses into nested records ---
 
 /// Regression guard for #520: `validate_poll` must recurse into
