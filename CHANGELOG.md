@@ -10,6 +10,101 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.58.0] - 2026-05-05
+
+### Fixed
+
+- **Issue #519: deepObject query with primitive sub-properties no longer
+  emits unimported `int.to_string` / `float.to_string` /
+  `bool.to_string` calls.** The client-side import-needs analyser in
+  `client_ir.gleam` now traverses every deepObject parameter's
+  ObjectSchema property tree (including nested objects) and pulls
+  `gleam/int` / `gleam/float` / `gleam/bool` into
+  `<package>_client/client.gleam` whenever a leaf is integer, number,
+  or boolean. Pre-fix, freshly-generated clients for
+  `?page[size]=10&page[after]=...`-style cursors failed `gleam build`
+  with `Unknown module: int`.
+
+- **Issue #520: `validate_<schema>` now recurses into nested-record
+  properties.** Previously the aggregator only walked fields with
+  constraints directly on the leaf type; a `$ref` to another record
+  (or an `array<$ref>`) was silently skipped, so an out-of-range value
+  on `Poll.options[i].weight` slipped past `validate_poll`. New
+  `Composite` and `CompositeList` guard-call kinds emit
+  `validate_<inner>(value.field)` and `list.fold(value.list, ...,
+  validate_<inner>)` shapes, with cycle detection so self- and
+  mutually-recursive schemas terminate.
+
+- **Issue #521: `multipleOf` validator codegen now compiles.** Two
+  defects in `<package>/guards.gleam` (and the parallel client file):
+  (1) the import-needs analyser's `NumberSchema` arm-order put the
+  range arm before the `multiple_of` arm, so a schema with both
+  `minimum` and `multipleOf` set lost the `gleam/float` / `gleam/int`
+  imports; (2) the body expression chained `value /. m |>
+  int.to_float` (passing a Float into an Int-expecting function) and
+  multiplied an Int by `0.01` with `*.`. Both are corrected; the body
+  is now `value -. int.to_float(float.truncate(value /. m)) *. m`.
+
+- **Issue #522: server router decodes `$ref`'d integer / number /
+  boolean optional query parameters with their scalar parser.**
+  Previously, when a query parameter's schema was a `$ref` to a
+  non-string-enum component (e.g. `EntryType: { type: integer, enum:
+  [1, 2] }`), the codegen fell through to `Some(v)` (raw String) into
+  a slot the request record had typed as `Option(Int|Float|Bool)`,
+  breaking `gleam build`. The optional-query path now resolves the
+  ref and emits `int.parse(v)` / `float.parse(v)` / `bool_parse_expr`
+  to match the inline-scalar arms, and `query_schema_needs_int` /
+  `query_schema_needs_float` resolve refs so the matching imports
+  reach `router.gleam`.
+
+- **Issue #523: OAS 3.0 boolean form of `exclusiveMinimum` /
+  `exclusiveMaximum` is honoured.** The schema parser previously read
+  these keys only as numeric (OAS 3.1) values; the boolean companion
+  used by OAS 3.0 (`{minimum: N, exclusiveMinimum: true}` for strict
+  `> N`) was silently discarded, leaving the inclusive guard in place
+  and accepting boundary values that the spec required to fail. The
+  parser now falls back to the boolean form when no numeric value is
+  present and promotes the matching `minimum` / `maximum` into the
+  exclusive slot, so the existing strict-inequality guard fires
+  correctly.
+
+- **Issue #524: passing a non-YAML file to `--config` returns a
+  friendly diagnostic instead of crashing.** Previously
+  `oaspec.toml`-style mistakes triggered an Erlang `case_clause`
+  runtime error because yay's FFI returned a `{yaml_error, ...}`
+  tuple shape that the Gleam-side mapping didn't pattern-match.
+  `config.load_all` now inspects the path's extension up front and,
+  for clearly-non-YAML extensions, returns
+  `ParseError(detail: "config files must be YAML; got '.<ext>'
+  extension. Try renaming to '.yaml' (or '.yml').")` before yay sees
+  the file. `.yaml` / `.yml` / extensionless paths are unchanged.
+
+- **Issue #525: response variant suffixes use the IANA reason phrase
+  for every standard HTTP status.** Pre-fix, `status_code_suffix/1`
+  named only a handful of common codes (200 → `Ok`, 201 → `Created`,
+  204 → `NoContent`, 401 → `Unauthorized`, 422 → `UnprocessableEntity`,
+  500 → `InternalServerError`, …) and everything else fell through to
+  the numeric `Status<N>` form. An operation declaring 200 + 202 thus
+  produced `…ResponseOk` and `…ResponseStatus202` in the same union.
+  The table now covers the full RFC 9110 / IANA registry —
+  202 → `Accepted`, 206 → `PartialContent`, 301 → `MovedPermanently`,
+  410 → `Gone`, 418 → `IAmATeapot`, 429 → `TooManyRequests`,
+  503 → `ServiceUnavailable`, etc. Pre-existing entries keep their
+  exact spelling so generated type names don't shift for already-
+  shipped specs; non-standard codes still fall back to `Status<N>`.
+
+- **Issue #526: pipeDelimited / spaceDelimited / form-explode-false
+  query parsers no longer drop or emit empty-string items.** The
+  `explode: false` array-of-string / int / number / boolean codegen
+  used `Ok([v, ..])` (taking only the first occurrence) and
+  `list.map(string.split(...))` (leaving empty splits in place). Two
+  consequences: `?tags=` produced `Some([""])` instead of `Some([])`,
+  and `?tags=a&tags=b` silently dropped `b`. The new shape
+  `Ok(vs) -> Some(vs |> list.flat_map(string.split(_, delim)) |>
+  list.map(string.trim) |> list.filter(_ != ""))` (with
+  `list.filter_map` for Int / Float items) accepts all incoming
+  occurrences and filters empty splits.
+
 ## [0.57.0] - 2026-05-05
 
 ### Tests
