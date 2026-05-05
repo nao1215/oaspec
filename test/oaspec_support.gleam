@@ -6875,6 +6875,77 @@ pub fn deep_object_primitive_props_client_imports_primitives_case() {
   |> should.be_true()
 }
 
+// --- Issue #520: validate_<schema> recurses into nested records ---
+
+/// Regression guard for #520: `validate_poll` must recurse into
+/// nested records (`Metadata`, `Banner`), required lists of records
+/// (`options: array<PollOption>`), and optional lists of records
+/// (`tags: array<Tag>`). Pre-fix, only direct leaf-level constraints
+/// (e.g. `slug` pattern) were emitted; constraint violations on inner
+/// fields silently passed through to handlers.
+pub fn nested_validate_recurses_into_records_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/guard_nested_constraints.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/guard_nested_constraints.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Server,
+      validate: True,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(guards_file) =
+    list.find(summary.files, fn(f) { f.path == "guards.gleam" })
+  // Required nested record → Composite call into validate_metadata.
+  string.contains(guards_file.content, "validate_metadata(value.metadata)")
+  |> should.be_true()
+  // Optional nested record → Composite under option.Some(v) wrap.
+  string.contains(guards_file.content, "validate_banner(v)")
+  |> should.be_true()
+  // Required list of records → list.fold over options calling validate_poll_option.
+  string.contains(guards_file.content, "validate_poll_option(item)")
+  |> should.be_true()
+  string.contains(guards_file.content, "list.fold(value.options, errors")
+  |> should.be_true()
+  // Optional list of records → option-wrapped list.fold over tags.
+  string.contains(guards_file.content, "validate_tag(item)")
+  |> should.be_true()
+}
+
+/// Regression guard for #520: cycle detection in `schema_has_validator`
+/// must not blow the stack on (a) self-recursive schemas like
+/// `Comment.replies: array<Comment>` and (b) mutually-recursive
+/// schemas like `User` ↔ `Link`. Pre-fix prototype, this fixture
+/// would non-terminate during codegen.
+pub fn nested_validate_handles_cycles_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/guard_nested_constraints.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/guard_nested_constraints.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Server,
+      validate: True,
+    )
+  // The mere fact that `generate.generate` returns `Ok(_)` (rather
+  // than spinning on `User` ↔ `Link` or on `Comment.replies`) is the
+  // important guarantee here.
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(guards_file) =
+    list.find(summary.files, fn(f) { f.path == "guards.gleam" })
+  // User has its own validator (because `name` has length constraints)
+  // so the cycle break inside `Link.owner` shouldn't suppress it.
+  string.contains(guards_file.content, "pub fn validate_user")
+  |> should.be_true()
+  // Link likewise has direct constraints on `target`.
+  string.contains(guards_file.content, "pub fn validate_link")
+  |> should.be_true()
+}
+
 // --- Issue #503: multipart/form-data object/array fields ---
 
 /// Regression guard: a client whose only multi-shape work is a

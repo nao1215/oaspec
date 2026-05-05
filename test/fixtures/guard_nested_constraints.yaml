@@ -1,0 +1,147 @@
+openapi: "3.0.3"
+info:
+  title: Nested Guard Recursion API
+  description: |
+    Issue #520. Exercises the `validate_<schema>` aggregator's
+    recursion into:
+    - required nested record (Poll.metadata: Metadata)
+    - optional nested record (Poll.banner: Banner)
+    - required list of records (Poll.options: array<PollOption>)
+    - optional list of records (Poll.tags: array<Tag>)
+    - mutually-recursive schemas (User has Link, Link has owner: User)
+    - self-recursive schema (Comment.replies: array<Comment>)
+
+    The inner records carry direct constraints; pre-fix, the outer
+    `validate_poll` / `validate_user` skipped them entirely.
+  version: "1.0.0"
+paths:
+  /polls:
+    post:
+      operationId: createPoll
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Poll" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Poll" }
+  /users/{id}:
+    get:
+      operationId: getUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+  /comments:
+    get:
+      operationId: listComments
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Comment" }
+components:
+  schemas:
+    PollOption:
+      type: object
+      required: [label, weight]
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 40
+        weight:
+          type: number
+          minimum: 0
+          maximum: 1
+
+    Tag:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          pattern: "^[a-z0-9-]+$"
+
+    Banner:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          minLength: 8
+          maxLength: 256
+
+    Metadata:
+      type: object
+      required: [created_by]
+      properties:
+        created_by:
+          type: string
+          minLength: 1
+          maxLength: 80
+
+    Poll:
+      type: object
+      required: [slug, metadata, options]
+      properties:
+        slug:
+          type: string
+          pattern: "^[a-z0-9-]{3,40}$"
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+        banner:
+          $ref: "#/components/schemas/Banner"
+        options:
+          type: array
+          items: { $ref: "#/components/schemas/PollOption" }
+        tags:
+          type: array
+          items: { $ref: "#/components/schemas/Tag" }
+
+    Link:
+      type: object
+      required: [target, owner]
+      properties:
+        target:
+          type: string
+          minLength: 8
+        owner:
+          $ref: "#/components/schemas/User"
+
+    User:
+      type: object
+      required: [name, recent_links]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        recent_links:
+          type: array
+          items: { $ref: "#/components/schemas/Link" }
+
+    Comment:
+      type: object
+      required: [body, replies]
+      properties:
+        body:
+          type: string
+          minLength: 1
+        replies:
+          type: array
+          items: { $ref: "#/components/schemas/Comment" }
