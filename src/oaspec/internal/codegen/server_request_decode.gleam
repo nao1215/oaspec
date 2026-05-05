@@ -435,14 +435,25 @@ fn query_optional_expr_with_schema(
 ) -> String {
   let delim = operation_ir.delimiter_for_style(style)
   case schema_ref {
+    // Issue #526: for `style: pipeDelimited` / `style:
+    // spaceDelimited` / `style: form, explode: false` (i.e. delim
+    // != ","), the previous codegen used `Ok([v, ..])` — taking
+    // only the FIRST occurrence — and `list.map(string.split(...))`
+    // — leaving empty splits as empty-string elements. Two
+    // edge-case bugs followed: `?tags=` (empty value) became
+    // `Some([""])` instead of `Some([])`, and `?tags=a&tags=b`
+    // (repeated keys) silently dropped `b`. The new shape uses
+    // `Ok(vs)` to accept ALL occurrences, flat_maps the splits
+    // across them, and filters out the empty strings produced by
+    // empty input or trailing delimiters (`?tags=foo|`).
     Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
       case explode {
         Some(False) ->
           "case dict.get(query, \""
           <> key
-          <> "\") { Ok([v, ..]) -> Some(list.map(string.split(v, \""
+          <> "\") { Ok(vs) -> Some(vs |> list.flat_map(fn(v) { string.split(v, \""
           <> delim
-          <> "\"), fn(item) { string.trim(item) })) _ -> None }"
+          <> "\") }) |> list.map(string.trim) |> list.filter(fn(s) { s != \"\" })) _ -> None }"
         _ ->
           "case dict.get(query, \""
           <> key
@@ -453,9 +464,9 @@ fn query_optional_expr_with_schema(
         Some(False) ->
           "case dict.get(query, \""
           <> key
-          <> "\") { Ok([v, ..]) -> Some(list.map(string.split(v, \""
+          <> "\") { Ok(vs) -> Some(vs |> list.flat_map(fn(v) { string.split(v, \""
           <> delim
-          <> "\"), fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } })) _ -> None }"
+          <> "\") }) |> list.filter_map(fn(item) { let trimmed = string.trim(item) case trimmed { \"\" -> Error(Nil) _ -> int.parse(trimmed) } })) _ -> None }"
         _ ->
           "case dict.get(query, \""
           <> key
@@ -466,9 +477,9 @@ fn query_optional_expr_with_schema(
         Some(False) ->
           "case dict.get(query, \""
           <> key
-          <> "\") { Ok([v, ..]) -> Some(list.map(string.split(v, \""
+          <> "\") { Ok(vs) -> Some(vs |> list.flat_map(fn(v) { string.split(v, \""
           <> delim
-          <> "\"), fn(item) { let trimmed = string.trim(item) case float.parse(trimmed) { Ok(n) -> n _ -> 0.0 } })) _ -> None }"
+          <> "\") }) |> list.filter_map(fn(item) { let trimmed = string.trim(item) case trimmed { \"\" -> Error(Nil) _ -> float.parse(trimmed) } })) _ -> None }"
         _ ->
           "case dict.get(query, \""
           <> key
@@ -479,9 +490,9 @@ fn query_optional_expr_with_schema(
         Some(False) ->
           "case dict.get(query, \""
           <> key
-          <> "\") { Ok([v, ..]) -> Some(list.map(string.split(v, \""
+          <> "\") { Ok(vs) -> Some(vs |> list.flat_map(fn(v) { string.split(v, \""
           <> delim
-          <> "\"), fn(item) { let v = string.trim(item) "
+          <> "\") }) |> list.filter(fn(s) { string.trim(s) != \"\" }) |> list.map(fn(item) { let v = string.trim(item) "
           <> bool_parse_expr
           <> " })) _ -> None }"
         _ ->

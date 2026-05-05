@@ -129,6 +129,7 @@ pub fn content_type_helpers_test() {
   let _ = support.oas30_exclusive_bool_emits_strict_guard_case()
   let _ = support.config_load_rejects_non_yaml_extension_case()
   let _ = support.config_load_yaml_extensions_bypass_gate_case()
+  let _ = support.pipe_delimited_query_handles_empty_and_repeated_keys_case()
   let _ = support.multipart_object_array_client_imports_list_json_case()
   let _ = support.wildcard_request_body_uses_bytes_body_case()
   let _ = support.fixtures_sweep_parse_resolve_no_panic_case()

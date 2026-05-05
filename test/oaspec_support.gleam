@@ -6903,6 +6903,50 @@ pub fn deep_object_primitive_props_client_imports_primitives_case() {
   |> should.be_true()
 }
 
+// --- Issue #526: pipeDelimited / spaceDelimited query parser edges ---
+
+/// Regression guard for #526. The optional array-of-string query
+/// parameter codegen for explode=false (pipeDelimited / spaceDelimited /
+/// form-with-explode-false) must:
+/// - accept ALL incoming occurrences (`?tags=a&tags=b` is no longer
+///   silently truncated to the first), and
+/// - filter empty strings produced by `?tags=` (empty value) or by
+///   trailing delimiters like `?tags=foo|`.
+pub fn pipe_delimited_query_handles_empty_and_repeated_keys_case() {
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: t, version: '0' }
+paths:
+  /polls:
+    get:
+      operationId: listPolls
+      parameters:
+        - name: tags
+          in: query
+          required: false
+          style: pipeDelimited
+          explode: false
+          schema:
+            type: array
+            items: { type: string }
+      responses: { '200': { description: ok } }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  // No more `Ok([v, ..])` for the optional pipeDelimited tags
+  // parameter — we now use `Ok(vs)` to consume all occurrences.
+  string.contains(
+    content,
+    "tags: case dict.get(query, \"tags\") { Ok(vs) -> Some(vs |> list.flat_map(fn(v) { string.split(v, \"|\") }) |> list.map(string.trim) |> list.filter(fn(s) { s != \"\" }))",
+  )
+  |> should.be_true()
+}
+
 // --- Issue #524: friendly error on non-YAML config ---
 
 /// Regression guard for #524: passing a non-YAML config path
@@ -10331,9 +10375,14 @@ pub fn server_query_array_params_use_query_multimap_case() {
     "tags: list.map(tags_raw, fn(item) { string.trim(item) }),",
   )
   |> should.be_true()
+  // Issue #526: optional array query params with explode=false now
+  // accept all incoming occurrences (`Ok(vs)` rather than the
+  // first-only `Ok([v, ..])`) and filter empties, so `?scores=` and
+  // `?scores=a,&scores=b,` no longer slip a stray empty / `0`
+  // through.
   string.contains(
     content,
-    "scores: case dict.get(query, \"scores\") { Ok([v, ..]) -> Some(list.map(string.split(v, \",\"), fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } })) _ -> None },",
+    "scores: case dict.get(query, \"scores\") { Ok(vs) -> Some(vs |> list.flat_map(fn(v) { string.split(v, \",\") }) |> list.filter_map(fn(item) { let trimmed = string.trim(item) case trimmed { \"\" -> Error(Nil) _ -> int.parse(trimmed) } })) _ -> None },",
   )
   |> should.be_true()
 }
