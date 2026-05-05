@@ -21,11 +21,7 @@ jobs:
         with:
           otp-version: "27"
           gleam-version: "1.15"
-
-      - name: Install rebar3
-        run: |
-          wget -q https://s3.amazonaws.com/rebar3/rebar3 -O /usr/local/bin/rebar3
-          chmod +x /usr/local/bin/rebar3
+          rebar3-version: "3"
 
       - name: Install ShellSpec
         run: |
