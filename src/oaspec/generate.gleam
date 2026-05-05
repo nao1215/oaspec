@@ -15,6 +15,7 @@ import oaspec/internal/openapi/filter
 import oaspec/internal/openapi/hoist
 import oaspec/internal/openapi/location_index.{type LocationIndex}
 import oaspec/internal/openapi/normalize
+import oaspec/internal/openapi/reachability
 import oaspec/internal/openapi/resolve
 import oaspec/internal/openapi/spec.{type OpenApiSpec, type Unresolved}
 import oaspec/internal/progress.{type Reporter}
@@ -114,6 +115,28 @@ fn prepare_context(
   progress.report(
     reporter,
     "hoist inline complex schemas (took " <> progress.format_ms(elapsed) <> ")",
+  )
+
+  // Issue #501: when an include filter is active, drop component
+  // schemas no surviving operation transitively references. Runs
+  // after hoist (so synthetic schemas hoisting introduces are still
+  // considered) and before dedup (so dedup operates on the smaller
+  // surviving set). Skipped when no filter is configured: the user
+  // didn't ask to subset the API, so we present the spec as-authored
+  // — dead component schemas left in the spec stay in the output.
+  let include_active = !config.include_is_empty(config.include(cfg))
+  let #(elapsed, spec) =
+    progress.timed(fn() {
+      case include_active {
+        True -> reachability.prune(spec)
+        False -> spec
+      }
+    })
+  progress.report(
+    reporter,
+    "prune unreachable component schemas (took "
+      <> progress.format_ms(elapsed)
+      <> ")",
   )
 
   // Deduplicate names to avoid collisions in generated code

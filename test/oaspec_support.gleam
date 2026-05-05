@@ -25,6 +25,7 @@ import oaspec/internal/openapi/hoist
 import oaspec/internal/openapi/location_index
 import oaspec/internal/openapi/normalize
 import oaspec/internal/openapi/provenance
+import oaspec/internal/openapi/reachability
 import oaspec/internal/openapi/resolve
 import oaspec/internal/openapi/resolver
 import oaspec/internal/openapi/schema
@@ -678,6 +679,73 @@ pub fn filter_apply_tags_or_paths_unions_case() {
   filter.apply(resolved, include)
   |> fn(s) { dict.size(s.paths) }
   |> should.equal(2)
+}
+
+pub fn reachability_prune_drops_unreferenced_components_case() {
+  // Issue #501: petstore declares Pet, CreatePetRequest, PetStatus,
+  // Error. Filtering to /pets/{petId} keeps only GET and DELETE
+  // operations, which reach Pet (and via Pet's `status` property,
+  // PetStatus). CreatePetRequest is reachable only from POST /pets
+  // and Error is never referenced in any operation's content, so
+  // both must be pruned.
+  let assert Ok(unresolved) = parser.parse_file("test/fixtures/petstore.yaml")
+  let assert Ok(resolved) = resolve.resolve(unresolved)
+  let include = config.Include(tags: [], paths: ["/pets/{petId}"])
+  let filtered = filter.apply(resolved, include)
+  let pruned = reachability.prune(filtered)
+  let assert Some(comps) = pruned.components
+  let names = dict.keys(comps.schemas) |> list.sort(string.compare)
+  names |> should.equal(["Pet", "PetStatus"])
+}
+
+pub fn reachability_prune_keeps_transitively_reachable_components_case() {
+  // GET /pets returns Pet[]; POST /pets takes a CreatePetRequest and
+  // returns Pet. Pet itself references PetStatus via its `status`
+  // property. So a /pets-only filter must keep CreatePetRequest, Pet,
+  // PetStatus and drop only Error.
+  let assert Ok(unresolved) = parser.parse_file("test/fixtures/petstore.yaml")
+  let assert Ok(resolved) = resolve.resolve(unresolved)
+  let include = config.Include(tags: [], paths: ["/pets"])
+  let filtered = filter.apply(resolved, include)
+  let pruned = reachability.prune(filtered)
+  let assert Some(comps) = pruned.components
+  let names = dict.keys(comps.schemas) |> list.sort(string.compare)
+  names |> should.equal(["CreatePetRequest", "Pet", "PetStatus"])
+}
+
+pub fn reachability_prune_with_no_surviving_operations_drops_everything_case() {
+  // When every operation is filtered out, no operation can seed the
+  // walk, so every component schema is unreachable.
+  let assert Ok(unresolved) = parser.parse_file("test/fixtures/petstore.yaml")
+  let assert Ok(resolved) = resolve.resolve(unresolved)
+  let include = config.Include(tags: [], paths: ["/no-such-path"])
+  let filtered = filter.apply(resolved, include)
+  let pruned = reachability.prune(filtered)
+  let assert Some(comps) = pruned.components
+  dict.size(comps.schemas) |> should.equal(0)
+}
+
+pub fn reachability_prune_pipeline_omits_dead_types_in_generated_output_case() {
+  // End-to-end: with an include filter active, the generation
+  // pipeline must emit a `types.gleam` that contains only types
+  // reachable from the surviving operations. petstore's Error and
+  // CreatePetRequest schemas are unreachable from /pets/{petId} and
+  // must not appear in the output.
+  let assert Ok(unresolved) = parser.parse_file("test/fixtures/petstore.yaml")
+  let cfg =
+    make_default_cfg()
+    |> config.with_include(config.Include(tags: [], paths: ["/pets/{petId}"]))
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(types_file) =
+    list.find(summary.files, fn(f) { f.path == "types.gleam" })
+  string.contains(types_file.content, "pub type Pet ")
+  |> should.be_true
+  string.contains(types_file.content, "pub type PetStatus")
+  |> should.be_true
+  string.contains(types_file.content, "pub type Error")
+  |> should.be_false
+  string.contains(types_file.content, "pub type CreatePetRequest")
+  |> should.be_false
 }
 
 pub fn filter_path_matches_exact_and_glob_case() {
