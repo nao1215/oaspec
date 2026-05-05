@@ -5473,11 +5473,12 @@ pub fn is_supported_request_rejects_unsupported_content_type_case() {
 
 pub fn capability_registry_names_appear_in_readme_boundaries_case() {
   // Every keyword the capability registry declares as Unsupported / NotHandled
-  // / ParsedNotUsed must be mentioned by name inside the README's
+  // / ParsedNotUsed must be mentioned by name inside the
   // `<!-- BEGIN GENERATED:BOUNDARIES -->` / `<!-- END GENERATED:BOUNDARIES -->`
-  // block. This catches the common drift case where someone adds a new
-  // unsupported keyword to the registry but forgets to update the README.
-  let assert Ok(readme) = simplifile.read("README.md")
+  // block in doc/openapi-support.md. This catches the common drift case where
+  // someone adds a new unsupported keyword to the registry but forgets to
+  // update the boundaries doc.
+  let assert Ok(readme) = simplifile.read("doc/openapi-support.md")
   let assert Ok(#(_before, after_begin)) =
     string.split_once(readme, "<!-- BEGIN GENERATED:BOUNDARIES -->")
   let assert Ok(#(boundaries_block, _after)) =
@@ -5548,9 +5549,9 @@ fn server_request_shape_boundary_fixtures() -> List(#(String, String, String)) {
 }
 
 pub fn server_boundary_checklist_matches_registry_case() {
-  let assert Ok(readme) = simplifile.read("README.md")
+  let assert Ok(support_doc) = simplifile.read("doc/openapi-support.md")
   let assert Ok(checklist) = simplifile.read("doc/server-mode-boundaries.md")
-  string.contains(readme, "doc/server-mode-boundaries.md")
+  string.contains(support_doc, "server-mode-boundaries.md")
   |> should.be_true()
 
   let server_capabilities =
@@ -13430,19 +13431,16 @@ pub fn capability_check_uses_registry_case() {
 // README boundaries generated from registry
 // ---------------------------------------------------------------------------
 
-/// README Current Boundaries section mentions all Unsupported capabilities.
+/// doc/openapi-support.md "Current boundaries" section mentions every
+/// Unsupported / NotHandled capability the registry knows about.
 pub fn readme_boundaries_match_registry_case() {
-  let assert Ok(readme) = simplifile.read("README.md")
-  // Every Unsupported capability name must appear in the README
+  let assert Ok(doc) = simplifile.read("doc/openapi-support.md")
+  // Every Unsupported capability name must appear in the support doc
   let unsupported = capability.by_level(capability.Unsupported)
-  list.each(unsupported, fn(c) {
-    should.be_true(string.contains(readme, c.name))
-  })
-  // Every NotHandled capability name must appear in the README
+  list.each(unsupported, fn(c) { should.be_true(string.contains(doc, c.name)) })
+  // Every NotHandled capability name must appear in the support doc
   let not_handled = capability.by_level(capability.NotHandled)
-  list.each(not_handled, fn(c) {
-    should.be_true(string.contains(readme, c.name))
-  })
+  list.each(not_handled, fn(c) { should.be_true(string.contains(doc, c.name)) })
 }
 
 // ---------------------------------------------------------------------------

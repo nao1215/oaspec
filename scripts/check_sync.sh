@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# check_sync.sh — Verify version and test count consistency
-# across gleam.toml, context.gleam, README.md, and CHANGELOG.md.
-# Exit 1 on any drift.
+# check_sync.sh — Verify version consistency across gleam.toml,
+# context.gleam, and CHANGELOG.md, and report live test counts for
+# manual sanity-check. Exit 1 on any drift.
 
 set -euo pipefail
 
@@ -26,36 +26,20 @@ if [ "$CHANGELOG_VERSION" != "Unreleased" ] && [ "$TOML_VERSION" != "$CHANGELOG_
 fi
 
 # --- 2. Test counts ---
+# Previously this script asserted that hard-coded test counts in README.md
+# matched the live counts in the repo. The README was slimmed down for
+# usability and no longer mentions those numbers, so the assertion is gone.
+# We still log the live counts so reviewers can sanity-check them by eye.
 echo ""
-echo "==> Checking test counts in README..."
+echo "==> Live test counts (informational)..."
 
-# Count actual unit tests (pub fn *_test functions across all test files)
 ACTUAL_UNIT_TESTS=$(grep -r '^pub fn .*_test()' test/ --include='*.gleam' | wc -l | tr -d ' ')
-
-# Count test fixtures
 ACTUAL_FIXTURES=$(find test/fixtures -type f -name '*.yaml' -o -name '*.json' | wc -l | tr -d ' ')
-
-# Count OSS-derived fixtures
 ACTUAL_OSS=$(find test/fixtures -type f -name 'oss_*' | wc -l | tr -d ' ')
 
-# Extract README claims
-README_UNIT=$(grep -o '[0-9]* unit tests' README.md | grep -o '[0-9]*')
-README_FIXTURES=$(grep -o '[0-9]* test fixtures' README.md | grep -o '[0-9]*')
-README_OSS=$(grep -o '[0-9]* OSS-derived' README.md | grep -o '[0-9]*')
-
-echo "    Unit tests:    actual=$ACTUAL_UNIT_TESTS, README=$README_UNIT"
-echo "    Test fixtures: actual=$ACTUAL_FIXTURES, README=$README_FIXTURES"
-echo "    OSS fixtures:  actual=$ACTUAL_OSS, README=$README_OSS"
-
-if [ "$ACTUAL_UNIT_TESTS" != "$README_UNIT" ]; then
-  warn "Unit test count: actual $ACTUAL_UNIT_TESTS != README $README_UNIT"
-fi
-if [ "$ACTUAL_FIXTURES" != "$README_FIXTURES" ]; then
-  warn "Test fixture count: actual $ACTUAL_FIXTURES != README $README_FIXTURES"
-fi
-if [ "$ACTUAL_OSS" != "$README_OSS" ]; then
-  warn "OSS fixture count: actual $ACTUAL_OSS != README $README_OSS"
-fi
+echo "    Unit tests:    $ACTUAL_UNIT_TESTS"
+echo "    Test fixtures: $ACTUAL_FIXTURES"
+echo "    OSS fixtures:  $ACTUAL_OSS"
 
 # --- 3. Summary ---
 echo ""

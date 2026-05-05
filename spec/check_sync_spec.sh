@@ -36,9 +36,9 @@ Describe 'check_sync.sh'
       The output should include 'Checking version consistency'
     End
 
-    It 'reports test count check'
+    It 'reports live test counts'
       When run check_sync
-      The output should include 'Checking test counts in README'
+      The output should include 'Live test counts'
     End
 
     It 'does not mention capability boundaries'
