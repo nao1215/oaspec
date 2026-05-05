@@ -6767,7 +6767,91 @@ pub fn deep_object_nested_object_emits_bracketed_query_case() {
   |> should.be_true()
 }
 
+/// Regression guard: a client whose only multi-shape work is a
+/// deepObject parameter must still import `Some`/`None` (the optional
+/// inner property unwrap arms call them). Pre-fix, the imports were
+/// gated only by optional params / response headers and the generated
+/// code referenced `Some` without it being in scope.
+pub fn deep_object_param_client_imports_some_none_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/deep_object_nested.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/deep_object_nested.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(client_file) =
+    list.find(summary.files, fn(f) { f.path == "client.gleam" })
+  string.contains(client_file.content, "import gleam/option.{")
+  |> should.be_true()
+  string.contains(client_file.content, "Some")
+  |> should.be_true()
+}
+
 // --- Issue #503: multipart/form-data object/array fields ---
+
+/// Regression guard: a client whose only multi-shape work is a
+/// multipart object/array body must import `gleam/list` (for
+/// `list.fold` over array fields), `gleam/json` (for the JSON-bodied
+/// object-field part), and the option ctors. Pre-fix, the import
+/// gate ignored multipart property shapes and emitted `Some`/`list`/
+/// `json` references without the modules in scope.
+pub fn multipart_object_array_client_imports_list_json_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/multipart_object_array.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/multipart_object_array.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(client_file) =
+    list.find(summary.files, fn(f) { f.path == "client.gleam" })
+  string.contains(client_file.content, "import gleam/list")
+  |> should.be_true()
+  string.contains(client_file.content, "import gleam/json")
+  |> should.be_true()
+  string.contains(client_file.content, "import gleam/option.{")
+  |> should.be_true()
+}
+
+/// Regression guard: a `*/*` request body must travel through
+/// `transport.BytesBody`, not `transport.TextBody(json.to_string(...))`.
+/// Pre-fix, the wildcard request fell through to the JSON encoder
+/// fallback and produced code that referenced `gleam/json` without
+/// it being in scope.
+pub fn wildcard_request_body_uses_bytes_body_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/wildcard_content_type.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/wildcard_content_type.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(client_file) =
+    list.find(summary.files, fn(f) { f.path == "client.gleam" })
+  string.contains(client_file.content, "transport.BytesBody")
+  |> should.be_true()
+  string.contains(
+    client_file.content,
+    "transport.TextBody(json.to_string(json.string",
+  )
+  |> should.be_false()
+}
 
 /// Object-typed and array-typed properties on a multipart/form-data
 /// schema must pass validation in client mode (the OAS 3 spec
