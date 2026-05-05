@@ -78,9 +78,16 @@ fn compile_regexes() -> Regexes {
 /// `-1`, or `404` produce valid Gleam variant names (`Plus1`,
 /// `Minus1`, `N404`) instead of `1`, `1`, `404` — the latter would
 /// be rejected by the parser at the type-constructor position.
+///
+/// Issue #494: `.` is rewritten to a `Dot` word boundary so that
+/// real-world specs (Stripe) which declare `payment_intent.processing`
+/// alongside `payment_intent_processing` produce distinct Gleam type
+/// names (`PaymentIntentDotProcessing` vs `PaymentIntentProcessing`)
+/// instead of colliding on `PaymentIntentProcessing`.
 pub fn to_pascal_case(input: String) -> String {
   let re = cached_regexes()
   input
+  |> rewrite_dot_segments
   |> rewrite_leading_signs
   |> split_words(re)
   |> list.map(capitalize)
@@ -125,6 +132,7 @@ pub fn to_snake_case(input: String) -> String {
   let re = cached_regexes()
   let result =
     input
+    |> rewrite_dot_segments
     |> rewrite_leading_signs
     |> insert_underscores_before_caps(re)
     |> split_words(re)
@@ -194,6 +202,18 @@ fn bump_inline_enum_suffix(
     False -> candidate
     True -> bump_inline_enum_suffix(base, suffix + 1, taken)
   }
+}
+
+/// Replace `.` with `_dot_` so the dot survives the snake/Pascal
+/// pipelines as a `Dot` word boundary instead of being treated as
+/// the same separator class as `_` and `-`. Issue #494 — Stripe's
+/// spec declares `payment_intent.processing` alongside
+/// `payment_intent_processing`, and treating `.` as plain whitespace
+/// (the prior behavior) collapsed both onto the same Gleam type
+/// name. Encoding the dot keeps the two distinguishable while still
+/// producing readable identifiers (`PaymentIntentDotProcessing`).
+fn rewrite_dot_segments(input: String) -> String {
+  string.replace(input, ".", "_dot_")
 }
 
 /// Map a leading `+` to `plus_` and a leading `-` to `minus_` so

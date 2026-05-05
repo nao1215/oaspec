@@ -13089,8 +13089,11 @@ pub fn to_snake_case_with_hyphen_case() {
 }
 
 pub fn to_snake_case_with_dots_case() {
+  // Issue #494: a `.` is encoded as a `_dot_` word boundary so dotted
+  // schema names (Stripe's `payment_intent.processing`) survive the
+  // pipeline distinguishable from their `_`-separated siblings.
   naming.to_snake_case("app.name")
-  |> should.equal("app_name")
+  |> should.equal("app_dot_name")
 }
 
 // ===========================================================================
@@ -14327,6 +14330,91 @@ components:
           items:
             $ref: '#/components/schemas/Card'
 "
+
+/// Issue #494: Stripe's OpenAPI spec declares pairs of component
+/// schemas that differ only by `.` vs `_` — e.g.
+/// `payment_intent.processing` and `payment_intent_processing`.
+/// Before the fix, both PascalCased to `PaymentIntentProcessing` and
+/// the validator hard-rejected the spec. The naming pipeline now
+/// encodes `.` as a `Dot` word boundary so the two stay
+/// distinguishable (`PaymentIntentDotProcessing` vs
+/// `PaymentIntentProcessing`).
+const stripe_dotted_schema_collision_spec = "
+openapi: 3.0.3
+info:
+  title: Stripe Dotted Schema Collision
+  version: 1.0.0
+servers:
+  - url: https://example.com
+paths:
+  /events:
+    get:
+      operationId: listEvents
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/payment_intent.processing'
+components:
+  schemas:
+    payment_intent.processing:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [dotted]
+    payment_intent_processing:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [underscored]
+"
+
+pub fn validate_stripe_dotted_schema_no_longer_collides_case() {
+  // Issue #494: the spec must validate without the pre-fix
+  // `Schema names ... all map to Gleam type ... — rename one to avoid
+  // the collision` hard error, and the generated `types.gleam` must
+  // carry both schemas as distinct Gleam types.
+  let assert Ok(spec) = parser.parse_string(stripe_dotted_schema_collision_spec)
+  let assert Ok(resolved) = resolve.resolve(spec)
+  let resolved = hoist.hoist(resolved)
+  let resolved = dedup.dedup(resolved)
+  let cfg =
+    config.new(
+      input: "test.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Both,
+      validate: False,
+    )
+  let ctx = context.new(resolved, cfg)
+  let errors = validate.validate(ctx)
+  // The hard rejection must no longer fire on this collision shape.
+  let has_collision_error =
+    list.any(errors, fn(e) {
+      string.contains(diagnostic.to_string(e), "all map to Gleam type")
+    })
+  has_collision_error |> should.be_false()
+
+  // Both schemas survive into types.gleam under distinct names.
+  let type_files = types.generate(ctx)
+  let assert Ok(types_file) =
+    list.find(type_files, fn(f) { f.path == "types.gleam" })
+  string.contains(types_file.content, "pub type PaymentIntentDotProcessing {")
+  |> should.be_true()
+  string.contains(types_file.content, "pub type PaymentIntentProcessing {")
+  |> should.be_true()
+}
 
 /// Issue #492: GitHub's OpenAPI spec declares
 /// `code-scanning-variant-analysis-status` as a top-level component
