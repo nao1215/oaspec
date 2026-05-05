@@ -60,25 +60,22 @@ fn schema_has_validator_visiting(
   ctx: Context,
   visiting: List(String),
 ) -> Bool {
-  case list.contains(visiting, name) {
-    True -> False
-    False ->
-      case context.spec(ctx).components {
-        Some(components) ->
-          case dict.get(components.schemas, name) {
-            Ok(schema_ref) ->
-              !ir_build.is_internal_schema(schema_ref)
-              && !list.is_empty(
-                collect_guard_calls_visiting(name, schema_ref, ctx, [
-                  name,
-                  ..visiting
-                ]),
-              )
-            // nolint: thrown_away_error -- unknown schema name simply has no validator
-            Error(_) -> False
-          }
-        None -> False
+  use <- bool.guard(when: list.contains(visiting, name), return: False)
+  case context.spec(ctx).components {
+    Some(components) ->
+      case dict.get(components.schemas, name) {
+        Ok(schema_ref) ->
+          !ir_build.is_internal_schema(schema_ref)
+          && !list.is_empty(
+            collect_guard_calls_visiting(name, schema_ref, ctx, [
+              name,
+              ..visiting
+            ]),
+          )
+        // nolint: thrown_away_error -- unknown schema name simply has no validator
+        Error(_) -> False
       }
+    None -> False
   }
 }
 
