@@ -6698,6 +6698,77 @@ paths:
   |> should.be_true()
 }
 
+// --- Issue #504: */* wildcard content type ---
+
+/// `*/*` request bodies and responses parse to BitArray and pass
+/// validation. Kubernetes' OpenAPI v3 spec uses `*/*` heavily for
+/// proxy and resource-mutation endpoints; without this support the
+/// generator can't accept those specs.
+pub fn wildcard_content_type_passes_validation_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/wildcard_content_type.yaml")
+  let assert Ok(resolved) = resolve.resolve(unresolved)
+  let spec = hoist.hoist(resolved)
+  let spec = dedup.dedup(spec)
+  let ctx =
+    context.new(
+      spec,
+      config.new(
+        input: "test/fixtures/wildcard_content_type.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Both,
+        validate: False,
+      ),
+    )
+  let errors = validate.validate(ctx)
+  errors |> list.is_empty |> should.be_true()
+}
+
+/// `content_type.from_string("*/*")` round-trips through `Wildcard`
+/// and is reported as supported for both request and response.
+pub fn wildcard_content_type_classified_as_supported_case() {
+  content_type.from_string("*/*")
+  |> should.equal(content_type.Wildcard)
+  content_type.to_string(content_type.Wildcard)
+  |> should.equal("*/*")
+  content_type.is_supported(content_type.Wildcard)
+  |> should.be_true()
+  content_type.is_supported_request(content_type.Wildcard)
+  |> should.be_true()
+  content_type.is_supported_response(content_type.Wildcard)
+  |> should.be_true()
+}
+
+/// End-to-end: generating a client for the wildcard fixture must
+/// produce a `BitArray` request body and a `BitArray` response
+/// variant — the same shape as `application/octet-stream`.
+pub fn wildcard_content_type_generates_bitarray_bodies_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/wildcard_content_type.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/wildcard_content_type.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(request_types_file) =
+    list.find(summary.files, fn(f) { f.path == "request_types.gleam" })
+  let assert Ok(response_types_file) =
+    list.find(summary.files, fn(f) { f.path == "response_types.gleam" })
+  // Request type carries BitArray for the upload op.
+  string.contains(request_types_file.content, "body: BitArray")
+  |> should.be_true()
+  // Response variants carry BitArray for both ops.
+  string.contains(response_types_file.content, "BitArray")
+  |> should.be_true()
+}
+
 // --- form-urlencoded non-object validation tests ---
 
 /// form-urlencoded with non-object schema must be rejected by validation.

@@ -35,7 +35,7 @@ stops with a diagnostic instead of emitting partial code.
   types
 - Keep unsupported spec shapes explicit and testable
 - Backed by 361 unit tests, ShellSpec CLI tests, 40 integration compile tests,
-  and 261 test fixtures (including 98 OSS-derived edge-case specs)
+  and 262 test fixtures (including 98 OSS-derived edge-case specs)
 
 API reference: <https://hexdocs.pm/oaspec/>
 

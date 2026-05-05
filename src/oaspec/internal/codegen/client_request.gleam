@@ -228,7 +228,8 @@ pub fn get_body_type(rb: spec.RequestBody(Resolved), op_id: String) -> String {
     [_, _, ..] -> "String"
     [#(media_type_name, media_type)] ->
       case content_type.from_string(media_type_name) {
-        content_type.ApplicationOctetStream -> "BitArray"
+        content_type.ApplicationOctetStream | content_type.Wildcard ->
+          "BitArray"
         _ ->
           case media_type.schema {
             Some(Reference(name:, ..)) ->

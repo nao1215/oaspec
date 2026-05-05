@@ -10,6 +10,22 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Added
+
+- **codegen(`*/*` content type)**: OpenAPI's `*/*` catch-all media type
+  is now recognised as a supported request and response content type.
+  Specs like Kubernetes' OpenAPI v3 use `*/*` heavily for proxy
+  endpoints and resource-mutation handlers (`replace`, `delete`,
+  `create`) that accept or emit arbitrary bytes; previously each
+  `*/*` declaration produced a hard validation error and the spec was
+  un-generatable. oaspec now treats `*/*` as a synonym for
+  `application/octet-stream` for codegen purposes — the request body
+  is `BitArray`, the response body is `BitArray` — which matches the
+  "any bytes" semantics without committing the SDK to a specific
+  parser. Both client and server modes accept the new shape; the
+  server router exposes the body as raw `BitArray` and the response
+  emitter wraps it in `BytesBody`. Issue #504.
+
 ## [0.52.0] - 2026-05-05
 
 ### Fixed

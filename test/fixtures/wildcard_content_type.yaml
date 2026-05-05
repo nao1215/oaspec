@@ -1,0 +1,41 @@
+openapi: "3.0.3"
+info:
+  title: Wildcard Content Type Test
+  description: |
+    Issue #504. Exercises `*/*` request and response media types as
+    used by Kubernetes' OpenAPI v3 spec for proxy and resource-mutation
+    endpoints. Both shapes should pass validation and generate working
+    Gleam code.
+  version: "1.0.0"
+paths:
+  /upload:
+    post:
+      operationId: uploadOpaqueBytes
+      summary: Accept any payload as raw bytes
+      requestBody:
+        required: true
+        content:
+          "*/*":
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Echo
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+  /proxy:
+    get:
+      operationId: proxyAnyResponse
+      summary: Pass-through proxy returning any media type
+      responses:
+        "200":
+          description: Whatever the upstream returned
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary

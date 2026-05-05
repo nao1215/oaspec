@@ -1191,11 +1191,13 @@ fn generate_response_conversion(
                             is_default: is_default,
                           )
                       }
-                    content_type.ApplicationOctetStream ->
+                    content_type.ApplicationOctetStream | content_type.Wildcard ->
                       // Issue #304: binary responses thread bytes end-to-end
                       // via `BytesBody(BitArray)` instead of being smuggled
                       // through `String`. The matching response_types
                       // variant carries `BitArray` (see ir_build).
+                      // Issue #504: */* shares the same path — wildcard
+                      // responses are handed to the user as raw BitArray.
                       case media_type.schema {
                         Some(_) ->
                           emit_response_arm(
