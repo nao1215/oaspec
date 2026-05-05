@@ -172,6 +172,38 @@ pub fn naming_to_snake_case_dot_becomes_dot_word_boundary_test() {
   |> should.equal("payment_intent_processing")
 }
 
+// Edge cases for the `.` → `_dot_` encoding (CodeRabbit on PR #499).
+// Behavior chosen for predictability; documenting it locks in the
+// shape so future refactors can't silently drift.
+
+pub fn naming_dot_encoding_consecutive_dots_test() {
+  // `foo..bar` becomes two consecutive `_dot_` segments. The
+  // word_separator regex collapses runs of `_`/`.`/etc. so the
+  // PascalCase output reads as `FooDotDotBar`.
+  naming.to_pascal_case("foo..bar") |> should.equal("FooDotDotBar")
+  naming.to_snake_case("foo..bar") |> should.equal("foo_dot_dot_bar")
+}
+
+pub fn naming_dot_encoding_leading_and_trailing_dot_test() {
+  // A leading `.` produces a leading `Dot` word; a trailing `.`
+  // produces a trailing `Dot` word. Both still PascalCase and
+  // snake_case to valid Gleam identifiers.
+  naming.to_pascal_case(".foo") |> should.equal("DotFoo")
+  naming.to_snake_case(".foo") |> should.equal("dot_foo")
+  naming.to_pascal_case("foo.") |> should.equal("FooDot")
+  naming.to_snake_case("foo.") |> should.equal("foo_dot")
+}
+
+pub fn naming_dot_encoding_literal_underscore_dot_underscore_test() {
+  // A literal `_dot_` already in the input is escaped to
+  // `_dot_literal_` so a spec that authored `a_dot_b` and a sibling
+  // `a.b` produce distinct Gleam type names.
+  naming.to_pascal_case("a_dot_b") |> should.equal("ADotLiteralB")
+  naming.to_pascal_case("a.b") |> should.equal("ADotB")
+  naming.to_snake_case("a_dot_b") |> should.equal("a_dot_literal_b")
+  naming.to_snake_case("a.b") |> should.equal("a_dot_b")
+}
+
 // Issue #492: inline-enum disambiguation against component schema names.
 
 pub fn naming_inline_enum_type_name_no_collision_returns_base_test() {

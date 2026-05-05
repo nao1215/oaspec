@@ -212,8 +212,16 @@ fn bump_inline_enum_suffix(
 /// (the prior behavior) collapsed both onto the same Gleam type
 /// name. Encoding the dot keeps the two distinguishable while still
 /// producing readable identifiers (`PaymentIntentDotProcessing`).
+///
+/// A literal `_dot_` already in the input is first escaped to
+/// `_dot_literal_` so spec authors who happen to use `_dot_` in a
+/// schema name still produce a name distinct from a sibling that
+/// uses `.` at the same position (`a_dot_b` → `ADotLiteralB`,
+/// `a.b` → `ADotB`).
 fn rewrite_dot_segments(input: String) -> String {
-  string.replace(input, ".", "_dot_")
+  input
+  |> string.replace("_dot_", "_dot_literal_")
+  |> string.replace(".", "_dot_")
 }
 
 /// Map a leading `+` to `plus_` and a leading `-` to `minus_` so
