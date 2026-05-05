@@ -3,7 +3,10 @@
 [![Hex package](https://img.shields.io/hexpm/v/oaspec)](https://hex.pm/packages/oaspec)
 [![HexDocs](https://img.shields.io/badge/hexdocs-latest-blue)](https://hexdocs.pm/oaspec/)
 [![License](https://img.shields.io/github/license/nao1215/oaspec)](https://github.com/nao1215/oaspec/blob/main/LICENSE)
-[![CI](https://github.com/nao1215/oaspec/actions/workflows/ci.yml/badge.svg)](https://github.com/nao1215/oaspec/actions)
+[![Quick](https://github.com/nao1215/oaspec/actions/workflows/ci-quick.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci-quick.yml)
+[![Tests](https://github.com/nao1215/oaspec/actions/workflows/ci-tests.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci-tests.yml)
+[![Examples](https://github.com/nao1215/oaspec/actions/workflows/ci-examples.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci-examples.yml)
+[![Adapters](https://github.com/nao1215/oaspec/actions/workflows/ci-adapters.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci-adapters.yml)
 
 Generate Gleam client and server modules from OpenAPI 3.x specs.
 

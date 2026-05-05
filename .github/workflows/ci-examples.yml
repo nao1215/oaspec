@@ -1,0 +1,67 @@
+name: Examples
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: examples-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  example:
+    name: ${{ matrix.target.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - name: petstore-client
+            kind: gen-and-run
+            generate: examples/petstore_client/oaspec.yaml
+            cwd: examples/petstore_client
+          - name: petstore-client-fetch
+            kind: gen-and-run
+            generate: examples/petstore_client_fetch/oaspec.yaml
+            cwd: examples/petstore_client_fetch
+          - name: server-adapter
+            kind: build-and-run
+            cwd: examples/server_adapter
+          - name: js-smoke
+            kind: build-and-run
+            cwd: examples/js_smoke
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          gleam-version: "1.15"
+
+      - name: Cache Gleam build
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/packages
+            build/dev/erlang/oaspec
+            ~/.cache/gleam
+          key: ${{ runner.os }}-gleam-build-${{ hashFiles('manifest.toml', 'gleam.toml', 'src/**') }}
+          restore-keys: |
+            ${{ runner.os }}-gleam-build-${{ hashFiles('manifest.toml', 'gleam.toml') }}-
+            ${{ runner.os }}-gleam-build-
+
+      - name: Download dependencies
+        run: gleam deps download
+
+      - name: Generate code (if applicable)
+        if: matrix.target.kind == 'gen-and-run'
+        run: gleam run -- generate --config=${{ matrix.target.generate }}
+
+      - name: Build and run example
+        working-directory: ${{ matrix.target.cwd }}
+        run: |
+          gleam deps download
+          gleam build --warnings-as-errors
+          gleam run
