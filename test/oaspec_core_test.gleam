@@ -121,6 +121,7 @@ pub fn content_type_helpers_test() {
   let _ = support.deep_object_nested_object_passes_client_validation_case()
   let _ = support.deep_object_nested_object_emits_bracketed_query_case()
   let _ = support.deep_object_param_client_imports_some_none_case()
+  let _ = support.deep_object_primitive_props_client_imports_primitives_case()
   let _ = support.multipart_object_array_client_imports_list_json_case()
   let _ = support.wildcard_request_body_uses_bytes_body_case()
   let _ = support.fixtures_sweep_parse_resolve_no_panic_case()

@@ -55,10 +55,22 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
         _ -> False
       }
     })
+    || deep_object_param_has_property(operations, ctx, fn(s) {
+      case s {
+        schema.BooleanSchema(..) -> True
+        _ -> False
+      }
+    })
   let needs_float_param =
     list.any(all_params, fn(p) {
       case p.payload {
         ParameterSchema(Inline(schema.NumberSchema(..))) -> True
+        _ -> False
+      }
+    })
+    || deep_object_param_has_property(operations, ctx, fn(s) {
+      case s {
+        schema.NumberSchema(..) -> True
         _ -> False
       }
     })
@@ -357,6 +369,12 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
         _ -> False
       }
     })
+    || deep_object_param_has_property(operations, ctx, fn(s) {
+      case s {
+        schema.IntegerSchema(..) -> True
+        _ -> False
+      }
+    })
 
   let needs_float = needs_float_param || has_float_response_header
 
@@ -532,6 +550,65 @@ fn resolve_to_object(
         // nolint: thrown_away_error -- unresolved refs are reported by the resolver; the import gate just falls back to "no match"
         Error(_) -> None
       }
+  }
+}
+
+/// Issue #519: predicate helper for deepObject query parameter
+/// sub-properties. Detects whether any deepObject query parameter has
+/// a (recursively-nested) property whose resolved schema matches
+/// `pred`. The deepObject codegen path emits `int.to_string` /
+/// `float.to_string` / `bool.to_string` for primitive sub-properties,
+/// so the import gate must mirror that recursion to pull in
+/// `gleam/int` / `gleam/float` / `gleam/bool`.
+fn deep_object_param_has_property(
+  operations: List(context.AnalyzedOperation),
+  ctx: Context,
+  pred: fn(schema.SchemaObject) -> Bool,
+) -> Bool {
+  list.any(operations, fn(op) {
+    let #(_, operation, _, _) = op
+    list.any(operation.parameters, fn(rp) {
+      case rp {
+        Value(p) ->
+          case operation_ir.is_deep_object_param(p, ctx) {
+            False -> False
+            True ->
+              case spec.parameter_schema(p) {
+                Some(ref) ->
+                  case resolve_to_object(ref, ctx) {
+                    Some(obj) -> object_properties_match(obj, ctx, pred)
+                    None -> False
+                  }
+                None -> False
+              }
+          }
+        _ -> False
+      }
+    })
+  })
+}
+
+/// Walk the leaves of an `ObjectSchema`'s property tree, calling
+/// `pred` on each resolved schema. Recurses into nested
+/// `ObjectSchema` properties so the import-needs analysis mirrors
+/// `emit_deep_object_nested_object/_property` in
+/// `oaspec/internal/codegen/client.gleam`.
+fn object_properties_match(
+  obj: schema.SchemaObject,
+  ctx: Context,
+  pred: fn(schema.SchemaObject) -> Bool,
+) -> Bool {
+  case obj {
+    schema.ObjectSchema(properties:, ..) ->
+      list.any(dict.to_list(properties), fn(entry) {
+        let #(_, prop_ref) = entry
+        case resolve_to_object(prop_ref, ctx) {
+          Some(prop_schema) ->
+            pred(prop_schema) || object_properties_match(prop_schema, ctx, pred)
+          None -> False
+        }
+      })
+    _ -> False
   }
 }
 

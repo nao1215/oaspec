@@ -6836,6 +6836,45 @@ pub fn deep_object_param_client_imports_some_none_case() {
   |> should.be_true()
 }
 
+// --- Issue #519: deepObject primitive sub-property imports ---
+
+/// Regression guard for #519: a client whose deepObject query
+/// parameter has integer / number / boolean sub-properties (top-level
+/// or nested) must import `gleam/int` / `gleam/float` / `gleam/bool`
+/// because the codegen emits `int.to_string` / `float.to_string` /
+/// `bool.to_string` at those sites. Pre-fix, the import gate didn't
+/// traverse deepObject ObjectSchema properties and the generated
+/// `<package>_client/client.gleam` failed to compile with
+/// `Unknown module: int`.
+pub fn deep_object_primitive_props_client_imports_primitives_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/deep_object_primitive_props.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/deep_object_primitive_props.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(client_file) =
+    list.find(summary.files, fn(f) { f.path == "client.gleam" })
+  // The deepObject sub-properties trigger int/float/bool to_string
+  // emissions, which in turn require the matching primitive modules.
+  string.contains(client_file.content, "import gleam/int")
+  |> should.be_true()
+  string.contains(client_file.content, "import gleam/float")
+  |> should.be_true()
+  string.contains(client_file.content, "import gleam/bool")
+  |> should.be_true()
+  // Nested-ObjectSchema property inner_count: integer is reached via
+  // the recursive walker.
+  string.contains(client_file.content, "filter[nested][inner_count]")
+  |> should.be_true()
+}
+
 // --- Issue #503: multipart/form-data object/array fields ---
 
 /// Regression guard: a client whose only multi-shape work is a

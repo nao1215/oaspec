@@ -1,0 +1,53 @@
+openapi: "3.0.3"
+info:
+  title: deepObject Primitive Property Imports Test
+  description: |
+    Issue #519. The deepObject codegen emits `int.to_string` /
+    `float.to_string` / `bool.to_string` for primitive sub-properties
+    of a deepObject query parameter, but the import-needs analysis in
+    `client_ir.gleam` did not traverse into deepObject properties, so
+    `<package>_client/client.gleam` was missing the corresponding
+    `gleam/int` / `gleam/float` / `gleam/bool` imports and failed to
+    compile.
+
+    This fixture exercises all three primitive sub-property types
+    plus a nested ObjectSchema property to lock the recursive
+    traversal in.
+  version: "1.0.0"
+paths:
+  /things:
+    get:
+      operationId: listThings
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          required: false
+          schema:
+            type: object
+            properties:
+              count:
+                type: integer
+              ratio:
+                type: number
+                format: double
+              active:
+                type: boolean
+              nested:
+                type: object
+                properties:
+                  inner_count:
+                    type: integer
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: string
