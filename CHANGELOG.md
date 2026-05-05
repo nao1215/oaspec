@@ -10,6 +10,24 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Fixed
+
+- **codegen(path filter)**: `targets[].include.paths` previously dropped
+  unwanted operations from `spec.paths` but left every component schema
+  in `spec.components.schemas` intact, so the generated `decode.gleam`,
+  `encode.gleam`, `types.gleam`, and `guards.gleam` still emitted code
+  for every schema in the spec. A one-path filter against GitHub's REST
+  OpenAPI produced an 11 MB `decode.gleam` instead of the ~22 KB the
+  filter implied. Generation now runs a reachability pass after hoist
+  and before dedup that walks every operation surviving the filter
+  (parameters, request bodies, response bodies, response headers,
+  callbacks, and webhooks) into the schema graph
+  (`properties` / `items` / `additionalProperties.Typed` /
+  `allOf` / `oneOf` / `anyOf` / `discriminator.mapping`) and prunes
+  `components.schemas` to the reachable set. The pass only runs when an
+  include filter is configured; without a filter the spec is presented
+  as-authored. Issue #501.
+
 ## [0.51.0] - 2026-05-05
 
 ### Fixed

@@ -84,6 +84,13 @@ pub fn include_filter_test() {
   let _ = support.filter_apply_tag_membership_keeps_tagged_operations_case()
   let _ = support.filter_apply_tags_or_paths_unions_case()
   let _ = support.filter_path_matches_exact_and_glob_case()
+  let _ = support.reachability_prune_drops_unreferenced_components_case()
+  let _ =
+    support.reachability_prune_keeps_transitively_reachable_components_case()
+  let _ =
+    support.reachability_prune_with_no_surviving_operations_drops_everything_case()
+  let _ =
+    support.reachability_prune_pipeline_omits_dead_types_in_generated_output_case()
 }
 
 pub fn content_type_helpers_test() {
