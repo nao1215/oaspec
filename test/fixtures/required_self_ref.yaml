@@ -1,0 +1,27 @@
+openapi: "3.0.3"
+info:
+  title: Required Self-Ref
+  version: "1.0.0"
+paths:
+  /node:
+    get:
+      operationId: getNode
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Node"
+components:
+  schemas:
+    Node:
+      type: object
+      # `child` is BOTH required and references the enclosing schema.
+      # Any value of Node would need an infinitely deep chain of children,
+      # so no finite JSON document can satisfy this schema. A spec like
+      # this is well-formed YAML but semantically inhabit-impossible.
+      required: [child]
+      properties:
+        child:
+          $ref: "#/components/schemas/Node"

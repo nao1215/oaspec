@@ -1906,6 +1906,39 @@ pub fn validate_rejects_duplicate_operation_id_case() {
   |> should.be_true()
 }
 
+/// Multi-error aggregation contract: validate.validate must surface
+/// ALL distinct issues found in one pass, not bail on the first one.
+/// This pin protects against a future change that converts the
+/// aggregator into early-return — which would silently hide every
+/// issue past the first and force users to re-run the generator
+/// repeatedly to discover their own bugs.
+///
+/// Fixture pairs an unresolved global security $ref with a duplicate
+/// operationId across two paths; both are validate-phase errors so
+/// they share a single call.
+pub fn validate_aggregates_multiple_errors_in_one_pass_case() {
+  let ctx = make_ctx("test/fixtures/error_multiple_issues.yaml")
+  let errors = validate.validate(ctx)
+  let messages = list.map(errors, validate.error_to_string)
+
+  // The contract: at least two distinct diagnostics returned.
+  case list.length(errors) >= 2 {
+    True -> Nil
+    False ->
+      // nolint: avoid_panic -- pin failure aborts the suite
+      panic as "expected >= 2 diagnostics, validator returned fewer"
+  }
+
+  // Both classes of error must be represented; otherwise the
+  // aggregator is silently dropping one of them.
+  list.any(messages, fn(s) { string.contains(s, "Duplicate operationId") })
+  |> should.be_true()
+  list.any(messages, fn(s) {
+    string.contains(s, "nonexistent_scheme") || string.contains(s, "security")
+  })
+  |> should.be_true()
+}
+
 pub fn validate_rejects_operation_ids_colliding_after_snake_case_case() {
   // Two operationIds that differ only in case (listItems vs list_items)
   // collapse to the same snake_case function name in generated code.
@@ -12310,6 +12343,60 @@ pub fn oss_openapi_gen_enum_uri_parses_case() {
   dict.size(components.schemas) |> should.equal(1)
 }
 
+/// Combined-feature stress: oneOf inside `items` of an `array` schema,
+/// with `nullable: true` and a `discriminator`. None of the existing
+/// fixtures exercise all three at once on the same schema.
+///
+/// Pinned behavior:
+///   - parses without error
+///   - generates without error
+///   - emits a discriminator-aware tagged union (one variant per
+///     oneOf branch) and a decoder that switches on the discriminator
+///   - the items-level `nullable: true` is currently NOT lifted to
+///     `Option(...)` in the generated array element type. This pin
+///     captures that observable behavior so that, on the day oaspec
+///     starts honoring the nullable, this test fails LOUDLY and asks
+///     for an intentional update.
+pub fn combined_oneof_nullable_array_parses_case() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/combined_oneof_nullable_array.yaml")
+  spec.info.title |> should.equal("Combined oneOf + nullable + array")
+  let assert Some(components) = spec.components
+  // Apple, Banana
+  dict.size(components.schemas) |> should.equal(2)
+}
+
+pub fn combined_oneof_nullable_array_generates_tagged_union_case() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/combined_oneof_nullable_array.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let assert Ok(summary) = generate.generate(spec, context.config(ctx))
+
+  let types_file =
+    list.find(summary.files, fn(f) { string.ends_with(f.path, "types.gleam") })
+  let assert Ok(types_file) = types_file
+  let types_src = types_file.content
+
+  // Discriminator-aware tagged union must be emitted.
+  string.contains(types_src, "ListFruitResponseOkItemApple(Apple)")
+  |> should.be_true()
+  string.contains(types_src, "ListFruitResponseOkItemBanana(Banana)")
+  |> should.be_true()
+
+  // Pin the items-nullable drop. If oaspec gains support, the next
+  // line will fail and the maintainer should flip this to
+  // `should.be_true()` and update the surrounding contract.
+  string.contains(types_src, "List(option.Option(ListFruitResponseOkItem))")
+  |> should.be_false()
+
+  // Decoder must switch on the discriminator field.
+  let decode_file =
+    list.find(summary.files, fn(f) { string.ends_with(f.path, "decode.gleam") })
+  let assert Ok(decode_file) = decode_file
+  string.contains(decode_file.content, "decode.field(\"kind\", decode.string)")
+  |> should.be_true()
+}
+
 /// openapi-generator: spec missing required 'info' field.
 /// The parser rejects this with a clear error.
 pub fn oss_openapi_gen_missing_info_rejects_case() {
@@ -13323,6 +13410,54 @@ pub fn generate_recursive_anyof_schema_types_case() {
   let ctx = make_ctx("test/fixtures/recursive_anyof_schema.yaml")
   let files = types.generate(ctx)
   list.length(files) |> should.not_equal(0)
+}
+
+/// Pathological spec: a `required` field whose schema is `$ref`-back to
+/// the enclosing schema. Every value of `Node` would need an
+/// infinitely deep chain of `child` Nodes, so the schema is
+/// inhabit-impossible — no finite JSON document can satisfy it.
+///
+/// Current observable behavior (pinned below):
+///   - parser accepts the spec
+///   - validator does NOT flag it as an error
+///   - codegen emits `pub type Node { Node(child: Node) }` which the
+///     Gleam compiler accepts even though the type has no constructor
+///     reachable from a finite value, AND emits a decoder
+///     (`node_decoder`) that recurses unconditionally — invoking it
+///     against any input would never return.
+///
+/// This pin documents that gap. When oaspec gains an inhabitability
+/// check (e.g. detect a required cycle in the schema graph), the
+/// `Ok(_)` arm below should flip to `Error(_)` and assert the
+/// diagnostic shape — at which point the test will fail loudly and
+/// the maintainer will know the contract has changed intentionally.
+pub fn required_self_ref_currently_accepted_case() {
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/required_self_ref.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let result = generate.generate(spec, context.config(ctx))
+  // Pin: today this generates without surfacing a blocking error.
+  case result {
+    Ok(summary) -> {
+      let types_file =
+        list.find(summary.files, fn(f) {
+          string.ends_with(f.path, "types.gleam")
+        })
+      let assert Ok(types_file) = types_file
+      // The non-Option recursive form is exactly what makes the type
+      // uninhabitable. If oaspec ever wraps the field in `Option(_)`
+      // (which would make Node inhabitable, with `Node(child: None)`
+      // as the base case), this assertion fails — that's the desired
+      // signal for an intentional change.
+      string.contains(types_file.content, "Node(child: Node)")
+      |> should.be_true()
+    }
+    Error(generate.ValidationErrors(errors:)) ->
+      // If a future inhabitability check rejects this fixture, that's
+      // an improvement — but the test must change too. Surface the
+      // error count so the failure prompt is informative.
+      list.length(diagnostic.errors_only(errors)) |> should.equal(0)
+  }
 }
 
 pub fn generate_default_response_only_case() {

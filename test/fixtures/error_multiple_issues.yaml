@@ -1,0 +1,22 @@
+openapi: "3.0.3"
+info:
+  title: Multiple Issues
+  version: "1.0.0"
+# Issue 1: a global security requirement names a scheme that does not exist.
+security:
+  - nonexistent_scheme: []
+paths:
+  /users:
+    get:
+      # Issue 2: duplicate operationId across two operations.
+      operationId: listItems
+      responses:
+        "200":
+          description: OK
+  /items:
+    get:
+      # Issue 2 (continued): same operationId as /users.get.
+      operationId: listItems
+      responses:
+        "200":
+          description: OK

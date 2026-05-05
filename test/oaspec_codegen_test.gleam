@@ -126,6 +126,7 @@ pub fn feature_fixture_codegen_smoke_test() {
   let _ = support.generate_mixed_param_locations_case()
   let _ = support.generate_complex_discriminator_case()
   let _ = support.generate_recursive_anyof_schema_types_case()
+  let _ = support.required_self_ref_currently_accepted_case()
   let _ = support.generate_default_response_only_case()
   let _ = support.generate_abbreviation_identifiers_valid_gleam_case()
   let _ = support.generate_optional_required_combinations_case()
