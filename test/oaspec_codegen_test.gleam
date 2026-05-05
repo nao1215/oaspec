@@ -95,7 +95,7 @@ pub fn decoder_semantics_test() {
   let _ = support.nullable_primitive_decoder_encoder_case()
   let _ = support.nullable_oneof_generates_option_type_case()
   let _ = support.top_level_array_response_uses_json_array_case()
-  let _ = support.validate_detects_decode_list_collision_case()
+  let _ = support.validate_decode_list_collision_auto_disambiguates_case()
   let _ = support.additional_properties_false_emits_unknown_key_check_case()
   let _ = support.oneof_decoder_rejects_multi_branch_matches_case()
   let _ =

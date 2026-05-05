@@ -485,7 +485,17 @@ pub fn get_response_decode_expr(
     Inline(schema.ArraySchema(items:, ..)) ->
       case items {
         Reference(name:, ..) -> {
-          "decode.decode_" <> naming.to_snake_case(name) <> "_list(text)"
+          // Issue #493 / CodeRabbit follow-up: parse with
+          // `decode.list(<schema>_decoder())` directly instead of
+          // calling the synthetic `decode_<schema>_list` wrapper.
+          // The wrapper is only emitted for object schemas, so an
+          // array of `$ref` to an enum / primitive / oneOf / anyOf
+          // would otherwise reference a non-existent function.
+          // Going through the per-schema decoder works for every
+          // schema kind and also dodges the `XxxList` rename pass.
+          "json.parse(text, dyn_decode.list(decode."
+          <> naming.to_snake_case(name)
+          <> "_decoder()))"
         }
         Inline(inner) -> {
           let inner_decoder = inline_schema_to_decoder(inner)

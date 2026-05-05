@@ -5,7 +5,9 @@ import api/encode
 import api/request_types
 import api/response_types
 import api/types
+import gleam/dynamic/decode as dyn_decode
 import gleam/int
+import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -118,7 +120,7 @@ pub fn decode_list_pets_response(
   case resp.status {
     200 -> {
       use text <- result.try(text_body(resp.body))
-      case decode.decode_pet_list(text) {
+      case json.parse(text, dyn_decode.list(decode.pet_decoder())) {
         Ok(decoded) -> Ok(response_types.ListPetsResponseOk(decoded))
         Error(_) ->
           Error(DecodeFailure(detail: "Failed to decode response body"))

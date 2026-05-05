@@ -14287,8 +14287,11 @@ paths:
 "
 
 /// Spec where two component schemas would collide on `decode_card_list`
-/// (Issue #267): `Card` synthesises a list decoder; `CardList` reuses the
-/// same identifier. The validator must surface this before codegen.
+/// (Issue #267 / #493): `Card` would synthesise `decode_card_list`,
+/// and the user-declared `CardList` schema's decoder would reuse the
+/// same identifier. The codegen now auto-disambiguates — the
+/// synthetic decoder shifts to `decode_card_list_items` and the
+/// user's `CardList` keeps the natural `decode_card_list` name.
 const decode_list_collision_spec = "
 openapi: 3.0.3
 info:
@@ -14325,7 +14328,11 @@ components:
             $ref: '#/components/schemas/Card'
 "
 
-pub fn validate_detects_decode_list_collision_case() {
+pub fn validate_decode_list_collision_auto_disambiguates_case() {
+  // Issue #493: previously this collision was a hard validation
+  // error. The codegen now auto-disambiguates the synthetic list
+  // decoder (`_list_items` suffix) so real-world specs (Kubernetes
+  // / Stripe) can compile without renaming upstream schemas.
   let assert Ok(spec) = parser.parse_string(decode_list_collision_spec)
   let assert Ok(resolved) = resolve.resolve(spec)
   let resolved = hoist.hoist(resolved)
@@ -14341,12 +14348,38 @@ pub fn validate_detects_decode_list_collision_case() {
     )
   let ctx = context.new(resolved, cfg)
   let errors = validate.validate(ctx)
+  // No XxxList-style errors should be reported anymore.
   let has_collision_error =
     list.any(errors, fn(e) {
-      string.contains(diagnostic.to_string(e), "decode_card_list")
-      && string.contains(diagnostic.to_string(e), "CardList")
+      string.contains(diagnostic.to_string(e), "synthetic list decoder")
     })
-  has_collision_error |> should.be_true()
+  has_collision_error |> should.be_false()
+
+  // Generated decoder uses the renamed synthetic `_list_items` for
+  // `List(Card)` and keeps the natural `_list` name for the user's
+  // `CardList` schema.
+  let decoder_files = decoders.generate(ctx)
+  let assert Ok(decode_file) =
+    list.find(decoder_files, fn(f) { f.path == "decode.gleam" })
+  let content = decode_file.content
+  // Renamed synthetic decoder for `List(Card)`.
+  string.contains(
+    content,
+    "pub fn card_decoder_list_items() -> decode.Decoder(List(types.Card))",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "pub fn decode_card_list_items(json_string: String) -> Result(List(types.Card)",
+  )
+  |> should.be_true()
+  // User's `CardList` decoder keeps `decode_card_list` since the
+  // synthetic moved out of the way.
+  string.contains(
+    content,
+    "pub fn decode_card_list(json_string: String) -> Result(types.CardList,",
+  )
+  |> should.be_true()
 }
 
 pub fn top_level_array_response_uses_json_array_case() {
