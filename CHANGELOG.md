@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-05-05
+
 ### Tests
 
 - **integration: format / non-empty / provenance smoke checks for
