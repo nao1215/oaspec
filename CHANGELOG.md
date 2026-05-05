@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.52.0] - 2026-05-05
+
 ### Fixed
 
 - **codegen(path filter)**: `targets[].include.paths` previously dropped
