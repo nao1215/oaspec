@@ -6875,6 +6875,42 @@ pub fn deep_object_primitive_props_client_imports_primitives_case() {
   |> should.be_true()
 }
 
+// --- Issue #524: friendly error on non-YAML config ---
+
+/// Regression guard for #524: passing a non-YAML config path
+/// (here a `.toml`) must surface a friendly `ParseError` instead
+/// of crashing with `case_clause` when yay's Erlang FFI returns
+/// a tuple shape that doesn't match the `YamlError` constructors.
+pub fn config_load_rejects_non_yaml_extension_case() {
+  // The path doesn't need to exist — the extension check happens
+  // before `simplifile.read`.
+  case config.load("/tmp/oaspec-test/oaspec.toml") {
+    Error(config.ParseError(detail:)) -> {
+      string.contains(detail, "config files must be YAML")
+      |> should.be_true()
+      string.contains(detail, "'.toml'")
+      |> should.be_true()
+    }
+    _ -> {
+      panic as "expected ParseError for non-YAML config extension"
+    }
+  }
+}
+
+/// Verify that real YAML extensions (.yaml, .yml) bypass the
+/// extension gate and surface the existing `FileNotFound` for a
+/// missing file (rather than the new friendly extension error).
+pub fn config_load_yaml_extensions_bypass_gate_case() {
+  let assert Error(err) =
+    config.load("/tmp/oaspec-test/definitely-not-a-real-config.yaml")
+  case err {
+    config.FileNotFound(..) -> Nil
+    _ -> {
+      panic as "expected FileNotFound for missing .yaml config"
+    }
+  }
+}
+
 // --- Issue #523: OAS 3.0 boolean exclusiveMinimum/Maximum ---
 
 /// Regression guard for #523: when the spec uses the OAS 3.0

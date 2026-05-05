@@ -175,6 +175,25 @@ pub fn load(path: String) -> Result(Config, ConfigError) {
 /// carrying its own `package` / `output_*` / `include` while
 /// sharing the top-level `input:`, `mode:`, and `validate:` values.
 pub fn load_all(path: String) -> Result(List(Config), ConfigError) {
+  // Issue #524: yay's Erlang FFI for `parse_string` returns a raw
+  // `{yaml_error, Message, {Line, Col}}` tuple in some failure
+  // modes, which doesn't structurally match either constructor of
+  // `yay.YamlError`. The downstream `yaml_error_to_string` then
+  // crashes with a `case_clause` runtime error instead of giving
+  // the user a readable diagnostic. Common trigger: passing a
+  // non-YAML file (e.g. `oaspec.toml` instead of `oaspec.yaml`).
+  // Catch the obvious "wrong file extension" case up front and
+  // return a friendly error before yay even sees the file.
+  use _ <- result.try(case non_yaml_extension(path) {
+    Some(ext) ->
+      Error(ParseError(
+        detail: "config files must be YAML; got '."
+        <> ext
+        <> "' extension. Try renaming to '.yaml' (or '.yml').",
+      ))
+    None -> Ok(Nil)
+  })
+
   use content <- result.try(
     simplifile.read(path)
     |> result.map_error(fn(e) {
@@ -678,5 +697,40 @@ fn yaml_error_to_string(error: yay.YamlError) -> String {
   case error {
     yay.UnexpectedParsingError -> "Unexpected parsing error"
     yay.ParsingError(msg:, ..) -> msg
+  }
+}
+
+/// Issue #524: detect a config path whose extension is clearly not
+/// YAML so we can short-circuit with a friendly diagnostic before
+/// the YAML parser hits a shape mismatch and crashes. Returns the
+/// extension (lowercased, without the dot) when the file is plainly
+/// non-YAML; `None` for `.yaml` / `.yml` / no extension (which we
+/// pass through to yay so it can still surface a real parse error
+/// for malformed content).
+fn non_yaml_extension(path: String) -> Option(String) {
+  let lowered = string.lowercase(path)
+  case extension_of(lowered) {
+    Some("yaml") | Some("yml") | None -> None
+    Some(ext) -> Some(ext)
+  }
+}
+
+fn extension_of(path: String) -> Option(String) {
+  // Use the last segment (after the final '/') so `foo/bar.yml`
+  // resolves to `yml` even when an earlier segment contains a dot.
+  let last_segment = case list.last(string.split(path, "/")) {
+    Ok(seg) -> seg
+    // nolint: thrown_away_error -- string.split never returns the empty list, so the Error arm is unreachable
+    Error(_) -> path
+  }
+  case string.split(last_segment, ".") {
+    [_only] -> None
+    [_, ..rest] ->
+      case list.last(rest) {
+        Ok(ext) -> Some(ext)
+        // nolint: thrown_away_error -- empty-rest is impossible after the head match, but covers `last/0` totality
+        Error(_) -> None
+      }
+    [] -> None
   }
 }
