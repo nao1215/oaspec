@@ -56,6 +56,36 @@ pub fn schema_ref_qualified_type(ref: SchemaRef) -> String {
   }
 }
 
+/// Issue #537: like `schema_type`, but recurses into composites so any
+/// `Reference(_)` items / sub-schemas come back qualified with the
+/// `types.` prefix. `schema_type` flattens references through
+/// `schema_ref_type` (bare), which works for the `types.gleam` module
+/// where every component schema is an in-module declaration but breaks
+/// `guards.gleam` (and any other module that imports `types` as a
+/// separate qualifier). The full GitHub OpenAPI's
+/// `IssuesAddIssueFieldValuesRequestIssueFieldValues` (a top-level
+/// `type: array` whose items are a `$ref`) hit this path with bare
+/// `List(IssuesAddIssueFieldValuesRequestIssueFieldValuesItem)`,
+/// failing `gleam build` with `Unknown type`.
+pub fn schema_type_qualified(schema: SchemaObject) -> String {
+  let base = case schema {
+    ArraySchema(items:, ..) ->
+      "List(" <> schema_ref_qualified_type_recursive(items) <> ")"
+    _ -> schema_base_type(schema)
+  }
+  case schema.is_nullable(schema) {
+    True -> "Option(" <> base <> ")"
+    False -> base
+  }
+}
+
+fn schema_ref_qualified_type_recursive(ref: SchemaRef) -> String {
+  case ref {
+    Inline(s) -> schema_type_qualified(s)
+    Reference(name:, ..) -> "types." <> naming.schema_to_type_name(name)
+  }
+}
+
 /// Map a primitive schema to its to_string expression.
 /// Returns the expression that converts a value to String for URL encoding.
 pub fn to_string_expr(schema: SchemaObject, value: String) -> String {

@@ -2652,4 +2652,115 @@ rm -rf "$DEEPOBJ_DIR"
 
 info "Issue #502 deepObject nested properties integration test passed."
 
+# -------------------------------------------------------
+# Step: Issue #537 — full GitHub OpenAPI compiles end-to-end
+# -------------------------------------------------------
+# Issue #537 reported (a) `oaspec generate` hung indefinitely on the
+# 8 MiB github/rest-api-description spec and (b) the trimmed variant
+# emitted unused-warning code that failed `gleam build
+# --warnings-as-errors`. Both classes of bug are only catchable by
+# running the full spec end-to-end. This step:
+#
+#   1. Downloads the GitHub OpenAPI document (cached under /tmp,
+#      refreshed weekly) — gated by `OASPEC_SKIP_GITHUB_TEST=1` for
+#      offline runs. Failure to download is a soft skip, not a fatal
+#      error, so contributors without network access can still run
+#      the rest of the suite.
+#   2. Runs `oaspec generate` with `validate: true` so the guards
+#      module is exercised end-to-end alongside types/decoders/
+#      encoders/client.
+#   3. Builds the generated package with `gleam build
+#      --warnings-as-errors`. A single warning anywhere in the output
+#      fails this step.
+#
+# When this passes, the user's reported workflow ("generate against
+# the full GitHub spec, then `gleam build`") works without manual
+# intervention.
+if [ "${OASPEC_SKIP_GITHUB_TEST:-0}" = "1" ]; then
+  info "OASPEC_SKIP_GITHUB_TEST=1 — skipping full GitHub OpenAPI integration test."
+else
+  info "Testing full GitHub OpenAPI generation + build (Issue #537)..."
+
+  GITHUB_API_CACHE="/tmp/oaspec_github_api.yaml"
+  GITHUB_API_URL="https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.yaml"
+
+  # Refresh the cache when missing OR older than 7 days. `find -mtime
+  # +7` returns nothing if the file is younger; the second `[ -f ]`
+  # falls back to "always download if missing".
+  needs_download=0
+  if [ ! -f "$GITHUB_API_CACHE" ]; then
+    needs_download=1
+  elif [ -n "$(find "$GITHUB_API_CACHE" -mtime +7 -print 2>/dev/null)" ]; then
+    needs_download=1
+  fi
+
+  if [ "$needs_download" = "1" ]; then
+    info "Downloading GitHub OpenAPI to $GITHUB_API_CACHE ..."
+    if ! curl -fsSL --max-time 120 -o "$GITHUB_API_CACHE.tmp" "$GITHUB_API_URL"; then
+      info "WARNING: download failed (network or rate limit). Skipping #537 full-spec test."
+      rm -f "$GITHUB_API_CACHE.tmp"
+      info "Issue #537 full GitHub OpenAPI integration test skipped (download failed)."
+      info "(Pass OASPEC_SKIP_GITHUB_TEST=1 to silence this notice.)"
+      # `return` would exit the whole script; we just fall through.
+    else
+      mv "$GITHUB_API_CACHE.tmp" "$GITHUB_API_CACHE"
+    fi
+  fi
+
+  if [ -f "$GITHUB_API_CACHE" ]; then
+    GITHUB_TEST_DIR="$SCRIPT_DIR/github_full_test"
+    rm -rf "$GITHUB_TEST_DIR"
+    mkdir -p "$GITHUB_TEST_DIR/src"
+
+    cat > "$GITHUB_TEST_DIR/oaspec.yaml" << YAML_EOF
+input: $GITHUB_API_CACHE
+mode: client
+validate: true
+
+targets:
+  - package: github_full_test
+    output:
+      dir: ./integration_test/github_full_test/src
+YAML_EOF
+
+    cat > "$GITHUB_TEST_DIR/gleam.toml" << 'TOML_EOF'
+name = "github_full_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_regexp = ">= 1.0.0 and < 2.0.0"
+oaspec = { path = "../.." }
+TOML_EOF
+
+    cat > "$GITHUB_TEST_DIR/src/github_full_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+    cd "$PROJECT_ROOT"
+    info "Generating from full GitHub OpenAPI (this typically takes ~50s)..."
+    if ! gleam run -- generate --config="$GITHUB_TEST_DIR/oaspec.yaml"; then
+      fail "Issue #537 — \`oaspec generate\` failed on full GitHub OpenAPI."
+    fi
+
+    cd "$GITHUB_TEST_DIR"
+    gleam deps download
+
+    info "Compiling generated full-GitHub client (warnings-as-errors)..."
+    if gleam build --warnings-as-errors; then
+      info "PASS: Issue #537 — full GitHub OpenAPI generates and compiles end-to-end."
+    else
+      fail "Issue #537 — generated full-GitHub client failed to compile."
+    fi
+
+    cd "$PROJECT_ROOT"
+    rm -rf "$GITHUB_TEST_DIR"
+    info "Issue #537 full GitHub OpenAPI integration test passed."
+  fi
+fi
+
 info "All integration tests passed!"
