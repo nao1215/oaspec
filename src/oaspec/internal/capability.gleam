@@ -265,12 +265,6 @@ pub fn registry() -> List(Capability) {
       "application/x-www-form-urlencoded must be the sole request content type",
     ),
     Capability(
-      "server: complex form-urlencoded fields",
-      "server-validation",
-      Unsupported,
-      "Form fields must be primitive scalars, primitive arrays, or shallow nested objects (max 5 levels)",
-    ),
-    Capability(
       "server: mixed multipart request",
       "server-validation",
       Unsupported,

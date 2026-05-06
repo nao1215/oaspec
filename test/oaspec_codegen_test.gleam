@@ -36,6 +36,8 @@ pub fn codegen_core_regressions_test() {
   let _ = support.deep_object_array_leaf_case()
   let _ = support.form_urlencoded_nested_object_case()
   let _ = support.form_urlencoded_two_level_nested_object_case()
+  let _ = support.form_urlencoded_object_with_primitive_array_case()
+  let _ = support.form_urlencoded_object_array_of_object_case()
   let _ = support.head_operation_not_silently_dropped_case()
   let _ = support.options_operation_not_silently_dropped_case()
   let _ = support.optional_request_body_case()

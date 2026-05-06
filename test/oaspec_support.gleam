@@ -5531,11 +5531,6 @@ fn server_request_shape_boundary_fixtures() -> List(#(String, String, String)) {
       "application/x-www-form-urlencoded request bodies are only supported as the sole request content type",
     ),
     #(
-      "server: complex form-urlencoded fields",
-      "test/fixtures/server_form_urlencoded_complex_fields.yaml",
-      "application/x-www-form-urlencoded request bodies only support",
-    ),
-    #(
       "server: mixed multipart request",
       "test/fixtures/server_multipart_mixed_content.yaml",
       "multipart/form-data request bodies are only supported as the sole request content type",
@@ -16488,3 +16483,80 @@ fn pdict_put_list(key: String, value: List(String)) -> List(String)
 
 @external(erlang, "oaspec_test_helpers_ffi", "pdict_get")
 fn pdict_get_list(key: String) -> Result(List(String), Nil)
+
+/// Form-urlencoded body validates and code-generates when one of its
+/// top-level fields is a nested object whose own property is an
+/// array of primitives. The wire format for nested primitive arrays
+/// is the OAS `form, explode: true` default — repeat the same
+/// bracket-key per element (`profile[scores]=10&profile[scores]=20`)
+/// so the generated client and the generated server decoder
+/// round-trip cleanly.
+pub fn form_urlencoded_object_with_primitive_array_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file(
+      "test/fixtures/form_urlencoded_object_primitive_array.yaml",
+    )
+  let cfg =
+    config.new(
+      input: "test/fixtures/form_urlencoded_object_primitive_array.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(client_file) =
+    list.find(summary.files, fn(f) { f.path == "client.gleam" })
+  let content = client_file.content
+
+  // Repeated-key wire format for the nested primitive array.
+  string.contains(content, "\"profile[scores]\"")
+  |> should.be_true()
+  // Integer items go through `int.to_string` before percent-encoding.
+  string.contains(content, "uri.percent_encode(int.to_string(item))")
+  |> should.be_true()
+  // The static key must NOT have a numerical index appended.
+  string.contains(content, "\"profile[scores]\" <> \"[\" <> int.to_string(")
+  |> should.be_false()
+}
+
+/// Form-urlencoded body validates and code-generates when one of its
+/// top-level fields is an array whose items are themselves objects
+/// (Stripe `marketing_features`). Each item's properties serialise
+/// via numerical bracket indices —
+/// `marketing_features[0][name]=foo` — matching Stripe / qs `indices`
+/// and jQuery `$.param`.
+pub fn form_urlencoded_object_array_of_object_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file(
+      "test/fixtures/form_urlencoded_object_array_of_object.yaml",
+    )
+  let cfg =
+    config.new(
+      input: "test/fixtures/form_urlencoded_object_array_of_object.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(client_file) =
+    list.find(summary.files, fn(f) { f.path == "client.gleam" })
+  let content = client_file.content
+
+  // Required string property of an array element reaches the wire
+  // as `marketing_features[<i>][name]=...`. The runtime index goes
+  // through `int.to_string(idx)`; the static prefix and each
+  // bracket-key segment land in the source as separate literals.
+  string.contains(content, "\"marketing_features\"")
+  |> should.be_true()
+  string.contains(content, "<> int.to_string(idx)")
+  |> should.be_true()
+  string.contains(content, "<> \"[name]\"")
+  |> should.be_true()
+  // Optional description follows the same indexed prefix.
+  string.contains(content, "<> \"[description]\"")
+  |> should.be_true()
+}

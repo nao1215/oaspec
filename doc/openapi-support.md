@@ -124,7 +124,7 @@ This section stays in sync with `src/oaspec/internal/capability.gleam`.
 - `const` is only supported on string schemas. Non-string `const` values and multi-type schemas with type-specific constraints are rejected explicitly.
 - Parsed but not used by codegen: callbacks, webhooks, externalDocs, tags, examples, links, encoding
 - `xml` annotations are ignored by the parser
-- Remaining server-mode request-shape boundaries: `server: complex path parameters`, `server: non-primitive query array items`, `server: non-primitive header array items`, `server: complex deepObject properties`, `server: mixed form-urlencoded request`, `server: complex form-urlencoded fields`, `server: mixed multipart request`, `server: complex multipart fields`, `server: unsupported request content type`
+- Remaining server-mode request-shape boundaries: `server: complex path parameters`, `server: non-primitive query array items`, `server: non-primitive header array items`, `server: complex deepObject properties`, `server: mixed form-urlencoded request`, `server: mixed multipart request`, `server: complex multipart fields`, `server: unsupported request content type`
 - Detailed server-mode decisions and fixture coverage live in [server-mode-boundaries.md](./server-mode-boundaries.md)
 - Normalized to supported equivalents: `const` string values become single-value enums, `type: [T, null]` becomes nullable, and `type: [T1, T2]` becomes `oneOf`
 <!-- END GENERATED:BOUNDARIES -->

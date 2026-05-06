@@ -617,7 +617,381 @@ fn form_array_item_to_string(
   case field_schema {
     Inline(schema.ArraySchema(items:, ..)) ->
       schema_dispatch.schema_ref_to_string_expr(items, "item", ctx)
-    _ -> "string.inspect(item)"
+    _ -> "item"
+  }
+}
+
+/// True when `schema_ref` resolves to an `ObjectSchema` post-`$ref`
+/// resolution. Used to dispatch nested-form encoding into the
+/// recursive bracket-key path.
+fn schema_resolves_to_object(schema_ref: schema.SchemaRef, ctx: Context) -> Bool {
+  case schema_ref {
+    Inline(schema.ObjectSchema(..)) -> True
+    Reference(..) ->
+      case context.resolve_schema_ref(schema_ref, ctx) {
+        Ok(schema.ObjectSchema(..)) -> True
+        _ -> False
+      }
+    _ -> False
+  }
+}
+
+/// True when `schema_ref` resolves to an `ArraySchema`.
+fn schema_resolves_to_array(schema_ref: schema.SchemaRef, ctx: Context) -> Bool {
+  case schema_ref {
+    Inline(schema.ArraySchema(..)) -> True
+    Reference(..) ->
+      case context.resolve_schema_ref(schema_ref, ctx) {
+        Ok(schema.ArraySchema(..)) -> True
+        _ -> False
+      }
+    _ -> False
+  }
+}
+
+/// Resolve `schema_ref` to its ArraySchema items (post-`$ref`).
+/// Caller is expected to have already gated on `schema_resolves_to_array`.
+fn array_items_of(
+  schema_ref: schema.SchemaRef,
+  ctx: Context,
+) -> Option(schema.SchemaRef) {
+  case schema_ref {
+    Inline(schema.ArraySchema(items:, ..)) -> Some(items)
+    Reference(..) ->
+      case context.resolve_schema_ref(schema_ref, ctx) {
+        Ok(schema.ArraySchema(items:, ..)) -> Some(items)
+        _ -> None
+      }
+    _ -> None
+  }
+}
+
+/// Emit serialisation for an array sub-field whose runtime type is
+/// `List(<inner>)`. The wire format depends on what `<inner>` is:
+///
+///   - **primitive items**: OAS `form` style with `explode: true`,
+///     i.e. the same key is repeated per element
+///     (`<prefix>=v1&<prefix>=v2`). This is what the OAS spec defines
+///     as the default and what oaspec's existing server decoder
+///     already parses, so generated clients and servers round-trip
+///     cleanly.
+///   - **object items**: numerical bracket index per element
+///     (`<prefix>[0][<prop>]=v`). OAS leaves this case undefined; we
+///     pick the form Stripe / qs (`indices` mode) / jQuery / Rails
+///     all decode interoperably — the only encoding agreed on across
+///     mainstream form-body parsers.
+///   - **nested array items**: bracket-index recursion
+///     (`<prefix>[0][0]=v`).
+fn generate_form_indexed_array(
+  sb: se.StringBuilder,
+  key_prefix_quoted: String,
+  accessor: String,
+  items_schema: schema.SchemaRef,
+  is_required: Bool,
+  indent_base: Int,
+  parts_var: String,
+  ctx: Context,
+) -> se.StringBuilder {
+  case is_required {
+    True ->
+      emit_array_fold(
+        sb,
+        key_prefix_quoted,
+        accessor,
+        items_schema,
+        indent_base,
+        parts_var,
+        ctx,
+      )
+    False ->
+      sb
+      |> se.indent(
+        indent_base,
+        "let " <> parts_var <> " = case " <> accessor <> " {",
+      )
+      |> se.indent(indent_base + 1, "Some(items) -> {")
+      |> emit_array_fold(
+        key_prefix_quoted,
+        "items",
+        items_schema,
+        indent_base + 2,
+        parts_var,
+        ctx,
+      )
+      |> se.indent(indent_base + 1, "}")
+      |> se.indent(indent_base + 1, "None -> " <> parts_var)
+      |> se.indent(indent_base, "}")
+  }
+}
+
+fn emit_array_fold(
+  sb: se.StringBuilder,
+  key_prefix_quoted: String,
+  list_expr: String,
+  items_schema: schema.SchemaRef,
+  indent_base: Int,
+  parts_var: String,
+  ctx: Context,
+) -> se.StringBuilder {
+  case
+    schema_resolves_to_object(items_schema, ctx),
+    schema_resolves_to_array(items_schema, ctx)
+  {
+    True, _ -> {
+      // Object items: indexed bracket — `<prefix>[<i>][<prop>]=<v>`.
+      let element_key_expr =
+        key_prefix_quoted <> " <> \"[\" <> int.to_string(idx) <> \"]\""
+      sb
+      |> se.indent(
+        indent_base,
+        "let "
+          <> parts_var
+          <> " = list.index_fold("
+          <> list_expr
+          <> ", "
+          <> parts_var
+          <> ", fn(acc, item, idx) {",
+      )
+      |> emit_form_object_recurse(
+        element_key_expr,
+        "item",
+        items_schema,
+        True,
+        indent_base + 1,
+        "acc",
+        ctx,
+      )
+      |> se.indent(indent_base + 1, "acc")
+      |> se.indent(indent_base, "})")
+    }
+    _, True -> {
+      // Nested array items (rare, but representable):
+      // `<prefix>[<i>][<j>]=v`.
+      let element_key_expr =
+        key_prefix_quoted <> " <> \"[\" <> int.to_string(idx) <> \"]\""
+      case array_items_of(items_schema, ctx) {
+        Some(inner_items) ->
+          sb
+          |> se.indent(
+            indent_base,
+            "let "
+              <> parts_var
+              <> " = list.index_fold("
+              <> list_expr
+              <> ", "
+              <> parts_var
+              <> ", fn(acc, item, idx) {",
+          )
+          |> emit_array_fold(
+            element_key_expr,
+            "item",
+            inner_items,
+            indent_base + 1,
+            "acc",
+            ctx,
+          )
+          |> se.indent(indent_base + 1, "acc")
+          |> se.indent(indent_base, "})")
+        None -> sb
+      }
+    }
+    False, False -> {
+      // Primitive items: OAS form/explode default — repeat the same
+      // key per element. Round-trips cleanly with the existing
+      // generated server decoder.
+      let item_value_expr = case
+        schema_dispatch.to_string_fn(items_schema, ctx)
+      {
+        "fn(x) { x }" -> "item"
+        fn_name -> fn_name <> "(item)"
+      }
+      sb
+      |> se.indent(
+        indent_base,
+        "let "
+          <> parts_var
+          <> " = list.fold("
+          <> list_expr
+          <> ", "
+          <> parts_var
+          <> ", fn(acc, item) {",
+      )
+      |> se.indent(
+        indent_base + 1,
+        "["
+          <> key_prefix_quoted
+          <> " <> \"=\" <> uri.percent_encode("
+          <> item_value_expr
+          <> "), ..acc]",
+      )
+      |> se.indent(indent_base, "})")
+    }
+  }
+}
+
+/// Recurse into the properties of an object whose runtime accessor is
+/// `accessor`. Each sub-property is emitted with key
+/// `<key_prefix>[<sub>]=...`. Used both for top-level object fields
+/// and for object items inside arrays. Mutates `acc` (or whatever the
+/// caller's `parts_var` is) — the caller is responsible for emitting
+/// the final `acc` line if needed.
+fn emit_form_object_recurse(
+  sb: se.StringBuilder,
+  key_prefix_quoted: String,
+  accessor: String,
+  schema_ref: schema.SchemaRef,
+  _is_required: Bool,
+  indent_base: Int,
+  parts_var: String,
+  ctx: Context,
+) -> se.StringBuilder {
+  let resolved = context.resolve_schema_ref(schema_ref, ctx)
+  case resolved {
+    Ok(schema.ObjectSchema(properties:, required:, ..)) -> {
+      let props = ir_build.sorted_entries(properties)
+      list.fold(props, sb, fn(sb, entry) {
+        let #(prop_name, prop_ref) = entry
+        let prop_field = naming.to_snake_case(prop_name)
+        let prop_accessor = accessor <> "." <> prop_field
+        let prop_required = list.contains(required, prop_name)
+        let sub_key_quoted =
+          key_prefix_quoted <> " <> \"[" <> prop_name <> "]\""
+        emit_form_field(
+          sb,
+          sub_key_quoted,
+          prop_accessor,
+          prop_ref,
+          prop_required,
+          indent_base,
+          parts_var,
+          ctx,
+        )
+      })
+    }
+    _ -> sb
+  }
+}
+
+/// Single dispatch point for "emit one field whose runtime accessor
+/// is `accessor` under a key built from `key_prefix_quoted`". Routes
+/// objects through `emit_form_object_recurse`, arrays through
+/// `generate_form_indexed_array`, and primitive scalars to a direct
+/// emit. Used inside `emit_form_object_recurse` so deeply nested
+/// shapes terminate cleanly at primitives.
+fn emit_form_field(
+  sb: se.StringBuilder,
+  key_prefix_quoted: String,
+  accessor: String,
+  schema_ref: schema.SchemaRef,
+  is_required: Bool,
+  indent_base: Int,
+  parts_var: String,
+  ctx: Context,
+) -> se.StringBuilder {
+  case
+    schema_resolves_to_object(schema_ref, ctx),
+    schema_resolves_to_array(schema_ref, ctx)
+  {
+    True, _ -> {
+      case is_required {
+        True ->
+          emit_form_object_recurse(
+            sb,
+            key_prefix_quoted,
+            accessor,
+            schema_ref,
+            True,
+            indent_base,
+            parts_var,
+            ctx,
+          )
+        False -> {
+          sb
+          |> se.indent(
+            indent_base,
+            "let " <> parts_var <> " = case " <> accessor <> " {",
+          )
+          |> se.indent(indent_base + 1, "Some(obj) -> {")
+          |> se.indent(indent_base + 2, "let acc2 = " <> parts_var)
+          |> emit_form_object_recurse(
+            key_prefix_quoted,
+            "obj",
+            schema_ref,
+            True,
+            indent_base + 2,
+            "acc2",
+            ctx,
+          )
+          |> se.indent(indent_base + 2, "acc2")
+          |> se.indent(indent_base + 1, "}")
+          |> se.indent(indent_base + 1, "None -> " <> parts_var)
+          |> se.indent(indent_base, "}")
+        }
+      }
+    }
+    _, True -> {
+      case array_items_of(schema_ref, ctx) {
+        Some(items) ->
+          generate_form_indexed_array(
+            sb,
+            key_prefix_quoted,
+            accessor,
+            items,
+            is_required,
+            indent_base,
+            parts_var,
+            ctx,
+          )
+        None -> sb
+      }
+    }
+    False, False -> {
+      let to_str = multipart_field_to_string_fn(schema_ref, ctx)
+      case is_required {
+        True -> {
+          let value_expr = case to_str {
+            "" -> accessor
+            fn_name -> fn_name <> "(" <> accessor <> ")"
+          }
+          sb
+          |> se.indent(
+            indent_base,
+            "let "
+              <> parts_var
+              <> " = ["
+              <> key_prefix_quoted
+              <> " <> \"=\" <> uri.percent_encode("
+              <> value_expr
+              <> "), .."
+              <> parts_var
+              <> "]",
+          )
+        }
+        False -> {
+          let some_value_expr = case to_str {
+            "" -> "v"
+            fn_name -> fn_name <> "(v)"
+          }
+          sb
+          |> se.indent(
+            indent_base,
+            "let " <> parts_var <> " = case " <> accessor <> " {",
+          )
+          |> se.indent(
+            indent_base + 1,
+            "Some(v) -> ["
+              <> key_prefix_quoted
+              <> " <> \"=\" <> uri.percent_encode("
+              <> some_value_expr
+              <> "), .."
+              <> parts_var
+              <> "]",
+          )
+          |> se.indent(indent_base + 1, "None -> " <> parts_var)
+          |> se.indent(indent_base, "}")
+        }
+      }
+    }
   }
 }
 
@@ -676,8 +1050,17 @@ fn generate_form_nested_object(
           }
         _ -> False
       }
-      case is_sub_object {
-        True ->
+      let is_sub_array = case sub_ref {
+        Inline(schema.ArraySchema(..)) -> True
+        Reference(..) as sr ->
+          case context.resolve_schema_ref(sr, ctx) {
+            Ok(schema.ArraySchema(..)) -> True
+            _ -> False
+          }
+        _ -> False
+      }
+      case is_sub_object, is_sub_array {
+        True, _ ->
           // Recurse: generate meta[author][name]=value encoding
           generate_form_bracket_fields(
             sb,
@@ -689,7 +1072,27 @@ fn generate_form_nested_object(
             parts_var,
             ctx,
           )
-        False -> {
+        _, True -> {
+          // Object property whose value is an array — emit indexed
+          // bracket form (`<parent>[<sub>][<i>]=<v>` for primitive
+          // items, `<parent>[<sub>][<i>][<prop>]=<v>` for object
+          // items).
+          case array_items_of(sub_ref, ctx) {
+            Some(items_schema) ->
+              generate_form_indexed_array(
+                sb,
+                "\"" <> field_name <> "[" <> sub_name <> "]\"",
+                sub_accessor,
+                items_schema,
+                sub_required,
+                indent_base,
+                parts_var,
+                ctx,
+              )
+            None -> sb
+          }
+        }
+        False, False -> {
           let to_str = multipart_field_to_string_fn(sub_ref, ctx)
           case sub_required {
             True -> {
@@ -784,8 +1187,17 @@ fn generate_form_bracket_fields(
             }
           _ -> False
         }
-        case is_obj {
-          True ->
+        let is_arr = case prop_ref {
+          Inline(schema.ArraySchema(..)) -> True
+          Reference(..) as sr ->
+            case context.resolve_schema_ref(sr, ctx) {
+              Ok(schema.ArraySchema(..)) -> True
+              _ -> False
+            }
+          _ -> False
+        }
+        case is_obj, is_arr {
+          True, _ ->
             generate_form_bracket_fields(
               sb,
               key_prefix <> "[" <> prop_name <> "]",
@@ -796,7 +1208,22 @@ fn generate_form_bracket_fields(
               parts_var,
               ctx,
             )
-          False -> {
+          _, True ->
+            case array_items_of(prop_ref, ctx) {
+              Some(items_schema) ->
+                generate_form_indexed_array(
+                  sb,
+                  "\"" <> key_prefix <> "[" <> prop_name <> "]\"",
+                  prop_accessor,
+                  items_schema,
+                  prop_required,
+                  indent_base,
+                  parts_var,
+                  ctx,
+                )
+              None -> sb
+            }
+          False, False -> {
             let to_str = multipart_field_to_string_fn(prop_ref, ctx)
             case prop_required {
               True -> {
@@ -905,8 +1332,21 @@ pub fn generate_form_urlencoded_body(
           }
         _ -> False
       }
-      case is_object {
-        True ->
+      // Top-level array of objects (Stripe `marketing_features` shape)
+      // — wire format is `<field>[<i>][<prop>]=<v>`. Distinct from
+      // top-level array of primitives below, which keeps the OAS
+      // `form,explode` repeat shape (`<field>=<v>&<field>=<v>`) for
+      // backwards compatibility.
+      let array_items = case is_array {
+        True -> array_items_of(field_schema, ctx)
+        False -> None
+      }
+      let is_array_of_object = case array_items {
+        Some(items) -> schema_resolves_to_object(items, ctx)
+        None -> False
+      }
+      case is_object, is_array_of_object {
+        True, _ ->
           // Nested objects: serialize as field[subkey]=value
           generate_form_nested_object(
             sb,
@@ -916,10 +1356,28 @@ pub fn generate_form_urlencoded_body(
             is_required,
             ctx,
           )
-        False ->
+        _, True ->
+          case array_items {
+            Some(items_schema) ->
+              generate_form_indexed_array(
+                sb,
+                "\"" <> field_name <> "\"",
+                "body." <> gleam_field,
+                items_schema,
+                is_required,
+                1,
+                "form_parts",
+                ctx,
+              )
+            None -> sb
+          }
+        False, False ->
           case is_array {
             True ->
-              // Arrays: repeat the key for each element (tags=a&tags=b)
+              // Arrays of primitives: repeat the key for each element (tags=a&tags=b).
+              // This is the OAS form,explode default and stays
+              // unchanged for backwards compatibility — only nested
+              // arrays adopt the indexed-bracket form.
               case is_required {
                 True ->
                   sb
