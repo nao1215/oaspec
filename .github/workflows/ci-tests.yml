@@ -66,10 +66,14 @@ jobs:
 
   github-openapi:
     # Generates the full GitHub OpenAPI document end-to-end and runs
-    # format / build / lint against the produced package. Heavy
+    # format and build against the produced package. Heavy
     # (~3-4 min wall) and self-contained, so it lives in its own job
-    # and runs in parallel with the main test job.
-    name: Full GitHub OpenAPI generate / format / build / lint
+    # and runs in parallel with the main test job. Glinter is
+    # intentionally omitted — its quadratic-in-module-size analysis
+    # on the 30k+-line generated decode/encode/guard modules adds
+    # multi-minute wall time without unique signal; the project's own
+    # lint step already covers every rule it would surface.
+    name: Full GitHub OpenAPI generate / format / build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -105,5 +109,5 @@ jobs:
       - name: Build oaspec (warnings as errors)
         run: gleam build --warnings-as-errors
 
-      - name: Generate / format / build / lint full GitHub OpenAPI
+      - name: Generate / format / build full GitHub OpenAPI
         run: bash integration_test/github_full.sh

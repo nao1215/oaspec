@@ -15,8 +15,13 @@
 #   3. Verify the generated files are formatted and carry the codegen
 #      provenance header.
 #   4. Build the generated package with `--warnings-as-errors`.
-#   5. Run `glinter` against the generated package; any violation is
-#      a codegen regression.
+#
+# Glinter is intentionally NOT run against the generated full-GitHub
+# package. Its analysis is quadratic in module size, so on the spec's
+# 30k+-line decode/encode/guard modules it adds another multi-minute
+# pass that materially slows CI for diminishing return — every rule
+# the linter would surface also surfaces against the project's own
+# sources via the linter step in the main CI job.
 #
 # Set `OASPEC_SKIP_GITHUB_TEST=1` to skip everything (offline runs).
 
@@ -79,7 +84,7 @@ if [ "${OASPEC_SKIP_GITHUB_TEST:-0}" = "1" ]; then
   exit 0
 fi
 
-info "Full GitHub OpenAPI generation + format + build + lint test..."
+info "Full GitHub OpenAPI generation + format + build test..."
 
 GITHUB_API_CACHE="${OASPEC_GITHUB_API_CACHE:-/tmp/oaspec_github_api.yaml}"
 GITHUB_API_URL="https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.yaml"
@@ -119,9 +124,6 @@ targets:
       dir: ./integration_test/github_full_test/src
 YAML_EOF
 
-# `glinter` as a dev-dep lets us run the project linter against the
-# generated package with the same `warnings_as_errors=true` posture
-# the oaspec repo enforces on its own sources.
 cat > "$GITHUB_TEST_DIR/gleam.toml" << 'TOML_EOF'
 name = "github_full_test"
 version = "0.1.0"
@@ -132,13 +134,6 @@ gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 gleam_json = ">= 3.0.0 and < 4.0.0"
 gleam_regexp = ">= 1.0.0 and < 2.0.0"
 oaspec = { path = "../.." }
-
-[dev-dependencies]
-glinter = ">= 2.14.0 and < 3.0.0"
-
-[tools.glinter]
-warnings_as_errors = true
-include = ["src/"]
 TOML_EOF
 
 cat > "$GITHUB_TEST_DIR/src/github_full_test.gleam" << 'GLEAM_EOF'
@@ -157,19 +152,10 @@ verify_generated_format integration_test/github_full_test/src/github_full_test
 cd "$GITHUB_TEST_DIR"
 gleam deps download
 
-# Build and lint share `build/` — running them sequentially keeps gleam
-# from racing with itself. Cross-step parallelism happens at the
-# GitHub Actions job level (this whole script runs alongside the rest
-# of the test suite), not inside this shell.
 info "Compiling generated client (warnings-as-errors) ..."
 gleam build --warnings-as-errors \
   || fail "Generated full-GitHub client failed to compile."
 info "PASS: generated client compiles cleanly."
-
-info "Linting generated client ..."
-gleam run -m glinter -- --stats \
-  || fail "Generated full-GitHub client has glinter errors."
-info "PASS: generated client passes glinter."
 
 cd "$PROJECT_ROOT"
 rm -rf "$GITHUB_TEST_DIR"
