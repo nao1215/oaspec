@@ -273,6 +273,20 @@ fn emit_deep_object_property(
         is_required_prop,
         ctx,
       )
+    // Composite (`oneOf` / `anyOf` / `allOf`) properties don't fit
+    // the bracketed-string wire format; emit them via the JSON
+    // escape hatch (`parent[<prop>]=<JSON string>`), the same shape
+    // PR #542 introduced for form-urlencoded bodies.
+    Some(schema.OneOfSchema(..))
+    | Some(schema.AnyOfSchema(..))
+    | Some(schema.AllOfSchema(..)) ->
+      emit_deep_object_json_property(
+        sb,
+        key,
+        field_access,
+        prop_ref,
+        is_required_prop,
+      )
     Some(_) | None ->
       emit_deep_object_primitive(
         sb,
@@ -282,6 +296,36 @@ fn emit_deep_object_property(
         is_required_prop,
         ctx,
       )
+  }
+}
+
+fn emit_deep_object_json_property(
+  sb: se.StringBuilder,
+  key: String,
+  field_access: String,
+  prop_ref: schema.SchemaRef,
+  is_required: Bool,
+) -> se.StringBuilder {
+  let value_expr =
+    "json.to_string("
+    <> schema_dispatch.json_encoder_expr(prop_ref, "v_inner")
+    <> ")"
+  case is_required {
+    True ->
+      sb
+      |> se.indent(1, "let query = {")
+      |> se.indent(2, "let v_inner = " <> field_access)
+      |> se.indent(2, "[#(\"" <> key <> "\", " <> value_expr <> "), ..query]")
+      |> se.indent(1, "}")
+    False ->
+      sb
+      |> se.indent(1, "let query = case " <> field_access <> " {")
+      |> se.indent(
+        2,
+        "Some(v_inner) -> [#(\"" <> key <> "\", " <> value_expr <> "), ..query]",
+      )
+      |> se.indent(2, "None -> query")
+      |> se.indent(1, "}")
   }
 }
 

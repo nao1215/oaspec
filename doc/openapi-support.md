@@ -91,10 +91,10 @@ sealed delegator the router imports, and each operation forwards to
 |---------|--------|--------|-------|
 | JSON request/response bodies | yes | yes | |
 | Path / query / header / cookie parameters | yes | yes | |
-| `style: deepObject` parameters | restricted | yes | Server: only primitive scalars and primitive arrays |
-| Array query parameters | restricted | yes | Server: only inline primitive item schemas |
+| `style: deepObject` parameters | restricted | yes | Server: only primitive scalars and primitive arrays. Client: composite (`oneOf`/`anyOf`/`allOf`) sub-properties take the JSON escape hatch (`parent[<prop>]=<JSON string>`). |
+| Array query parameters | restricted | yes | Server: only inline primitive item schemas. Client: non-primitive items (object / composite) are JSON-encoded into a single `<param>=<JSON array>` value. |
 | `style: pipeDelimited` / `style: spaceDelimited` query arrays | yes | yes | Query array parameters only; primitive item types. Non-exploded joins with `\|` / `%20`, exploded degenerates to form-style `name=a&name=b`. |
-| `application/x-www-form-urlencoded` | restricted | yes | Server: must be sole content type; only primitive fields and shallow nested objects |
+| `application/x-www-form-urlencoded` | restricted | yes | Server: must be sole content type; only primitive fields and shallow nested objects. Client: composite fields and `encoding[<f>].contentType: application/json` opt fields into the JSON escape hatch (`<field>=<percent-encoded JSON string>`). |
 | `multipart/form-data` | restricted | yes | Server: must be sole content type; only primitive scalar fields or arrays of primitive scalars |
 | `text/plain` request body | yes | yes | Treated as a single `String` field on the request |
 | `application/octet-stream` request body | yes | yes | Treated as raw `BitArray`/binary on the request |

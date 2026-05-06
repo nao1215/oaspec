@@ -1,0 +1,53 @@
+openapi: "3.0.3"
+info:
+  title: deepObject query parameter with a composite sub-property
+  description: |
+    Stripe's `GetInvoicesUpcoming.customer_details` and
+    `GetTreasuryTransactions.status_transitions` declare a deepObject
+    query parameter whose own properties are `oneOf` / `anyOf`
+    composites. The OAS deepObject `parent[<prop>]=value` shape
+    cannot serialise a composite directly, so oaspec lifts each
+    composite property to the JSON escape hatch:
+
+      customer_details[address]=<JSON string>
+      customer_details[shipping]=<JSON string>
+
+    while the parameter's other primitive / object properties keep
+    the existing bracket encoding.
+  version: "1.0.0"
+components:
+  schemas:
+    BillingAddress:
+      type: object
+      required: [country]
+      properties:
+        country: { type: string }
+        zip: { type: string }
+    ShippingAddress:
+      type: object
+      required: [country, postal_code]
+      properties:
+        country: { type: string }
+        postal_code: { type: string }
+paths:
+  /invoices/upcoming:
+    get:
+      operationId: getInvoicesUpcoming
+      parameters:
+        - name: customer_details
+          in: query
+          required: true
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            properties:
+              email:
+                type: string
+              address:
+                oneOf:
+                  - $ref: "#/components/schemas/BillingAddress"
+                  - $ref: "#/components/schemas/ShippingAddress"
+      responses:
+        "200":
+          description: ok

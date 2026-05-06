@@ -16654,3 +16654,68 @@ pub fn form_urlencoded_composite_field_case() {
   string.contains(content, "import gleam/json")
   |> should.be_true()
 }
+
+/// Query array parameters with non-primitive items take the JSON
+/// escape hatch on the client side: a single query entry whose
+/// value is the JSON-encoded list. `to_string_fn` is bypassed so
+/// the previous panic on non-primitive items can no longer fire.
+pub fn query_array_of_objects_emits_json_escape_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/query_array_of_objects.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/query_array_of_objects.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(client_file) =
+    list.find(summary.files, fn(f) { f.path == "client.gleam" })
+  let content = client_file.content
+
+  string.contains(
+    content,
+    "json.to_string(json.array(lines, encode_invoice_line_item_json))",
+  )
+  |> should.be_true()
+  string.contains(content, "import gleam/json")
+  |> should.be_true()
+}
+
+/// deepObject query parameters with composite sub-properties take
+/// the JSON escape hatch per-property: the composite property emits
+/// `parent[<prop>]=<JSON string>` while sibling primitive/object
+/// properties keep their bracketed wire format.
+pub fn deep_object_composite_property_emits_json_escape_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/deep_object_composite_property.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/deep_object_composite_property.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(client_file) =
+    list.find(summary.files, fn(f) { f.path == "client.gleam" })
+  let content = client_file.content
+
+  // The composite `address` property serialises to a JSON string
+  // under the deepObject bracketed key.
+  string.contains(content, "\"customer_details[address]\"")
+  |> should.be_true()
+  string.contains(
+    content,
+    "json.to_string(encode_get_invoices_upcoming_param_customer_details_address_json(",
+  )
+  |> should.be_true()
+  // Sibling `email` property keeps the existing bracket encoding.
+  string.contains(content, "\"customer_details[email]\"")
+  |> should.be_true()
+}

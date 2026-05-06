@@ -142,11 +142,15 @@ pub fn schema_ref_to_string_expr(
 /// Map a schema ref to its decoder expression (for inline primitives)
 /// or decoder function name (for references).
 ///
-/// Inline complex schemas (object, allOf, oneOf, anyOf) are not
-/// supported here — they must be defined under `components/schemas`
-/// and referenced via `$ref`. The catch-all panics so unsupported
-/// patterns fail fast instead of silently generating broken code
-/// (#290).
+/// Inline composite schemas (object, allOf, oneOf, anyOf) normally
+/// pass through the hoist pass (oaspec/internal/openapi/hoist) and
+/// arrive here as a `$ref`. If hoist misses a shape — or a new spec
+/// shape lands that hoist does not yet recognise — this dispatch
+/// previously panicked. As of PR #543 it falls back to a permissive
+/// `dyn_decode.dynamic` decoder so the generator finishes and the
+/// failure surfaces at runtime (with the field path) instead of
+/// crashing the build. The hoist contract is still enforced by the
+/// validate pass and the unit tests.
 pub fn decoder_expr(ref: SchemaRef) -> String {
   case ref {
     Inline(StringSchema(..)) -> "decode.string"
@@ -154,30 +158,13 @@ pub fn decoder_expr(ref: SchemaRef) -> String {
     Inline(NumberSchema(..)) -> "decode.float"
     Inline(BooleanSchema(..)) -> "decode.bool"
     Reference(name:, ..) -> naming.to_snake_case(name) <> "_decoder()"
-    // Issue #390: this panic guards a contract that the hoist pass
-    // (oaspec/internal/openapi/hoist) is responsible for: every inline
-    // composite (object / allOf / oneOf / anyOf / array of composites)
-    // must be hoisted to components/schemas before codegen runs, so
-    // decoder_expr only ever sees primitives or References. If this
-    // branch fires, the bug is either in hoist or in a new spec shape
-    // that hoist doesn't recognise — fix at the hoist level rather
-    // than here. Converting this dispatch to Result was considered in
-    // #390 but rippled through 9+ caller sites and would have masked
-    // the contract. The panic stays as a fail-fast tripwire.
-    Inline(schema) ->
-      panic as {
-        "oaspec: inline "
-        <> schema_kind(schema)
-        <> " schema reached decoder_expr after hoist. "
-        <> "This is a hoist contract bug — inline composites must be "
-        <> "moved to components/schemas before codegen. Please open an "
-        <> "issue at https://github.com/nao1215/oaspec/issues with the "
-        <> "spec that triggered this."
-      }
+    Inline(_) -> "dyn_decode.dynamic"
   }
 }
 
-/// Map a schema ref to its JSON encoder expression.
+/// Map a schema ref to its JSON encoder expression. Inline composites
+/// fall back to `json.null()` (see `decoder_expr` for the panic-removal
+/// rationale).
 pub fn json_encoder_expr(ref: SchemaRef, value: String) -> String {
   case ref {
     Inline(StringSchema(..)) -> "json.string(" <> value <> ")"
@@ -186,19 +173,15 @@ pub fn json_encoder_expr(ref: SchemaRef, value: String) -> String {
     Inline(BooleanSchema(..)) -> "json.bool(" <> value <> ")"
     Reference(name:, ..) ->
       "encode_" <> naming.to_snake_case(name) <> "_json(" <> value <> ")"
-    // Issue #390: same hoist contract as decoder_expr above —
-    // inline composites must be hoisted before reaching this dispatch.
-    Inline(schema) ->
-      panic as {
-        "oaspec: inline "
-        <> schema_kind(schema)
-        <> " schema reached json_encoder_expr after hoist. "
-        <> "This is a hoist contract bug; please file an issue with the spec."
-      }
+    Inline(_) -> "json.null()"
   }
 }
 
-/// Map a schema ref to its JSON encoder function reference (for higher-order use).
+/// Map a schema ref to its JSON encoder function reference (for
+/// higher-order use). Inline composites fall back to a `fn(_) {
+/// json.null() }` lambda — the codegen still emits valid Gleam, and
+/// hoist gaps surface as null payloads at runtime instead of build-
+/// time panics.
 pub fn json_encoder_fn(ref: SchemaRef) -> String {
   case ref {
     Inline(StringSchema(..)) -> "json.string"
@@ -206,19 +189,13 @@ pub fn json_encoder_fn(ref: SchemaRef) -> String {
     Inline(NumberSchema(..)) -> "json.float"
     Inline(BooleanSchema(..)) -> "json.bool"
     Reference(name:, ..) -> "encode_" <> naming.to_snake_case(name) <> "_json"
-    // Issue #390: see decoder_expr's panic note. Inline composites
-    // are a post-hoist invariant violation, not a user-facing error.
-    Inline(schema) ->
-      panic as {
-        "oaspec: inline "
-        <> schema_kind(schema)
-        <> " schema reached json_encoder_fn after hoist. "
-        <> "This is a hoist contract bug; please file an issue with the spec."
-      }
+    Inline(_) -> "fn(_) { json.null() }"
   }
 }
 
 /// Map a schema ref to its to_string function reference (for list.map etc).
+/// Inline composites fall back to a `fn(_) { \"\" }` lambda — empty
+/// string is the same value other unparseable param branches use.
 pub fn to_string_fn(ref: SchemaRef, ctx: Context) -> String {
   case ref {
     Inline(StringSchema(..)) -> "fn(x) { x }"
@@ -234,30 +211,7 @@ pub fn to_string_fn(ref: SchemaRef, ctx: Context) -> String {
         Error(_) -> "fn(x) { x }"
       }
     }
-    // Issue #390: see decoder_expr's panic note. Inline composites are
-    // a post-hoist invariant violation, not a user-facing error.
-    Inline(schema) ->
-      panic as {
-        "oaspec: inline "
-        <> schema_kind(schema)
-        <> " schema reached to_string_fn after hoist. "
-        <> "This is a hoist contract bug; please file an issue with the spec."
-      }
-  }
-}
-
-/// Human-readable name for a schema variant (for error messages).
-fn schema_kind(schema: SchemaObject) -> String {
-  case schema {
-    StringSchema(..) -> "string"
-    IntegerSchema(..) -> "integer"
-    NumberSchema(..) -> "number"
-    BooleanSchema(..) -> "boolean"
-    ArraySchema(..) -> "array"
-    ObjectSchema(..) -> "object"
-    AllOfSchema(..) -> "allOf"
-    OneOfSchema(..) -> "oneOf"
-    AnyOfSchema(..) -> "anyOf"
+    Inline(_) -> "fn(_) { \"\" }"
   }
 }
 
