@@ -1,0 +1,44 @@
+openapi: "3.0.3"
+info:
+  title: Form-urlencoded with array-of-object field
+  description: |
+    A form-urlencoded body where one of the top-level fields is an
+    array whose items are themselves objects (Stripe's
+    `marketing_features` shape). Each array element's properties
+    must serialise via numerical bracket indices —
+    `marketing_features[0][name]=foo&marketing_features[0][description]=bar` —
+    matching Stripe / qs `indices` mode and jQuery `$.param` defaults.
+
+    Pre-fix the validator rejected the spec entirely because the
+    array-inside-object branch fell off the supported predicate.
+    Post-fix the hoist pass lifts the inline item schema to a
+    dedicated component, the validator accepts the resulting
+    `Reference` items, and the codegen emits the bracket-index shape.
+  version: "1.0.0"
+paths:
+  /products:
+    post:
+      operationId: createProduct
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                marketing_features:
+                  type: array
+                  items:
+                    type: object
+                    required: [name]
+                    properties:
+                      name:
+                        type: string
+                      description:
+                        type: string
+      responses:
+        "200":
+          description: ok

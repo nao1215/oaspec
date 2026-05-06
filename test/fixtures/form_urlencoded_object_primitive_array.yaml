@@ -1,0 +1,43 @@
+openapi: "3.0.3"
+info:
+  title: Form-urlencoded with primitive array inside object
+  description: |
+    A form-urlencoded body where one of the top-level fields is a
+    nested object whose own property is an array of primitives. Pre-fix
+    this shape was rejected at validate time because the validator's
+    `depth > 0` guard treated any nested array as unsupported, and the
+    client emitter would otherwise crash inside `to_string_fn`.
+
+    Wire format must use Stripe / qs `indices` compatible bracket
+    indices for the array elements (`profile[scores][0]=10`), not the
+    OAS `form,explode` repeat shape (which has no `prefix` semantics
+    once the array is nested inside an object).
+  version: "1.0.0"
+paths:
+  /widgets:
+    post:
+      operationId: createWidget
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                profile:
+                  type: object
+                  properties:
+                    scores:
+                      type: array
+                      items:
+                        type: integer
+                    tags:
+                      type: array
+                      items:
+                        type: string
+      responses:
+        "200":
+          description: ok

@@ -842,14 +842,35 @@ fn validate_server_form_urlencoded_request_body(
           dict.to_list(properties)
           |> list.flat_map(fn(entry) {
             let #(field_name, field_schema) = entry
-            case form_urlencoded_field_codegen_safe(field_schema, ctx, 0) {
-              True -> []
-              False -> [
+            // Client codegen accepts every shape this predicate
+            // green-lights — primitives, primitive arrays at any
+            // depth, nested objects at any depth, arrays of objects.
+            // The server decoder is more constrained: it still
+            // requires shallow primitive-leaf shapes. Until the
+            // server-side helpers catch up, surface a server-only
+            // diagnostic for the shapes the client now handles but
+            // the server doesn't.
+            let client_safe =
+              form_urlencoded_field_codegen_safe(field_schema, ctx, 0)
+            let server_safe =
+              form_urlencoded_server_field_supported(field_schema, ctx, 0)
+            case client_safe, server_safe {
+              True, True -> []
+              True, False -> [
+                diagnostic.validation_error_server(
+                  path: op_id <> ".requestBody.form." <> field_name,
+                  detail: "application/x-www-form-urlencoded server request bodies only support primitive scalars, primitive arrays at the top level, and nested objects with primitive leaves (max 5 levels). Nested arrays-within-objects, oneOf, anyOf, and allOf properties are not yet supported on the server side.",
+                  hint: Some(
+                    "Switch to mode: client for now, or simplify to primitive scalars, primitive arrays at the top level, or shallow nested objects with primitive leaves.",
+                  ),
+                ),
+              ]
+              False, _ -> [
                 diagnostic.validation_error_both(
                   path: op_id <> ".requestBody.form." <> field_name,
-                  detail: "application/x-www-form-urlencoded request bodies only support primitive scalars, primitive arrays at the top level, and nested objects with primitive leaves (max 5 levels). Nested arrays-within-objects, oneOf, anyOf, and allOf properties are not supported in either client or server codegen.",
+                  detail: "application/x-www-form-urlencoded request bodies do not support oneOf / anyOf / allOf at the field level yet.",
                   hint: Some(
-                    "Simplify to primitive scalars, primitive arrays at the top level, or shallow nested objects with primitive leaves.",
+                    "Use a single concrete schema (object or primitive) for each form field.",
                   ),
                 ),
               ]
@@ -863,13 +884,14 @@ fn validate_server_form_urlencoded_request_body(
   list.append(server_mode_errors, field_errors)
 }
 
-/// Tighter form-urlencoded shape predicate that prevents the
-/// generator from recursing into a path it can't render. Mirrors
-/// `form_urlencoded_server_field_supported` but rejects nested
-/// arrays (an array nested inside an object property), which the
-/// client emitter otherwise sends through `to_string_fn` and
-/// crashes.
-fn form_urlencoded_field_codegen_safe(
+/// Predicate matching the server-side decode contract today:
+/// primitive scalars, primitive arrays at any depth (the server
+/// reads them as repeated keys via `dict.get(form_body, key)
+/// |> Ok(vs)`), and nested objects up to 5 levels with primitive or
+/// primitive-array leaves. Object arrays (`features[0][prop]=v`) and
+/// nested arrays-of-arrays still need the indexed-key decoder
+/// upgrade.
+fn form_urlencoded_server_field_supported(
   schema_ref: SchemaRef,
   ctx: Context,
   depth: Int,
@@ -879,17 +901,76 @@ fn form_urlencoded_field_codegen_safe(
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
     | Some(BooleanSchema(..)) -> True
-    Some(ArraySchema(items:, ..)) if depth == 0 ->
-      form_urlencoded_server_array_item_supported(items, ctx)
-    // Arrays nested inside object properties are not handled by
-    // the generator (post-hoist they survive as Inline ArraySchema
-    // and `multipart_field_to_string_fn` panics on them).
-    Some(ArraySchema(..)) -> False
+    Some(ArraySchema(items:, ..)) ->
+      case resolve_schema_object(Some(items), ctx) {
+        Some(StringSchema(..))
+        | Some(IntegerSchema(..))
+        | Some(NumberSchema(..))
+        | Some(BooleanSchema(..)) -> True
+        _ -> False
+      }
     Some(ObjectSchema(properties:, ..)) if depth < 5 ->
       dict.to_list(properties)
       |> list.all(fn(entry) {
         let #(_, child_schema) = entry
-        form_urlencoded_field_codegen_safe(child_schema, ctx, depth + 1)
+        form_urlencoded_server_field_supported(child_schema, ctx, depth + 1)
+      })
+    _ -> False
+  }
+}
+
+/// Form-urlencoded shape predicate. Accepts every shape the codegen
+/// can render via the bracket-index wire format
+/// (`field[a][b][0][c]=v`, Stripe / qs `indices` compatible):
+/// primitive scalars, primitive arrays at any depth, nested objects
+/// at any depth, and arrays-of-objects (whose items the hoist pass
+/// has already promoted to a `Reference`, so the codegen sees a
+/// nameable `ObjectSchema` here). composite shapes (`oneOf` /
+/// `anyOf` / `allOf`) at the field level remain on the rejection
+/// path until the dedicated codegen for them lands.
+fn form_urlencoded_field_codegen_safe(
+  schema_ref: SchemaRef,
+  ctx: Context,
+  _depth: Int,
+) -> Bool {
+  case resolve_schema_object(Some(schema_ref), ctx) {
+    Some(StringSchema(..))
+    | Some(IntegerSchema(..))
+    | Some(NumberSchema(..))
+    | Some(BooleanSchema(..)) -> True
+    Some(ArraySchema(items:, ..)) ->
+      form_urlencoded_array_items_codegen_safe(items, ctx)
+    Some(ObjectSchema(properties:, ..)) ->
+      dict.to_list(properties)
+      |> list.all(fn(entry) {
+        let #(_, child_schema) = entry
+        form_urlencoded_field_codegen_safe(child_schema, ctx, 0)
+      })
+    _ -> False
+  }
+}
+
+/// Items of an array inside a form-urlencoded body may be a primitive
+/// scalar (rendered as `key[i]=v`), a primitive array (rendered as
+/// `key[i][j]=v`), or an object whose properties recurse through the
+/// same predicate (rendered as `key[i][prop]=v`). Composites at the
+/// item level are still rejected.
+fn form_urlencoded_array_items_codegen_safe(
+  items: SchemaRef,
+  ctx: Context,
+) -> Bool {
+  case resolve_schema_object(Some(items), ctx) {
+    Some(StringSchema(..))
+    | Some(IntegerSchema(..))
+    | Some(NumberSchema(..))
+    | Some(BooleanSchema(..)) -> True
+    Some(ArraySchema(items: inner_items, ..)) ->
+      form_urlencoded_array_items_codegen_safe(inner_items, ctx)
+    Some(ObjectSchema(properties:, ..)) ->
+      dict.to_list(properties)
+      |> list.all(fn(entry) {
+        let #(_, child_schema) = entry
+        form_urlencoded_field_codegen_safe(child_schema, ctx, 0)
       })
     _ -> False
   }
@@ -981,19 +1062,6 @@ fn validate_server_multipart_request_body(
         // nolint: thrown_away_error -- absence of the content type means there is nothing to validate here
         Error(_) -> []
       }
-  }
-}
-
-fn form_urlencoded_server_array_item_supported(
-  schema_ref: SchemaRef,
-  ctx: Context,
-) -> Bool {
-  case resolve_schema_object(Some(schema_ref), ctx) {
-    Some(StringSchema(..))
-    | Some(IntegerSchema(..))
-    | Some(NumberSchema(..))
-    | Some(BooleanSchema(..)) -> True
-    _ -> False
   }
 }
 

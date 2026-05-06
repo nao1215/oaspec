@@ -44,14 +44,6 @@ fixture-backed test covers the behavior.
   Fixtures: `test/fixtures/server_form_urlencoded_body.yaml`,
   `test/fixtures/server_form_urlencoded_mixed_content.yaml`
 
-- [x] `server: complex form-urlencoded fields`
-  Decision: long-term non-goal after primitive fields, primitive arrays, and
-  nested primitive-leaf objects were added.
-  Reason: arrays or objects whose leaves are themselves complex still fall
-  outside the current parser and router contract.
-  Fixtures: `test/fixtures/server_form_urlencoded_nested_body.yaml`,
-  `test/fixtures/server_form_urlencoded_complex_fields.yaml`
-
 - [x] `server: mixed multipart request`
   Decision: long-term non-goal.
   Reason: the generated server path for multipart parsing assumes the multipart
