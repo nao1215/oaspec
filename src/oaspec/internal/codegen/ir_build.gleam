@@ -1061,16 +1061,23 @@ fn schema_ref_to_type_with_inline_enum(
 /// the bare `<Parent><Prop>` PascalCase concat when no collision exists, or a
 /// numerically-suffixed variant (`<Parent><Prop>2`, `<Parent><Prop>3`, …) when
 /// a component schema already maps to the same Gleam type name.
+///
+/// Issue #537: reads the precomputed `component_type_names` set from
+/// the `Context` so the collision check is O(log N) and the per-spec
+/// `schema_to_type_name` mapping work happens exactly once. The
+/// previous shape recomputed the full mapped list on every call —
+/// O(N) per call × O(N) inline enum sites blew up to multi-minute
+/// wall time on the full GitHub OpenAPI (~10k schemas).
 pub fn inline_enum_type_name_for(
   parent_name: String,
   prop_name: String,
   ctx: Context,
 ) -> String {
-  let schema_names = case context.spec(ctx).components {
-    Some(components) -> components.schemas |> dict.keys
-    None -> []
-  }
-  naming.inline_enum_type_name(parent_name, prop_name, schema_names)
+  naming.inline_enum_type_name_with_set(
+    parent_name,
+    prop_name,
+    context.component_type_names(ctx),
+  )
 }
 
 fn schema_ref_to_type(ref: SchemaRef, _ctx: Context) -> String {

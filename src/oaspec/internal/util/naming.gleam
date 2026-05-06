@@ -153,12 +153,22 @@ pub fn to_snake_case(input: String) -> String {
 /// schema's natural decoder name and shifts the synthetic one,
 /// since the user does not own upstream specs like Kubernetes /
 /// Stripe and cannot rename.
-pub fn synthetic_list_suffix(
+/// Issue #537: collision detection runs in the Gleam-mapped
+/// `<Schema>List` namespace via the precomputed component-type-names
+/// set carried on the `Context`. The earlier list-of-raw-schema-names
+/// shape only caught `<base>` / `<base>List` exact spellings, so a
+/// sibling schema named `<base>-list` (full GitHub spec) slipped past
+/// the check. Both names map to Gleam type `<Base>List` and produce
+/// a duplicate `decode_<base>_list` definition. Comparing in the
+/// Gleam-mapped namespace via `dict.has_key` collapses the false
+/// negative without rebuilding the mapped list per call.
+pub fn synthetic_list_suffix_with_set(
   base_name: String,
-  schema_names: List(String),
+  component_type_names: dict.Dict(String, Nil),
 ) -> String {
+  let base_type_name = schema_to_type_name(base_name)
   use <- bool.guard(
-    list.contains(schema_names, base_name <> "List"),
+    dict.has_key(component_type_names, base_type_name <> "List"),
     "_list_items",
   )
   "_list"
@@ -192,6 +202,25 @@ pub fn inline_enum_type_name(
   }
 }
 
+/// Issue #537: like `inline_enum_type_name`, but takes the
+/// already-mapped component-type-name set as a `Dict(String, Nil)` so
+/// the collision check is O(log N) and the (expensive) per-name
+/// `schema_to_type_name` work happens once, at context construction,
+/// rather than once per inline-enum property × N_schemas. On the full
+/// GitHub spec (~10k schemas) the list-based variant collapsed to
+/// multi-minute wall time inside `ir_build.build_types_module`.
+pub fn inline_enum_type_name_with_set(
+  parent_name: String,
+  prop_name: String,
+  component_type_names: dict.Dict(String, Nil),
+) -> String {
+  let base = schema_to_type_name(parent_name) <> schema_to_type_name(prop_name)
+  case dict.has_key(component_type_names, base) {
+    False -> base
+    True -> bump_inline_enum_suffix_set(base, 2, component_type_names)
+  }
+}
+
 fn bump_inline_enum_suffix(
   base: String,
   suffix: Int,
@@ -201,6 +230,18 @@ fn bump_inline_enum_suffix(
   case list.contains(taken, candidate) {
     False -> candidate
     True -> bump_inline_enum_suffix(base, suffix + 1, taken)
+  }
+}
+
+fn bump_inline_enum_suffix_set(
+  base: String,
+  suffix: Int,
+  taken: dict.Dict(String, Nil),
+) -> String {
+  let candidate = base <> int.to_string(suffix)
+  case dict.has_key(taken, candidate) {
+    False -> candidate
+    True -> bump_inline_enum_suffix_set(base, suffix + 1, taken)
   }
 }
 

@@ -217,12 +217,7 @@ pub fn generate_with_progress_and_locations(
   reporter: Reporter,
 ) -> Result(GenerationSummary, GenerateError) {
   use prepared <- result.try(prepare_context(spec, cfg, reporter, index))
-  let #(elapsed, files) =
-    progress.timed(fn() { generate_all_files(prepared.ctx) })
-  progress.report(
-    reporter,
-    "render generated source files (took " <> progress.format_ms(elapsed) <> ")",
-  )
+  let files = generate_all_files_with_progress(prepared.ctx, reporter)
   Ok(GenerationSummary(
     files:,
     spec_title: prepared.spec_title,
@@ -260,30 +255,81 @@ pub fn validate_only_with_progress_and_locations(
 }
 
 /// Pure file generation: produce all GeneratedFile values without any IO.
+///
+/// The `Reporter` plumbing lives in `generate_all_files_with_progress`;
+/// callers that want progress events (the CLI) go through the
+/// progress-aware wrapper. Library callers that need the values
+/// without progress noise pay nothing — `progress.noop()` is cheap.
 pub fn generate_all_files(ctx: Context) -> List(GeneratedFile) {
-  let shared = generate_shared(ctx)
+  generate_all_files_with_progress(ctx, progress.noop())
+}
+
+/// Pure file generation with per-substage progress events.
+///
+/// Issue #537: a single `render generated source files (took ...)`
+/// event covered types/decoders/encoders/guards/server/client all at
+/// once. On large specs the slow phase stayed invisible behind that
+/// outer line. Each substage now emits its own `<phase> (took ...)`
+/// line via `progress.timed_stage`, so a hang surfaces against a
+/// specific phase rather than the opaque outer wrapper.
+///
+/// `middleware.gleam` used to be emitted here too, but its `Handler`
+/// shape did not actually compose with the generated client or server
+/// APIs (see issue #116). The internal `middleware` module is kept
+/// only as a library-level helper for consumers who want to assemble
+/// their own middleware chain.
+fn generate_all_files_with_progress(
+  ctx: Context,
+  reporter: Reporter,
+) -> List(GeneratedFile) {
+  let type_files =
+    progress.timed_stage(
+      reporter: reporter,
+      label: "generate types",
+      body: fn() { types.generate(ctx) },
+    )
+  let decoder_files =
+    progress.timed_stage(
+      reporter: reporter,
+      label: "generate decoders",
+      body: fn() { decoders.generate(ctx) },
+    )
+  let encoder_files =
+    progress.timed_stage(
+      reporter: reporter,
+      label: "generate encoders",
+      body: fn() { encoders.generate(ctx) },
+    )
+  let guard_files =
+    progress.timed_stage(
+      reporter: reporter,
+      label: "generate guards",
+      body: fn() { guards.generate(ctx) },
+    )
   let server_files = case config.mode(context.config(ctx)) {
-    Server | Both -> server.generate(ctx)
+    Server | Both ->
+      progress.timed_stage(
+        reporter: reporter,
+        label: "generate server",
+        body: fn() { server.generate(ctx) },
+      )
     Client -> []
   }
   let client_files = case config.mode(context.config(ctx)) {
-    Client | Both -> client.generate(ctx)
+    Client | Both ->
+      progress.timed_stage(
+        reporter: reporter,
+        label: "generate client",
+        body: fn() { client.generate(ctx) },
+      )
     Server -> []
   }
-  list.flatten([shared, server_files, client_files])
-}
-
-/// Generate shared files (types, decoders, encoders, guards).
-///
-/// `middleware.gleam` used to be emitted here too, but its `Handler` shape
-/// did not actually compose with the generated client or server APIs (see
-/// issue #116). It is no longer part of the default generated surface;
-/// the `oaspec/internal/codegen/middleware` module is kept only as a library-level
-/// helper for consumers who want to assemble their own middleware chain.
-fn generate_shared(ctx: Context) -> List(GeneratedFile) {
-  let type_files = types.generate(ctx)
-  let decoder_files = decoders.generate(ctx)
-  let encoder_files = encoders.generate(ctx)
-  let guard_files = guards.generate(ctx)
-  list.flatten([type_files, decoder_files, encoder_files, guard_files])
+  list.flatten([
+    type_files,
+    decoder_files,
+    encoder_files,
+    guard_files,
+    server_files,
+    client_files,
+  ])
 }

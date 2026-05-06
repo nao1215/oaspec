@@ -84,7 +84,40 @@ pub fn schema_ref_to_string_expr(
           <> "_to_string("
           <> value
           <> ")"
-        Ok(resolved) -> to_string_expr(resolved, value)
+        // Issue #537: a `$ref` whose resolved schema is a composite
+        // (object / oneOf / anyOf / allOf) cannot fall through to the
+        // `_ -> value` catch-all in `to_string_expr` — the value is
+        // typed as the per-schema record/union, not String, so the
+        // generated query-param tuple `#("name", v)` would fail
+        // typecheck. Hoisted composite component schemas always carry
+        // a generated encoder (`encode.encode_<name>/1`) whose String
+        // form serialises through `json.to_string()`, which IS the
+        // form-style fallback the validator already warns about.
+        Ok(ObjectSchema(..))
+        | Ok(OneOfSchema(..))
+        | Ok(AnyOfSchema(..))
+        | Ok(AllOfSchema(..)) ->
+          "encode.encode_" <> naming.to_snake_case(name) <> "(" <> value <> ")"
+        Ok(resolved) -> {
+          // Issue #537: a `$ref` whose resolved primitive carries
+          // `nullable: true` renders its TYPE as `Option(<T>)` (see
+          // `schema_type` above and `ir_build.schema_ref_to_type`).
+          // The to_string callsite — query parameter tuples,
+          // `string.replace` on path segments — needs a `String`. The
+          // pre-fix shape emitted the bare `<value>` accessor and
+          // typechecked only when the schema happened to be
+          // non-nullable; nullable referenced primitives broke
+          // `gleam build` with `Expected String, found Option(String)`
+          // on the full GitHub OpenAPI. `option.unwrap(<value>, "")`
+          // resolves both halves of the optional-and-nullable shape:
+          // `Some(None)` collapses to the empty string, which most
+          // OpenAPI servers treat the same as the param being absent.
+          let inner = to_string_expr(resolved, value)
+          case schema.is_nullable(resolved) {
+            True -> "option.unwrap(" <> inner <> ", \"\")"
+            False -> inner
+          }
+        }
         // nolint: thrown_away_error -- unresolved refs fall back to the raw accessor; the resolver reports the ref error separately
         Error(_) -> value
       }

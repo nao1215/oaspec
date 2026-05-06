@@ -132,6 +132,12 @@ pub fn content_type_helpers_test() {
   let _ = support.pipe_delimited_query_handles_empty_and_repeated_keys_case()
   let _ = support.multipart_object_array_client_imports_list_json_case()
   let _ = support.wildcard_request_body_uses_bytes_body_case()
+  let _ =
+    support.client_omits_bytes_body_helper_when_response_has_no_schema_case()
+  let _ = support.client_keeps_bytes_body_when_response_has_schema_case()
+  let _ = support.generate_emits_per_substage_progress_events_case()
+  let _ =
+    support.generate_completes_within_budget_for_synthetic_large_spec_case()
   let _ = support.fixtures_sweep_parse_resolve_no_panic_case()
   let _ = support.petstore_client_generated_surface_invariants_case()
 }

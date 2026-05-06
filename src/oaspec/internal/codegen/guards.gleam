@@ -9,11 +9,12 @@ import gleam/set.{type Set}
 import gleam/string
 import oaspec/config
 import oaspec/internal/codegen/allof_merge
+import oaspec/internal/codegen/codec_helpers
 import oaspec/internal/codegen/context.{
   type Context, type GeneratedFile, GeneratedFile,
 }
 import oaspec/internal/codegen/ir_build
-import oaspec/internal/codegen/schema_dispatch
+import oaspec/internal/codegen/schema_utils
 import oaspec/internal/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, ArraySchema, Inline,
   IntegerSchema, NumberSchema, ObjectSchema, Reference, StringSchema,
@@ -164,9 +165,26 @@ pub fn build_module(ctx: Context) -> GuardModule {
         !is_required
       })
     })
-  let imports = case needs_option {
-    True -> ["gleam/option", ..imports]
-    False -> imports
+  // Issue #537: a composite validator whose schema (or whose nullable
+  // referenced primitive field) renders as `Option(...)` in the
+  // generated signature needs the bare `Option` type in scope. Detect
+  // that separately from `needs_option` (which only covers
+  // `option.Some` / `option.None` pattern matching for optional
+  // fields). Importing `{type Option}` unconditionally would trip
+  // `Unused imported type` on specs that exercise optional fields
+  // but never produce `Option(...)` in a signature.
+  let needs_option_type =
+    list.any(schemas, fn(entry) {
+      let #(name, schema_ref) = entry
+      string.contains(
+        composite_validator_type(name, schema_ref, ctx),
+        "Option(",
+      )
+    })
+  let imports = case needs_option, needs_option_type {
+    True, True -> ["gleam/option.{type Option}", ..imports]
+    True, False -> ["gleam/option", ..imports]
+    False, _ -> imports
   }
 
   // Issue #520: nested-composite and composite-list emissions use
@@ -647,7 +665,17 @@ fn guard_function_name(
 ) -> String {
   let base = naming.to_snake_case(schema_name)
   case prop_name {
-    "" -> "validate_" <> base <> "_" <> constraint
+    // Issue #537: append `_root_` so a schema-level validator on a
+    // hoisted inline-array component schema (e.g.
+    // `IssuesAddIssueFieldValuesRequestIssueFieldValues`, generated
+    // when the parent's `issue_field_values: type:array, maxItems`
+    // is hoisted) does not collide with the parent's field-level
+    // validator on the same constraint kind. Without the infix, both
+    // schemas' validators end up with the same `pub fn` name and
+    // `gleam build` rejects the module with `Duplicate definition`
+    // on the full GitHub OpenAPI. The infix is fixed and chosen to
+    // be lexically distinct from any plausible property name.
+    "" -> "validate_" <> base <> "_root_" <> constraint
     _ ->
       "validate_"
       <> base
@@ -1421,6 +1449,17 @@ fn build_properties_count_guard_function(
 }
 
 /// Determine the Gleam type for the composite validator parameter.
+///
+/// Issue #537: non-object / non-allOf schemas previously fell through
+/// to `schema_dispatch.schema_type(s)`, which renders `ArraySchema` as
+/// `"List(" <> bare_type <> ")"` — the inner Reference's type name
+/// emitted WITHOUT the `types.` prefix. `guards.gleam` does NOT
+/// re-export schema types, so the bare name resolves to "Unknown
+/// type" at `gleam build` time on any spec whose array-typed
+/// component schema's items are a `$ref` (e.g. GitHub's
+/// `projects-v2-view-sort-by-item: type:array, items: $ref`). Using
+/// `codec_helpers.qualified_schema_ref_type` qualifies the inner ref
+/// and keeps inline primitives unqualified.
 fn composite_validator_type(
   name: String,
   schema_ref: SchemaRef,
@@ -1430,9 +1469,7 @@ fn composite_validator_type(
   case schema {
     Ok(ObjectSchema(..)) | Ok(AllOfSchema(..)) ->
       "types." <> naming.schema_to_type_name(name)
-    Ok(s) -> {
-      schema_dispatch.schema_type(s)
-    }
+    Ok(_) -> codec_helpers.qualified_schema_ref_type(schema_ref, ctx)
     _ -> "types." <> naming.schema_to_type_name(name)
   }
 }
@@ -1487,7 +1524,17 @@ fn collect_guard_calls_visiting(
         ir_build.sorted_entries(properties)
         |> list.flat_map(fn(entry) {
           let #(prop_name, prop_ref) = entry
-          let is_required = list.contains(required, prop_name)
+          // Issue #537: a `required: true` AND `nullable: true` field
+          // still renders as `Option(<T>)` in the generated record
+          // type (`schema_dispatch.schema_type` wraps every nullable
+          // through `Option(_)`). The composite validator must
+          // therefore unwrap before calling the per-field validator,
+          // exactly as it does for plain optional fields. Treat the
+          // call as not-required when the field is nullable so the
+          // emitter falls into the `option.Some(v) ->` shape.
+          let is_required =
+            list.contains(required, prop_name)
+            && !schema_utils.schema_ref_is_nullable(prop_ref, ctx)
           collect_field_guard_calls(
             name,
             prop_name,
@@ -1510,7 +1557,12 @@ fn collect_guard_calls_visiting(
       ir_build.sorted_entries(merged.properties)
       |> list.flat_map(fn(entry) {
         let #(prop_name, prop_ref) = entry
-        let is_required = list.contains(merged.required, prop_name)
+        // Issue #537: see the parallel branch above for why nullable
+        // counts toward "needs unwrapping" alongside `not in
+        // required`.
+        let is_required =
+          list.contains(merged.required, prop_name)
+          && !schema_utils.schema_ref_is_nullable(prop_ref, ctx)
         collect_field_guard_calls(
           name,
           prop_name,

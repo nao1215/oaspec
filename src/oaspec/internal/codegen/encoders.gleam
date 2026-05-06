@@ -293,17 +293,6 @@ fn generate_encoder(
 
   case schema_ref {
     Inline(ObjectSchema(properties:, required:, additional_properties:, ..)) -> {
-      // _json version: returns json.Json
-      let sb =
-        sb
-        |> se.line(
-          "pub fn "
-          <> json_fn_name
-          <> "(value: types."
-          <> type_name
-          <> ") -> json.Json {",
-        )
-
       // When additional_properties is Typed or Untyped we emit a `base_props`
       // list and merge in dict entries; Forbidden and Unspecified (Issue #249)
       // both go through `json.object([...])` directly with no AP merge.
@@ -332,6 +321,62 @@ fn generate_encoder(
           let #(_, prop_ref, _) = entry
           !schema_utils.schema_ref_is_read_only(prop_ref, ctx)
         })
+
+      // Issue #537: when the encoder body never references `value`,
+      // the `value` parameter is bound but never read — `gleam build
+      // --warnings-as-errors` rejects the generated module with
+      // "Unused function argument". This happens in two related shapes:
+      //
+      //   (a) the schema has no surviving properties AND no
+      //       additional_properties merge, so the body collapses to
+      //       `json.object([])`;
+      //   (b) every surviving property is a constant (Issue #309 —
+      //       `required` + single-value enum), so each tuple emits the
+      //       wire literal `json.string("...")` directly without
+      //       reading `value.<field>`.
+      //
+      // In both cases the `_json` variant takes `_value:`. The String
+      // variant below still pipes through `_json(value)` and keeps its
+      // own `value:` binding.
+      let all_constant = case props_with_names {
+        [] -> False
+        _ ->
+          list.all(props_with_names, fn(entry) {
+            let #(prop_name, prop_ref, _) = entry
+            case
+              schema_utils.constant_property_value(
+                prop_ref,
+                prop_name,
+                required,
+              )
+            {
+              Some(_) -> True
+              None -> False
+            }
+          })
+      }
+      let body_reads_value = case has_ap, props_with_names, all_constant {
+        False, [], _ -> False
+        False, _, True -> False
+        _, _, _ -> True
+      }
+      let json_value_param = case body_reads_value {
+        True -> "value"
+        False -> "_value"
+      }
+
+      // _json version: returns json.Json
+      let sb =
+        sb
+        |> se.line(
+          "pub fn "
+          <> json_fn_name
+          <> "("
+          <> json_value_param
+          <> ": types."
+          <> type_name
+          <> ") -> json.Json {",
+        )
 
       // Issue #303: a property that is in `properties` but not in `required`
       // and is not `nullable: true` MUST be omitted entirely from the JSON
@@ -842,7 +887,12 @@ fn generate_encoder(
       // of the bare `json.array(...)` it had been emitting.
       let inner_type = codec_helpers.qualified_schema_ref_type(items, ctx)
       let list_type = "List(" <> inner_type <> ")"
-      let inner_encoder = schema_ref_to_json_encoder_fn(items, name, "", ctx)
+      // Issue #537: items dispatch through `json_encoder_fn_for_array_items`
+      // so the parent schema name is never spliced into an inline-enum
+      // encoder reference. The IR pass collapses the field type to
+      // `List(<primitive>)`, and the codec must agree — see the parallel
+      // fix in `decoders.gleam::generate_array_decoder`.
+      let inner_encoder = json_encoder_fn_for_array_items(items, name, "", ctx)
       let array_expr = "json.array(value, " <> inner_encoder <> ")"
       let #(gleam_type, json_expr) = case metadata.nullable {
         True -> #(
@@ -911,8 +961,12 @@ fn schema_ref_to_json_encoder(
       fn_name <> "(" <> value_expr <> ")"
     }
     Inline(ArraySchema(items:, ..)) -> {
+      // Issue #537: array items NEVER pull in an inline-enum encoder
+      // — see the parallel branch in `decoders.gleam` for the contract.
+      // Field types collapse `array of inline string-enum` to
+      // `List(String)`, so the encoder matches via the plain dispatch.
       let inner_fn =
-        schema_ref_to_json_encoder_fn(items, parent_name, prop_name, ctx)
+        json_encoder_fn_for_array_items(items, parent_name, prop_name, ctx)
       "json.array(" <> value_expr <> ", " <> inner_fn <> ")"
     }
     _ -> schema_dispatch.json_encoder_expr(ref, value_expr)
@@ -938,10 +992,30 @@ fn schema_ref_to_json_encoder_fn(
       <> "_json"
     }
     Inline(ArraySchema(items:, ..)) -> {
+      // Issue #537: see comment in `schema_ref_to_json_encoder`. Array
+      // items dispatch on the plain primitive shape so we don't
+      // reference an inline-enum encoder that the IR pass never
+      // emitted.
       let inner =
-        schema_ref_to_json_encoder_fn(items, parent_name, prop_name, ctx)
+        json_encoder_fn_for_array_items(items, parent_name, prop_name, ctx)
       "fn(items) { json.array(items, " <> inner <> ") }"
     }
+    _ -> schema_dispatch.json_encoder_fn(ref)
+  }
+}
+
+/// Issue #537: encoder-fn shape for array items. Falls back to the
+/// plain primitive / Reference dispatch and recurses only on nested
+/// arrays — matching the field-type collapse done by the IR.
+fn json_encoder_fn_for_array_items(
+  ref: SchemaRef,
+  parent_name: String,
+  prop_name: String,
+  ctx: Context,
+) -> String {
+  case ref {
+    Inline(ArraySchema(..)) ->
+      schema_ref_to_json_encoder_fn(ref, parent_name, prop_name, ctx)
     _ -> schema_dispatch.json_encoder_fn(ref)
   }
 }

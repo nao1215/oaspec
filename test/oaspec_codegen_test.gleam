@@ -5,6 +5,12 @@ pub fn codegen_core_regressions_test() {
   let _ = support.allof_part_types_not_in_generated_types_case()
   let _ = support.allof_part_types_not_in_generated_decoders_case()
   let _ = support.empty_object_decoder_omits_constructor_parens_case()
+  let _ = support.encoder_for_empty_object_omits_unused_value_param_case()
+  let _ = support.encoder_for_non_empty_object_keeps_value_param_case()
+  let _ =
+    support.synthetic_list_decoder_disambiguates_against_dashed_list_sibling_case()
+  let _ =
+    support.array_of_inline_string_enum_uses_plain_decoder_and_encoder_case()
   let _ = support.allof_part_types_not_in_generated_encoders_case()
   let _ = support.generation_is_idempotent_case()
   let _ = support.generated_type_fields_are_alphabetically_ordered_case()

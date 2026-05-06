@@ -378,6 +378,12 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
 
   let needs_float = needs_float_param || has_float_response_header
 
+  // Issue #537: gate on `mt.schema = Some(_)` so the import-needs
+  // analyzer agrees with `client_response.gleam`'s emission gate. A
+  // wildcard / octet-stream response with NO schema falls through to
+  // `empty_body_branch` and never calls `bytes_body(...)` — emitting
+  // the helper anyway leaves a `pub fn bytes_body(...)` defined and
+  // never referenced, failing `gleam build --warnings-as-errors`.
   let needs_bytes_helper =
     list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
@@ -386,10 +392,11 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
         case ref_or {
           Value(response) ->
             list.any(dict.to_list(response.content), fn(ce) {
-              let #(name, _) = ce
-              case ct_util.from_string(name) {
-                ct_util.ApplicationOctetStream | ct_util.Wildcard -> True
-                _ -> False
+              let #(name, mt) = ce
+              case ct_util.from_string(name), mt.schema {
+                ct_util.ApplicationOctetStream, Some(_) -> True
+                ct_util.Wildcard, Some(_) -> True
+                _, _ -> False
               }
             })
           _ -> False

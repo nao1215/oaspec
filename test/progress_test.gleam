@@ -92,6 +92,63 @@ pub fn format_ms_minute_and_up_test() {
   progress.format_ms(125_400) |> should.equal("2m5.4s")
 }
 
+pub fn timed_stage_returns_body_value_test() {
+  // Issue #537: `timed_stage` is the bundled `timed + report` helper
+  // used by `generate_all_files` so each codegen sub-stage emits its
+  // own progress line. The body's value must round-trip unchanged.
+  let value =
+    progress.timed_stage(
+      reporter: progress.noop(),
+      label: "anything",
+      body: fn() { 7 },
+    )
+  value |> should.equal(7)
+}
+
+pub fn timed_stage_emits_starting_and_completed_events_test() {
+  // Issue #537: `timed_stage` emits TWO events — one BEFORE the body
+  // runs (so a slow / hung body is still attributable to a specific
+  // stage in real time) and one AFTER it completes (so users see the
+  // elapsed-time figure). Pinning both shapes here keeps the contract
+  // honest if someone refactors this back to a single event.
+  let key = "progress_test_timed_stage_msg"
+  pdict_put(key, [])
+  let reporter =
+    progress.from_fn(fn(msg) {
+      let prev = case pdict_get(key) {
+        Ok(v) -> v
+        Error(Nil) -> []
+      }
+      pdict_put(key, [msg, ..prev])
+      Nil
+    })
+  let Nil =
+    progress.timed_stage(reporter: reporter, label: "demo stage", body: fn() {
+      Nil
+    })
+  let assert Ok(events_rev) = pdict_get(key)
+  let events: List(String) = list.reverse(events_rev)
+  case events {
+    [first, second] -> {
+      let first_ok = case first {
+        "demo stage ..." -> True
+        _ -> False
+      }
+      let second_ok = case second {
+        "demo stage (took " <> _ -> True
+        _ -> False
+      }
+      first_ok |> should.be_true()
+      second_ok |> should.be_true()
+    }
+    _ -> {
+      // Anything other than two events is a contract violation.
+      should.be_true(False)
+      Nil
+    }
+  }
+}
+
 @external(erlang, "erlang", "put")
 fn pdict_put(key: String, value: a) -> a
 

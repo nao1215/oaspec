@@ -186,7 +186,12 @@ pub fn client_response_get_response_decode_expr_array_inline_test() {
     http.Status(200),
     ctx,
   )
-  |> should.equal("json.parse(text, decode.list(dyn_decode.int))")
+  // Issue #537: previously `decode.list(...)` — but `decode` is the
+  // generated per-spec decode module which has no `list/2` combinator.
+  // The list combinator lives on `gleam/dynamic/decode` (imported as
+  // `dyn_decode` in client.gleam), so the generated expression must
+  // route through `dyn_decode.list` to compile.
+  |> should.equal("json.parse(text, dyn_decode.list(dyn_decode.int))")
 }
 
 // ===================================================================

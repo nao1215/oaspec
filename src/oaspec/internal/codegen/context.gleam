@@ -10,6 +10,7 @@ import oaspec/internal/openapi/schema.{
 import oaspec/internal/openapi/spec.{
   type HttpMethod, type OpenApiSpec, type Operation, type Resolved,
 }
+import oaspec/internal/util/naming
 
 /// The version of oaspec used for generated code headers.
 pub const version = "0.58.0"
@@ -33,6 +34,7 @@ pub opaque type Context {
     config: Config,
     operations: List(AnalyzedOperation),
     schema_cache: dict.Dict(String, Result(SchemaObject, resolver.ResolveError)),
+    component_type_names: dict.Dict(String, Nil),
   )
 }
 
@@ -48,6 +50,7 @@ pub fn new(spec: OpenApiSpec(Resolved), config: Config) -> Context {
     config:,
     operations: operations.collect_operations(spec),
     schema_cache: build_schema_cache(spec),
+    component_type_names: build_component_type_names(spec),
   )
 }
 
@@ -97,6 +100,32 @@ pub fn schema_metadata(
     Ok(schema_obj) -> Some(schema.get_metadata(schema_obj))
     // nolint: thrown_away_error -- unresolved refs have no metadata; callers treat this as absence and the validator reports the underlying ref error separately
     Error(_) -> None
+  }
+}
+
+/// Pre-computed set of every component schema name mapped through
+/// `naming.schema_to_type_name`. Issue #537: previously
+/// `ir_build.inline_enum_type_name_for` rebuilt this list and ran
+/// `list.map(schema_to_type_name) + list.contains` per inline-enum
+/// property, which is O(N_schemas) per call and called once per
+/// inline-enum property — 10k schemas × 10k inline enum sites blew the
+/// types phase to multi-minute wall time on the full GitHub spec.
+/// Pre-computing into a Dict-as-Set lets the collision check fire as
+/// `dict.has_key` (O(log N)) and the per-spec `schema_to_type_name`
+/// work happen exactly once.
+pub fn component_type_names(ctx: Context) -> dict.Dict(String, Nil) {
+  ctx.component_type_names
+}
+
+fn build_component_type_names(
+  spec: OpenApiSpec(Resolved),
+) -> dict.Dict(String, Nil) {
+  case spec.components {
+    Some(components) ->
+      list.fold(dict.keys(components.schemas), dict.new(), fn(acc, name) {
+        dict.insert(acc, naming.schema_to_type_name(name), Nil)
+      })
+    None -> dict.new()
   }
 }
 
