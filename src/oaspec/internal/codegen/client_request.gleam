@@ -1281,6 +1281,57 @@ fn generate_form_bracket_fields(
   }
 }
 
+/// JSON encoder expression for an `encoding.<field>.contentType:
+/// application/json` escape hatch. Falls back to per-property recursion
+/// for inline arrays so a `tags: [string]` field can be lifted to a
+/// single `json.array(...)` call without round-tripping through the
+/// hoist contract.
+fn form_field_json_encoder_expr(
+  ref: schema.SchemaRef,
+  value: String,
+  _ctx: Context,
+) -> String {
+  case ref {
+    Inline(schema.StringSchema(..)) -> "json.string(" <> value <> ")"
+    Inline(schema.IntegerSchema(..)) -> "json.int(" <> value <> ")"
+    Inline(schema.NumberSchema(..)) -> "json.float(" <> value <> ")"
+    Inline(schema.BooleanSchema(..)) -> "json.bool(" <> value <> ")"
+    Inline(schema.ArraySchema(items:, ..)) ->
+      "json.array(" <> value <> ", " <> form_field_json_encoder_fn(items) <> ")"
+    _ -> schema_dispatch.json_encoder_expr(ref, value)
+  }
+}
+
+fn form_field_json_encoder_fn(ref: schema.SchemaRef) -> String {
+  case ref {
+    Inline(schema.StringSchema(..)) -> "json.string"
+    Inline(schema.IntegerSchema(..)) -> "json.int"
+    Inline(schema.NumberSchema(..)) -> "json.float"
+    Inline(schema.BooleanSchema(..)) -> "json.bool"
+    Inline(schema.ArraySchema(items:, ..)) ->
+      "fn(xs) { json.array(xs, " <> form_field_json_encoder_fn(items) <> ") }"
+    _ -> schema_dispatch.json_encoder_fn(ref)
+  }
+}
+
+/// Returns true when `encoding[<field>].contentType` resolves to
+/// `application/json` (or `application/json` with parameters such as
+/// `application/json; charset=utf-8`). Per OAS 3.x this triggers the
+/// per-property JSON serialisation escape hatch.
+fn form_encoding_is_json(
+  encoding: Dict(String, spec.Encoding),
+  field_name: String,
+) -> Bool {
+  case dict.get(encoding, field_name) {
+    Ok(spec.Encoding(content_type: Some(ct), ..)) ->
+      case content_type.from_string(ct) {
+        content_type.ApplicationJson -> True
+        _ -> False
+      }
+    _ -> False
+  }
+}
+
 /// Generate application/x-www-form-urlencoded body encoding in the client function.
 pub fn generate_form_urlencoded_body(
   sb: se.StringBuilder,
@@ -1289,23 +1340,28 @@ pub fn generate_form_urlencoded_body(
   ctx: Context,
 ) -> se.StringBuilder {
   let content_entries = ir_build.sorted_entries(rb.content)
-  let #(properties, required_fields) = case content_entries {
+  let #(properties, required_fields, encoding) = case content_entries {
     [#(_, media_type), ..] ->
       case media_type.schema {
         Some(Inline(schema.ObjectSchema(properties:, required:, ..))) -> #(
           ir_build.sorted_entries(properties),
           required,
+          media_type.encoding,
         )
         Some(Reference(..) as schema_ref) ->
           case context.resolve_schema_ref(schema_ref, ctx) {
             Ok(schema.ObjectSchema(properties:, required:, ..)) -> {
-              #(ir_build.sorted_entries(properties), required)
+              #(
+                ir_build.sorted_entries(properties),
+                required,
+                media_type.encoding,
+              )
             }
-            _ -> #([], [])
+            _ -> #([], [], dict.new())
           }
-        _ -> #([], [])
+        _ -> #([], [], dict.new())
       }
-    _ -> #([], [])
+    _ -> #([], [], dict.new())
   }
 
   let sb = sb |> se.indent(1, "let form_parts = []")
@@ -1345,6 +1401,43 @@ pub fn generate_form_urlencoded_body(
         Some(items) -> schema_resolves_to_object(items, ctx)
         None -> False
       }
+      let json_escape_hatch = form_encoding_is_json(encoding, field_name)
+      use <- bool.lazy_guard(json_escape_hatch, fn() {
+        let value_expr = "body." <> gleam_field
+        case is_required {
+          True -> {
+            let inner =
+              form_field_json_encoder_expr(field_schema, value_expr, ctx)
+            sb
+            |> se.indent(
+              1,
+              "let form_parts = [\""
+                <> field_name
+                <> "=\" <> uri.percent_encode(json.to_string("
+                <> inner
+                <> ")), ..form_parts]",
+            )
+          }
+          False -> {
+            let inner = form_field_json_encoder_expr(field_schema, "v", ctx)
+            sb
+            |> se.indent(
+              1,
+              "let form_parts = case body." <> gleam_field <> " {",
+            )
+            |> se.indent(
+              2,
+              "Some(v) -> [\""
+                <> field_name
+                <> "=\" <> uri.percent_encode(json.to_string("
+                <> inner
+                <> ")), ..form_parts]",
+            )
+            |> se.indent(2, "None -> form_parts")
+            |> se.indent(1, "}")
+          }
+        }
+      })
       case is_object, is_array_of_object {
         True, _ ->
           // Nested objects: serialize as field[subkey]=value

@@ -16560,3 +16560,51 @@ pub fn form_urlencoded_object_array_of_object_case() {
   string.contains(content, "<> \"[description]\"")
   |> should.be_true()
 }
+
+/// Form-urlencoded body honors per-field
+/// `encoding.<field>.contentType: application/json`. Each tagged
+/// field is JSON-encoded into a single string and that string is
+/// percent-encoded as one form value, while untagged fields keep
+/// their existing form serialisation.
+pub fn form_urlencoded_encoding_contenttype_json_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/form_urlencoded_encoding_json.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/form_urlencoded_encoding_json.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(client_file) =
+    list.find(summary.files, fn(f) { f.path == "client.gleam" })
+  let content = client_file.content
+
+  // Reference field is optional (only `name` is required) so it goes
+  // through the `Some(v) -> ... encode_<schema>_json(v) ...` arm and
+  // never re-references `body.metadata` inside the literal payload.
+  string.contains(content, "encode_metadata_json(v)")
+  |> should.be_true()
+  string.contains(content, "json.to_string")
+  |> should.be_true()
+  string.contains(
+    content,
+    "\"metadata=\" <> uri.percent_encode(json.to_string(",
+  )
+  |> should.be_true()
+
+  // Inline array of strings: emitted as `json.array(<value>, json.string)`
+  // and wrapped in the same `json.to_string + percent_encode` envelope.
+  string.contains(content, "json.array(v, json.string)")
+  |> should.be_true()
+  string.contains(content, "\"tags=\" <> uri.percent_encode(json.to_string(")
+  |> should.be_true()
+
+  // Untagged required scalar `name` keeps the existing
+  // `name=<percent-encoded value>` shape — no JSON wrapping.
+  string.contains(content, "\"name=\" <> uri.percent_encode(body.name)")
+  |> should.be_true()
+}

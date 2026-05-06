@@ -1,0 +1,60 @@
+openapi: "3.0.3"
+info:
+  title: Form-urlencoded with encoding.contentType=application/json escape hatch
+  description: |
+    OpenAPI 3.x permits `mediaType.encoding.<field>.contentType` to
+    override the default per-property serialisation inside a
+    `application/x-www-form-urlencoded` body. When the override is
+    `application/json`, the field's value is JSON-encoded into a
+    string and that string is then URL-encoded as a single value.
+
+    Stripe relies on this for fields like `metadata` (an open object
+    of string→string), where indexed-bracket form encoding does not
+    round-trip cleanly across language boundaries. This fixture
+    locks in:
+
+      - `metadata` is a `Reference`-resolved object → emit
+        `metadata=<percent-encoded JSON string>`.
+      - `tags` is an inline array of strings → emit
+        `tags=<percent-encoded JSON array string>`.
+      - `name` has no encoding override → keeps the existing
+        `name=<percent-encoded value>` shape.
+
+    The escape hatch is per-field: only fields whose
+    `encoding[<field>].contentType` resolves to `application/json`
+    take the new path.
+  version: "1.0.0"
+components:
+  schemas:
+    Metadata:
+      type: object
+      additionalProperties:
+        type: string
+paths:
+  /widgets:
+    post:
+      operationId: createWidget
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                metadata:
+                  $ref: "#/components/schemas/Metadata"
+                tags:
+                  type: array
+                  items:
+                    type: string
+            encoding:
+              metadata:
+                contentType: application/json
+              tags:
+                contentType: application/json
+      responses:
+        "200":
+          description: ok

@@ -244,11 +244,39 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
       })
     })
 
+  let has_form_urlencoded_json_escape =
+    list.any(operations, fn(op) {
+      let #(_, operation, _, _) = op
+      case operation.request_body {
+        Some(Value(rb)) ->
+          list.any(dict.to_list(rb.content), fn(ce) {
+            let #(ct_name, mt) = ce
+            case ct_util.from_string(ct_name) {
+              ct_util.FormUrlEncoded ->
+                list.any(dict.to_list(mt.encoding), fn(entry) {
+                  let #(_, enc) = entry
+                  case enc.content_type {
+                    Some(value) ->
+                      case ct_util.from_string(value) {
+                        ct_util.ApplicationJson -> True
+                        _ -> False
+                      }
+                    None -> False
+                  }
+                })
+              _ -> False
+            }
+          })
+        _ -> False
+      }
+    })
+
   let needs_json =
     needs_dyn_decode
     // Issue #503: object multipart fields are JSON-encoded into one part,
     // pulling in json.to_string + the per-schema encoder.
     || has_multipart_object_field
+    || has_form_urlencoded_json_escape
     || list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       case operation.request_body {
