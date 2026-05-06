@@ -56,6 +56,31 @@ pub fn schema_ref_qualified_type(ref: SchemaRef) -> String {
   }
 }
 
+/// Like `schema_type`, but recurses into composites so any
+/// `Reference(_)` items / sub-schemas come back qualified with the
+/// `types.` prefix. Use this from any module that imports `types` as
+/// a separate qualifier (`guards.gleam`, `decoders.gleam`); plain
+/// `schema_type` flattens references bare and only works inside
+/// `types.gleam` itself.
+pub fn schema_type_qualified(schema: SchemaObject) -> String {
+  let base = case schema {
+    ArraySchema(items:, ..) ->
+      "List(" <> schema_ref_qualified_type_recursive(items) <> ")"
+    _ -> schema_base_type(schema)
+  }
+  case schema.is_nullable(schema) {
+    True -> "Option(" <> base <> ")"
+    False -> base
+  }
+}
+
+fn schema_ref_qualified_type_recursive(ref: SchemaRef) -> String {
+  case ref {
+    Inline(s) -> schema_type_qualified(s)
+    Reference(name:, ..) -> "types." <> naming.schema_to_type_name(name)
+  }
+}
+
 /// Map a primitive schema to its to_string expression.
 /// Returns the expression that converts a value to String for URL encoding.
 pub fn to_string_expr(schema: SchemaObject, value: String) -> String {
@@ -84,7 +109,29 @@ pub fn schema_ref_to_string_expr(
           <> "_to_string("
           <> value
           <> ")"
-        Ok(resolved) -> to_string_expr(resolved, value)
+        // Composite `$ref`s cannot fall through to `to_string_expr`'s
+        // catch-all — the value is typed as the per-schema record /
+        // union, not String. The generated encoder's String form
+        // serialises through `json.to_string()`, which is the
+        // form-style fallback the validator already warns about.
+        Ok(ObjectSchema(..))
+        | Ok(OneOfSchema(..))
+        | Ok(AnyOfSchema(..))
+        | Ok(AllOfSchema(..)) ->
+          "encode.encode_" <> naming.to_snake_case(name) <> "(" <> value <> ")"
+        Ok(resolved) -> {
+          // A `$ref` to a `nullable: true` primitive renders its type
+          // as `Option(<T>)`, but the to_string callsite (query-param
+          // tuples, path-segment substitution) needs a `String`.
+          // `option.unwrap(<value>, "")` collapses `None` (and
+          // `Some(None)`) to the empty string, which most OpenAPI
+          // servers treat the same as the param being absent.
+          let inner = to_string_expr(resolved, value)
+          case schema.is_nullable(resolved) {
+            True -> "option.unwrap(" <> inner <> ", \"\")"
+            False -> inner
+          }
+        }
         // nolint: thrown_away_error -- unresolved refs fall back to the raw accessor; the resolver reports the ref error separately
         Error(_) -> value
       }

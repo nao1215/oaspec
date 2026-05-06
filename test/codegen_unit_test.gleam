@@ -186,7 +186,10 @@ pub fn client_response_get_response_decode_expr_array_inline_test() {
     http.Status(200),
     ctx,
   )
-  |> should.equal("json.parse(text, decode.list(dyn_decode.int))")
+  // The list combinator lives on `gleam/dynamic/decode` (imported as
+  // `dyn_decode` in client.gleam); the local `decode` module is the
+  // generated per-spec one and has no `list/2`.
+  |> should.equal("json.parse(text, dyn_decode.list(dyn_decode.int))")
 }
 
 // ===================================================================

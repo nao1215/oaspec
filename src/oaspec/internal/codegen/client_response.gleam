@@ -498,8 +498,12 @@ pub fn get_response_decode_expr(
           <> "_decoder()))"
         }
         Inline(inner) -> {
+          // `decode` here is the generated per-spec decode module; it
+          // has no `list` combinator. The list combinator lives on
+          // `gleam/dynamic/decode` — imported as `dyn_decode` — so we
+          // route through that.
           let inner_decoder = inline_schema_to_decoder(inner)
-          "json.parse(text, decode.list(" <> inner_decoder <> "))"
+          "json.parse(text, dyn_decode.list(" <> inner_decoder <> "))"
         }
       }
     Inline(schema.StringSchema(..)) -> "json.parse(text, dyn_decode.string)"

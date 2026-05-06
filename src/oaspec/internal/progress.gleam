@@ -52,6 +52,28 @@ pub fn timed(body: fn() -> a) -> #(Int, a) {
   #(end - start, result)
 }
 
+/// Run `body`, time it, and emit two events to `reporter`:
+///
+///   1. `<label> ...` BEFORE the body runs, so the user can see which
+///      stage is currently in flight if the body is slow or hangs;
+///   2. `<label> (took <elapsed>)` AFTER it completes.
+///
+/// Returns `body`'s value unchanged. The "before" event matters when
+/// the body never returns — without it the slow stage stays invisible.
+pub fn timed_stage(
+  reporter reporter: Reporter,
+  label label: String,
+  body body: fn() -> a,
+) -> a {
+  report(reporter: reporter, message: label <> " ...")
+  let #(elapsed, value) = timed(body)
+  report(
+    reporter: reporter,
+    message: label <> " (took " <> format_ms(elapsed) <> ")",
+  )
+  value
+}
+
 /// Format a millisecond duration as a compact human string, e.g.
 /// `"123ms"`, `"4.56s"`, `"1m23.4s"`. Used in progress lines so the
 /// user can tell at a glance which stage is the slow one.

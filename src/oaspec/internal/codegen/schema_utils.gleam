@@ -150,8 +150,16 @@ pub fn constant_property_value(
   required: List(String),
 ) -> Option(String) {
   case list.contains(required, prop_name), prop_ref {
-    True, Inline(StringSchema(enum_values: [single_value], ..)) ->
-      Some(single_value)
+    // A `nullable: true` enum admits two wire values (the single
+    // declared variant AND `null`), so it is not a true constant.
+    // Treating it as one would elide the field from the record but
+    // leave the encoder reading `value.<field>` from a type that no
+    // longer carries it.
+    True, Inline(StringSchema(metadata:, enum_values: [single_value], ..)) ->
+      case metadata.nullable {
+        True -> None
+        False -> Some(single_value)
+      }
     _, _ -> None
   }
 }

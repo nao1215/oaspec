@@ -1056,21 +1056,26 @@ fn schema_ref_to_type_with_inline_enum(
   }
 }
 
-/// Resolve the disambiguated inline-enum type name for `<parent_name>.<prop_name>`
-/// against the current context's component schema names (Issue #492). Returns
-/// the bare `<Parent><Prop>` PascalCase concat when no collision exists, or a
-/// numerically-suffixed variant (`<Parent><Prop>2`, `<Parent><Prop>3`, …) when
-/// a component schema already maps to the same Gleam type name.
+/// Resolve the disambiguated inline-enum type name for
+/// `<parent_name>.<prop_name>` against the current context's component
+/// schema names. Returns the bare `<Parent><Prop>` PascalCase concat
+/// when no collision exists, or a numerically-suffixed variant
+/// (`<Parent><Prop>2`, `<Parent><Prop>3`, …) when a component schema
+/// already maps to the same Gleam type name.
+///
+/// Reads the precomputed `component_type_names` set on `Context` so
+/// the collision check is O(log N) and the per-spec
+/// `schema_to_type_name` mapping work happens exactly once.
 pub fn inline_enum_type_name_for(
   parent_name: String,
   prop_name: String,
   ctx: Context,
 ) -> String {
-  let schema_names = case context.spec(ctx).components {
-    Some(components) -> components.schemas |> dict.keys
-    None -> []
-  }
-  naming.inline_enum_type_name(parent_name, prop_name, schema_names)
+  naming.inline_enum_type_name_with_set(
+    parent_name,
+    prop_name,
+    context.component_type_names(ctx),
+  )
 }
 
 fn schema_ref_to_type(ref: SchemaRef, _ctx: Context) -> String {

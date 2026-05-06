@@ -10,6 +10,7 @@ import oaspec/internal/openapi/schema.{
 import oaspec/internal/openapi/spec.{
   type HttpMethod, type OpenApiSpec, type Operation, type Resolved,
 }
+import oaspec/internal/util/naming
 
 /// The version of oaspec used for generated code headers.
 pub const version = "0.58.0"
@@ -33,6 +34,7 @@ pub opaque type Context {
     config: Config,
     operations: List(AnalyzedOperation),
     schema_cache: dict.Dict(String, Result(SchemaObject, resolver.ResolveError)),
+    component_type_names: dict.Dict(String, Nil),
   )
 }
 
@@ -48,6 +50,7 @@ pub fn new(spec: OpenApiSpec(Resolved), config: Config) -> Context {
     config:,
     operations: operations.collect_operations(spec),
     schema_cache: build_schema_cache(spec),
+    component_type_names: build_component_type_names(spec),
   )
 }
 
@@ -97,6 +100,28 @@ pub fn schema_metadata(
     Ok(schema_obj) -> Some(schema.get_metadata(schema_obj))
     // nolint: thrown_away_error -- unresolved refs have no metadata; callers treat this as absence and the validator reports the underlying ref error separately
     Error(_) -> None
+  }
+}
+
+/// Pre-computed set of every component schema name mapped through
+/// `naming.schema_to_type_name`, exposed as a `Dict(String, Nil)` so
+/// `dict.has_key` is the collision-check primitive. Without this,
+/// every inline-enum / synthetic-list-suffix collision check would
+/// rebuild the full mapped list, blowing up to O(N_schemas²) on
+/// large specs.
+pub fn component_type_names(ctx: Context) -> dict.Dict(String, Nil) {
+  ctx.component_type_names
+}
+
+fn build_component_type_names(
+  spec: OpenApiSpec(Resolved),
+) -> dict.Dict(String, Nil) {
+  case spec.components {
+    Some(components) ->
+      list.fold(dict.keys(components.schemas), dict.new(), fn(acc, name) {
+        dict.insert(acc, naming.schema_to_type_name(name), Nil)
+      })
+    None -> dict.new()
   }
 }
 

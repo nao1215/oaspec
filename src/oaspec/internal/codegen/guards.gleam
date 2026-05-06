@@ -9,14 +9,17 @@ import gleam/set.{type Set}
 import gleam/string
 import oaspec/config
 import oaspec/internal/codegen/allof_merge
+import oaspec/internal/codegen/codec_helpers
 import oaspec/internal/codegen/context.{
   type Context, type GeneratedFile, GeneratedFile,
 }
 import oaspec/internal/codegen/ir_build
 import oaspec/internal/codegen/schema_dispatch
+import oaspec/internal/codegen/schema_utils
 import oaspec/internal/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, ArraySchema, Inline,
-  IntegerSchema, NumberSchema, ObjectSchema, Reference, StringSchema,
+  IntegerSchema, NumberSchema, ObjectSchema, Reference, StringSchema, Typed,
+  Untyped,
 }
 import oaspec/internal/util/naming
 import oaspec/internal/util/string_extra as se
@@ -160,13 +163,33 @@ pub fn build_module(ctx: Context) -> GuardModule {
       let #(name, schema_ref) = entry
       let guard_calls = collect_guard_calls(name, schema_ref, ctx)
       list.any(guard_calls, fn(call) {
-        let #(_, _, is_required, _) = call
+        let #(_, _, is_required, _, _) = call
         !is_required
       })
     })
-  let imports = case needs_option {
-    True -> ["gleam/option", ..imports]
-    False -> imports
+  // The bare `Option` type is needed only when a composite signature
+  // actually contains `Option(...)` — separate from `needs_option`,
+  // which covers `option.Some` / `option.None` pattern matching for
+  // optional fields. Limit the scan to schemas that actually emit a
+  // composite validator (i.e. have at least one guard call); a
+  // nullable primitive component with no constraints would otherwise
+  // flip the import to `{type Option}` even though no signature
+  // references the bare type, tripping "Unused imported type" under
+  // `--warnings-as-errors`.
+  let needs_option_type =
+    list.any(schemas, fn(entry) {
+      let #(name, schema_ref) = entry
+      let guard_calls = collect_guard_calls(name, schema_ref, ctx)
+      !list.is_empty(guard_calls)
+      && string.contains(
+        composite_validator_type(name, schema_ref, ctx),
+        "Option(",
+      )
+    })
+  let imports = case needs_option, needs_option_type {
+    True, True -> ["gleam/option.{type Option}", ..imports]
+    True, False -> ["gleam/option", ..imports]
+    False, _ -> imports
   }
 
   // Issue #520: nested-composite and composite-list emissions use
@@ -180,7 +203,7 @@ pub fn build_module(ctx: Context) -> GuardModule {
       let #(name, schema_ref) = entry
       let guard_calls = collect_guard_calls(name, schema_ref, ctx)
       list.any(guard_calls, fn(call) {
-        let #(_, _, _, kind) = call
+        let #(_, _, _, kind, _) = call
         case kind {
           Composite | CompositeList -> True
           Direct -> False
@@ -320,20 +343,38 @@ fn collect_guard_functions_for_schema_object(
   ctx: Context,
 ) -> List(GuardFunction) {
   case schema {
-    ObjectSchema(properties:, min_properties:, max_properties:, ..) ->
+    ObjectSchema(
+      properties:,
+      min_properties:,
+      max_properties:,
+      additional_properties:,
+      ..,
+    ) -> {
+      // Match the gate in `collect_guard_calls_visiting`: emit the
+      // properties-count validator only for dict-backed schemas. A
+      // closed record has no Dict view to feed into `Dict(k, v) ->
+      // Result(Dict(k, v), _)`, so the function would be unused
+      // (skipped by the composite call site) AND would break
+      // `--warnings-as-errors` on the unused-private-function rule.
+      let count_guard = case additional_properties {
+        Typed(_) | Untyped ->
+          maybe_one(build_properties_count_guard_function(
+            name,
+            "",
+            min_properties,
+            max_properties,
+          ))
+        _ -> []
+      }
       list.append(
-        maybe_one(build_properties_count_guard_function(
-          name,
-          "",
-          min_properties,
-          max_properties,
-        )),
+        count_guard,
         ir_build.sorted_entries(properties)
           |> list.flat_map(fn(entry) {
             let #(prop_name, prop_ref) = entry
             collect_field_guard_functions(name, prop_name, prop_ref, ctx)
           }),
       )
+    }
 
     AllOfSchema(schemas:, ..) ->
       list.append(
@@ -647,7 +688,13 @@ fn guard_function_name(
 ) -> String {
   let base = naming.to_snake_case(schema_name)
   case prop_name {
-    "" -> "validate_" <> base <> "_" <> constraint
+    // The `_root_` infix separates a schema-level validator on a
+    // hoisted inline-array component schema from the parent's
+    // field-level validator with the same constraint kind. Without
+    // it, when a hoisted child's snake-case name equals
+    // `<parent>_<field>`, both validators collide on the same
+    // `pub fn` name.
+    "" -> "validate_" <> base <> "_root_" <> constraint
     _ ->
       "validate_"
       <> base
@@ -758,15 +805,15 @@ fn build_composite_guard_function(
       let gleam_type = composite_validator_type(name, schema_ref, ctx)
       let call_lines =
         list.flat_map(guard_calls, fn(call) {
-          let #(guard_fn, accessor, is_required, kind) = call
-          case kind, is_required {
-            Direct, True -> [
+          let #(guard_fn, accessor, is_required, kind, extra_unwrap) = call
+          case kind, is_required, extra_unwrap {
+            Direct, True, _ -> [
               "  let errors = case " <> guard_fn <> "(" <> accessor <> ") {",
               "    Ok(_) -> errors",
               "    Error(failure) -> [failure, ..errors]",
               "  }",
             ]
-            Direct, False -> [
+            Direct, False, False -> [
               "  let errors = case " <> accessor <> " {",
               "    option.Some(v) -> case " <> guard_fn <> "(v) {",
               "      Ok(_) -> errors",
@@ -775,16 +822,30 @@ fn build_composite_guard_function(
               "    option.None -> errors",
               "  }",
             ]
+            // Field static type is `Option(Option(T))` (optional +
+            // nullable-via-alias). Both `None` (absent) and
+            // `Some(None)` (explicit null) collapse to no-op — the
+            // constraint only applies when a value is actually
+            // present.
+            Direct, False, True -> [
+              "  let errors = case " <> accessor <> " {",
+              "    option.Some(option.Some(v)) -> case " <> guard_fn <> "(v) {",
+              "      Ok(_) -> errors",
+              "      Error(failure) -> [failure, ..errors]",
+              "    }",
+              "    _ -> errors",
+              "  }",
+            ]
             // Issue #520: nested-record validators return
             // `Result(_, List(ValidationFailure))`; merge their failure
             // list into the outer accumulator.
-            Composite, True -> [
+            Composite, True, _ -> [
               "  let errors = case " <> guard_fn <> "(" <> accessor <> ") {",
               "    Ok(_) -> errors",
               "    Error(failures) -> list.append(list.reverse(failures), errors)",
               "  }",
             ]
-            Composite, False -> [
+            Composite, False, False -> [
               "  let errors = case " <> accessor <> " {",
               "    option.Some(v) -> case " <> guard_fn <> "(v) {",
               "      Ok(_) -> errors",
@@ -793,9 +854,18 @@ fn build_composite_guard_function(
               "    option.None -> errors",
               "  }",
             ]
+            Composite, False, True -> [
+              "  let errors = case " <> accessor <> " {",
+              "    option.Some(option.Some(v)) -> case " <> guard_fn <> "(v) {",
+              "      Ok(_) -> errors",
+              "      Error(failures) -> list.append(list.reverse(failures), errors)",
+              "    }",
+              "    _ -> errors",
+              "  }",
+            ]
             // Issue #520: lists of validatable records are folded so
             // every element runs through the inner composite validator.
-            CompositeList, True -> [
+            CompositeList, True, _ -> [
               "  let errors = list.fold("
                 <> accessor
                 <> ", errors, fn(errs, item) {",
@@ -805,7 +875,7 @@ fn build_composite_guard_function(
               "    }",
               "  })",
             ]
-            CompositeList, False -> [
+            CompositeList, False, False -> [
               "  let errors = case " <> accessor <> " {",
               "    option.Some(items) -> list.fold(items, errors, fn(errs, item) {",
               "      case " <> guard_fn <> "(item) {",
@@ -814,6 +884,17 @@ fn build_composite_guard_function(
               "      }",
               "    })",
               "    option.None -> errors",
+              "  }",
+            ]
+            CompositeList, False, True -> [
+              "  let errors = case " <> accessor <> " {",
+              "    option.Some(option.Some(items)) -> list.fold(items, errors, fn(errs, item) {",
+              "      case " <> guard_fn <> "(item) {",
+              "        Ok(_) -> errs",
+              "        Error(failures) -> list.append(list.reverse(failures), errs)",
+              "      }",
+              "    })",
+              "    _ -> errors",
               "  }",
             ]
           }
@@ -1421,6 +1502,10 @@ fn build_properties_count_guard_function(
 }
 
 /// Determine the Gleam type for the composite validator parameter.
+/// Non-object / non-allOf schemas (top-level arrays, primitives) go
+/// through `schema_type_qualified` so any inner `$ref` items come
+/// back with the `types.` prefix; this module imports `types` as a
+/// separate qualifier and bare names would resolve as "Unknown type".
 fn composite_validator_type(
   name: String,
   schema_ref: SchemaRef,
@@ -1430,9 +1515,7 @@ fn composite_validator_type(
   case schema {
     Ok(ObjectSchema(..)) | Ok(AllOfSchema(..)) ->
       "types." <> naming.schema_to_type_name(name)
-    Ok(s) -> {
-      schema_dispatch.schema_type(s)
-    }
+    Ok(s) -> schema_dispatch.schema_type_qualified(s)
     _ -> "types." <> naming.schema_to_type_name(name)
   }
 }
@@ -1443,10 +1526,9 @@ fn composite_validator_type(
 ///   the historical leaf case (range / pattern / length / unique).
 /// - `Composite`: the validator returns
 ///   `Result(T, List(ValidationFailure))` — the per-schema aggregator
-///   for a nested record. Issue #520.
+///   for a nested record.
 /// - `CompositeList`: the field is `List(T)` and each item must be
-///   recursively validated against its composite validator. Issue
-///   #520.
+///   recursively validated against its composite validator.
 type GuardCallKind {
   Direct
   Composite
@@ -1455,9 +1537,15 @@ type GuardCallKind {
 
 /// A guard call with metadata about whether the field is optional and
 /// what shape its validator returns.
-/// #(guard_fn_name, accessor_expr, is_required, kind)
+/// `#(guard_fn_name, accessor_expr, is_required, kind, extra_unwrap)`.
+///
+/// `extra_unwrap` is True when the accessor's runtime type is
+/// `Option(Option(T))` — i.e. the field is not in `required` AND
+/// references a `nullable: true` primitive (whose alias is itself
+/// `Option(T)`). The composite validator must peel both `Option`
+/// layers before calling the per-constraint validator.
 type GuardCall =
-  #(String, String, Bool, GuardCallKind)
+  #(String, String, Bool, GuardCallKind, Bool)
 
 /// Collect all guard function calls for a schema's constrained fields.
 fn collect_guard_calls(
@@ -1481,13 +1569,20 @@ fn collect_guard_calls_visiting(
       required:,
       min_properties:,
       max_properties:,
+      additional_properties:,
       ..,
     )) -> {
       let prop_calls =
         ir_build.sorted_entries(properties)
         |> list.flat_map(fn(entry) {
           let #(prop_name, prop_ref) = entry
-          let is_required = list.contains(required, prop_name)
+          // A `required: true` AND `nullable: true` field still
+          // renders as `Option(<T>)` in the generated record (every
+          // nullable field is wrapped). Treat it like an optional
+          // field so the dispatch lands on the unwrap arm.
+          let is_required =
+            list.contains(required, prop_name)
+            && !schema_utils.schema_ref_is_nullable(prop_ref, ctx)
           collect_field_guard_calls(
             name,
             prop_name,
@@ -1499,9 +1594,30 @@ fn collect_guard_calls_visiting(
         })
       let size_calls = case min_properties, max_properties {
         None, None -> []
-        _, _ -> [
-          #(guard_function_name(name, "", "properties"), "value", True, Direct),
-        ]
+        _, _ ->
+          // The `properties` constraint validator takes `Dict(k, v)`,
+          // which only matches schemas whose generated type carries
+          // an `additional_properties` field — i.e.
+          // `additionalProperties: { type: ... }` (Typed) or a bare
+          // `additionalProperties: true` (Untyped). For closed records
+          // (`Forbidden` / `Unspecified`) the generated type is a
+          // concrete record with no Dict view, so we'd be handing a
+          // record to a `Dict(k, v) -> ...` validator. Skip the guard
+          // there: with a fixed set of declared properties the count
+          // is determined at codegen time and there's nothing to
+          // validate at runtime anyway.
+          case additional_properties {
+            Typed(_) | Untyped -> [
+              #(
+                guard_function_name(name, "", "properties"),
+                "value.additional_properties",
+                True,
+                Direct,
+                False,
+              ),
+            ]
+            _ -> []
+          }
       }
       list.append(prop_calls, size_calls)
     }
@@ -1510,7 +1626,11 @@ fn collect_guard_calls_visiting(
       ir_build.sorted_entries(merged.properties)
       |> list.flat_map(fn(entry) {
         let #(prop_name, prop_ref) = entry
-        let is_required = list.contains(merged.required, prop_name)
+        // Nullable counts toward "needs unwrapping" alongside `not in
+        // required` — see the ObjectSchema branch above.
+        let is_required =
+          list.contains(merged.required, prop_name)
+          && !schema_utils.schema_ref_is_nullable(prop_ref, ctx)
         collect_field_guard_calls(
           name,
           prop_name,
@@ -1521,22 +1641,40 @@ fn collect_guard_calls_visiting(
         )
       })
     }
-    Ok(StringSchema(min_length:, max_length:, pattern:, ..)) -> {
+    Ok(StringSchema(metadata:, min_length:, max_length:, pattern:, ..)) -> {
+      // A top-level `nullable: true` schema renders the composite's
+      // `value` parameter as `Option(<T>)`, so the inner constraint
+      // validators must be reached via the `Some(v) -> validator(v)`
+      // unwrap arm.
+      let is_req = !metadata.nullable
       let calls = case min_length, max_length {
         None, None -> []
         _, _ -> [
-          #(guard_function_name(name, "", "length"), "value", True, Direct),
+          #(
+            guard_function_name(name, "", "length"),
+            "value",
+            is_req,
+            Direct,
+            False,
+          ),
         ]
       }
       case pattern {
         None -> calls
         Some(_) ->
           list.append(calls, [
-            #(guard_function_name(name, "", "pattern"), "value", True, Direct),
+            #(
+              guard_function_name(name, "", "pattern"),
+              "value",
+              is_req,
+              Direct,
+              False,
+            ),
           ])
       }
     }
     Ok(IntegerSchema(
+      metadata:,
       minimum:,
       maximum:,
       exclusive_minimum:,
@@ -1544,10 +1682,17 @@ fn collect_guard_calls_visiting(
       multiple_of:,
       ..,
     )) -> {
+      let is_req = !metadata.nullable
       let calls = case minimum, maximum {
         None, None -> []
         _, _ -> [
-          #(guard_function_name(name, "", "range"), "value", True, Direct),
+          #(
+            guard_function_name(name, "", "range"),
+            "value",
+            is_req,
+            Direct,
+            False,
+          ),
         ]
       }
       let calls = case exclusive_minimum, exclusive_maximum {
@@ -1557,8 +1702,9 @@ fn collect_guard_calls_visiting(
             #(
               guard_function_name(name, "", "exclusive_range"),
               "value",
-              True,
+              is_req,
               Direct,
+              False,
             ),
           ])
       }
@@ -1569,13 +1715,15 @@ fn collect_guard_calls_visiting(
             #(
               guard_function_name(name, "", "multiple_of"),
               "value",
-              True,
+              is_req,
               Direct,
+              False,
             ),
           ])
       }
     }
     Ok(NumberSchema(
+      metadata:,
       minimum:,
       maximum:,
       exclusive_minimum:,
@@ -1583,10 +1731,17 @@ fn collect_guard_calls_visiting(
       multiple_of:,
       ..,
     )) -> {
+      let is_req = !metadata.nullable
       let calls = case minimum, maximum {
         None, None -> []
         _, _ -> [
-          #(guard_function_name(name, "", "range"), "value", True, Direct),
+          #(
+            guard_function_name(name, "", "range"),
+            "value",
+            is_req,
+            Direct,
+            False,
+          ),
         ]
       }
       let calls = case exclusive_minimum, exclusive_maximum {
@@ -1596,8 +1751,9 @@ fn collect_guard_calls_visiting(
             #(
               guard_function_name(name, "", "exclusive_range"),
               "value",
-              True,
+              is_req,
               Direct,
+              False,
             ),
           ])
       }
@@ -1608,22 +1764,36 @@ fn collect_guard_calls_visiting(
             #(
               guard_function_name(name, "", "multiple_of"),
               "value",
-              True,
+              is_req,
               Direct,
+              False,
             ),
           ])
       }
     }
-    Ok(ArraySchema(min_items:, max_items:, unique_items:, ..)) -> {
+    Ok(ArraySchema(metadata:, min_items:, max_items:, unique_items:, ..)) -> {
+      let is_req = !metadata.nullable
       let length_calls = case min_items, max_items {
         None, None -> []
         _, _ -> [
-          #(guard_function_name(name, "", "length"), "value", True, Direct),
+          #(
+            guard_function_name(name, "", "length"),
+            "value",
+            is_req,
+            Direct,
+            False,
+          ),
         ]
       }
       let unique_calls = case unique_items {
         True -> [
-          #(guard_function_name(name, "", "unique"), "value", True, Direct),
+          #(
+            guard_function_name(name, "", "unique"),
+            "value",
+            is_req,
+            Direct,
+            False,
+          ),
         ]
         False -> []
       }
@@ -1648,6 +1818,23 @@ fn collect_field_guard_calls(
 ) -> List(GuardCall) {
   let resolved = context.resolve_schema_ref(prop_ref, ctx)
   let accessor = "value." <> naming.to_snake_case(prop_name)
+  // The double-Option shape arises only when the field is not in
+  // `required` AND the referenced schema's type alias itself unwraps
+  // to `Option(...)` (nullable primitive / array — alias is
+  // `pub type X = Option(<inner>)`). Nullable objects / unions keep a
+  // record / union alias and only pick up the outer wrap. Unresolved
+  // `$ref` falls back to the conservative non-Option case; broken
+  // refs surface through the resolver elsewhere.
+  let alias_is_optional = case prop_ref {
+    Reference(..) ->
+      case resolved {
+        Ok(s) -> codec_helpers.schema_ref_has_bare_option_type(Inline(s))
+        // nolint: thrown_away_error -- conservative fallback: see comment above.
+        Error(_) -> False
+      }
+    _ -> False
+  }
+  let extra_unwrap = !is_required && alias_is_optional
   case resolved {
     Ok(StringSchema(min_length:, max_length:, pattern:, ..)) -> {
       let calls = case min_length, max_length {
@@ -1658,6 +1845,7 @@ fn collect_field_guard_calls(
             accessor,
             is_required,
             Direct,
+            extra_unwrap,
           ),
         ]
       }
@@ -1670,6 +1858,7 @@ fn collect_field_guard_calls(
               accessor,
               is_required,
               Direct,
+              extra_unwrap,
             ),
           ])
       }
@@ -1690,6 +1879,7 @@ fn collect_field_guard_calls(
             accessor,
             is_required,
             Direct,
+            extra_unwrap,
           ),
         ]
       }
@@ -1702,6 +1892,7 @@ fn collect_field_guard_calls(
               accessor,
               is_required,
               Direct,
+              extra_unwrap,
             ),
           ])
       }
@@ -1714,6 +1905,7 @@ fn collect_field_guard_calls(
               accessor,
               is_required,
               Direct,
+              extra_unwrap,
             ),
           ])
       }
@@ -1734,6 +1926,7 @@ fn collect_field_guard_calls(
             accessor,
             is_required,
             Direct,
+            extra_unwrap,
           ),
         ]
       }
@@ -1746,6 +1939,7 @@ fn collect_field_guard_calls(
               accessor,
               is_required,
               Direct,
+              extra_unwrap,
             ),
           ])
       }
@@ -1758,6 +1952,7 @@ fn collect_field_guard_calls(
               accessor,
               is_required,
               Direct,
+              extra_unwrap,
             ),
           ])
       }
@@ -1771,6 +1966,7 @@ fn collect_field_guard_calls(
             accessor,
             is_required,
             Direct,
+            extra_unwrap,
           ),
         ]
       }
@@ -1781,6 +1977,7 @@ fn collect_field_guard_calls(
             accessor,
             is_required,
             Direct,
+            extra_unwrap,
           ),
         ]
         False -> []
@@ -1800,6 +1997,7 @@ fn collect_field_guard_calls(
                 accessor,
                 is_required,
                 CompositeList,
+                extra_unwrap,
               ),
             ]
             False -> []
@@ -1823,6 +2021,7 @@ fn collect_field_guard_calls(
                 accessor,
                 is_required,
                 Composite,
+                extra_unwrap,
               ),
             ]
             False -> []

@@ -1017,7 +1017,12 @@ fn generate_array_decoder(
   nullable: Bool,
   ctx: Context,
 ) -> se.StringBuilder {
-  let inner_decoder = schema_ref_to_decoder(items, name, "", ctx)
+  // Items use the array-items dispatch, not the generic decoder
+  // resolver — the inline-enum naming path in the latter would
+  // synthesise a `<base>_decoder()` reference whose suffix-bumped
+  // form (when the hoist pass promoted a sibling schema with the
+  // same shape) names a function the IR never emits.
+  let inner_decoder = decoder_for_array_items(items, name, "", ctx)
   let inner_type = codec_helpers.qualified_schema_ref_type(items, ctx)
   let list_type = "List(" <> inner_type <> ")"
   let list_decoder = "decode.list(" <> inner_decoder <> ")"
@@ -1393,23 +1398,39 @@ fn schema_ref_to_decoder(
       decoder_name <> "_decoder()"
     }
     Inline(ArraySchema(items:, ..)) -> {
-      let inner = schema_ref_to_decoder(items, parent_name, prop_name, ctx)
+      // Array items skip the inline-enum decoder dispatch: the IR
+      // promotes inline string-enums only on object properties, so an
+      // `array of inline string-enum` type collapses to `List(String)`
+      // and the decoder must use the plain primitive dispatch to
+      // match.
+      let inner = decoder_for_array_items(items, parent_name, prop_name, ctx)
       "decode.list(" <> inner <> ")"
     }
     _ -> schema_dispatch.decoder_expr(ref)
   }
 }
 
-/// Resolve the synthetic list-decoder suffix for `<base>` against the
-/// current context's component schemas (issue #493). Returns
-/// `_list_items` when `<base>List` is declared as a component schema,
-/// `_list` otherwise.
-fn synthetic_list_suffix_for(base: String, ctx: Context) -> String {
-  let schema_names = case context.spec(ctx).components {
-    Some(components) -> components.schemas |> dict.keys
-    None -> []
+fn decoder_for_array_items(
+  ref: SchemaRef,
+  parent_name: String,
+  prop_name: String,
+  ctx: Context,
+) -> String {
+  case ref {
+    Inline(ArraySchema(..)) ->
+      schema_ref_to_decoder(ref, parent_name, prop_name, ctx)
+    _ -> schema_dispatch.decoder_expr(ref)
   }
-  naming.synthetic_list_suffix(base, schema_names)
+}
+
+/// Resolve the synthetic list-decoder suffix for `<base>`. Returns
+/// `_list_items` when a sibling component schema would map to the
+/// same `<Base>List` Gleam type, `_list` otherwise. Detection runs in
+/// Gleam-mapped namespace via `Context`'s precomputed set so dashed
+/// or otherwise spelled siblings (e.g. `<base>-list`) are caught
+/// alongside the literal `<base>List` form.
+fn synthetic_list_suffix_for(base: String, ctx: Context) -> String {
+  naming.synthetic_list_suffix_with_set(base, context.component_type_names(ctx))
 }
 
 /// Add a doc comment if description is present.

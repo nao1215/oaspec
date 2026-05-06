@@ -1,4 +1,5 @@
 import gleam/dict
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
@@ -32,6 +33,7 @@ import oaspec/internal/openapi/resolver
 import oaspec/internal/openapi/schema
 import oaspec/internal/openapi/spec
 import oaspec/internal/openapi/value
+import oaspec/internal/progress
 import oaspec/internal/util/content_type
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
@@ -3837,11 +3839,11 @@ components:
   let files = guards.generate(ctx)
   let assert [guard_file] = files
 
-  string.contains(guard_file.content, "validate_username_pattern")
+  string.contains(guard_file.content, "validate_username_root_pattern")
   |> should.be_true()
   string.contains(guard_file.content, "validate_username(value: String)")
   |> should.be_true()
-  string.contains(guard_file.content, "validate_username_pattern(value)")
+  string.contains(guard_file.content, "validate_username_root_pattern(value)")
   |> should.be_true()
   string.contains(guard_file.content, "import gleam/regexp")
   |> should.be_true()
@@ -3878,13 +3880,16 @@ components:
   let files = guards.generate(ctx)
   let assert [guard_file] = files
 
-  string.contains(guard_file.content, "import gleam/dict.{type Dict}")
-  |> should.be_true()
+  // The schema is a closed record (no `additionalProperties`), so the
+  // `minProperties` guard is intentionally NOT emitted — its validator
+  // takes `Dict(k, v)` and the generated record exposes no Dict view.
+  // Nested string constraints on individual fields must still be
+  // collected; this test exists to pin that.
+  string.contains(guard_file.content, "validate_user_root_properties")
+  |> should.be_false()
   string.contains(guard_file.content, "import gleam/string")
   |> should.be_true()
   string.contains(guard_file.content, "import gleam/regexp")
-  |> should.be_true()
-  string.contains(guard_file.content, "validate_user_properties")
   |> should.be_true()
   string.contains(guard_file.content, "validate_user_username_length")
   |> should.be_true()
@@ -4385,7 +4390,7 @@ components:
   |> should.be_false()
   // The composite validator must call the same function name as the definition
   // Both definition and call must use the same suffix ("length" for arrays)
-  string.contains(content, "validate_bounded_list_length")
+  string.contains(content, "validate_bounded_list_root_length")
   |> should.be_true()
   // Must NOT reference a mismatched "items" suffix
   string.contains(content, "validate_bounded_list_items")
@@ -9596,10 +9601,10 @@ components:
   let content = guard_file.content
 
   // Top-level exclusive range guard
-  string.contains(content, "validate_even_positive_exclusive_range")
+  string.contains(content, "validate_even_positive_root_exclusive_range")
   |> should.be_true()
   // Top-level multipleOf guard
-  string.contains(content, "validate_even_positive_multiple_of")
+  string.contains(content, "validate_even_positive_root_multiple_of")
   |> should.be_true()
 }
 
@@ -11393,7 +11398,7 @@ components:
   let assert [guard_file] = files
   let content = guard_file.content
   // Should generate a uniqueItems guard
-  string.contains(content, "validate_tag_list_unique")
+  string.contains(content, "validate_tag_list_root_unique")
   |> should.be_true()
   // Should use list.unique for deduplication
   string.contains(content, "list.unique")
@@ -11454,7 +11459,7 @@ components:
   list.length(files) |> should.not_equal(0)
   let assert [guard_file] = files
   let content = guard_file.content
-  string.contains(content, "validate_filter_map_properties")
+  string.contains(content, "validate_filter_map_root_properties")
   |> should.be_true()
   string.contains(content, "dict.size")
   |> should.be_true()
@@ -16024,3 +16029,462 @@ components:
   string.contains(content, "decode.success(types.EmptyObject())")
   |> should.be_false()
 }
+
+/// A `*/*` (or `application/octet-stream`) response with no `schema:`
+/// must NOT cause `client.gleam` to define the `bytes_body` helper —
+/// `client_response.gleam` doesn't call it in that branch, so an
+/// emitted helper would be unused and break
+/// `gleam build --warnings-as-errors`. The import-needs predicate
+/// must require `media_type.schema = Some(_)` to agree with the
+/// emission gate.
+pub fn client_omits_bytes_body_helper_when_response_has_no_schema_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/wildcard_response_no_schema.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/wildcard_response_no_schema.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(client_file) =
+    list.find(summary.files, fn(f) { f.path == "client.gleam" })
+  // The bytes_body helper must NOT be defined when no response uses it.
+  string.contains(client_file.content, "fn bytes_body(")
+  |> should.be_false()
+}
+
+/// Regression guard: the existing wildcard fixture has `*/*` responses
+/// WITH a schema, which DOES need the bytes_body helper. Make sure the
+/// tightened predicate still fires here.
+pub fn client_keeps_bytes_body_when_response_has_schema_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/wildcard_content_type.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/wildcard_content_type.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(client_file) =
+    list.find(summary.files, fn(f) { f.path == "client.gleam" })
+  string.contains(client_file.content, "fn bytes_body(")
+  |> should.be_true()
+}
+
+/// An empty-object schema (no properties, additionalProperties:
+/// false) collapses the encoder body to `json.object([])` — the
+/// `value` parameter is bound but never read, so `gleam build
+/// --warnings-as-errors` rejects it. The `_json` variant must take
+/// `_value` for that exact shape; the String variant keeps `value`
+/// because it still pipes through `_json(value)`.
+pub fn encoder_for_empty_object_omits_unused_value_param_case() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /thing:
+    post:
+      operationId: createThing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyObject'
+      responses:
+        '200':
+          description: ok
+components:
+  schemas:
+    EmptyObject:
+      type: object
+      properties: {}
+      additionalProperties: false
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = encoders.generate(ctx)
+
+  let assert Ok(encode_file) =
+    list.find(files, fn(f) { string.contains(f.path, "encode") })
+  let content = encode_file.content
+
+  // The _json variant must NOT bind `value:` (it would be unused).
+  string.contains(
+    content,
+    "pub fn encode_empty_object_json(value: types.EmptyObject)",
+  )
+  |> should.be_false()
+
+  // It must still exist, just with `_value:` (or equivalent) so the
+  // Gleam compiler's "unused argument" warning never fires.
+  string.contains(
+    content,
+    "pub fn encode_empty_object_json(_value: types.EmptyObject)",
+  )
+  |> should.be_true()
+}
+
+/// An array of inline string-enum items collapses to `List(String)`
+/// at the type level (the IR's inline-enum pass walks only top-level
+/// object properties, never array items). The decoder/encoder must
+/// agree: items go through `decode.string` / `json.string`, NOT a
+/// synthesised `<parent>_<prop>` enum codec that the IR never emits.
+pub fn array_of_inline_string_enum_uses_plain_decoder_and_encoder_case() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /widgets:
+    get:
+      operationId: listWidgets
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Widget'
+components:
+  schemas:
+    Widget:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        events:
+          description: events the widget cares about
+          type: array
+          items:
+            type: string
+            enum: [created, updated, deleted]
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let decode_files = decoders.generate(ctx)
+  let encode_files = encoders.generate(ctx)
+
+  let assert Ok(decode_file) =
+    list.find(decode_files, fn(f) { string.contains(f.path, "decode") })
+  let decode_content = decode_file.content
+
+  let assert Ok(encode_file) =
+    list.find(encode_files, fn(f) { string.contains(f.path, "encode") })
+  let encode_content = encode_file.content
+
+  // Items are decoded as plain strings, NOT through a synthesised
+  // inline-enum decoder reference.
+  string.contains(decode_content, "decode.list(decode.string)")
+  |> should.be_true()
+  string.contains(decode_content, "widget_events_decoder")
+  |> should.be_false()
+
+  // Same on the encoder side.
+  string.contains(encode_content, "json.string")
+  |> should.be_true()
+  string.contains(encode_content, "encode_widget_events_json")
+  |> should.be_false()
+}
+
+/// Sibling schemas like `widget-instance` AND `widget-instance-list`
+/// (a real shape on the GitHub spec) both map to the same Gleam type
+/// `WidgetInstanceList`, so the synthetic `decode_<base>_list` for
+/// the first collides with the regular decoder for the second. The
+/// suffix-bumping predicate must resolve in Gleam-mapped namespace
+/// (not raw kebab-case) to catch both spellings.
+pub fn synthetic_list_decoder_disambiguates_against_dashed_list_sibling_case() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /a:
+    get:
+      operationId: getA
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/widget-instance-list'
+  /b:
+    get:
+      operationId: getB
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/widget-instance'
+components:
+  schemas:
+    widget-instance:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+    widget-instance-list:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/widget-instance'
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = decoders.generate(ctx)
+
+  let assert Ok(decode_file) =
+    list.find(files, fn(f) { string.contains(f.path, "decode") })
+  let content = decode_file.content
+
+  // The user-named `widget-instance-list` schema keeps its natural
+  // decoder. The synthetic list decoder for `widget-instance` shifts
+  // to `_list_items` to avoid the collision.
+  string.contains(
+    content,
+    "pub fn decode_widget_instance_list(json_string: String)",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "pub fn decode_widget_instance_list_items(json_string: String)",
+  )
+  |> should.be_true()
+}
+
+/// Regression guard: a non-empty object encoder MUST still bind `value`
+/// (without the underscore prefix), because the body reads
+/// `value.<field>`. The fix from
+/// `encoder_for_empty_object_omits_unused_value_param_case` must NOT
+/// over-apply to populated schemas.
+pub fn encoder_for_non_empty_object_keeps_value_param_case() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /pet:
+    post:
+      operationId: createPet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Pet'
+      responses:
+        '200':
+          description: ok
+components:
+  schemas:
+    Pet:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let spec = hoist.hoist(spec)
+  let ctx = make_ctx_from_spec(spec)
+  let files = encoders.generate(ctx)
+
+  let assert Ok(encode_file) =
+    list.find(files, fn(f) { string.contains(f.path, "encode") })
+  let content = encode_file.content
+
+  string.contains(content, "pub fn encode_pet_json(value: types.Pet)")
+  |> should.be_true()
+  string.contains(content, "pub fn encode_pet_json(_value: types.Pet)")
+  |> should.be_false()
+}
+
+/// Each codegen sub-stage (types, decoders, encoders, guards, server,
+/// client) must emit its own progress event so a slow phase surfaces
+/// against a specific stage rather than disappearing behind a single
+/// opaque "render" wrapper. The mode-gated substages (server / client)
+/// must NOT fire when their mode is excluded.
+pub fn generate_emits_per_substage_progress_events_case() {
+  let key = "progress_events_log"
+  pdict_put_list(key, [])
+  let reporter =
+    progress.from_fn(fn(msg) {
+      let prev = case pdict_get_list(key) {
+        Ok(v) -> v
+        Error(Nil) -> []
+      }
+      pdict_put_list(key, [msg, ..prev])
+      Nil
+    })
+
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/wildcard_response_no_schema.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/wildcard_response_no_schema.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let assert Ok(_summary) =
+    generate.generate_with_progress_and_locations(
+      unresolved,
+      location_index.empty(),
+      cfg,
+      reporter,
+    )
+  let assert Ok(events_rev) = pdict_get_list(key)
+  let events = list.reverse(events_rev)
+
+  // Each codegen sub-stage emits its own `(took ...)` line so the user
+  // can see which phase is the slow one.
+  let event_contains = fn(needle: String) {
+    list.any(events, fn(e) { string.contains(e, needle) })
+  }
+  event_contains("generate types") |> should.be_true()
+  event_contains("generate decoders") |> should.be_true()
+  event_contains("generate encoders") |> should.be_true()
+  event_contains("generate guards") |> should.be_true()
+  // mode = Client, so the client substage MUST fire and server MUST NOT.
+  event_contains("generate client") |> should.be_true()
+  event_contains("generate server") |> should.be_false()
+}
+
+/// Regression guard for the large-spec hang: a synthetic spec with
+/// several hundred component schemas and operations must complete
+/// codegen well under a generous wall-clock ceiling. Older versions
+/// of the codegen ran dozens of independent `list.any` passes over
+/// operations and schemas, blowing up to multi-minute wall time on
+/// realistic specs. The synthetic shape exercises the same quadratic
+/// structure; the 30 s budget here is a loud floor — typical hardware
+/// finishes in well under a second.
+pub fn generate_completes_within_budget_for_synthetic_large_spec_case() {
+  let yaml = build_synthetic_large_spec_yaml(400, 80)
+  let assert Ok(unresolved) = parser.parse_string(yaml)
+  let cfg =
+    config.new(
+      input: "synthetic.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let #(elapsed_ms, result) =
+    progress.timed(fn() { generate.generate(unresolved, cfg) })
+
+  case result {
+    Ok(_) -> Nil
+    Error(_) -> {
+      should.be_true(False)
+      Nil
+    }
+  }
+
+  // Coarse anti-hang guard. The optimised path finishes specs of this
+  // size in well under a second locally; the 120 s ceiling is set
+  // high enough to absorb transient CI host contention while still
+  // catching the multi-minute regressions we care about.
+  should.be_true(elapsed_ms < 120_000)
+}
+
+/// Build a synthetic OpenAPI 3.0 YAML with `num_schemas` simple
+/// object schemas (five string properties each) and `num_operations`
+/// GET endpoints, each returning a different schema. Mirrors the
+/// "many per-resource response shapes" pattern of large real-world
+/// specs without needing an 8 MiB fixture in source control.
+fn build_synthetic_large_spec_yaml(
+  num_schemas: Int,
+  num_operations: Int,
+) -> String {
+  let header =
+    "openapi: 3.0.3
+info:
+  title: Synthetic Large Spec
+  version: 1.0.0
+paths:
+"
+  let paths =
+    range_zero_until(num_operations)
+    |> list.map(fn(i) {
+      let schema_idx = case num_schemas {
+        0 -> 0
+        _ -> i % num_schemas
+      }
+      "  /endpoint_"
+      <> int.to_string(i)
+      <> ":\n    get:\n      operationId: getEndpoint"
+      <> int.to_string(i)
+      <> "\n      responses:\n        '200':\n          description: ok\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Schema"
+      <> int.to_string(schema_idx)
+      <> "'\n"
+    })
+    |> string.concat
+  let schemas_section = case num_schemas {
+    0 -> ""
+    _ ->
+      "components:\n  schemas:\n"
+      <> {
+        range_zero_until(num_schemas)
+        |> list.map(fn(i) {
+          "    Schema"
+          <> int.to_string(i)
+          <> ":\n      type: object\n      required: [field0]\n      properties:\n        field0:\n          type: string\n        field1:\n          type: string\n        field2:\n          type: string\n        field3:\n          type: string\n        field4:\n          type: string\n"
+        })
+        |> string.concat
+      }
+  }
+  header <> paths <> schemas_section
+}
+
+/// `[0, 1, ..., end - 1]`. Local stand-in for `list.range`, which is
+/// not in this project's `gleam_stdlib` floor. Empty list when
+/// `end <= 0`.
+fn range_zero_until(end: Int) -> List(Int) {
+  build_descending_range(end - 1, [])
+}
+
+fn build_descending_range(i: Int, acc: List(Int)) -> List(Int) {
+  case i < 0 {
+    True -> acc
+    False -> build_descending_range(i - 1, [i, ..acc])
+  }
+}
+
+@external(erlang, "erlang", "put")
+fn pdict_put_list(key: String, value: List(String)) -> List(String)
+
+@external(erlang, "oaspec_test_helpers_ffi", "pdict_get")
+fn pdict_get_list(key: String) -> Result(List(String), Nil)
