@@ -1289,7 +1289,7 @@ fn generate_form_bracket_fields(
 fn form_field_json_encoder_expr(
   ref: schema.SchemaRef,
   value: String,
-  ctx: Context,
+  _ctx: Context,
 ) -> String {
   case ref {
     Inline(schema.StringSchema(..)) -> "json.string(" <> value <> ")"
@@ -1297,26 +1297,19 @@ fn form_field_json_encoder_expr(
     Inline(schema.NumberSchema(..)) -> "json.float(" <> value <> ")"
     Inline(schema.BooleanSchema(..)) -> "json.bool(" <> value <> ")"
     Inline(schema.ArraySchema(items:, ..)) ->
-      "json.array("
-      <> value
-      <> ", "
-      <> form_field_json_encoder_fn(items, ctx)
-      <> ")"
+      "json.array(" <> value <> ", " <> form_field_json_encoder_fn(items) <> ")"
     _ -> schema_dispatch.json_encoder_expr(ref, value)
   }
 }
 
-fn form_field_json_encoder_fn(ref: schema.SchemaRef, ctx: Context) -> String {
-  let _ = ctx
+fn form_field_json_encoder_fn(ref: schema.SchemaRef) -> String {
   case ref {
     Inline(schema.StringSchema(..)) -> "json.string"
     Inline(schema.IntegerSchema(..)) -> "json.int"
     Inline(schema.NumberSchema(..)) -> "json.float"
     Inline(schema.BooleanSchema(..)) -> "json.bool"
     Inline(schema.ArraySchema(items:, ..)) ->
-      "fn(xs) { json.array(xs, "
-      <> form_field_json_encoder_fn(items, ctx)
-      <> ") }"
+      "fn(xs) { json.array(xs, " <> form_field_json_encoder_fn(items) <> ") }"
     _ -> schema_dispatch.json_encoder_fn(ref)
   }
 }
