@@ -170,13 +170,18 @@ pub fn build_module(ctx: Context) -> GuardModule {
   // The bare `Option` type is needed only when a composite signature
   // actually contains `Option(...)` — separate from `needs_option`,
   // which covers `option.Some` / `option.None` pattern matching for
-  // optional fields. Importing `{type Option}` unconditionally would
-  // trip "Unused imported type" on specs that exercise optional
-  // fields but never expose `Option` in a signature.
+  // optional fields. Limit the scan to schemas that actually emit a
+  // composite validator (i.e. have at least one guard call); a
+  // nullable primitive component with no constraints would otherwise
+  // flip the import to `{type Option}` even though no signature
+  // references the bare type, tripping "Unused imported type" under
+  // `--warnings-as-errors`.
   let needs_option_type =
     list.any(schemas, fn(entry) {
       let #(name, schema_ref) = entry
-      string.contains(
+      let guard_calls = collect_guard_calls(name, schema_ref, ctx)
+      !list.is_empty(guard_calls)
+      && string.contains(
         composite_validator_type(name, schema_ref, ctx),
         "Option(",
       )
@@ -338,20 +343,38 @@ fn collect_guard_functions_for_schema_object(
   ctx: Context,
 ) -> List(GuardFunction) {
   case schema {
-    ObjectSchema(properties:, min_properties:, max_properties:, ..) ->
+    ObjectSchema(
+      properties:,
+      min_properties:,
+      max_properties:,
+      additional_properties:,
+      ..,
+    ) -> {
+      // Match the gate in `collect_guard_calls_visiting`: emit the
+      // properties-count validator only for dict-backed schemas. A
+      // closed record has no Dict view to feed into `Dict(k, v) ->
+      // Result(Dict(k, v), _)`, so the function would be unused
+      // (skipped by the composite call site) AND would break
+      // `--warnings-as-errors` on the unused-private-function rule.
+      let count_guard = case additional_properties {
+        Typed(_) | Untyped ->
+          maybe_one(build_properties_count_guard_function(
+            name,
+            "",
+            min_properties,
+            max_properties,
+          ))
+        _ -> []
+      }
       list.append(
-        maybe_one(build_properties_count_guard_function(
-          name,
-          "",
-          min_properties,
-          max_properties,
-        )),
+        count_guard,
         ir_build.sorted_entries(properties)
           |> list.flat_map(fn(entry) {
             let #(prop_name, prop_ref) = entry
             collect_field_guard_functions(name, prop_name, prop_ref, ctx)
           }),
       )
+    }
 
     AllOfSchema(schemas:, ..) ->
       list.append(
@@ -1571,30 +1594,30 @@ fn collect_guard_calls_visiting(
         })
       let size_calls = case min_properties, max_properties {
         None, None -> []
-        _, _ -> {
+        _, _ ->
           // The `properties` constraint validator takes `Dict(k, v)`,
-          // so when the generated record carries an
-          // `additional_properties` field we pass that. Concrete
-          // fields are always populated and don't contribute to
-          // `dict.size` anyway. Records without an
-          // `additional_properties` field fall back to `value` —
-          // that path is broken for records with concrete fields
-          // (no `Dict` view exists), but dict-only schemas (the
-          // common case) now compile.
-          let size_accessor = case additional_properties {
-            Typed(_) | Untyped -> "value.additional_properties"
-            _ -> "value"
+          // which only matches schemas whose generated type carries
+          // an `additional_properties` field — i.e.
+          // `additionalProperties: { type: ... }` (Typed) or a bare
+          // `additionalProperties: true` (Untyped). For closed records
+          // (`Forbidden` / `Unspecified`) the generated type is a
+          // concrete record with no Dict view, so we'd be handing a
+          // record to a `Dict(k, v) -> ...` validator. Skip the guard
+          // there: with a fixed set of declared properties the count
+          // is determined at codegen time and there's nothing to
+          // validate at runtime anyway.
+          case additional_properties {
+            Typed(_) | Untyped -> [
+              #(
+                guard_function_name(name, "", "properties"),
+                "value.additional_properties",
+                True,
+                Direct,
+                False,
+              ),
+            ]
+            _ -> []
           }
-          [
-            #(
-              guard_function_name(name, "", "properties"),
-              size_accessor,
-              True,
-              Direct,
-              False,
-            ),
-          ]
-        }
       }
       list.append(prop_calls, size_calls)
     }

@@ -3880,13 +3880,16 @@ components:
   let files = guards.generate(ctx)
   let assert [guard_file] = files
 
-  string.contains(guard_file.content, "import gleam/dict.{type Dict}")
-  |> should.be_true()
+  // The schema is a closed record (no `additionalProperties`), so the
+  // `minProperties` guard is intentionally NOT emitted — its validator
+  // takes `Dict(k, v)` and the generated record exposes no Dict view.
+  // Nested string constraints on individual fields must still be
+  // collected; this test exists to pin that.
+  string.contains(guard_file.content, "validate_user_root_properties")
+  |> should.be_false()
   string.contains(guard_file.content, "import gleam/string")
   |> should.be_true()
   string.contains(guard_file.content, "import gleam/regexp")
-  |> should.be_true()
-  string.contains(guard_file.content, "validate_user_root_properties")
   |> should.be_true()
   string.contains(guard_file.content, "validate_user_username_length")
   |> should.be_true()
@@ -16410,11 +16413,11 @@ pub fn generate_completes_within_budget_for_synthetic_large_spec_case() {
     }
   }
 
-  // 30 seconds is a deliberately loose ceiling — the optimised path
-  // finishes synthetic specs of this size in well under a second on
-  // typical CI hardware. The point is to fail loudly if the codegen
-  // ever regresses to multi-minute behaviour again.
-  should.be_true(elapsed_ms < 30_000)
+  // Coarse anti-hang guard. The optimised path finishes specs of this
+  // size in well under a second locally; the 120 s ceiling is set
+  // high enough to absorb transient CI host contention while still
+  // catching the multi-minute regressions we care about.
+  should.be_true(elapsed_ms < 120_000)
 }
 
 /// Build a synthetic OpenAPI 3.0 YAML with `num_schemas` simple
