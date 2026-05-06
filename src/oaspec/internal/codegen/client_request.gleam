@@ -1314,6 +1314,55 @@ fn form_field_json_encoder_fn(ref: schema.SchemaRef) -> String {
   }
 }
 
+/// Returns true when a form field's schema either is — or transitively
+/// contains — a composite (`oneOf` / `anyOf` / `allOf`). There is no
+/// agreed-upon bracket-or-repeat wire format for composite shapes (a
+/// 2025 Stripe spec hits this on `metadata`, `address`, `documents`,
+/// `tags`, etc.), so the codegen lifts the entire field to the JSON
+/// escape hatch — the same shape an explicit
+/// `encoding.<field>.contentType: application/json` annotation
+/// would request — and serialises the whole value as one
+/// percent-encoded JSON string.
+///
+/// "Transitively" means descending into object properties and array
+/// items: if any leaf schema in the field's tree is composite, the
+/// whole field switches to the JSON path. Without this, fields like
+/// Stripe's `documents` (object → properties → array → items → `anyOf`)
+/// would slip back into the bracket-index emitter and panic in
+/// `to_string_fn` after hoist.
+fn field_resolves_to_composite(ref: schema.SchemaRef, ctx: Context) -> Bool {
+  case resolve_schema_object(Some(ref), ctx) {
+    Some(schema.OneOfSchema(..))
+    | Some(schema.AnyOfSchema(..))
+    | Some(schema.AllOfSchema(..)) -> True
+    Some(schema.ArraySchema(items:, ..)) ->
+      field_resolves_to_composite(items, ctx)
+    Some(schema.ObjectSchema(properties:, ..)) ->
+      dict.to_list(properties)
+      |> list.any(fn(entry) {
+        let #(_, child_schema) = entry
+        field_resolves_to_composite(child_schema, ctx)
+      })
+    _ -> False
+  }
+}
+
+fn resolve_schema_object(
+  schema_ref: Option(schema.SchemaRef),
+  ctx: Context,
+) -> Option(schema.SchemaObject) {
+  case schema_ref {
+    Some(Inline(s)) -> Some(s)
+    Some(Reference(..) as ref) ->
+      case context.resolve_schema_ref(ref, ctx) {
+        Ok(s) -> Some(s)
+        // nolint: thrown_away_error -- unresolved refs cannot be classified; treat as non-composite and let downstream codegen fail loudly if it actually emits
+        Error(_) -> None
+      }
+    None -> None
+  }
+}
+
 /// Returns true when `encoding[<field>].contentType` resolves to
 /// `application/json` (or `application/json` with parameters such as
 /// `application/json; charset=utf-8`). Per OAS 3.x this triggers the
@@ -1401,7 +1450,15 @@ pub fn generate_form_urlencoded_body(
         Some(items) -> schema_resolves_to_object(items, ctx)
         None -> False
       }
-      let json_escape_hatch = form_encoding_is_json(encoding, field_name)
+      let is_composite = field_resolves_to_composite(field_schema, ctx)
+      // The JSON escape hatch fires for both an explicit
+      // `encoding.<field>.contentType: application/json` annotation
+      // and for composite (`oneOf` / `anyOf` / `allOf`) fields —
+      // there is no single bracket-or-repeat wire format that round-
+      // trips for those, so we serialise the whole value as one JSON
+      // string and percent-encode it.
+      let json_escape_hatch =
+        form_encoding_is_json(encoding, field_name) || is_composite
       use <- bool.lazy_guard(json_escape_hatch, fn() {
         let value_expr = "body." <> gleam_field
         case is_required {

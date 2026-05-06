@@ -252,18 +252,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
           list.any(dict.to_list(rb.content), fn(ce) {
             let #(ct_name, mt) = ce
             case ct_util.from_string(ct_name) {
-              ct_util.FormUrlEncoded ->
-                list.any(dict.to_list(mt.encoding), fn(entry) {
-                  let #(_, enc) = entry
-                  case enc.content_type {
-                    Some(value) ->
-                      case ct_util.from_string(value) {
-                        ct_util.ApplicationJson -> True
-                        _ -> False
-                      }
-                    None -> False
-                  }
-                })
+              ct_util.FormUrlEncoded -> form_body_uses_json_escape(mt, ctx)
               _ -> False
             }
           })
@@ -584,6 +573,54 @@ fn resolve_to_object(
         // nolint: thrown_away_error -- unresolved refs are reported by the resolver; the import gate just falls back to "no match"
         Error(_) -> None
       }
+  }
+}
+
+/// Mirror of the client emitter's "JSON escape hatch fires" decision
+/// for a `application/x-www-form-urlencoded` media type. Returns True
+/// when at least one property either has an explicit
+/// `encoding[<field>].contentType: application/json` annotation or
+/// transitively contains a composite (`oneOf` / `anyOf` / `allOf`)
+/// shape — both branches emit `json.to_string(...)` and so require
+/// `gleam/json` in the client's import set.
+fn form_body_uses_json_escape(mt: spec.MediaType, ctx: Context) -> Bool {
+  let explicit =
+    list.any(dict.to_list(mt.encoding), fn(entry) {
+      let #(_, enc) = entry
+      case enc.content_type {
+        Some(value) ->
+          case ct_util.from_string(value) {
+            ct_util.ApplicationJson -> True
+            _ -> False
+          }
+        None -> False
+      }
+    })
+  let composite = case resolve_to_object(option_or_none(mt.schema), ctx) {
+    Some(schema.ObjectSchema(properties:, ..)) ->
+      dict.to_list(properties)
+      |> list.any(fn(entry) {
+        let #(_, child_schema) = entry
+        ref_contains_composite(child_schema, ctx)
+      })
+    _ -> False
+  }
+  explicit || composite
+}
+
+fn ref_contains_composite(ref: schema.SchemaRef, ctx: Context) -> Bool {
+  case resolve_to_object(ref, ctx) {
+    Some(schema.OneOfSchema(..))
+    | Some(schema.AnyOfSchema(..))
+    | Some(schema.AllOfSchema(..)) -> True
+    Some(schema.ArraySchema(items:, ..)) -> ref_contains_composite(items, ctx)
+    Some(schema.ObjectSchema(properties:, ..)) ->
+      dict.to_list(properties)
+      |> list.any(fn(entry) {
+        let #(_, child_schema) = entry
+        ref_contains_composite(child_schema, ctx)
+      })
+    _ -> False
   }
 }
 
