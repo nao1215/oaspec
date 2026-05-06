@@ -1,0 +1,39 @@
+openapi: "3.0.3"
+info:
+  title: Query parameter that is an array of non-primitive items
+  description: |
+    Real-world specs (Stripe `lines`, `invoice_items`,
+    `subscription_items`) declare query array parameters whose
+    items resolve to an object or composite shape. There is no OAS
+    `style` that maps these cleanly to a single query value, so
+    oaspec emits the array via the JSON escape hatch on the client
+    side: a single query entry whose value is the JSON-encoded list.
+
+      lines=[{"amount":1000,"currency":"usd"}]
+
+    Server codegen still requires primitive items today, so the
+    diagnostic is gated to server mode.
+  version: "1.0.0"
+components:
+  schemas:
+    InvoiceLineItem:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount: { type: integer }
+        currency: { type: string }
+paths:
+  /invoices/preview:
+    get:
+      operationId: previewInvoice
+      parameters:
+        - name: lines
+          in: query
+          required: true
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/InvoiceLineItem"
+      responses:
+        "200":
+          description: ok

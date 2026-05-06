@@ -367,18 +367,27 @@ fn validate_server_structured_param(
   // ObjectSchema and hits the same panic. Reject in BOTH modes
   // when the items resolve to a non-primitive shape.
   let array_errors = case param.in_, schema_obj {
+    // Query array parameters with non-primitive items take the JSON
+    // escape hatch on the client side (`<param>=<JSON array string>`,
+    // the same shape PR #542 introduced for form-urlencoded
+    // composite fields). The server decoder still requires primitive
+    // items, so the diagnostic remains gated to server mode.
     spec.InQuery, Some(ArraySchema(items:, ..)) ->
       case array_items_resolve_primitive(items, ctx) {
         True -> []
-        False -> [
-          diagnostic.validation_error_both(
-            path: path,
-            detail: "Query array parameters are only supported for primitive items (string, integer, number, boolean), whether inline or via $ref.",
-            hint: Some(
-              "Replace the item schema with a primitive type (string, integer, number, boolean).",
-            ),
-          ),
-        ]
+        False ->
+          case config.mode(context.config(ctx)) {
+            config.Client -> []
+            _ -> [
+              diagnostic.validation_error_server(
+                path: path,
+                detail: "Query array parameters are only supported for primitive items (string, integer, number, boolean), whether inline or via $ref, in server code generation.",
+                hint: Some(
+                  "Switch to mode: client to use the JSON escape hatch, or replace the item schema with a primitive type.",
+                ),
+              ),
+            ]
+          }
       }
     spec.InHeader, Some(ArraySchema(items:, ..)) ->
       case array_items_resolve_primitive(items, ctx) {
@@ -593,39 +602,43 @@ fn validate_complex_param_schema(
 }
 
 /// Validate that a deepObject parameter has no unsupported property
-/// shapes. Issue #502: an object-typed property is now allowed (encoded
+/// shapes. Issue #502: an object-typed property is allowed (encoded
 /// as `parent[outer][inner]=value` and modeled as `Dict(String, String)`
-/// in the generated client). oneOf / anyOf / arrays of objects remain
-/// rejected because they don't fit the bracketed-string wire format.
+/// in the generated client). Composite properties (`oneOf` / `anyOf` /
+/// `allOf`) take the JSON escape hatch — `parent[<prop>]=<JSON
+/// string>` — the same shape PR #542 introduced for form-urlencoded
+/// composite fields, on the client side. The server decoder does
+/// not yet handle the JSON-escaped form, so the diagnostic stays
+/// gated to server mode.
 fn validate_deep_object_no_nested_objects(
   path: String,
   param: spec.Parameter(Resolved),
   ctx: Context,
 ) -> List(Diagnostic) {
-  case resolve_schema_object(spec.parameter_schema(param), ctx) {
-    Some(ObjectSchema(properties:, ..)) ->
-      dict.to_list(properties)
-      |> list.flat_map(fn(entry) {
-        let #(prop_name, prop_ref) = entry
-        case resolve_schema_object(Some(prop_ref), ctx) {
-          // Object and AllOf-of-objects: accepted (treated as
-          // bracketed-bracketed Dict(String, String)).
-          Some(ObjectSchema(..)) | Some(AllOfSchema(..)) -> []
-          // oneOf / anyOf / arrays at the property level still don't
-          // map to the bracketed-string wire format.
-          Some(OneOfSchema(..)) | Some(AnyOfSchema(..)) -> [
-            diagnostic.validation_error_both(
-              path: path <> "." <> prop_name,
-              detail: "Nested oneOf/anyOf properties in deepObject parameters are not supported. Only primitive scalars, primitive arrays, and single-level nested objects (Dict(String, String)) are supported.",
-              hint: Some(
-                "Flatten the property structure or pick a concrete branch of the oneOf/anyOf.",
-              ),
-            ),
-          ]
-          _ -> []
-        }
-      })
-    _ -> []
+  case config.mode(context.config(ctx)) {
+    config.Client -> []
+    _ ->
+      case resolve_schema_object(spec.parameter_schema(param), ctx) {
+        Some(ObjectSchema(properties:, ..)) ->
+          dict.to_list(properties)
+          |> list.flat_map(fn(entry) {
+            let #(prop_name, prop_ref) = entry
+            case resolve_schema_object(Some(prop_ref), ctx) {
+              Some(ObjectSchema(..)) | Some(AllOfSchema(..)) -> []
+              Some(OneOfSchema(..)) | Some(AnyOfSchema(..)) -> [
+                diagnostic.validation_error_server(
+                  path: path <> "." <> prop_name,
+                  detail: "Nested oneOf/anyOf properties in deepObject parameters are not supported in server code generation. Only primitive scalars, primitive arrays, and single-level nested objects (Dict(String, String)) are supported.",
+                  hint: Some(
+                    "Switch to mode: client to use the JSON escape hatch, or flatten the property structure.",
+                  ),
+                ),
+              ]
+              _ -> []
+            }
+          })
+        _ -> []
+      }
   }
 }
 

@@ -260,12 +260,19 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
       }
     })
 
+  // Query / header / cookie array params with non-primitive items
+  // and deepObject params with composite sub-properties both emit
+  // `json.to_string(...)` from PR #543's residual-shapes fixes.
+  let has_param_json_escape =
+    list.any(all_params, fn(p) { param_uses_json_escape(p, ctx) })
+
   let needs_json =
     needs_dyn_decode
     // Issue #503: object multipart fields are JSON-encoded into one part,
     // pulling in json.to_string + the per-schema encoder.
     || has_multipart_object_field
     || has_form_urlencoded_json_escape
+    || has_param_json_escape
     || list.any(operations, fn(op) {
       let #(_, operation, _, _) = op
       case operation.request_body {
@@ -606,6 +613,69 @@ fn form_body_uses_json_escape(mt: spec.MediaType, ctx: Context) -> Bool {
     _ -> False
   }
   explicit || composite
+}
+
+/// Mirror of the client emitter's "JSON escape hatch fires" decision
+/// for a query / header / cookie / deepObject parameter. Returns True
+/// when the emitter will produce `json.to_string(...)` and so requires
+/// `gleam/json` in the import set.
+fn param_uses_json_escape(
+  param: spec.Parameter(spec.Resolved),
+  ctx: Context,
+) -> Bool {
+  let in_query = case param.in_ {
+    spec.InQuery -> True
+    _ -> False
+  }
+  let array_items = case param.payload {
+    ParameterSchema(Inline(schema.ArraySchema(items:, ..))) -> Some(items)
+    ParameterSchema(Reference(..) as sr) ->
+      case context.resolve_schema_ref(sr, ctx) {
+        Ok(schema.ArraySchema(items:, ..)) -> Some(items)
+        _ -> None
+      }
+    _ -> None
+  }
+  let array_with_non_primitive_items = case in_query, array_items {
+    True, Some(items) -> !items_resolve_primitive_local(items, ctx)
+    _, _ -> False
+  }
+  let deep_object_composite = case
+    operation_ir.is_deep_object_param(param, ctx)
+  {
+    True ->
+      case
+        resolve_to_object(option_or_none(spec.parameter_schema(param)), ctx)
+      {
+        Some(schema.ObjectSchema(properties:, ..)) ->
+          dict.to_list(properties)
+          |> list.any(fn(entry) {
+            let #(_, child_schema) = entry
+            ref_contains_composite(child_schema, ctx)
+          })
+        _ -> False
+      }
+    False -> False
+  }
+  array_with_non_primitive_items || deep_object_composite
+}
+
+fn items_resolve_primitive_local(items: schema.SchemaRef, ctx: Context) -> Bool {
+  case items {
+    Inline(schema.StringSchema(..))
+    | Inline(schema.IntegerSchema(..))
+    | Inline(schema.NumberSchema(..))
+    | Inline(schema.BooleanSchema(..)) -> True
+    Reference(..) ->
+      case context.resolve_schema_ref(items, ctx) {
+        Ok(schema.StringSchema(..))
+        | Ok(schema.IntegerSchema(..))
+        | Ok(schema.NumberSchema(..))
+        | Ok(schema.BooleanSchema(..)) -> True
+        _ -> False
+      }
+    _ -> False
+  }
 }
 
 fn ref_contains_composite(ref: schema.SchemaRef, ctx: Context) -> Bool {

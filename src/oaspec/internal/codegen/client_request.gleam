@@ -1734,16 +1734,21 @@ pub fn generate_exploded_array_query_param(
   param_name: String,
   ctx: Context,
 ) -> se.StringBuilder {
-  let item_to_str = case param.payload {
-    ParameterSchema(Inline(schema.ArraySchema(items:, ..))) ->
-      array_item_to_string_fn(items, ctx)
-    ParameterSchema(Reference(..) as sr) ->
-      case context.resolve_schema_ref(sr, ctx) {
-        Ok(schema.ArraySchema(items:, ..)) ->
-          array_item_to_string_fn(items, ctx)
-        _ -> "fn(x) { x }"
-      }
-    _ -> "fn(x) { x }"
+  let items_ref = array_items_ref(param, ctx)
+  let json_escape = case items_ref {
+    Some(items) -> !items_resolve_primitive(items, ctx)
+    None -> False
+  }
+  use <- bool.lazy_guard(json_escape, fn() {
+    case items_ref {
+      Some(items) -> emit_json_array_query_param(sb, param, param_name, items)
+      None -> sb
+    }
+  })
+
+  let item_to_str = case items_ref {
+    Some(items) -> array_item_to_string_fn(items, ctx)
+    None -> "fn(x) { x }"
   }
   case param.required {
     True ->
@@ -1766,6 +1771,81 @@ pub fn generate_exploded_array_query_param(
         "[#(\"" <> param.name <> "\", " <> item_to_str <> "(item)), ..acc]",
       )
       |> se.indent(2, "})")
+      |> se.indent(2, "None -> query")
+      |> se.indent(1, "}")
+  }
+}
+
+fn array_items_ref(
+  param: spec.Parameter(Resolved),
+  ctx: Context,
+) -> Option(schema.SchemaRef) {
+  case param.payload {
+    ParameterSchema(Inline(schema.ArraySchema(items:, ..))) -> Some(items)
+    ParameterSchema(Reference(..) as sr) ->
+      case context.resolve_schema_ref(sr, ctx) {
+        Ok(schema.ArraySchema(items:, ..)) -> Some(items)
+        _ -> None
+      }
+    _ -> None
+  }
+}
+
+fn items_resolve_primitive(items: schema.SchemaRef, ctx: Context) -> Bool {
+  case items {
+    Inline(schema.StringSchema(..))
+    | Inline(schema.IntegerSchema(..))
+    | Inline(schema.NumberSchema(..))
+    | Inline(schema.BooleanSchema(..)) -> True
+    Reference(..) ->
+      case context.resolve_schema_ref(items, ctx) {
+        Ok(schema.StringSchema(..))
+        | Ok(schema.IntegerSchema(..))
+        | Ok(schema.NumberSchema(..))
+        | Ok(schema.BooleanSchema(..)) -> True
+        _ -> False
+      }
+    _ -> False
+  }
+}
+
+/// Emit an array query parameter whose items resolve to a non-
+/// primitive (object / array / composite) shape via the JSON escape
+/// hatch — the entire list is JSON-encoded into a single value
+/// (`<param>=<JSON array string>`). This matches the form-urlencoded
+/// composite path (PR #542) and keeps the generator from panicking
+/// in `to_string_fn` on non-primitive items.
+fn emit_json_array_query_param(
+  sb: se.StringBuilder,
+  param: spec.Parameter(Resolved),
+  param_name: String,
+  items: schema.SchemaRef,
+) -> se.StringBuilder {
+  let item_encoder = schema_dispatch.json_encoder_fn(items)
+  case param.required {
+    True ->
+      sb
+      |> se.indent(
+        1,
+        "let query = [#(\""
+          <> param.name
+          <> "\", json.to_string(json.array("
+          <> param_name
+          <> ", "
+          <> item_encoder
+          <> "))), ..query]",
+      )
+    False ->
+      sb
+      |> se.indent(1, "let query = case " <> param_name <> " {")
+      |> se.indent(
+        2,
+        "Some(items) -> [#(\""
+          <> param.name
+          <> "\", json.to_string(json.array(items, "
+          <> item_encoder
+          <> "))), ..query]",
+      )
       |> se.indent(2, "None -> query")
       |> se.indent(1, "}")
   }

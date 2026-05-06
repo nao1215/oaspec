@@ -40,6 +40,8 @@ pub fn codegen_core_regressions_test() {
   let _ = support.form_urlencoded_object_array_of_object_case()
   let _ = support.form_urlencoded_encoding_contenttype_json_case()
   let _ = support.form_urlencoded_composite_field_case()
+  let _ = support.query_array_of_objects_emits_json_escape_case()
+  let _ = support.deep_object_composite_property_emits_json_escape_case()
   let _ = support.head_operation_not_silently_dropped_case()
   let _ = support.options_operation_not_silently_dropped_case()
   let _ = support.optional_request_body_case()
