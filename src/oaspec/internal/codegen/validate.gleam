@@ -868,9 +868,11 @@ fn validate_server_form_urlencoded_request_body(
               False, _ -> [
                 diagnostic.validation_error_both(
                   path: op_id <> ".requestBody.form." <> field_name,
-                  detail: "application/x-www-form-urlencoded request bodies do not support oneOf / anyOf / allOf at the field level yet.",
+                  detail: "application/x-www-form-urlencoded request body field has a shape the codegen does not yet know how to serialise.",
                   hint: Some(
-                    "Use a single concrete schema (object or primitive) for each form field.",
+                    "Switch this field to a concrete primitive, object, array, or composite schema, or set encoding."
+                    <> field_name
+                    <> ".contentType: application/json to opt the field into the JSON escape hatch.",
                   ),
                 ),
               ]
@@ -925,9 +927,15 @@ fn form_urlencoded_server_field_supported(
 /// primitive scalars, primitive arrays at any depth, nested objects
 /// at any depth, and arrays-of-objects (whose items the hoist pass
 /// has already promoted to a `Reference`, so the codegen sees a
-/// nameable `ObjectSchema` here). composite shapes (`oneOf` /
-/// `anyOf` / `allOf`) at the field level remain on the rejection
-/// path until the dedicated codegen for them lands.
+/// nameable `ObjectSchema` here).
+///
+/// Composite shapes (`oneOf` / `anyOf` / `allOf`) at the field level
+/// also pass: they take the JSON-escape-hatch branch in the client
+/// emitter (`field=<percent-encoded JSON string>`), the same shape
+/// `encoding.<field>.contentType: application/json` would request
+/// explicitly. Without this branch real-world specs (Stripe, GitHub)
+/// would validate-reject for ~hundreds of fields with no spec change
+/// the user can make.
 fn form_urlencoded_field_codegen_safe(
   schema_ref: SchemaRef,
   ctx: Context,
@@ -946,6 +954,8 @@ fn form_urlencoded_field_codegen_safe(
         let #(_, child_schema) = entry
         form_urlencoded_field_codegen_safe(child_schema, ctx, 0)
       })
+    Some(OneOfSchema(..)) | Some(AnyOfSchema(..)) | Some(AllOfSchema(..)) ->
+      True
     _ -> False
   }
 }
@@ -953,8 +963,15 @@ fn form_urlencoded_field_codegen_safe(
 /// Items of an array inside a form-urlencoded body may be a primitive
 /// scalar (rendered as `key[i]=v`), a primitive array (rendered as
 /// `key[i][j]=v`), or an object whose properties recurse through the
-/// same predicate (rendered as `key[i][prop]=v`). Composites at the
-/// item level are still rejected.
+/// same predicate (rendered as `key[i][prop]=v`).
+///
+/// Composites at the item level (`items: { anyOf: ... }`, common in
+/// the Stripe spec on `documents.<kind>.files.items`) escalate the
+/// whole containing field to the JSON escape hatch, just like a
+/// composite at the field level would. They pass the predicate so
+/// the field is not validate-rejected; the client emitter recognises
+/// the composite-via-items shape and emits a single JSON-encoded
+/// form value for the entire field.
 fn form_urlencoded_array_items_codegen_safe(
   items: SchemaRef,
   ctx: Context,
@@ -972,6 +989,8 @@ fn form_urlencoded_array_items_codegen_safe(
         let #(_, child_schema) = entry
         form_urlencoded_field_codegen_safe(child_schema, ctx, 0)
       })
+    Some(OneOfSchema(..)) | Some(AnyOfSchema(..)) | Some(AllOfSchema(..)) ->
+      True
     _ -> False
   }
 }

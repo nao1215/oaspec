@@ -16608,3 +16608,49 @@ pub fn form_urlencoded_encoding_contenttype_json_case() {
   string.contains(content, "\"name=\" <> uri.percent_encode(body.name)")
   |> should.be_true()
 }
+
+/// Form-urlencoded body with `oneOf` / `anyOf` / `allOf` field-level
+/// composites is accepted by validate (client mode) and the client
+/// codegen emits the per-field JSON escape hatch automatically — no
+/// `encoding.contentType: application/json` annotation required.
+pub fn form_urlencoded_composite_field_case() {
+  let assert Ok(unresolved) =
+    parser.parse_file("test/fixtures/form_urlencoded_composite_field.yaml")
+  let cfg =
+    config.new(
+      input: "test/fixtures/form_urlencoded_composite_field.yaml",
+      output_server: "./test_output/api",
+      output_client: "./test_output_client/api",
+      package: "api",
+      mode: config.Client,
+      validate: False,
+    )
+  let assert Ok(summary) = generate.generate(unresolved, cfg)
+  let assert Ok(client_file) =
+    list.find(summary.files, fn(f) { f.path == "client.gleam" })
+  let content = client_file.content
+
+  // Each composite field is JSON-encoded via its synthetic encoder
+  // and percent-encoded as a single form value.
+  string.contains(
+    content,
+    "\"metadata=\" <> uri.percent_encode(json.to_string(",
+  )
+  |> should.be_true()
+  string.contains(content, "\"address=\" <> uri.percent_encode(json.to_string(")
+  |> should.be_true()
+  string.contains(content, "\"audit=\" <> uri.percent_encode(json.to_string(")
+  |> should.be_true()
+  string.contains(content, "\"tags=\" <> uri.percent_encode(json.to_string(")
+  |> should.be_true()
+
+  // Untagged required scalar `name` is unchanged.
+  string.contains(content, "\"name=\" <> uri.percent_encode(body.name)")
+  |> should.be_true()
+
+  // The composite-driven JSON escape hatch must also pull
+  // `gleam/json` into the import set; otherwise the emitted
+  // `json.to_string(...)` references would not compile.
+  string.contains(content, "import gleam/json")
+  |> should.be_true()
+}

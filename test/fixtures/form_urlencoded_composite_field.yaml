@@ -1,0 +1,81 @@
+openapi: "3.0.3"
+info:
+  title: Form-urlencoded with composite (oneOf / anyOf / allOf) fields
+  description: |
+    Real-world specs (Stripe, GitHub) routinely declare
+    `application/x-www-form-urlencoded` request bodies whose
+    properties resolve to `oneOf` / `anyOf` / `allOf` schemas — a
+    `metadata` hash that may be either a typed object or null, an
+    `address` object that is the union of two shipping shapes, etc.
+
+    There is no single bracket-or-repeat wire encoding that round-trips
+    cleanly across language boundaries for these shapes, so oaspec
+    treats them like any other JSON field and serialises the value
+    via the schema's JSON encoder, then percent-encodes the resulting
+    string into a single form value:
+
+      metadata=%7B%22env%22%3A%22prod%22%7D
+      address=%7B%22kind%22%3A%22billing%22%2C%22zip%22%3A%2294105%22%7D
+
+    Pre-fix the generator validate-rejected the spec entirely with
+    "do not support oneOf / anyOf / allOf at the field level yet."
+    Post-fix the client codegen accepts these shapes and emits the
+    JSON escape hatch automatically; server codegen still rejects
+    until the form decoder learns the inverse transform.
+  version: "1.0.0"
+components:
+  schemas:
+    MetadataObject:
+      type: object
+      additionalProperties:
+        type: string
+    BillingAddress:
+      type: object
+      required: [kind, zip]
+      properties:
+        kind: { type: string, enum: [billing] }
+        zip: { type: string }
+    ShippingAddress:
+      type: object
+      required: [kind, postal_code]
+      properties:
+        kind: { type: string, enum: [shipping] }
+        postal_code: { type: string }
+    HasCreatedAt:
+      type: object
+      required: [created_at]
+      properties:
+        created_at: { type: string, format: date-time }
+paths:
+  /widgets:
+    post:
+      operationId: createWidget
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                metadata:
+                  oneOf:
+                    - $ref: "#/components/schemas/MetadataObject"
+                    - type: "null"
+                address:
+                  oneOf:
+                    - $ref: "#/components/schemas/BillingAddress"
+                    - $ref: "#/components/schemas/ShippingAddress"
+                audit:
+                  allOf:
+                    - $ref: "#/components/schemas/HasCreatedAt"
+                tags:
+                  anyOf:
+                    - type: array
+                      items:
+                        type: string
+      responses:
+        "200":
+          description: ok
