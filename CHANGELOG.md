@@ -10,6 +10,54 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.58.1] - 2026-05-06
+
+### Fixed
+
+- **Issue #537: `oaspec generate` no longer hangs on the full GitHub
+  OpenAPI document, and the generated client compiles cleanly under
+  `gleam build --warnings-as-errors`.** The `types` phase of
+  `ir_build.build_types_module` rebuilt the full component-schema
+  list and re-mapped every entry through `naming.schema_to_type_name`
+  on each inline-enum collision check. With ~10k component schemas
+  this collapsed to multi-minute wall time. The mapped set is now
+  precomputed once on the `Context` and queried via `dict.has_key`,
+  bringing the types phase from minutes back to milliseconds.
+  Companion fixes that surface only once the hang is gone:
+  `bytes_body` and `encode_<empty>_json(value)` no longer leave
+  unused-warning code in the generated module; array items of inline
+  string-enums dispatch through the plain primitive codec; sibling
+  `<base>-list` component schemas no longer trip
+  `Duplicate definition: decode_<base>_list`; `client_response.gleam`
+  routes `decode.list` calls through `dyn_decode.list`; complex /
+  nullable query parameters serialise correctly; `path` / `query` /
+  `headers` are reserved parameter names; `nullable + enum:[single]`
+  is no longer treated as a constant property; the guards module
+  qualifies inner refs, unwraps double-Option fields, gates the
+  `properties` constraint to dict-backed schemas, and only imports
+  `{type Option}` when a composite signature actually needs it.
+
+### Added
+
+- **Per-substage progress events during code generation.**
+  `oaspec generate` now emits a `<phase> ...` line before each
+  codegen substage (types / decoders / encoders / guards / server /
+  client) and a `(took ...)` line after, so a slow phase surfaces
+  against a specific stage rather than disappearing behind the
+  opaque outer render wrapper. New helper `progress.timed_stage`
+  factors the bracketing for downstream callers.
+
+- **Full GitHub OpenAPI integration test job.** A new
+  `integration_test/github_full.sh` script downloads the upstream
+  `github/rest-api-description` document (cached weekly under
+  `/tmp`), runs `oaspec generate` with `validate: true`, then checks
+  that every generated file is non-empty, carries the codegen
+  provenance header, round-trips through `gleam format --check`, and
+  builds with `--warnings-as-errors`. A new `github-openapi`
+  GitHub Actions job runs it in parallel with the existing test job
+  so total CI wall-clock caps at `max(integration, github_full)`
+  instead of the sum.
+
 ## [0.58.0] - 2026-05-05
 
 ### Fixed
