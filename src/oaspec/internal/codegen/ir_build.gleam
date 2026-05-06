@@ -1056,18 +1056,16 @@ fn schema_ref_to_type_with_inline_enum(
   }
 }
 
-/// Resolve the disambiguated inline-enum type name for `<parent_name>.<prop_name>`
-/// against the current context's component schema names (Issue #492). Returns
-/// the bare `<Parent><Prop>` PascalCase concat when no collision exists, or a
-/// numerically-suffixed variant (`<Parent><Prop>2`, `<Parent><Prop>3`, …) when
-/// a component schema already maps to the same Gleam type name.
+/// Resolve the disambiguated inline-enum type name for
+/// `<parent_name>.<prop_name>` against the current context's component
+/// schema names. Returns the bare `<Parent><Prop>` PascalCase concat
+/// when no collision exists, or a numerically-suffixed variant
+/// (`<Parent><Prop>2`, `<Parent><Prop>3`, …) when a component schema
+/// already maps to the same Gleam type name.
 ///
-/// Issue #537: reads the precomputed `component_type_names` set from
-/// the `Context` so the collision check is O(log N) and the per-spec
-/// `schema_to_type_name` mapping work happens exactly once. The
-/// previous shape recomputed the full mapped list on every call —
-/// O(N) per call × O(N) inline enum sites blew up to multi-minute
-/// wall time on the full GitHub OpenAPI (~10k schemas).
+/// Reads the precomputed `component_type_names` set on `Context` so
+/// the collision check is O(log N) and the per-spec
+/// `schema_to_type_name` mapping work happens exactly once.
 pub fn inline_enum_type_name_for(
   parent_name: String,
   prop_name: String,

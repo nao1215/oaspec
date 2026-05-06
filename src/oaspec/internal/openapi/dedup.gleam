@@ -118,14 +118,11 @@ pub fn dedup_param_field_names(
   params: List(spec.Parameter(stage)),
 ) -> List(String) {
   let snake_names = list.map(params, fn(p) { naming.to_snake_case(p.name) })
-  // Issue #537: extend the reserved set to every local the generated
-  // client function binds (`path` for the URL template, `query` for
-  // the form-style key/value list, `headers`, plus the request-record
-  // `body` from #...). A parameter literally named `path` collides
-  // with the URL local, shadowing it before `case path { Some(v) -> }`
-  // tries to pattern-match on what is now a String. The dedup pass
-  // already handled `body`; adding `path`/`query`/`headers` covers
-  // the remaining shadowing on the full GitHub OpenAPI spec.
+  // Reserve every local the generated client function binds (`path`
+  // for the URL template, `query` for the form-style key/value list,
+  // `headers`, plus the request-record `body`). A parameter literally
+  // named `path` would otherwise shadow the URL local and break the
+  // pattern-match shape downstream.
   let reserved = ["body", "path", "query", "headers"]
   let with_reserved = list.append(reserved, snake_names)
   case deduplicate_strings(with_reserved) {

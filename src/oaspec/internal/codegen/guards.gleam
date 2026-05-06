@@ -167,14 +167,12 @@ pub fn build_module(ctx: Context) -> GuardModule {
         !is_required
       })
     })
-  // Issue #537: a composite validator whose schema (or whose nullable
-  // referenced primitive field) renders as `Option(...)` in the
-  // generated signature needs the bare `Option` type in scope. Detect
-  // that separately from `needs_option` (which only covers
-  // `option.Some` / `option.None` pattern matching for optional
-  // fields). Importing `{type Option}` unconditionally would trip
-  // `Unused imported type` on specs that exercise optional fields
-  // but never produce `Option(...)` in a signature.
+  // The bare `Option` type is needed only when a composite signature
+  // actually contains `Option(...)` — separate from `needs_option`,
+  // which covers `option.Some` / `option.None` pattern matching for
+  // optional fields. Importing `{type Option}` unconditionally would
+  // trip "Unused imported type" on specs that exercise optional
+  // fields but never expose `Option` in a signature.
   let needs_option_type =
     list.any(schemas, fn(entry) {
       let #(name, schema_ref) = entry
@@ -667,16 +665,12 @@ fn guard_function_name(
 ) -> String {
   let base = naming.to_snake_case(schema_name)
   case prop_name {
-    // Issue #537: append `_root_` so a schema-level validator on a
-    // hoisted inline-array component schema (e.g.
-    // `IssuesAddIssueFieldValuesRequestIssueFieldValues`, generated
-    // when the parent's `issue_field_values: type:array, maxItems`
-    // is hoisted) does not collide with the parent's field-level
-    // validator on the same constraint kind. Without the infix, both
-    // schemas' validators end up with the same `pub fn` name and
-    // `gleam build` rejects the module with `Duplicate definition`
-    // on the full GitHub OpenAPI. The infix is fixed and chosen to
-    // be lexically distinct from any plausible property name.
+    // The `_root_` infix separates a schema-level validator on a
+    // hoisted inline-array component schema from the parent's
+    // field-level validator with the same constraint kind. Without
+    // it, when a hoisted child's snake-case name equals
+    // `<parent>_<field>`, both validators collide on the same
+    // `pub fn` name.
     "" -> "validate_" <> base <> "_root_" <> constraint
     _ ->
       "validate_"
@@ -805,13 +799,11 @@ fn build_composite_guard_function(
               "    option.None -> errors",
               "  }",
             ]
-            // Issue #537: the field's static type is `Option(Option(T))`,
-            // so the constraint validator (which takes the bare `T`) is
-            // only reachable through nested `Some(Some(v))` matches. The
-            // `_ -> errors` arm collapses both `None` (field absent) and
-            // `Some(None)` (field present, explicit null) into a no-op,
-            // which matches the spec's intent — neither shape supplies a
-            // value to constrain.
+            // Field static type is `Option(Option(T))` (optional +
+            // nullable-via-alias). Both `None` (absent) and
+            // `Some(None)` (explicit null) collapse to no-op — the
+            // constraint only applies when a value is actually
+            // present.
             Direct, False, True -> [
               "  let errors = case " <> accessor <> " {",
               "    option.Some(option.Some(v)) -> case " <> guard_fn <> "(v) {",
@@ -1487,17 +1479,10 @@ fn build_properties_count_guard_function(
 }
 
 /// Determine the Gleam type for the composite validator parameter.
-///
-/// Issue #537: non-object / non-allOf schemas previously fell through
-/// to `schema_dispatch.schema_type(s)`, which renders `ArraySchema` as
-/// `"List(" <> bare_type <> ")"` — the inner Reference's type name
-/// emitted WITHOUT the `types.` prefix. `guards.gleam` does NOT
-/// re-export schema types, so the bare name resolves to "Unknown
-/// type" at `gleam build` time on any spec whose array-typed
-/// component schema's items are a `$ref` (e.g. GitHub's
-/// `projects-v2-view-sort-by-item: type:array, items: $ref`). Using
-/// `codec_helpers.qualified_schema_ref_type` qualifies the inner ref
-/// and keeps inline primitives unqualified.
+/// Non-object / non-allOf schemas (top-level arrays, primitives) go
+/// through `schema_type_qualified` so any inner `$ref` items come
+/// back with the `types.` prefix; this module imports `types` as a
+/// separate qualifier and bare names would resolve as "Unknown type".
 fn composite_validator_type(
   name: String,
   schema_ref: SchemaRef,
@@ -1518,10 +1503,9 @@ fn composite_validator_type(
 ///   the historical leaf case (range / pattern / length / unique).
 /// - `Composite`: the validator returns
 ///   `Result(T, List(ValidationFailure))` — the per-schema aggregator
-///   for a nested record. Issue #520.
+///   for a nested record.
 /// - `CompositeList`: the field is `List(T)` and each item must be
-///   recursively validated against its composite validator. Issue
-///   #520.
+///   recursively validated against its composite validator.
 type GuardCallKind {
   Direct
   Composite
@@ -1532,13 +1516,11 @@ type GuardCallKind {
 /// what shape its validator returns.
 /// `#(guard_fn_name, accessor_expr, is_required, kind, extra_unwrap)`.
 ///
-/// `extra_unwrap` (Issue #537): True when the accessor's runtime type
-/// is `Option(Option(T))` — i.e. the field is `not in required` AND
-/// references a `nullable: true` schema (whose alias is itself
-/// `Option(T)`). The composite validator must peel a SECOND `Option`
-/// layer before calling the per-constraint validator, otherwise the
-/// validator receives `Option(T)` where it expects `T` and `gleam
-/// build` rejects the module with `Type mismatch`.
+/// `extra_unwrap` is True when the accessor's runtime type is
+/// `Option(Option(T))` — i.e. the field is not in `required` AND
+/// references a `nullable: true` primitive (whose alias is itself
+/// `Option(T)`). The composite validator must peel both `Option`
+/// layers before calling the per-constraint validator.
 type GuardCall =
   #(String, String, Bool, GuardCallKind, Bool)
 
@@ -1571,14 +1553,10 @@ fn collect_guard_calls_visiting(
         ir_build.sorted_entries(properties)
         |> list.flat_map(fn(entry) {
           let #(prop_name, prop_ref) = entry
-          // Issue #537: a `required: true` AND `nullable: true` field
-          // still renders as `Option(<T>)` in the generated record
-          // type (`schema_dispatch.schema_type` wraps every nullable
-          // through `Option(_)`). The composite validator must
-          // therefore unwrap before calling the per-field validator,
-          // exactly as it does for plain optional fields. Treat the
-          // call as not-required when the field is nullable so the
-          // emitter falls into the `option.Some(v) ->` shape.
+          // A `required: true` AND `nullable: true` field still
+          // renders as `Option(<T>)` in the generated record (every
+          // nullable field is wrapped). Treat it like an optional
+          // field so the dispatch lands on the unwrap arm.
           let is_required =
             list.contains(required, prop_name)
             && !schema_utils.schema_ref_is_nullable(prop_ref, ctx)
@@ -1594,19 +1572,15 @@ fn collect_guard_calls_visiting(
       let size_calls = case min_properties, max_properties {
         None, None -> []
         _, _ -> {
-          // Issue #537: the `properties` constraint validator's
-          // signature is `Dict(k, v) -> Result(Dict(k, v), _)`. When
-          // the generated record carries an `additional_properties`
-          // field (i.e. the spec declares `additionalProperties: Typed
-          // | Untyped`), pass `value.additional_properties` so the
-          // call type-checks. The record's other concrete fields are
-          // always populated and don't contribute to `dict.size`
-          // anyway; the constraint counts only the open-ended bag.
-          // For schemas without an `additional_properties` field, fall
-          // back to `value` — that path is already broken on records
-          // with concrete fields (no `Dict` view exists), but at
-          // least dict-only schemas (which are the common case) now
-          // compile.
+          // The `properties` constraint validator takes `Dict(k, v)`,
+          // so when the generated record carries an
+          // `additional_properties` field we pass that. Concrete
+          // fields are always populated and don't contribute to
+          // `dict.size` anyway. Records without an
+          // `additional_properties` field fall back to `value` —
+          // that path is broken for records with concrete fields
+          // (no `Dict` view exists), but dict-only schemas (the
+          // common case) now compile.
           let size_accessor = case additional_properties {
             Typed(_) | Untyped -> "value.additional_properties"
             _ -> "value"
@@ -1629,9 +1603,8 @@ fn collect_guard_calls_visiting(
       ir_build.sorted_entries(merged.properties)
       |> list.flat_map(fn(entry) {
         let #(prop_name, prop_ref) = entry
-        // Issue #537: see the parallel branch above for why nullable
-        // counts toward "needs unwrapping" alongside `not in
-        // required`.
+        // Nullable counts toward "needs unwrapping" alongside `not in
+        // required` — see the ObjectSchema branch above.
         let is_required =
           list.contains(merged.required, prop_name)
           && !schema_utils.schema_ref_is_nullable(prop_ref, ctx)
@@ -1646,11 +1619,10 @@ fn collect_guard_calls_visiting(
       })
     }
     Ok(StringSchema(metadata:, min_length:, max_length:, pattern:, ..)) -> {
-      // Issue #537: a top-level `nullable: true` schema renders the
-      // composite's `value` parameter as `Option(<T>)`, so the inner
-      // constraint validators must be reached via the
-      // `option.Some(v) -> validator(v)` shape — set `is_req=False`
-      // when nullable so the dispatch lands on the unwrap arm.
+      // A top-level `nullable: true` schema renders the composite's
+      // `value` parameter as `Option(<T>)`, so the inner constraint
+      // validators must be reached via the `Some(v) -> validator(v)`
+      // unwrap arm.
       let is_req = !metadata.nullable
       let calls = case min_length, max_length {
         None, None -> []
@@ -1823,19 +1795,13 @@ fn collect_field_guard_calls(
 ) -> List(GuardCall) {
   let resolved = context.resolve_schema_ref(prop_ref, ctx)
   let accessor = "value." <> naming.to_snake_case(prop_name)
-  // Issue #537: `extra_unwrap` is True when the field's static type is
-  // `Option(Option(<T>))` rather than `Option(<T>)` or `<T>`. The
-  // double layer ONLY arises when the field is NOT in `required` AND
-  // the referenced schema's TYPE ALIAS itself unwraps to
-  // `Option(...)` — that happens specifically for `$ref` to a
-  // nullable primitive / nullable array, whose alias IR is
-  // `pub type X = Option(<inner>)`. Nullable objects / unions keep
-  // a non-Option alias (the record / union itself) and only pick up
-  // the outer optional wrapping, so they need only ONE unwrap.
-  // An unresolved `$ref` cannot tell us whether its alias is
-  // `Option(...)`; treat it as the conservative non-Option case so the
-  // composite emits a single-unwrap shape (matching the resolver's
-  // diagnostic surface — broken refs surface elsewhere).
+  // The double-Option shape arises only when the field is not in
+  // `required` AND the referenced schema's type alias itself unwraps
+  // to `Option(...)` (nullable primitive / array — alias is
+  // `pub type X = Option(<inner>)`). Nullable objects / unions keep a
+  // record / union alias and only pick up the outer wrap. Unresolved
+  // `$ref` falls back to the conservative non-Option case; broken
+  // refs surface through the resolver elsewhere.
   let alias_is_optional = case prop_ref {
     Reference(..) ->
       case resolved {

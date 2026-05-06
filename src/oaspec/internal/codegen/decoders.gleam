@@ -1017,14 +1017,11 @@ fn generate_array_decoder(
   nullable: Bool,
   ctx: Context,
 ) -> se.StringBuilder {
-  // Issue #537: items of a top-level ArraySchema also go through the
-  // array-items dispatch (`decoder_for_array_items`) rather than the
-  // generic `schema_ref_to_decoder`. The inline-enum naming path in
-  // the latter would synthesise a `<base>_decoder()` reference that
-  // collides with the schema's own name (the hoist pass typically
-  // promotes the array variant to a sibling schema, so the inline-
-  // enum disambiguator would bump the suffix to `<base>2`, naming a
-  // function the IR pass never emits).
+  // Items use the array-items dispatch, not the generic decoder
+  // resolver — the inline-enum naming path in the latter would
+  // synthesise a `<base>_decoder()` reference whose suffix-bumped
+  // form (when the hoist pass promoted a sibling schema with the
+  // same shape) names a function the IR never emits.
   let inner_decoder = decoder_for_array_items(items, name, "", ctx)
   let inner_type = codec_helpers.qualified_schema_ref_type(items, ctx)
   let list_type = "List(" <> inner_type <> ")"
@@ -1401,17 +1398,11 @@ fn schema_ref_to_decoder(
       decoder_name <> "_decoder()"
     }
     Inline(ArraySchema(items:, ..)) -> {
-      // Issue #537: items of an array NEVER pull in an inline-enum
-      // decoder. The IR pass (`inline_enums_for_schema` /
-      // `inline_enums_from_properties` in `ir_build.gleam`) only
-      // promotes top-level inline string-enums on object properties,
-      // so the type expression for `events: type:array, items: string-
-      // enum` collapses to `List(String)`. Dispatching items through
-      // the same `<inline_enum>_decoder()` name as the property would
-      // call a function that's never defined and disagree with the
-      // record field type, breaking `gleam build` on the full GitHub
-      // OpenAPI. Items take the plain primitive / Reference dispatch
-      // (and recurse for nested arrays).
+      // Array items skip the inline-enum decoder dispatch: the IR
+      // promotes inline string-enums only on object properties, so an
+      // `array of inline string-enum` type collapses to `List(String)`
+      // and the decoder must use the plain primitive dispatch to
+      // match.
       let inner = decoder_for_array_items(items, parent_name, prop_name, ctx)
       "decode.list(" <> inner <> ")"
     }
@@ -1432,17 +1423,12 @@ fn decoder_for_array_items(
   }
 }
 
-/// Resolve the synthetic list-decoder suffix for `<base>` against the
-/// current context's component schemas (issue #493). Returns
-/// `_list_items` when `<base>List` is declared as a component schema,
-/// `_list` otherwise.
-///
-/// Issue #537: collision detection runs in the Gleam-mapped type-name
-/// namespace via the precomputed set on the `Context`. The previous
-/// shape compared the raw schema-name list, which missed sibling
-/// schemas like `<base>-list` that map to the same `<Base>List`
-/// Gleam type and trip a `Duplicate definition: decode_<base>_list`
-/// at build time on the full GitHub OpenAPI.
+/// Resolve the synthetic list-decoder suffix for `<base>`. Returns
+/// `_list_items` when a sibling component schema would map to the
+/// same `<Base>List` Gleam type, `_list` otherwise. Detection runs in
+/// Gleam-mapped namespace via `Context`'s precomputed set so dashed
+/// or otherwise spelled siblings (e.g. `<base>-list`) are caught
+/// alongside the literal `<base>List` form.
 fn synthetic_list_suffix_for(base: String, ctx: Context) -> String {
   naming.synthetic_list_suffix_with_set(base, context.component_type_names(ctx))
 }

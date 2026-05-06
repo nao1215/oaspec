@@ -2,14 +2,13 @@ openapi: "3.0.3"
 info:
   title: Wildcard No-Schema Response
   description: |
-    Issue #537. A response declares `*/*` content with NO schema, only
-    a description. The trimmed GitHub spec contains operations of this
-    shape (proxy / pass-through endpoints). The previous client_ir
-    analyzer flipped `needs_bytes_helper` to True purely from the
-    content-type, even though `client_response.gleam` only emits a
-    `bytes_body(...)` call when `media_type.schema = Some(_)`. The
-    result was a `pub fn bytes_body(...)` defined in client.gleam and
-    never referenced — failing `gleam build --warnings-as-errors`.
+    A response declares `*/*` content with NO schema, only a
+    description (proxy / pass-through endpoints in the trimmed GitHub
+    spec take this shape). `client_response.gleam` emits a
+    `bytes_body(...)` call only when `media_type.schema = Some(_)`,
+    so the import-needs analyzer must agree — otherwise the helper
+    is defined but never referenced and `gleam build
+    --warnings-as-errors` rejects the module.
 
     Companion JSON endpoint exists so the typed/decode imports still
     fire and the integration build covers the realistic case.

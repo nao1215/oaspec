@@ -16027,16 +16027,13 @@ components:
   |> should.be_false()
 }
 
-/// Issue #537: when a response declares `*/*` (or
-/// `application/octet-stream`) content but provides no `schema:`,
-/// `client_response.gleam` does not emit a `bytes_body(...)` call —
-/// the branch falls through to `empty_body_branch`. Yet the previous
-/// `client_ir.needs_bytes_helper` predicate flipped to `True` purely
-/// from the content-type, so `client.gleam` defined a private
-/// `bytes_body` helper that nothing referenced. That fails
-/// `gleam build --warnings-as-errors` with an "Unused private
-/// function" warning. The fixed predicate must require
-/// `media_type.schema = Some(_)` so it agrees with the emission gate.
+/// A `*/*` (or `application/octet-stream`) response with no `schema:`
+/// must NOT cause `client.gleam` to define the `bytes_body` helper —
+/// `client_response.gleam` doesn't call it in that branch, so an
+/// emitted helper would be unused and break
+/// `gleam build --warnings-as-errors`. The import-needs predicate
+/// must require `media_type.schema = Some(_)` to agree with the
+/// emission gate.
 pub fn client_omits_bytes_body_helper_when_response_has_no_schema_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/wildcard_response_no_schema.yaml")
@@ -16079,13 +16076,12 @@ pub fn client_keeps_bytes_body_when_response_has_schema_case() {
   |> should.be_true()
 }
 
-/// Issue #537: an empty-object component schema with no properties and
-/// `additionalProperties: false` collapses the encoder body to
-/// `json.object([])` — the `value` parameter is bound but never read.
-/// `gleam build --warnings-as-errors` rejects that with "Unused
-/// function argument". The fix is to emit `_value` for that specific
-/// shape (only the `_json` variant is affected; the String variant
-/// still pipes through `_json(value)`).
+/// An empty-object schema (no properties, additionalProperties:
+/// false) collapses the encoder body to `json.object([])` — the
+/// `value` parameter is bound but never read, so `gleam build
+/// --warnings-as-errors` rejects it. The `_json` variant must take
+/// `_value` for that exact shape; the String variant keeps `value`
+/// because it still pipes through `_json(value)`.
 pub fn encoder_for_empty_object_omits_unused_value_param_case() {
   let yaml =
     "
@@ -16138,20 +16134,11 @@ components:
   |> should.be_true()
 }
 
-/// Issue #537: an array property whose items are an inline string-enum
-/// (`events: type:array, items: type:string, enum:[...]`) collapses
-/// at the type level to `List(String)` — `schema_dispatch.schema_type`
-/// for `ArraySchema` calls into `schema_ref_type` which does NOT
-/// branch on `enum_values`. The codecs must agree: the decoder for
-/// the items must be `decode.string` (not a reference to a synthesised
-/// `<parent>_<prop>_decoder` that the IR pass never emitted), and
-/// likewise the encoder must use `json.string` for the items. The
-/// pre-fix shape generated `decode.list(<inline_enum>_decoder())` and
-/// `json.array(value, encode_<inline_enum>_json)` — both referencing
-/// helpers the IR's `inline_enums_for_schema` pass never emits because
-/// it only walks top-level object properties, never array items. That
-/// produced `Unknown variable` and `Duplicate definition` failures at
-/// `gleam build` time on the full GitHub OpenAPI.
+/// An array of inline string-enum items collapses to `List(String)`
+/// at the type level (the IR's inline-enum pass walks only top-level
+/// object properties, never array items). The decoder/encoder must
+/// agree: items go through `decode.string` / `json.string`, NOT a
+/// synthesised `<parent>_<prop>` enum codec that the IR never emits.
 pub fn array_of_inline_string_enum_uses_plain_decoder_and_encoder_case() {
   let yaml =
     "
@@ -16213,18 +16200,12 @@ components:
   |> should.be_false()
 }
 
-/// Issue #537: GitHub's OpenAPI ships sibling schemas like
-/// `code-scanning-alert-instance` AND
-/// `code-scanning-alert-instance-list`. Both map to the Gleam type
-/// `CodeScanningAlertInstanceList` and both produce a function called
-/// `decode_code_scanning_alert_instance_list` — the synthetic list
-/// decoder for the first schema, and the regular decoder for the
-/// second. The previous `synthetic_list_suffix` predicate compared
-/// `<base>List` against the raw kebab-case schema name list, so the
-/// dash-spelled sibling slipped past and `gleam build` rejected the
-/// generated module with `Duplicate definition`. The fixed predicate
-/// resolves in Gleam-type-name namespace via the precomputed
-/// component-type-names set, catching both spellings.
+/// Sibling schemas like `widget-instance` AND `widget-instance-list`
+/// (a real shape on the GitHub spec) both map to the same Gleam type
+/// `WidgetInstanceList`, so the synthetic `decode_<base>_list` for
+/// the first collides with the regular decoder for the second. The
+/// suffix-bumping predicate must resolve in Gleam-mapped namespace
+/// (not raw kebab-case) to catch both spellings.
 pub fn synthetic_list_decoder_disambiguates_against_dashed_list_sibling_case() {
   let yaml =
     "
@@ -16345,19 +16326,13 @@ components:
   |> should.be_false()
 }
 
-/// Issue #537: full GitHub OpenAPI hangs apparently-forever after
-/// `validate spec for unsupported features (took ...)`. The user could
-/// not tell whether the process was hung or working. The opaque
-/// "render generated source files" line covers types/decoders/encoders/
-/// guards/server/client all at once — when one of those sub-stages is
-/// pathologically slow on a large spec, the user sees nothing.
-///
-/// Per-substage progress events surface the running phase so the user
-/// can identify where the slowdown lives. This test pins the contract:
-/// running `generate_with_progress_and_locations` against `petstore`
-/// must emit at least one event per non-empty sub-stage.
+/// Each codegen sub-stage (types, decoders, encoders, guards, server,
+/// client) must emit its own progress event so a slow phase surfaces
+/// against a specific stage rather than disappearing behind a single
+/// opaque "render" wrapper. The mode-gated substages (server / client)
+/// must NOT fire when their mode is excluded.
 pub fn generate_emits_per_substage_progress_events_case() {
-  let key = "issue537_progress_events_log"
+  let key = "progress_events_log"
   pdict_put_list(key, [])
   let reporter =
     progress.from_fn(fn(msg) {
@@ -16404,17 +16379,14 @@ pub fn generate_emits_per_substage_progress_events_case() {
   event_contains("generate server") |> should.be_false()
 }
 
-/// Issue #537: regression guard for the GitHub-shape hang. A synthetic
-/// spec with several hundred component schemas and operations must
-/// complete codegen well under a generous budget. The pre-fix code
-/// performed dozens of independent `list.any` passes over operations
-/// and schemas in `client_ir.analyze` / `decoders.generate` /
-/// `encoders.generate`, each pass walking the full operations list
-/// and re-resolving refs. On 1k+ ops × 10k+ schemas (full GitHub) that
-/// blew up to multi-minute wall time. This test won't reproduce the
-/// full GitHub spec (8 MiB is impractical to commit), but a
-/// 400-schema / 80-op synthetic spec already exercises the same
-/// quadratic shape; finishing under 30 s here is a solid floor.
+/// Regression guard for the large-spec hang: a synthetic spec with
+/// several hundred component schemas and operations must complete
+/// codegen well under a generous wall-clock ceiling. Older versions
+/// of the codegen ran dozens of independent `list.any` passes over
+/// operations and schemas, blowing up to multi-minute wall time on
+/// realistic specs. The synthetic shape exercises the same quadratic
+/// structure; the 30 s budget here is a loud floor — typical hardware
+/// finishes in well under a second.
 pub fn generate_completes_within_budget_for_synthetic_large_spec_case() {
   let yaml = build_synthetic_large_spec_yaml(400, 80)
   let assert Ok(unresolved) = parser.parse_string(yaml)
@@ -16445,12 +16417,11 @@ pub fn generate_completes_within_budget_for_synthetic_large_spec_case() {
   should.be_true(elapsed_ms < 30_000)
 }
 
-/// Build a synthetic OpenAPI 3.0 YAML with `num_schemas` simple object
-/// component schemas (each five string properties) and `num_operations`
-/// GET endpoints, each returning a different schema. This shape mirrors
-/// the GitHub spec's pattern of "many per-resource response shapes
-/// referenced from many operations" without needing an 8 MiB fixture
-/// in source control.
+/// Build a synthetic OpenAPI 3.0 YAML with `num_schemas` simple
+/// object schemas (five string properties each) and `num_operations`
+/// GET endpoints, each returning a different schema. Mirrors the
+/// "many per-resource response shapes" pattern of large real-world
+/// specs without needing an 8 MiB fixture in source control.
 fn build_synthetic_large_spec_yaml(
   num_schemas: Int,
   num_operations: Int,

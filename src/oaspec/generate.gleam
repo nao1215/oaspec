@@ -266,18 +266,15 @@ pub fn generate_all_files(ctx: Context) -> List(GeneratedFile) {
 
 /// Pure file generation with per-substage progress events.
 ///
-/// Issue #537: a single `render generated source files (took ...)`
-/// event covered types/decoders/encoders/guards/server/client all at
-/// once. On large specs the slow phase stayed invisible behind that
-/// outer line. Each substage now emits its own `<phase> (took ...)`
-/// line via `progress.timed_stage`, so a hang surfaces against a
-/// specific phase rather than the opaque outer wrapper.
+/// Each substage emits its own `<phase> (took ...)` line via
+/// `progress.timed_stage` so a slow phase surfaces against a specific
+/// stage rather than the opaque outer render wrapper.
 ///
 /// `middleware.gleam` used to be emitted here too, but its `Handler`
 /// shape did not actually compose with the generated client or server
-/// APIs (see issue #116). The internal `middleware` module is kept
-/// only as a library-level helper for consumers who want to assemble
-/// their own middleware chain.
+/// APIs. The internal `middleware` module is kept only as a
+/// library-level helper for consumers who want to assemble their own
+/// middleware chain.
 fn generate_all_files_with_progress(
   ctx: Context,
   reporter: Reporter,

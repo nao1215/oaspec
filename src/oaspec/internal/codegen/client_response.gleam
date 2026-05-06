@@ -498,14 +498,10 @@ pub fn get_response_decode_expr(
           <> "_decoder()))"
         }
         Inline(inner) -> {
-          // Issue #537: `decode` here is the GENERATED per-spec decode
-          // module — it has named decoders like `decode_<schema>` /
-          // `<schema>_decoder` but not the stdlib's `list/2`
-          // combinator. The list combinator lives on
-          // `gleam/dynamic/decode` (imported in the client as
-          // `dyn_decode`). Routing through `dyn_decode.list` matches
-          // the schema-bearing array branch above and the broader
-          // decoder dispatch in `decoders.gleam`.
+          // `decode` here is the generated per-spec decode module; it
+          // has no `list` combinator. The list combinator lives on
+          // `gleam/dynamic/decode` — imported as `dyn_decode` — so we
+          // route through that.
           let inner_decoder = inline_schema_to_decoder(inner)
           "json.parse(text, dyn_decode.list(" <> inner_decoder <> "))"
         }

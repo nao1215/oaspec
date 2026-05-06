@@ -150,14 +150,11 @@ pub fn constant_property_value(
   required: List(String),
 ) -> Option(String) {
   case list.contains(required, prop_name), prop_ref {
-    // Issue #537: a `nullable: true` enum has TWO admissible wire
-    // values — the single declared variant AND `null` — so it is not
-    // a true constant. Treating it as one elides the field from the
-    // generated record but leaves the encoder still emitting
-    // `json.nullable(value.<field>, ...)`, which fails to compile
-    // because the type no longer carries the field. Falling through
-    // to `None` here keeps the field in the record (typed as
-    // `Option(<EnumType>)`) and the encoder/decoder agree.
+    // A `nullable: true` enum admits two wire values (the single
+    // declared variant AND `null`), so it is not a true constant.
+    // Treating it as one would elide the field from the record but
+    // leave the encoder reading `value.<field>` from a type that no
+    // longer carries it.
     True, Inline(StringSchema(metadata:, enum_values: [single_value], ..)) ->
       case metadata.nullable {
         True -> None

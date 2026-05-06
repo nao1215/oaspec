@@ -93,9 +93,7 @@ pub fn format_ms_minute_and_up_test() {
 }
 
 pub fn timed_stage_returns_body_value_test() {
-  // Issue #537: `timed_stage` is the bundled `timed + report` helper
-  // used by `generate_all_files` so each codegen sub-stage emits its
-  // own progress line. The body's value must round-trip unchanged.
+  // The body's value must round-trip through `timed_stage` unchanged.
   let value =
     progress.timed_stage(
       reporter: progress.noop(),
@@ -106,11 +104,9 @@ pub fn timed_stage_returns_body_value_test() {
 }
 
 pub fn timed_stage_emits_starting_and_completed_events_test() {
-  // Issue #537: `timed_stage` emits TWO events — one BEFORE the body
-  // runs (so a slow / hung body is still attributable to a specific
-  // stage in real time) and one AFTER it completes (so users see the
-  // elapsed-time figure). Pinning both shapes here keeps the contract
-  // honest if someone refactors this back to a single event.
+  // Two events: one BEFORE the body runs (so a slow or hung body is
+  // attributable to a specific stage in real time) and one AFTER it
+  // completes (so users see the elapsed-time figure).
   let key = "progress_test_timed_stage_msg"
   pdict_put(key, [])
   let reporter =

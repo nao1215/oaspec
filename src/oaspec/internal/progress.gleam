@@ -54,19 +54,12 @@ pub fn timed(body: fn() -> a) -> #(Int, a) {
 
 /// Run `body`, time it, and emit two events to `reporter`:
 ///
-///   1. `<label> ...` BEFORE the body runs, so the user can see WHICH
+///   1. `<label> ...` BEFORE the body runs, so the user can see which
 ///      stage is currently in flight if the body is slow or hangs;
 ///   2. `<label> (took <elapsed>)` AFTER it completes.
 ///
-/// Returns `body`'s value unchanged.
-///
-/// Issue #537: `oaspec/generate.generate_all_files` used to emit a
-/// single opaque `render generated source files` event covering
-/// types/decoders/encoders/guards/server/client all at once. On large
-/// specs (~10k schemas) the substage that was actually slow stayed
-/// invisible until the entire render finished — minutes later, or
-/// never. The "before" event guarantees the user sees which substage
-/// has started even when the "after" event would never fire.
+/// Returns `body`'s value unchanged. The "before" event matters when
+/// the body never returns — without it the slow stage stays invisible.
 pub fn timed_stage(
   reporter reporter: Reporter,
   label label: String,

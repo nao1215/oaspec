@@ -153,15 +153,11 @@ pub fn to_snake_case(input: String) -> String {
 /// schema's natural decoder name and shifts the synthetic one,
 /// since the user does not own upstream specs like Kubernetes /
 /// Stripe and cannot rename.
-/// Issue #537: collision detection runs in the Gleam-mapped
+/// Like `synthetic_list_suffix`, but compares in the Gleam-mapped
 /// `<Schema>List` namespace via the precomputed component-type-names
-/// set carried on the `Context`. The earlier list-of-raw-schema-names
-/// shape only caught `<base>` / `<base>List` exact spellings, so a
-/// sibling schema named `<base>-list` (full GitHub spec) slipped past
-/// the check. Both names map to Gleam type `<Base>List` and produce
-/// a duplicate `decode_<base>_list` definition. Comparing in the
-/// Gleam-mapped namespace via `dict.has_key` collapses the false
-/// negative without rebuilding the mapped list per call.
+/// set on the `Context`. Catches dashed / otherwise-spelled siblings
+/// (e.g. `<base>-list`) that the raw-schema-name form misses, and
+/// avoids rebuilding the mapped list per call.
 pub fn synthetic_list_suffix_with_set(
   base_name: String,
   component_type_names: dict.Dict(String, Nil),
@@ -202,13 +198,12 @@ pub fn inline_enum_type_name(
   }
 }
 
-/// Issue #537: like `inline_enum_type_name`, but takes the
-/// already-mapped component-type-name set as a `Dict(String, Nil)` so
-/// the collision check is O(log N) and the (expensive) per-name
-/// `schema_to_type_name` work happens once, at context construction,
-/// rather than once per inline-enum property × N_schemas. On the full
-/// GitHub spec (~10k schemas) the list-based variant collapsed to
-/// multi-minute wall time inside `ir_build.build_types_module`.
+/// Like `inline_enum_type_name`, but takes an already-mapped
+/// component-type-name set as a `Dict(String, Nil)`. Collision check
+/// is O(log N) per call and the per-name `schema_to_type_name` work
+/// happens once at `Context` construction instead of being repeated
+/// per inline-enum property — essential on specs with thousands of
+/// component schemas.
 pub fn inline_enum_type_name_with_set(
   parent_name: String,
   prop_name: String,

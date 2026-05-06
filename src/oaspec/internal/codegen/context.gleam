@@ -104,15 +104,11 @@ pub fn schema_metadata(
 }
 
 /// Pre-computed set of every component schema name mapped through
-/// `naming.schema_to_type_name`. Issue #537: previously
-/// `ir_build.inline_enum_type_name_for` rebuilt this list and ran
-/// `list.map(schema_to_type_name) + list.contains` per inline-enum
-/// property, which is O(N_schemas) per call and called once per
-/// inline-enum property — 10k schemas × 10k inline enum sites blew the
-/// types phase to multi-minute wall time on the full GitHub spec.
-/// Pre-computing into a Dict-as-Set lets the collision check fire as
-/// `dict.has_key` (O(log N)) and the per-spec `schema_to_type_name`
-/// work happen exactly once.
+/// `naming.schema_to_type_name`, exposed as a `Dict(String, Nil)` so
+/// `dict.has_key` is the collision-check primitive. Without this,
+/// every inline-enum / synthetic-list-suffix collision check would
+/// rebuild the full mapped list, blowing up to O(N_schemas²) on
+/// large specs.
 pub fn component_type_names(ctx: Context) -> dict.Dict(String, Nil) {
   ctx.component_type_names
 }
