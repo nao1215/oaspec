@@ -1,5 +1,6 @@
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import gleeunit/should
 import oaspec/mock
 import oaspec/transport.{
@@ -285,6 +286,110 @@ pub fn with_default_header_explicit_request_header_beats_all_wrappers_test() {
   |> list.key_find("X-Trace")
   |> should.equal(Ok("explicit"))
 }
+
+// Header value validation: CRLF / NUL injection (#546).
+
+pub fn with_default_header_panics_on_cr_in_value_test() {
+  let #(panicked, message) =
+    capture_panic(fn() {
+      let _ =
+        transport.with_default_header(
+          send: echo_to_response(),
+          name: "X-Trace-Id",
+          value: "abc\r\nX-Smuggled: yes",
+        )
+      Nil
+    })
+  should.be_true(panicked)
+  should.be_true(string.contains(
+    message,
+    "oaspec.transport.with_default_header",
+  ))
+  should.be_true(string.contains(message, "CR"))
+}
+
+pub fn with_default_header_panics_on_lf_in_value_test() {
+  let #(panicked, message) =
+    capture_panic(fn() {
+      let _ =
+        transport.with_default_header(
+          send: echo_to_response(),
+          name: "X-Trace-Id",
+          value: "abc\nX-Smuggled: yes",
+        )
+      Nil
+    })
+  should.be_true(panicked)
+  should.be_true(string.contains(message, "LF"))
+}
+
+pub fn with_default_header_panics_on_nul_in_value_test() {
+  let #(panicked, message) =
+    capture_panic(fn() {
+      let _ =
+        transport.with_default_header(
+          send: echo_to_response(),
+          name: "X-Trace-Id",
+          value: "abc\u{0000}def",
+        )
+      Nil
+    })
+  should.be_true(panicked)
+  should.be_true(string.contains(message, "NUL"))
+}
+
+pub fn with_default_header_panics_on_cr_in_name_test() {
+  let #(panicked, message) =
+    capture_panic(fn() {
+      let _ =
+        transport.with_default_header(
+          send: echo_to_response(),
+          name: "X-Bad\r\nInjected",
+          value: "ok",
+        )
+      Nil
+    })
+  should.be_true(panicked)
+  should.be_true(string.contains(message, "header name"))
+}
+
+pub fn with_default_header_accepts_printable_ascii_test() {
+  // Tab (\t) is allowed inside header values per RFC 9112 — only CR,
+  // LF, and NUL are forbidden. All other printable ASCII passes.
+  let send =
+    transport.with_default_header(
+      send: echo_to_response(),
+      name: "X-Trace-Id",
+      value: "abc-123 ~!@#$%^&*()_+\t",
+    )
+  let assert Ok(resp) = send(empty_request())
+  resp.headers
+  |> list.key_find("X-Trace-Id")
+  |> should.equal(Ok("abc-123 ~!@#$%^&*()_+\t"))
+}
+
+pub fn with_default_headers_panics_on_invalid_value_test() {
+  let #(panicked, message) =
+    capture_panic(fn() {
+      let _ =
+        transport.with_default_headers(echo_to_response(), [
+          #("X-OK", "fine"),
+          #("X-Bad", "with\nnewline"),
+        ])
+      Nil
+    })
+  should.be_true(panicked)
+  should.be_true(string.contains(
+    message,
+    "oaspec.transport.with_default_headers",
+  ))
+  should.be_true(string.contains(message, "X-Bad"))
+  should.be_true(string.contains(message, "LF"))
+}
+
+@external(erlang, "oaspec_ffi", "capture_panic")
+@external(javascript, "../oaspec_ffi.mjs", "capture_panic")
+fn capture_panic(thunk: fn() -> Nil) -> #(Bool, String)
 
 // ---------------------------------------------------------------------------
 // with_security: bearer

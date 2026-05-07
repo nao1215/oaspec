@@ -10,6 +10,27 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Security:** `oaspec/transport.with_default_header` and
+  `with_default_headers` now reject CR (`\r`), LF (`\n`), and NUL
+  (`\u{0000}`) bytes in any header name or value at construction
+  time. Those bytes are the gateway to HTTP response-splitting and
+  header-injection attacks (RFC 9112 §2.2): a credential-derived or
+  environment-derived value flowing into a default header without
+  pre-sanitisation could previously smuggle a forged header on the
+  wire. The validator panics with a structured message naming the
+  offending byte ("CR (\r)" / "LF (\n)" / "NUL (\u{0000})") and the
+  recommendation to pre-encode binary values via Base64 or RFC 8187.
+  The check fires at the outer call (when the wrapper is built), so
+  static misconfiguration surfaces immediately at startup rather
+  than per-request. Tab (`\t`) inside values remains allowed (it is
+  RFC-permitted). The `oaspec_ffi.{erl,mjs}` modules gain a
+  `capture_panic` helper used by the new tests; the helper is also
+  available to future tests that need to assert on panic messages.
+  Same audit lens as multipartkit#28 (CRLF in part headers); the
+  generated client middleware path was the missing companion. (#546)
+
 ### Documentation
 
 - `oaspec/transport.with_default_headers` and
