@@ -10,6 +10,21 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Tests
+
+- `test/normalize_argv_property_test.gleam` adds metamon
+  property-based tests pinning `oaspec.normalize_argv`'s algebraic
+  invariants: idempotency (a second pass is a no-op), length
+  non-increasing (pair-collapse can only shrink the list), bit-for-bit
+  pass-through when the argv contains no value-bearing long flags,
+  equivalence between `--name value` and `--name=value` for the
+  flags listed in `cli.value_flag_names`, the absence of any bare
+  `--name <value>` pair in the output, and commutation with
+  appending an unrelated bool flag. The generators draw from
+  `cli.value_flag_names` directly rather than duplicating the list,
+  so adding a new value flag automatically extends the property's
+  input space. metamon is added to `[dev-dependencies]`. (#551)
+
 ### Fixed
 
 - `oaspec generate` no longer panics on a response header whose
