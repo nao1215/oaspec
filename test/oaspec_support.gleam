@@ -1011,6 +1011,53 @@ paths: {}
   should.be_false(is_empty)
 }
 
+// Regression: yamerl applies YAML 1.1 implicit-type rules that the
+// OTP json:decode frontend does not. The two parsers therefore diverge
+// on the same JSON bytes whenever a scalar matches a YAML 1.1 pattern.
+// Pin parse_json_string's verbatim behaviour; if a future yamerl
+// upgrade changes its rule the parse_string docstring's coercion
+// table needs to follow. (#549)
+
+pub fn parse_json_string_preserves_yes_no_string_values_case() {
+  // Stripe-style API key descriptions occasionally contain the
+  // literal strings "Yes"/"No" in human-readable description fields.
+  // OpenAPI's `info.description` is documented as a free-form string;
+  // both parsers must preserve the value as `"Yes"` for the JSON
+  // input — which the OTP frontend does. The yamerl frontend is
+  // documented to potentially coerce; we pin the JSON-side guarantee
+  // so a future regression that breaks the JSON path surfaces here.
+  let json =
+    "{
+      \"openapi\": \"3.0.3\",
+      \"info\": {
+        \"title\": \"Yes/No API\",
+        \"version\": \"1.0.0\",
+        \"description\": \"Yes\"
+      },
+      \"paths\": {}
+    }"
+  let assert Ok(spec) = parser.parse_json_string(json)
+  spec.info.title |> should.equal("Yes/No API")
+  spec.info.description |> should.equal(option.Some("Yes"))
+}
+
+pub fn parse_json_string_preserves_dotted_version_literal_case() {
+  // OpenAPI's `info.version` is a string. JSON reproduces "1.10"
+  // verbatim; yamerl's YAML 1.1 numeric coercion can drop the
+  // trailing zero on unquoted numerics but the quoted form should
+  // survive. Pin the JSON path's exact-string behaviour for the
+  // `"1.10"` case, which oaspec actually sees in the wild (Stripe
+  // pinned "2024-04-10" / "1.10"-style version strings).
+  let json =
+    "{
+      \"openapi\": \"3.0.3\",
+      \"info\": {\"title\": \"v\", \"version\": \"1.10\"},
+      \"paths\": {}
+    }"
+  let assert Ok(spec) = parser.parse_json_string(json)
+  spec.info.version |> should.equal("1.10")
+}
+
 pub fn parse_string_or_json_with_locations_array_root_routes_json_case() {
   // First non-whitespace byte is `[` — also a JSON discriminator.
   // The content here is intentionally not a valid OpenAPI doc; we
