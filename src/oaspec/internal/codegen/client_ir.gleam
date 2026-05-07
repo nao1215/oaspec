@@ -374,8 +374,39 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
       })
     })
 
+  // Form-urlencoded bodies stringify each scalar leaf via
+  // `int.to_string` / `float.to_string` / `bool.to_string` for the
+  // matching primitive types. The form-body emitter walks the tree
+  // recursively, so the import-needs analyser has to mirror the same
+  // walk to pull `gleam/int` / `gleam/float` / `gleam/bool` into the
+  // import set when the body shape calls for them.
+  let has_form_urlencoded_int =
+    form_body_has_primitive(operations, ctx, fn(s) {
+      case s {
+        schema.IntegerSchema(..) -> True
+        _ -> False
+      }
+    })
+  let has_form_urlencoded_float =
+    form_body_has_primitive(operations, ctx, fn(s) {
+      case s {
+        schema.NumberSchema(..) -> True
+        _ -> False
+      }
+    })
+  let has_form_urlencoded_bool =
+    form_body_has_primitive(operations, ctx, fn(s) {
+      case s {
+        schema.BooleanSchema(..) -> True
+        _ -> False
+      }
+    })
+
+  let needs_bool = needs_bool || has_form_urlencoded_bool
+
   let needs_int =
     has_int_response_header
+    || has_form_urlencoded_int
     || list.any(all_params, fn(p) {
       case p.payload {
         ParameterSchema(Inline(schema.IntegerSchema(..))) -> True
@@ -400,7 +431,8 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
       }
     })
 
-  let needs_float = needs_float_param || has_float_response_header
+  let needs_float =
+    needs_float_param || has_float_response_header || has_form_urlencoded_float
 
   // Gate on `mt.schema = Some(_)` so the import-needs analyzer agrees
   // with `client_response.gleam`'s emission gate. A schema-less
@@ -675,6 +707,62 @@ fn items_resolve_primitive_local(items: schema.SchemaRef, ctx: Context) -> Bool 
         _ -> False
       }
     _ -> False
+  }
+}
+
+/// Returns True when any operation's `application/x-www-form-urlencoded`
+/// body has a primitive leaf (anywhere in the property tree) matching
+/// `pred`. The form-body emitter walks objects and arrays recursively,
+/// stringifying each scalar leaf with the matching `<gleam>.to_string`
+/// helper, so the import-needs analyser has to mirror that walk.
+fn form_body_has_primitive(
+  operations: List(context.AnalyzedOperation),
+  ctx: Context,
+  pred: fn(schema.SchemaObject) -> Bool,
+) -> Bool {
+  list.any(operations, fn(op) {
+    let #(_, operation, _, _) = op
+    case operation.request_body {
+      Some(Value(rb)) ->
+        list.any(dict.to_list(rb.content), fn(ce) {
+          let #(ct_name, mt) = ce
+          case ct_util.from_string(ct_name) {
+            ct_util.FormUrlEncoded ->
+              case resolve_to_object(option_or_none(mt.schema), ctx) {
+                Some(s) -> ref_contains_primitive(Inline(s), ctx, pred)
+                None -> False
+              }
+            _ -> False
+          }
+        })
+      _ -> False
+    }
+  })
+}
+
+fn ref_contains_primitive(
+  ref: schema.SchemaRef,
+  ctx: Context,
+  pred: fn(schema.SchemaObject) -> Bool,
+) -> Bool {
+  case resolve_to_object(ref, ctx) {
+    Some(s) ->
+      case pred(s) {
+        True -> True
+        False ->
+          case s {
+            schema.ArraySchema(items:, ..) ->
+              ref_contains_primitive(items, ctx, pred)
+            schema.ObjectSchema(properties:, ..) ->
+              dict.to_list(properties)
+              |> list.any(fn(entry) {
+                let #(_, child) = entry
+                ref_contains_primitive(child, ctx, pred)
+              })
+            _ -> False
+          }
+      }
+    None -> False
   }
 }
 

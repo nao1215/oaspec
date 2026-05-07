@@ -218,10 +218,13 @@ pub fn to_string_fn(ref: SchemaRef, ctx: Context) -> String {
 /// Resolve a schema ref and return the base type (for parameter type resolution).
 pub fn resolve_param_type(schema_ref: Option(SchemaRef), ctx: Context) -> String {
   case schema_ref {
+    Some(Inline(ArraySchema(items:, ..))) ->
+      "List(" <> schema_ref_qualified_type_recursive(items) <> ")"
     Some(Inline(schema)) -> schema_base_type(schema)
     Some(Reference(name:, ..) as ref) -> {
       case context.resolve_schema_ref(ref, ctx) {
-        Ok(ArraySchema(items:, ..)) -> "List(" <> schema_ref_type(items) <> ")"
+        Ok(ArraySchema(items:, ..)) ->
+          "List(" <> schema_ref_qualified_type_recursive(items) <> ")"
         _ -> "types." <> naming.schema_to_type_name(name)
       }
     }

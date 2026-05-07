@@ -388,11 +388,24 @@ fn collect_guard_functions_for_schema_object(
           }),
       )
 
-    StringSchema(min_length:, max_length:, pattern:, ..) ->
-      list.flatten([
-        maybe_one(build_string_guard_function(name, "", min_length, max_length)),
-        maybe_one(build_string_pattern_guard_function(name, "", pattern)),
-      ])
+    StringSchema(min_length:, max_length:, pattern:, enum_values:, ..) ->
+      case enum_values {
+        // Enums emit a tagged-union type, not a `String` field, so a
+        // length / pattern guard would not type-check. The enum's own
+        // decoder already constrains the value to the spec's variants,
+        // which is the strictest check available.
+        [_, ..] -> []
+        [] ->
+          list.flatten([
+            maybe_one(build_string_guard_function(
+              name,
+              "",
+              min_length,
+              max_length,
+            )),
+            maybe_one(build_string_pattern_guard_function(name, "", pattern)),
+          ])
+      }
 
     IntegerSchema(
       minimum:,
@@ -454,20 +467,24 @@ fn collect_field_guard_functions(
 ) -> List(GuardFunction) {
   let resolved = context.resolve_schema_ref(prop_ref, ctx)
   case resolved {
-    Ok(StringSchema(min_length:, max_length:, pattern:, ..)) ->
-      list.flatten([
-        maybe_one(build_string_guard_function(
-          schema_name,
-          prop_name,
-          min_length,
-          max_length,
-        )),
-        maybe_one(build_string_pattern_guard_function(
-          schema_name,
-          prop_name,
-          pattern,
-        )),
-      ])
+    Ok(StringSchema(min_length:, max_length:, pattern:, enum_values:, ..)) ->
+      case enum_values {
+        [_, ..] -> []
+        [] ->
+          list.flatten([
+            maybe_one(build_string_guard_function(
+              schema_name,
+              prop_name,
+              min_length,
+              max_length,
+            )),
+            maybe_one(build_string_pattern_guard_function(
+              schema_name,
+              prop_name,
+              pattern,
+            )),
+          ])
+      }
 
     Ok(IntegerSchema(
       minimum:,
@@ -624,17 +641,25 @@ fn collect_schema_constraint_types_inner(
 ) -> ConstraintTypes {
   let schema = context.resolve_schema_ref(schema_ref, ctx)
   case schema {
-    Ok(StringSchema(min_length:, max_length:, pattern:, ..)) -> {
-      let acc = case min_length, max_length {
-        None, None -> acc
-        _, _ -> ConstraintTypes(..acc, has_string: True)
-      }
+    Ok(StringSchema(min_length:, max_length:, pattern:, enum_values:, ..)) ->
+      case enum_values {
+        // Same rationale as `collect_top_level_guard_functions`: enum
+        // values land as a tagged union, so length / pattern guards
+        // are no-ops at the type level and would just import the
+        // length/regexp helpers without using them.
+        [_, ..] -> acc
+        [] -> {
+          let acc = case min_length, max_length {
+            None, None -> acc
+            _, _ -> ConstraintTypes(..acc, has_string: True)
+          }
 
-      case pattern {
-        Some(_) -> ConstraintTypes(..acc, has_regexp: True)
-        None -> acc
+          case pattern {
+            Some(_) -> ConstraintTypes(..acc, has_regexp: True)
+            None -> acc
+          }
+        }
       }
-    }
     Ok(IntegerSchema(minimum: Some(_), ..))
     | Ok(IntegerSchema(maximum: Some(_), ..))
     | Ok(IntegerSchema(exclusive_minimum: Some(_), ..))
@@ -1641,15 +1666,29 @@ fn collect_guard_calls_visiting(
         )
       })
     }
-    Ok(StringSchema(metadata:, min_length:, max_length:, pattern:, ..)) -> {
+    Ok(StringSchema(
+      metadata:,
+      min_length:,
+      max_length:,
+      pattern:,
+      enum_values:,
+      ..,
+    )) -> {
       // A top-level `nullable: true` schema renders the composite's
       // `value` parameter as `Option(<T>)`, so the inner constraint
       // validators must be reached via the `Some(v) -> validator(v)`
-      // unwrap arm.
+      // unwrap arm. Enum-valued strings skip length / pattern guards
+      // entirely (see the `Inline(StringSchema(..))` arm at the top
+      // of this file for the rationale).
       let is_req = !metadata.nullable
-      let calls = case min_length, max_length {
-        None, None -> []
-        _, _ -> [
+      let has_enum = case enum_values {
+        [_, ..] -> True
+        [] -> False
+      }
+      let calls = case has_enum, min_length, max_length {
+        True, _, _ -> []
+        False, None, None -> []
+        False, _, _ -> [
           #(
             guard_function_name(name, "", "length"),
             "value",
@@ -1659,9 +1698,10 @@ fn collect_guard_calls_visiting(
           ),
         ]
       }
-      case pattern {
-        None -> calls
-        Some(_) ->
+      case has_enum, pattern {
+        True, _ -> calls
+        False, None -> calls
+        False, Some(_) ->
           list.append(calls, [
             #(
               guard_function_name(name, "", "pattern"),
@@ -1836,10 +1876,15 @@ fn collect_field_guard_calls(
   }
   let extra_unwrap = !is_required && alias_is_optional
   case resolved {
-    Ok(StringSchema(min_length:, max_length:, pattern:, ..)) -> {
-      let calls = case min_length, max_length {
-        None, None -> []
-        _, _ -> [
+    Ok(StringSchema(min_length:, max_length:, pattern:, enum_values:, ..)) -> {
+      let has_enum = case enum_values {
+        [_, ..] -> True
+        [] -> False
+      }
+      let calls = case has_enum, min_length, max_length {
+        True, _, _ -> []
+        False, None, None -> []
+        False, _, _ -> [
           #(
             guard_function_name(schema_name, prop_name, "length"),
             accessor,
@@ -1849,9 +1894,10 @@ fn collect_field_guard_calls(
           ),
         ]
       }
-      case pattern {
-        None -> calls
-        Some(_) ->
+      case has_enum, pattern {
+        True, _ -> calls
+        False, None -> calls
+        False, Some(_) ->
           list.append(calls, [
             #(
               guard_function_name(schema_name, prop_name, "pattern"),

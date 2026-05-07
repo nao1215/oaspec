@@ -16678,7 +16678,7 @@ pub fn query_array_of_objects_emits_json_escape_case() {
 
   string.contains(
     content,
-    "json.to_string(json.array(lines, encode_invoice_line_item_json))",
+    "json.to_string(json.array(lines, encode.encode_invoice_line_item_json))",
   )
   |> should.be_true()
   string.contains(content, "import gleam/json")
@@ -16712,7 +16712,7 @@ pub fn deep_object_composite_property_emits_json_escape_case() {
   |> should.be_true()
   string.contains(
     content,
-    "json.to_string(encode_get_invoices_upcoming_param_customer_details_address_json(",
+    "json.to_string(encode.encode_get_invoices_upcoming_param_customer_details_address_json(",
   )
   |> should.be_true()
   // Sibling `email` property keeps the existing bracket encoding.
