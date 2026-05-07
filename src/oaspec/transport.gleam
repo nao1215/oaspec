@@ -201,6 +201,22 @@ fn add_credential(creds: Credentials, entry: CredentialEntry) -> Credentials {
 // Send middleware
 // ---------------------------------------------------------------------------
 
+// Header-middleware composition rules at a glance:
+//
+// - `with_default_header` (single name/value, wrapper form) — each call
+//   wraps the previous send. When two wrappers target the same name
+//   (case-insensitive), the **outermost** wrapper (the one most recently
+//   piped in) wins, because the request reaches it first and inserts
+//   before the inner check runs.
+// - `with_default_headers` (list form) — when the supplied list contains
+//   the same name twice, the **first occurrence** is kept and the rest
+//   are silently dropped.
+//
+// The two rules are each correct in isolation but inverse to each other.
+// Pick one shape per code path to avoid surprises. In both forms,
+// headers already on the inbound request always win — middleware never
+// clobbers explicit caller intent.
+
 // Override the request's base URL. Always wins over any `base_url` set
 // by the request builder, so callers can target staging / proxy hosts
 // without regenerating clients. Works with both `transport.Send` and

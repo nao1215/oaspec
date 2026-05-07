@@ -239,6 +239,53 @@ pub fn with_default_headers_first_wins_preserves_order_for_others_test() {
   kept |> should.equal([#("X-A", "a"), #("X-B", "b")])
 }
 
+// Pin the wrapper-form composition rule: when two with_default_header
+// wrappers target the same name, the OUTERMOST wrapper (the one most
+// recently piped in) wins, because the request reaches it first. This
+// is the inverse of the list-form rule above (#555).
+pub fn with_default_header_outermost_wrapper_wins_for_same_name_test() {
+  let send =
+    echo_to_response()
+    |> transport.with_default_header(name: "X-Trace", value: "v1")
+    |> transport.with_default_header(name: "X-Trace", value: "v2")
+  let assert Ok(resp) = send(empty_request())
+  resp.headers
+  |> list.key_find("X-Trace")
+  |> should.equal(Ok("v2"))
+}
+
+pub fn with_default_header_outermost_wins_is_case_insensitive_test() {
+  // Same composition rule, but the inner wrapper uses a lower-case
+  // name. The outer wrapper still wins because the request reaches it
+  // first; the inner wrapper sees the already-set header and skips.
+  let send =
+    echo_to_response()
+    |> transport.with_default_header(name: "x-trace", value: "v1")
+    |> transport.with_default_header(name: "X-Trace", value: "v2")
+  let assert Ok(resp) = send(empty_request())
+  resp.headers
+  |> list.key_find("X-Trace")
+  |> should.equal(Ok("v2"))
+  // Lower-case duplicate must not slip in under a different key.
+  resp.headers
+  |> list.key_find("x-trace")
+  |> should.equal(Error(Nil))
+}
+
+pub fn with_default_header_explicit_request_header_beats_all_wrappers_test() {
+  // An explicit request header beats every wrapper layer regardless
+  // of how many with_default_header calls are stacked above it.
+  let send =
+    echo_to_response()
+    |> transport.with_default_header(name: "X-Trace", value: "wrapper-1")
+    |> transport.with_default_header(name: "X-Trace", value: "wrapper-2")
+  let req = Request(..empty_request(), headers: [#("X-Trace", "explicit")])
+  let assert Ok(resp) = send(req)
+  resp.headers
+  |> list.key_find("X-Trace")
+  |> should.equal(Ok("explicit"))
+}
+
 // ---------------------------------------------------------------------------
 // with_security: bearer
 // ---------------------------------------------------------------------------
