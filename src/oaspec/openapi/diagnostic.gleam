@@ -78,6 +78,41 @@ pub fn yaml_error(detail detail: String, loc loc: SourceLoc) -> Diagnostic {
   )
 }
 
+/// Parser refused the input because it exceeded a configured DoS
+/// limit (see `parser.ParseLimits`). The message names the limit, the
+/// configured cap, and the actual value so callers can either bump
+/// the limit (when they trust the source) or reject the input.
+pub fn parse_limit_exceeded(
+  limit limit: String,
+  configured configured: Int,
+  actual actual: Int,
+) -> Diagnostic {
+  Diagnostic(
+    code: "parse_limit_exceeded",
+    phase: PhaseParse,
+    severity: SeverityError,
+    target: TargetBoth,
+    pointer: "",
+    source_loc: NoSourceLoc,
+    message: "Parser limit '"
+      <> limit
+      <> "' exceeded: configured cap "
+      <> int_to_string(configured)
+      <> ", actual "
+      <> int_to_string(actual)
+      <> ". The input was refused before parsing to bound denial-of-service exposure (issue #553).",
+    hint: option.Some(
+      "If the source is trusted, raise '"
+      <> limit
+      <> "' via parser.ParseLimits and call parse_string_with_limits with the larger cap. Untrusted sources should keep the default cap.",
+    ),
+  )
+}
+
+@external(erlang, "erlang", "integer_to_binary")
+@external(javascript, "../oaspec_ffi.mjs", "integer_to_string")
+fn int_to_string(n: Int) -> String
+
 pub fn missing_field(
   path path: String,
   field field: String,

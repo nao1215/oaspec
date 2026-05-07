@@ -934,6 +934,70 @@ pub fn parse_file_dispatches_json_path_for_json_extension_case() {
   spec.openapi |> should.equal("3.0.0")
 }
 
+// parse_string_with_limits / ParseLimits (#553) — DoS-aware parser limits
+
+pub fn parse_string_with_limits_accepts_input_under_default_cap_case() {
+  // A small inline spec is well under the 16 MiB default cap; the
+  // limit-aware entry point must accept it and produce the same spec
+  // a plain parse_string call would.
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Tiny
+  version: 1.0.0
+paths: {}
+"
+  let assert Ok(spec) =
+    parser.parse_string_with_limits(yaml, parser.default_limits())
+  spec.openapi |> should.equal("3.0.3")
+  spec.info.title |> should.equal("Tiny")
+}
+
+pub fn parse_string_with_limits_rejects_input_over_byte_cap_case() {
+  // Build an input bigger than a deliberately tiny cap (1 byte) and
+  // confirm parse_string_with_limits rejects it before yamerl is
+  // invoked. The diagnostic must name the limit and the actual size.
+  let yaml =
+    "
+openapi: 3.0.3
+info: { title: Big, version: 1.0.0 }
+paths: {}
+"
+  let tiny_limit =
+    parser.ParseLimits(
+      max_input_bytes: 1,
+      max_schema_depth: 100,
+      max_allof_chain: 32,
+      max_external_ref_hops: 16,
+      max_paths: 4096,
+      max_parameters_per_op: 64,
+    )
+  let assert Error(d) = parser.parse_string_with_limits(yaml, tiny_limit)
+  d.code |> should.equal("parse_limit_exceeded")
+  // Diagnostic must name the offending limit so callers can bump
+  // exactly that field if they trust the source.
+  should.be_true(string.contains(d.message, "max_input_bytes"))
+  // Diagnostic must include the actual size, so an operator reading
+  // the message can decide what to set the cap to. We don't pin the
+  // exact integer (the YAML literal length above could drift across
+  // edits), only that the actual size is mentioned.
+  should.be_true(string.contains(d.message, "actual"))
+}
+
+pub fn parse_string_with_limits_default_limits_match_documented_caps_case() {
+  // Pin the documented default values so a future change to the
+  // defaults (raising or lowering them) lands in the test diff and
+  // gets reviewed alongside the docstring.
+  let limits = parser.default_limits()
+  limits.max_input_bytes |> should.equal(16 * 1024 * 1024)
+  limits.max_schema_depth |> should.equal(100)
+  limits.max_allof_chain |> should.equal(32)
+  limits.max_external_ref_hops |> should.equal(16)
+  limits.max_paths |> should.equal(4096)
+  limits.max_parameters_per_op |> should.equal(64)
+}
+
 // parse_json_string_with_locations / parse_string_or_json_with_locations (#550)
 
 pub fn parse_json_string_with_locations_returns_same_spec_case() {

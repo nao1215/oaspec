@@ -19,6 +19,13 @@ export function monotonic_ms() {
   return Math.trunc(ms);
 }
 
+// Format an integer as a decimal string. Mirrors `erlang:integer_to_binary/1`
+// for cross-target use in places where `gleam/int.to_string` is not in
+// scope (e.g. inside diagnostic constructors).
+export function integer_to_string(n) {
+  return String(n);
+}
+
 // Run a thunk and report (panicked, message) to the caller. Mirrors
 // the BEAM implementation in `oaspec_ffi.erl`. Used by tests that
 // exercise functions which intentionally panic on invalid input.
