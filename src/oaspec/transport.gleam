@@ -15,6 +15,16 @@ import gleam/string
 // Defined locally to keep the root `oaspec` package free of a
 // `gleam_http` dependency — adapters can convert to `gleam/http.Method`
 // at the runtime boundary.
+//
+// `Other(String)` carries verbs outside the RFC 9110 §9 method
+// registry: WebDAV (`PROPFIND`, `PROPPATCH`, `MKCOL`, …), CalDAV /
+// CardDAV (`REPORT`, `MKCALENDAR`), and vendor extensions (`PURGE`,
+// `BAN`, `LINK`, `UNLINK`). Per RFC 9110 §9.1 method tokens are
+// case-sensitive — construct via `method_from_string` rather than
+// the bare `Other(...)` constructor when the source string may be
+// in a non-canonical case; the constructor enforces the `tchar`
+// charset (RFC 9110 §5.6.2) and routes well-known names to the
+// dedicated variants.
 pub type Method {
   Get
   Post
@@ -25,6 +35,120 @@ pub type Method {
   Options
   Trace
   Connect
+  Other(String)
+}
+
+/// Construction error for `method_from_string`.
+pub type MethodError {
+  /// The supplied string is empty or contains a byte outside the
+  /// `tchar` production from RFC 9110 §5.6.2 (control bytes,
+  /// whitespace, separators like `(`, `)`, `<`, `>`, `@`, `,`, `;`,
+  /// `:`, `\`, `"`, `/`, `[`, `]`, `?`, `=`, `{`, `}`).
+  InvalidMethod(detail: String)
+}
+
+/// Convert a `Method` to its on-wire string. Well-known variants
+/// produce their canonical RFC 9110 spelling (`Get` → `"GET"`);
+/// `Other(s)` returns `s` verbatim — pre-normalise via
+/// `method_from_string` if the source is in a non-canonical case.
+pub fn method_to_wire(method: Method) -> String {
+  case method {
+    Get -> "GET"
+    Post -> "POST"
+    Put -> "PUT"
+    Delete -> "DELETE"
+    Patch -> "PATCH"
+    Head -> "HEAD"
+    Options -> "OPTIONS"
+    Trace -> "TRACE"
+    Connect -> "CONNECT"
+    Other(s) -> s
+  }
+}
+
+/// Smart constructor for `Method`. Routes case-insensitively to the
+/// nine RFC 9110 §9 variants for known names; for everything else,
+/// validates the input against the `tchar` charset (RFC 9110 §5.6.2)
+/// and uppercases the result before wrapping in `Other` so the wire
+/// representation is canonical.
+///
+/// Empty input or a byte outside `tchar` (control bytes, whitespace,
+/// or separators like `(`, `)`, `,`, `;`, `:`, `/`, `[`, etc.) returns
+/// `Error(InvalidMethod(detail))`.
+pub fn method_from_string(s: String) -> Result(Method, MethodError) {
+  case string.lowercase(s) {
+    "get" -> Ok(Get)
+    "post" -> Ok(Post)
+    "put" -> Ok(Put)
+    "delete" -> Ok(Delete)
+    "patch" -> Ok(Patch)
+    "head" -> Ok(Head)
+    "options" -> Ok(Options)
+    "trace" -> Ok(Trace)
+    "connect" -> Ok(Connect)
+    "" ->
+      Error(InvalidMethod(detail: "method string is empty (RFC 9110 §5.6.2)"))
+    _ ->
+      case is_valid_token(s) {
+        True -> Ok(Other(string.uppercase(s)))
+        False ->
+          Error(InvalidMethod(
+            detail: "method `"
+            <> s
+            <> "` contains a byte outside the tchar charset (RFC 9110 §5.6.2)",
+          ))
+      }
+  }
+}
+
+fn is_valid_token(s: String) -> Bool {
+  string.to_utf_codepoints(s)
+  |> list.all(is_tchar)
+}
+
+// RFC 9110 §5.6.2: tchar = "!" / "#" / "$" / "%" / "&" / "'" / "*"
+// / "+" / "-" / "." / "^" / "_" / "`" / "|" / "~" / DIGIT / ALPHA.
+// Every other byte (control chars, whitespace, separators) is
+// forbidden inside a method token.
+fn is_tchar(cp: UtfCodepoint) -> Bool {
+  let codepoint = string.utf_codepoint_to_int(cp)
+  case codepoint {
+    0x21 -> True
+    // !
+    0x23 -> True
+    // #
+    0x24 -> True
+    // $
+    0x25 -> True
+    // %
+    0x26 -> True
+    // &
+    0x27 -> True
+    // '
+    0x2A -> True
+    // *
+    0x2B -> True
+    // +
+    0x2D -> True
+    // -
+    0x2E -> True
+    // .
+    0x5E -> True
+    // ^
+    0x5F -> True
+    // _
+    0x60 -> True
+    // `
+    0x7C -> True
+    // |
+    0x7E -> True
+    // ~
+    _ ->
+      // 0..9 / A..Z / a..z
+      { codepoint >= 0x30 && codepoint <= 0x39 }
+      || { codepoint >= 0x41 && codepoint <= 0x5A }
+      || { codepoint >= 0x61 && codepoint <= 0x7A }
+  }
 }
 
 pub type Body {

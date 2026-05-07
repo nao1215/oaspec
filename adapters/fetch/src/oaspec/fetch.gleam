@@ -106,6 +106,7 @@ fn convert_method(method: transport.Method) -> http.Method {
     transport.Options -> http.Options
     transport.Trace -> http.Trace
     transport.Connect -> http.Connect
+    transport.Other(s) -> http.Other(s)
   }
 }
 

@@ -10,6 +10,23 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Breaking
+
+- **`oaspec/transport.Method` gains an `Other(String)` variant.**
+  External callers that exhaustively pattern-match on `Method`
+  (without a catch-all `_ ->`) will fail to compile until they add
+  an arm for `Other(_)`. The new variant is required to express
+  WebDAV (`PROPFIND`, `PROPPATCH`, `MKCOL`, …), CalDAV / CardDAV
+  (`REPORT`, `MKCALENDAR`), and vendor extensions (`PURGE`, `BAN`,
+  `LINK`, `UNLINK`) — the previous closed sum could not represent
+  any of these. The bundled `httpc` and `fetch` adapters route
+  `Other(s) → http.Other(s)` so the wire path is unchanged for
+  callers that use them. New helpers `transport.method_to_wire/1`
+  and `transport.method_from_string/1` (case-insensitive routing
+  for the nine RFC 9110 §9 verbs, `tchar`-validated `Other`
+  passthrough for everything else) keep the construction surface
+  consistent. (#554)
+
 ### Added
 
 - `oaspec/openapi/parser.parse_json_string_with_locations` is now

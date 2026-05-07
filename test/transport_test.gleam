@@ -85,17 +85,10 @@ fn list_join(items: List(String), sep: String) -> String {
 }
 
 fn method_to_string(method: transport.Method) -> String {
-  case method {
-    transport.Get -> "GET"
-    transport.Post -> "POST"
-    transport.Put -> "PUT"
-    transport.Delete -> "DELETE"
-    transport.Patch -> "PATCH"
-    transport.Head -> "HEAD"
-    transport.Options -> "OPTIONS"
-    transport.Trace -> "TRACE"
-    transport.Connect -> "CONNECT"
-  }
+  // Defer to the public helper so the dual list (test helper +
+  // production helper) cannot drift apart on a future Method
+  // variant addition.
+  transport.method_to_wire(method)
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +278,87 @@ pub fn with_default_header_explicit_request_header_beats_all_wrappers_test() {
   resp.headers
   |> list.key_find("X-Trace")
   |> should.equal(Ok("explicit"))
+}
+
+// Method.Other(String) + smart constructor (#554).
+
+pub fn method_to_wire_round_trips_known_verbs_test() {
+  // The nine RFC 9110 §9 verbs canonicalise to their uppercase
+  // RFC spelling.
+  transport.method_to_wire(transport.Get) |> should.equal("GET")
+  transport.method_to_wire(transport.Post) |> should.equal("POST")
+  transport.method_to_wire(transport.Put) |> should.equal("PUT")
+  transport.method_to_wire(transport.Delete) |> should.equal("DELETE")
+  transport.method_to_wire(transport.Patch) |> should.equal("PATCH")
+  transport.method_to_wire(transport.Head) |> should.equal("HEAD")
+  transport.method_to_wire(transport.Options) |> should.equal("OPTIONS")
+  transport.method_to_wire(transport.Trace) |> should.equal("TRACE")
+  transport.method_to_wire(transport.Connect) |> should.equal("CONNECT")
+}
+
+pub fn method_to_wire_passes_through_other_verbatim_test() {
+  // Other(s) returns s as-is. The smart constructor is responsible
+  // for case normalisation; bare Other("propfind") would round-trip
+  // as lowercase, which the tchar charset permits but RFC 9110 §9.1
+  // says is case-sensitive.
+  transport.method_to_wire(transport.Other("PROPFIND"))
+  |> should.equal("PROPFIND")
+  transport.method_to_wire(transport.Other("propfind"))
+  |> should.equal("propfind")
+}
+
+pub fn method_from_string_routes_known_verbs_case_insensitive_test() {
+  let assert Ok(transport.Get) = transport.method_from_string("GET")
+  let assert Ok(transport.Get) = transport.method_from_string("get")
+  let assert Ok(transport.Post) = transport.method_from_string("Post")
+  let assert Ok(transport.Connect) = transport.method_from_string("CONNECT")
+}
+
+pub fn method_from_string_uppercases_other_verbs_test() {
+  let assert Ok(transport.Other("PROPFIND")) =
+    transport.method_from_string("PROPFIND")
+  let assert Ok(transport.Other("PROPFIND")) =
+    transport.method_from_string("propfind")
+  let assert Ok(transport.Other("MKCOL")) =
+    transport.method_from_string("mkcol")
+  let assert Ok(transport.Other("PURGE")) =
+    transport.method_from_string("purge")
+}
+
+pub fn method_from_string_rejects_empty_test() {
+  case transport.method_from_string("") {
+    Error(transport.InvalidMethod(detail)) ->
+      should.be_true(string.contains(detail, "empty"))
+    Ok(_) -> should.fail()
+  }
+}
+
+pub fn method_from_string_rejects_separator_bytes_test() {
+  // Slash is in the separators set per RFC 9110 §5.6.2 — rejected.
+  case transport.method_from_string("HELLO/WORLD") {
+    Error(transport.InvalidMethod(detail)) ->
+      should.be_true(string.contains(detail, "tchar"))
+    Ok(_) -> should.fail()
+  }
+}
+
+pub fn method_from_string_rejects_whitespace_test() {
+  case transport.method_from_string("HE LLO") {
+    Error(transport.InvalidMethod(_)) -> Nil
+    Ok(_) -> should.fail()
+  }
+}
+
+pub fn method_from_string_round_trips_via_to_wire_test() {
+  // from_string → to_wire → from_string must be idempotent for any
+  // valid input. Pin the round-trip on the canonical verbs and a
+  // representative WebDAV verb.
+  list.each(["GET", "propfind", "MKCOL", "purge"], fn(input) {
+    let assert Ok(method) = transport.method_from_string(input)
+    let wire = transport.method_to_wire(method)
+    let assert Ok(method2) = transport.method_from_string(wire)
+    should.equal(method, method2)
+  })
 }
 
 // Header value validation: CRLF / NUL injection (#546).
