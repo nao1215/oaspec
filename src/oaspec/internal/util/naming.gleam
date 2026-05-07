@@ -228,6 +228,40 @@ fn bump_inline_enum_suffix(
   }
 }
 
+/// Disambiguate an enum constructor name against the set of
+/// already-allocated component type names. Stripe's spec declares a
+/// `source.type` enum whose values (`three_d_secure`, `wechat`, …)
+/// each also appear as `source_type_<value>` component schemas, so
+/// the naive `<EnumType><Value>` constructor name (e.g.
+/// `SourceTypeThreeDSecure`) collides with the constructor of the
+/// `SourceTypeThreeDSecure` record that `source_type_three_d_secure`
+/// generates. When a collision is detected we suffix the variant
+/// with `Variant`, then bump a numeric tail until the result is
+/// unique. Returning the un-suffixed name when there is no collision
+/// keeps the generated API stable for the common case.
+pub fn dedup_enum_variant_name(
+  base: String,
+  component_type_names: dict.Dict(String, Nil),
+) -> String {
+  use <- bool.guard(!dict.has_key(component_type_names, base), base)
+  bump_enum_variant_suffix(base <> "Variant", 0, component_type_names)
+}
+
+fn bump_enum_variant_suffix(
+  candidate: String,
+  suffix: Int,
+  taken: dict.Dict(String, Nil),
+) -> String {
+  let next = case suffix {
+    0 -> candidate
+    n -> candidate <> int.to_string(n)
+  }
+  case dict.has_key(taken, next) {
+    False -> next
+    True -> bump_enum_variant_suffix(candidate, suffix + 1, taken)
+  }
+}
+
 fn bump_inline_enum_suffix_set(
   base: String,
   suffix: Int,

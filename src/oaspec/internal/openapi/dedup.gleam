@@ -133,19 +133,29 @@ pub fn dedup_param_field_names(
 
 /// Given a list of original enum values (JSON wire values), return a list
 /// of deduped PascalCase Gleam variant suffixes. The returned list is
-/// parallel to the input.
+/// parallel to the input. Uses the bare-digit tail (`Foo`, `Foo2`, …)
+/// because PascalCase names cannot legally carry an underscore in a
+/// Gleam type-variant identifier.
 pub fn dedup_enum_variants(enum_values: List(String)) -> List(String) {
   let pascal_names = list.map(enum_values, naming.to_pascal_case)
-  deduplicate_strings(pascal_names)
+  deduplicate_strings_with_separator(pascal_names, "")
 }
 
-/// Deduplicate a list of strings by appending "_2", "_3", etc. for duplicates.
-/// The chosen suffix skips any name that already appears elsewhere in the
-/// input (so a later literal `foo_2` keeps its label and an earlier
-/// duplicate `foo` advances to `foo_3`) and any suffix this call has
-/// already handed out, so the output has no collisions in either
-/// direction.
+/// Deduplicate a list of strings by appending `_2`, `_3`, … for
+/// duplicates (snake_case identifiers).
 fn deduplicate_strings(names: List(String)) -> List(String) {
+  deduplicate_strings_with_separator(names, "_")
+}
+
+/// Shared dedup driver. The separator goes between the base name and
+/// the numeric suffix; pass `_` for snake_case fields and `""` for
+/// PascalCase variants. Skips any name that already appears elsewhere
+/// in the input and any suffix this call has already handed out, so
+/// the output has no collisions in either direction.
+fn deduplicate_strings_with_separator(
+  names: List(String),
+  separator: String,
+) -> List(String) {
   let input_names =
     list.fold(names, dict.new(), fn(acc, name) { dict.insert(acc, name, True) })
   let #(result_rev, _) =
@@ -154,7 +164,8 @@ fn deduplicate_strings(names: List(String)) -> List(String) {
       case dict.has_key(claimed, name) {
         False -> #([name, ..result], dict.insert(claimed, name, True))
         True -> {
-          let unique_name = next_unique_name(name, input_names, claimed, 2)
+          let unique_name =
+            next_unique_name(name, input_names, claimed, 2, separator)
           #([unique_name, ..result], dict.insert(claimed, unique_name, True))
         }
       }
@@ -162,19 +173,21 @@ fn deduplicate_strings(names: List(String)) -> List(String) {
   list.reverse(result_rev)
 }
 
-/// Pick the first `base_<n>` suffix that collides neither with another
-/// literal input name nor with a name this call has already minted.
+/// Pick the first `base<separator><n>` candidate that collides neither
+/// with another literal input name nor with a name this call has
+/// already minted.
 fn next_unique_name(
   base: String,
   input_names: Dict(String, Bool),
   claimed: Dict(String, Bool),
   suffix: Int,
+  separator: String,
 ) -> String {
-  let candidate = base <> "_" <> int.to_string(suffix)
+  let candidate = base <> separator <> int.to_string(suffix)
   case
     dict.has_key(input_names, candidate) || dict.has_key(claimed, candidate)
   {
-    True -> next_unique_name(base, input_names, claimed, suffix + 1)
+    True -> next_unique_name(base, input_names, claimed, suffix + 1, separator)
     False -> candidate
   }
 }

@@ -1,5 +1,6 @@
 import gleam/bool
 import gleam/dict.{type Dict}
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
@@ -7,6 +8,7 @@ import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/ir_build
 import oaspec/internal/codegen/operation_ir
 import oaspec/internal/codegen/schema_dispatch
+import oaspec/internal/codegen/schema_utils
 import oaspec/internal/openapi/dedup
 import oaspec/internal/openapi/schema.{Inline, Reference}
 import oaspec/internal/openapi/spec.{type Resolved, ParameterSchema, Value}
@@ -284,9 +286,12 @@ pub fn get_body_encode_expr(
 pub fn generate_multipart_body(
   sb: se.StringBuilder,
   rb: spec.RequestBody(Resolved),
-  _op_id: String,
+  op_id: String,
   ctx: Context,
 ) -> se.StringBuilder {
+  // Same path the form-urlencoded emitter uses: inline-enum fields
+  // resolve to `encode.encode_<op_id>_request_<field>_to_string`.
+  let parent_name = naming.to_snake_case(op_id) <> "_request"
   let boundary = "----oaspec-boundary"
   let content_entries = ir_build.sorted_entries(rb.content)
   let #(properties, required_fields) = case content_entries {
@@ -351,7 +356,7 @@ pub fn generate_multipart_body(
             sb,
             field_name,
             gleam_field,
-            multipart_field_to_string_fn(field_schema, ctx),
+            form_field_to_string_fn(field_schema, field_name, parent_name, ctx),
             False,
             is_required,
           )
@@ -608,6 +613,28 @@ fn multipart_field_to_string_fn(
   }
 }
 
+/// Same as `multipart_field_to_string_fn`, but with the operation /
+/// field context needed to resolve an `Inline(StringSchema(enum_values))`
+/// to the matching `encode.encode_<inline_enum>_to_string` helper.
+/// Without this, an inline enum field on a form-urlencoded body would
+/// be passed straight to `uri.percent_encode` and the Gleam compiler
+/// would complain (`Expected: String, Found: types.<EnumType>`).
+fn form_field_to_string_fn(
+  field_schema: schema.SchemaRef,
+  field_name: String,
+  parent_name: String,
+  ctx: Context,
+) -> String {
+  case field_schema {
+    Inline(schema.StringSchema(enum_values:, ..)) if enum_values != [] -> {
+      let enum_type_name =
+        ir_build.inline_enum_type_name_for(parent_name, field_name, ctx)
+      "encode.encode_" <> naming.to_snake_case(enum_type_name) <> "_to_string"
+    }
+    _ -> multipart_field_to_string_fn(field_schema, ctx)
+  }
+}
+
 /// Convert an array field's items to a string expression for form-urlencoded encoding.
 /// Returns an expression that converts `item` to a String.
 fn form_array_item_to_string(
@@ -690,6 +717,7 @@ fn generate_form_indexed_array(
   is_required: Bool,
   indent_base: Int,
   parts_var: String,
+  parent_path: String,
   ctx: Context,
 ) -> se.StringBuilder {
   case is_required {
@@ -701,6 +729,7 @@ fn generate_form_indexed_array(
         items_schema,
         indent_base,
         parts_var,
+        parent_path,
         ctx,
       )
     False ->
@@ -716,6 +745,7 @@ fn generate_form_indexed_array(
         items_schema,
         indent_base + 2,
         parts_var,
+        parent_path,
         ctx,
       )
       |> se.indent(indent_base + 1, "}")
@@ -731,6 +761,7 @@ fn emit_array_fold(
   items_schema: schema.SchemaRef,
   indent_base: Int,
   parts_var: String,
+  parent_path: String,
   ctx: Context,
 ) -> se.StringBuilder {
   case
@@ -759,6 +790,10 @@ fn emit_array_fold(
         True,
         indent_base + 1,
         "acc",
+        // The hoist pass names array-of-object item schemas with an
+        // `_item` suffix (`<parent>_item`), so inline-enum encoders
+        // for those items resolve through the same suffix here.
+        parent_path <> "_item",
         ctx,
       )
       |> se.indent(indent_base + 1, "acc")
@@ -788,6 +823,7 @@ fn emit_array_fold(
             inner_items,
             indent_base + 1,
             "acc",
+            parent_path,
             ctx,
           )
           |> se.indent(indent_base + 1, "acc")
@@ -843,6 +879,7 @@ fn emit_form_object_recurse(
   _is_required: Bool,
   indent_base: Int,
   parts_var: String,
+  parent_path: String,
   ctx: Context,
 ) -> se.StringBuilder {
   let resolved = context.resolve_schema_ref(schema_ref, ctx)
@@ -856,16 +893,43 @@ fn emit_form_object_recurse(
         let prop_required = list.contains(required, prop_name)
         let sub_key_quoted =
           key_prefix_quoted <> " <> \"[" <> prop_name <> "]\""
-        emit_form_field(
-          sb,
-          sub_key_quoted,
-          prop_accessor,
-          prop_ref,
-          prop_required,
-          indent_base,
-          parts_var,
-          ctx,
-        )
+        let nested_parent = parent_path <> "_" <> prop_field
+        // Issue #309: a required inline single-value string-enum is
+        // dropped from the record but still has to land on the wire,
+        // so emit a literal `<key>=<value>` form part instead of
+        // accessing `record.<prop>` (which no longer exists).
+        case
+          schema_utils.constant_property_value(prop_ref, prop_name, required)
+        {
+          Some(constant) ->
+            sb
+            |> se.indent(
+              indent_base,
+              "let "
+                <> parts_var
+                <> " = ["
+                <> sub_key_quoted
+                <> " <> \"=\" <> uri.percent_encode(\""
+                <> constant
+                <> "\"), .."
+                <> parts_var
+                <> "]",
+            )
+          None ->
+            emit_form_field(
+              sb,
+              sub_key_quoted,
+              prop_accessor,
+              prop_ref,
+              prop_required,
+              indent_base,
+              parts_var,
+              prop_name,
+              parent_path,
+              nested_parent,
+              ctx,
+            )
+        }
       })
     }
     _ -> sb
@@ -886,6 +950,9 @@ fn emit_form_field(
   is_required: Bool,
   indent_base: Int,
   parts_var: String,
+  prop_name: String,
+  parent_path: String,
+  nested_parent: String,
   ctx: Context,
 ) -> se.StringBuilder {
   case
@@ -903,6 +970,7 @@ fn emit_form_field(
             True,
             indent_base,
             parts_var,
+            nested_parent,
             ctx,
           )
         False -> {
@@ -920,6 +988,7 @@ fn emit_form_field(
             True,
             indent_base + 2,
             "acc2",
+            nested_parent,
             ctx,
           )
           |> se.indent(indent_base + 2, "acc2")
@@ -940,13 +1009,15 @@ fn emit_form_field(
             is_required,
             indent_base,
             parts_var,
+            nested_parent,
             ctx,
           )
         None -> sb
       }
     }
     False, False -> {
-      let to_str = multipart_field_to_string_fn(schema_ref, ctx)
+      let to_str =
+        form_field_to_string_fn(schema_ref, prop_name, parent_path, ctx)
       case is_required {
         True -> {
           let value_expr = case to_str {
@@ -1003,8 +1074,14 @@ fn generate_form_nested_object(
   gleam_field: String,
   field_schema: schema.SchemaRef,
   is_required: Bool,
+  parent_path: String,
   ctx: Context,
 ) -> se.StringBuilder {
+  // Inline-enum sub-properties of this nested object resolve their
+  // `encode.encode_<...>_to_string` helper names from
+  // `<parent_path>_<gleam_field>` (e.g. `post_accounts_request_company`),
+  // matching the names `encoders.gleam` mints from the same path.
+  let nested_parent = parent_path <> "_" <> gleam_field
   let resolved = context.resolve_schema_ref(field_schema, ctx)
   let sub_props = case resolved {
     Ok(schema.ObjectSchema(properties:, required:, ..)) -> #(
@@ -1059,9 +1136,41 @@ fn generate_form_nested_object(
           }
         _ -> False
       }
+      let sub_constant =
+        schema_utils.constant_property_value(sub_ref, sub_name, required_fields)
+      use <- bool.lazy_guard(
+        case sub_constant {
+          Some(_) -> True
+          None -> False
+        },
+        fn() {
+          case sub_constant {
+            Some(constant) ->
+              sb
+              |> se.indent(
+                indent_base,
+                "let "
+                  <> parts_var
+                  <> " = [\""
+                  <> field_name
+                  <> "["
+                  <> sub_name
+                  <> "]=\" <> uri.percent_encode(\""
+                  <> constant
+                  <> "\"), .."
+                  <> parts_var
+                  <> "]",
+              )
+            None -> sb
+          }
+        },
+      )
       case is_sub_object, is_sub_array {
         True, _ ->
-          // Recurse: generate meta[author][name]=value encoding
+          // Recurse: generate meta[author][name]=value encoding.
+          // Append the sub-field's snake-case name to the path so
+          // inline-enum encoders for that sub-tree resolve to the
+          // correct `encode_<...>_<sub_field>_<...>_to_string` helper.
           generate_form_bracket_fields(
             sb,
             field_name <> "[" <> sub_name <> "]",
@@ -1070,6 +1179,7 @@ fn generate_form_nested_object(
             sub_required,
             indent_base,
             parts_var,
+            nested_parent <> "_" <> sub_field,
             ctx,
           )
         _, True -> {
@@ -1087,13 +1197,15 @@ fn generate_form_nested_object(
                 sub_required,
                 indent_base,
                 parts_var,
+                nested_parent <> "_" <> sub_field,
                 ctx,
               )
             None -> sb
           }
         }
         False, False -> {
-          let to_str = multipart_field_to_string_fn(sub_ref, ctx)
+          let to_str =
+            form_field_to_string_fn(sub_ref, sub_name, nested_parent, ctx)
           case sub_required {
             True -> {
               let value_expr = case to_str {
@@ -1164,9 +1276,68 @@ fn generate_form_bracket_fields(
   key_prefix: String,
   accessor_prefix: String,
   field_schema: schema.SchemaRef,
-  _is_required: Bool,
+  is_required: Bool,
   indent_base: Int,
   parts_var: String,
+  parent_path: String,
+  ctx: Context,
+) -> se.StringBuilder {
+  // Sub-properties that are themselves objects can be optional inside
+  // the parent (e.g. Stripe's `capabilities.acss_debit_payments` is
+  // `Option(...)`). Walking into the inner record without a `Some(v)`
+  // unwrap turns into a type error in the generated code, so we
+  // bracket the entire recursion in a `case <accessor> { Some(v) ->
+  // { ... } None -> parts }` arm and re-bind the accessor to `v`.
+  case is_required {
+    False -> {
+      let inner_accessor = "v_" <> int.to_string(indent_base)
+      let sb =
+        sb
+        |> se.indent(
+          indent_base,
+          "let " <> parts_var <> " = case " <> accessor_prefix <> " {",
+        )
+        |> se.indent(indent_base + 1, "Some(" <> inner_accessor <> ") -> {")
+        |> se.indent(indent_base + 2, "let inner = " <> parts_var)
+      let sb =
+        emit_bracket_props(
+          sb,
+          key_prefix,
+          inner_accessor,
+          field_schema,
+          indent_base + 2,
+          "inner",
+          parent_path,
+          ctx,
+        )
+      sb
+      |> se.indent(indent_base + 2, "inner")
+      |> se.indent(indent_base + 1, "}")
+      |> se.indent(indent_base + 1, "None -> " <> parts_var)
+      |> se.indent(indent_base, "}")
+    }
+    True ->
+      emit_bracket_props(
+        sb,
+        key_prefix,
+        accessor_prefix,
+        field_schema,
+        indent_base,
+        parts_var,
+        parent_path,
+        ctx,
+      )
+  }
+}
+
+fn emit_bracket_props(
+  sb: se.StringBuilder,
+  key_prefix: String,
+  accessor_prefix: String,
+  field_schema: schema.SchemaRef,
+  indent_base: Int,
+  parts_var: String,
+  parent_path: String,
   ctx: Context,
 ) -> se.StringBuilder {
   let resolved = context.resolve_schema_ref(field_schema, ctx)
@@ -1196,84 +1367,113 @@ fn generate_form_bracket_fields(
             }
           _ -> False
         }
-        case is_obj, is_arr {
-          True, _ ->
-            generate_form_bracket_fields(
-              sb,
-              key_prefix <> "[" <> prop_name <> "]",
-              prop_accessor,
-              prop_ref,
-              prop_required,
+        let nested_parent = parent_path <> "_" <> prop_field
+        // Issue #309: a required inline single-value string-enum is
+        // dropped from the record but still has to land on the wire.
+        // Recurse the constant-property emission here so the bracket
+        // path still produces `<key>[<prop>]=<constant>`.
+        let constant_value =
+          schema_utils.constant_property_value(prop_ref, prop_name, required)
+        case constant_value {
+          Some(constant) ->
+            sb
+            |> se.indent(
               indent_base,
-              parts_var,
-              ctx,
+              "let "
+                <> parts_var
+                <> " = [\""
+                <> key_prefix
+                <> "["
+                <> prop_name
+                <> "]=\" <> uri.percent_encode(\""
+                <> constant
+                <> "\"), .."
+                <> parts_var
+                <> "]",
             )
-          _, True ->
-            case array_items_of(prop_ref, ctx) {
-              Some(items_schema) ->
-                generate_form_indexed_array(
+          None ->
+            case is_obj, is_arr {
+              True, _ ->
+                generate_form_bracket_fields(
                   sb,
-                  "\"" <> key_prefix <> "[" <> prop_name <> "]\"",
+                  key_prefix <> "[" <> prop_name <> "]",
                   prop_accessor,
-                  items_schema,
+                  prop_ref,
                   prop_required,
                   indent_base,
                   parts_var,
+                  nested_parent,
                   ctx,
                 )
-              None -> sb
-            }
-          False, False -> {
-            let to_str = multipart_field_to_string_fn(prop_ref, ctx)
-            case prop_required {
-              True -> {
-                let value_expr = case to_str {
-                  "" -> prop_accessor
-                  fn_name -> fn_name <> "(" <> prop_accessor <> ")"
+              _, True ->
+                case array_items_of(prop_ref, ctx) {
+                  Some(items_schema) ->
+                    generate_form_indexed_array(
+                      sb,
+                      "\"" <> key_prefix <> "[" <> prop_name <> "]\"",
+                      prop_accessor,
+                      items_schema,
+                      prop_required,
+                      indent_base,
+                      parts_var,
+                      nested_parent,
+                      ctx,
+                    )
+                  None -> sb
                 }
-                sb
-                |> se.indent(
-                  indent_base,
-                  "let "
-                    <> parts_var
-                    <> " = [\""
-                    <> key_prefix
-                    <> "["
-                    <> prop_name
-                    <> "]=\" <> uri.percent_encode("
-                    <> value_expr
-                    <> "), .."
-                    <> parts_var
-                    <> "]",
-                )
-              }
-              False ->
-                sb
-                |> se.indent(
-                  indent_base,
-                  "let " <> parts_var <> " = case " <> prop_accessor <> " {",
-                )
-                |> se.indent(
-                  indent_base + 1,
-                  "Some(v) -> [\""
-                    <> key_prefix
-                    <> "["
-                    <> prop_name
-                    <> "]=\" <> uri.percent_encode("
-                    <> {
-                    case to_str {
-                      "" -> "v"
-                      fn_name -> fn_name <> "(v)"
+              False, False -> {
+                let to_str =
+                  form_field_to_string_fn(prop_ref, prop_name, parent_path, ctx)
+                case prop_required {
+                  True -> {
+                    let value_expr = case to_str {
+                      "" -> prop_accessor
+                      fn_name -> fn_name <> "(" <> prop_accessor <> ")"
                     }
+                    sb
+                    |> se.indent(
+                      indent_base,
+                      "let "
+                        <> parts_var
+                        <> " = [\""
+                        <> key_prefix
+                        <> "["
+                        <> prop_name
+                        <> "]=\" <> uri.percent_encode("
+                        <> value_expr
+                        <> "), .."
+                        <> parts_var
+                        <> "]",
+                    )
                   }
-                    <> "), .."
-                    <> parts_var
-                    <> "]",
-                )
-                |> se.indent(indent_base + 1, "None -> " <> parts_var)
-                |> se.indent(indent_base, "}")
+                  False ->
+                    sb
+                    |> se.indent(
+                      indent_base,
+                      "let " <> parts_var <> " = case " <> prop_accessor <> " {",
+                    )
+                    |> se.indent(
+                      indent_base + 1,
+                      "Some(v) -> [\""
+                        <> key_prefix
+                        <> "["
+                        <> prop_name
+                        <> "]=\" <> uri.percent_encode("
+                        <> {
+                        case to_str {
+                          "" -> "v"
+                          fn_name -> fn_name <> "(v)"
+                        }
+                      }
+                        <> "), .."
+                        <> parts_var
+                        <> "]",
+                    )
+                    |> se.indent(indent_base + 1, "None -> " <> parts_var)
+                    |> se.indent(indent_base, "}")
+                }
+              }
             }
-          }
         }
       })
     }
@@ -1298,6 +1498,13 @@ fn form_field_json_encoder_expr(
     Inline(schema.BooleanSchema(..)) -> "json.bool(" <> value <> ")"
     Inline(schema.ArraySchema(items:, ..)) ->
       "json.array(" <> value <> ", " <> form_field_json_encoder_fn(items) <> ")"
+    Reference(name:, ..) ->
+      // The generated client lives in a different module from the
+      // per-schema encoders, so a Reference encoder must be prefixed
+      // with the `encode.` module alias here. `schema_dispatch`
+      // returns the bare identifier because it is also used inside
+      // `encode.gleam` itself, where the prefix would be wrong.
+      "encode.encode_" <> naming.to_snake_case(name) <> "_json(" <> value <> ")"
     _ -> schema_dispatch.json_encoder_expr(ref, value)
   }
 }
@@ -1310,6 +1517,8 @@ fn form_field_json_encoder_fn(ref: schema.SchemaRef) -> String {
     Inline(schema.BooleanSchema(..)) -> "json.bool"
     Inline(schema.ArraySchema(items:, ..)) ->
       "fn(xs) { json.array(xs, " <> form_field_json_encoder_fn(items) <> ") }"
+    Reference(name:, ..) ->
+      "encode.encode_" <> naming.to_snake_case(name) <> "_json"
     _ -> schema_dispatch.json_encoder_fn(ref)
   }
 }
@@ -1385,9 +1594,13 @@ fn form_encoding_is_json(
 pub fn generate_form_urlencoded_body(
   sb: se.StringBuilder,
   rb: spec.RequestBody(Resolved),
-  _op_id: String,
+  op_id: String,
   ctx: Context,
 ) -> se.StringBuilder {
+  // The hoist pass exposes inline enums under
+  // `<snake_case(op_id)>_request_<field>`, matching the
+  // `encode.encode_<...>_to_string` helpers `encoders.gleam` emits.
+  let parent_name = naming.to_snake_case(op_id) <> "_request"
   let content_entries = ir_build.sorted_entries(rb.content)
   let #(properties, required_fields, encoding) = case content_entries {
     [#(_, media_type), ..] ->
@@ -1419,6 +1632,46 @@ pub fn generate_form_urlencoded_body(
       let #(field_name, field_schema) = prop
       let gleam_field = naming.to_snake_case(field_name)
       let is_required = list.contains(required_fields, field_name)
+      // Issue #309: a required inline single-value string-enum is
+      // dropped from the generated record but still has to land on
+      // the wire. Emit it as a literal `<field>=<value>` form part
+      // so the field is sent without trying to read a body field
+      // that no longer exists.
+      use <- bool.lazy_guard(
+        {
+          case
+            schema_utils.constant_property_value(
+              field_schema,
+              field_name,
+              required_fields,
+            )
+          {
+            Some(_) -> True
+            None -> False
+          }
+        },
+        fn() {
+          case
+            schema_utils.constant_property_value(
+              field_schema,
+              field_name,
+              required_fields,
+            )
+          {
+            Some(constant) ->
+              sb
+              |> se.indent(
+                1,
+                "let form_parts = [\""
+                  <> field_name
+                  <> "=\" <> uri.percent_encode(\""
+                  <> constant
+                  <> "\"), ..form_parts]",
+              )
+            None -> sb
+          }
+        },
+      )
       let is_array = case field_schema {
         Inline(schema.ArraySchema(..)) -> True
         Reference(..) as sr ->
@@ -1504,6 +1757,7 @@ pub fn generate_form_urlencoded_body(
             gleam_field,
             field_schema,
             is_required,
+            parent_name,
             ctx,
           )
         _, True ->
@@ -1517,6 +1771,7 @@ pub fn generate_form_urlencoded_body(
                 is_required,
                 1,
                 "form_parts",
+                parent_name <> "_" <> gleam_field,
                 ctx,
               )
             None -> sb
@@ -1569,7 +1824,13 @@ pub fn generate_form_urlencoded_body(
                   |> se.indent(1, "}")
               }
             False -> {
-              let to_str = multipart_field_to_string_fn(field_schema, ctx)
+              let to_str =
+                form_field_to_string_fn(
+                  field_schema,
+                  field_name,
+                  parent_name,
+                  ctx,
+                )
               case is_required {
                 True -> {
                   let value_expr = case to_str {
@@ -1821,7 +2082,11 @@ fn emit_json_array_query_param(
   param_name: String,
   items: schema.SchemaRef,
 ) -> se.StringBuilder {
-  let item_encoder = schema_dispatch.json_encoder_fn(items)
+  let item_encoder = case items {
+    Reference(name:, ..) ->
+      "encode.encode_" <> naming.to_snake_case(name) <> "_json"
+    _ -> schema_dispatch.json_encoder_fn(items)
+  }
   case param.required {
     True ->
       sb

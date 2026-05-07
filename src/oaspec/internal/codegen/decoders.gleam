@@ -403,6 +403,7 @@ fn generate_decoder(
         decoder_fn_name,
         metadata.description,
         enum_values,
+        ctx,
       )
 
     Inline(AllOfSchema(metadata:, schemas:)) -> {
@@ -822,6 +823,7 @@ fn generate_enum_decoder(
   decoder_fn_name: String,
   description: Option(String),
   enum_values: List(String),
+  ctx: Context,
 ) -> se.StringBuilder {
   let sb = maybe_doc_comment(sb, description)
   let sb =
@@ -837,6 +839,7 @@ fn generate_enum_decoder(
     |> se.indent(1, "case value {")
 
   let deduped_variants = dedup.dedup_enum_variants(enum_values)
+  let component_type_names = context.component_type_names(ctx)
   let sb =
     list.index_fold(enum_values, sb, fn(sb, value, idx) {
       let variant_suffix =
@@ -845,7 +848,11 @@ fn generate_enum_decoder(
           idx,
           naming.to_pascal_case(value),
         )
-      let variant = naming.schema_to_type_name(type_name) <> variant_suffix
+      let variant =
+        naming.dedup_enum_variant_name(
+          naming.schema_to_type_name(type_name) <> variant_suffix,
+          component_type_names,
+        )
       sb
       |> se.indent(
         2,
@@ -859,12 +866,16 @@ fn generate_enum_decoder(
       [first, ..] -> naming.to_pascal_case(first)
       [] -> "Unknown"
     })
+  let first_variant_full =
+    naming.dedup_enum_variant_name(
+      naming.schema_to_type_name(type_name) <> first_variant_suffix,
+      component_type_names,
+    )
   sb
   |> se.indent(
     2,
     "_ -> decode.failure(types."
-      <> naming.schema_to_type_name(type_name)
-      <> first_variant_suffix
+      <> first_variant_full
       <> ", \""
       <> type_name
       <> ": unknown variant \" <> value)",

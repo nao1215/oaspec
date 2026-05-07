@@ -676,11 +676,15 @@ fn inline_enums_from_properties(
             let type_name =
               inline_enum_type_name_for(parent_name, prop_name, ctx)
             let deduped_variants = dedup.dedup_enum_variants(enum_values)
+            let component_type_names = context.component_type_names(ctx)
             let variants =
               list.zip(enum_values, deduped_variants)
               |> list.map(fn(pair) {
                 let #(_, variant_suffix) = pair
-                naming.schema_to_type_name(type_name) <> variant_suffix
+                naming.dedup_enum_variant_name(
+                  naming.schema_to_type_name(type_name) <> variant_suffix,
+                  component_type_names,
+                )
               })
             Ok(ir.declaration(
               doc: metadata.description,
@@ -818,11 +822,15 @@ fn schema_type_decls(
 
     StringSchema(metadata:, enum_values:, ..) if enum_values != [] -> {
       let deduped_variants = dedup.dedup_enum_variants(enum_values)
+      let component_type_names = context.component_type_names(ctx)
       let variants =
         list.zip(enum_values, deduped_variants)
         |> list.map(fn(pair) {
           let #(_, variant_suffix) = pair
-          naming.schema_to_type_name(type_name) <> variant_suffix
+          naming.dedup_enum_variant_name(
+            naming.schema_to_type_name(type_name) <> variant_suffix,
+            component_type_names,
+          )
         })
       [
         ir.declaration(

@@ -195,7 +195,14 @@ fn generate_encoders(
   se.to_string(sb)
 }
 
-/// Generate inline enum encoders found in object/allOf properties.
+/// Generate inline enum encoders found in object / allOf properties,
+/// recursively. Stripe (and similar large specs) declare inline enums
+/// at depths well past the original one-level walk: e.g.
+/// `post_billing_portal_sessions_request.flow_data.retention.type`
+/// is an inline `enum: [...]` 3 levels under the request body. The
+/// client emitter resolves these to
+/// `encode.encode_<parent>_<...>_<prop>_to_string` helpers, so each
+/// nested level needs its own emitter call here.
 fn generate_inline_enum_encoders(
   sb: se.StringBuilder,
   parent_name: String,
@@ -215,11 +222,11 @@ fn generate_inline_enum_encoders(
   }
   list.fold(props, sb, fn(sb, entry) {
     let #(prop_name, prop_ref) = entry
-    // Issue #309: a required inline single-value string-enum has no
-    // matching type in `types.gleam`, so generating an encoder for it
-    // would reference a non-existent type. Skip it; the parent
-    // object's encoder inlines the constant `json.string("...")`.
     case schema_utils.constant_property_value(prop_ref, prop_name, required) {
+      // Issue #309: a required inline single-value string-enum has no
+      // matching type in `types.gleam`, so generating an encoder for
+      // it would reference a non-existent type. Skip it; the parent
+      // object's encoder inlines the constant `json.string("...")`.
       Some(_) -> sb
       None ->
         case prop_ref {
@@ -227,6 +234,14 @@ fn generate_inline_enum_encoders(
             let enum_name =
               ir_build.inline_enum_type_name_for(parent_name, prop_name, ctx)
             generate_encoder(sb, enum_name, prop_ref, ctx)
+          }
+          // Recurse into nested object / allOf properties so their
+          // inline enums are emitted with the matching nested-path
+          // helper names.
+          Inline(ObjectSchema(..)) | Inline(AllOfSchema(..)) -> {
+            let nested_parent =
+              parent_name <> "_" <> naming.to_snake_case(prop_name)
+            generate_inline_enum_encoders(sb, nested_parent, prop_ref, ctx)
           }
           _ -> sb
         }
@@ -597,6 +612,7 @@ fn generate_encoder(
         )
         |> se.indent(1, "let str = case value {")
 
+      let component_type_names = context.component_type_names(ctx)
       let sb =
         list.index_fold(enum_values, sb, fn(sb, value, idx) {
           let variant_suffix =
@@ -605,7 +621,11 @@ fn generate_encoder(
               idx,
               naming.to_pascal_case(value),
             )
-          let variant = naming.schema_to_type_name(type_name) <> variant_suffix
+          let variant =
+            naming.dedup_enum_variant_name(
+              naming.schema_to_type_name(type_name) <> variant_suffix,
+              component_type_names,
+            )
           sb
           |> se.indent(2, "types." <> variant <> " -> \"" <> value <> "\"")
         })
@@ -652,7 +672,11 @@ fn generate_encoder(
               idx,
               naming.to_pascal_case(value),
             )
-          let variant = naming.schema_to_type_name(type_name) <> variant_suffix
+          let variant =
+            naming.dedup_enum_variant_name(
+              naming.schema_to_type_name(type_name) <> variant_suffix,
+              component_type_names,
+            )
           sb
           |> se.indent(2, "types." <> variant <> " -> \"" <> value <> "\"")
         })

@@ -111,3 +111,46 @@ jobs:
 
       - name: Generate / format / build full GitHub OpenAPI
         run: bash integration_test/github_full.sh
+
+  stripe-openapi:
+    # Companion to github-openapi: runs the full Stripe OpenAPI spec
+    # (committed in-repo at doc/reference/oss/libopenapi/test_specs/
+    # stripe.yaml, ~4.3 MB / ~1k operations) end-to-end. Stripe leans
+    # heavily on form-urlencoded bodies, deepObject query parameters,
+    # composite (oneOf / anyOf / allOf) field shapes, and inline
+    # enums nested several levels deep — exactly the codegen surface
+    # PRs #540–#543 added. The job builds the generated client (no
+    # `--warnings-as-errors`; stylistic emitter cleanups are tracked
+    # as follow-ups). Self-contained and runs in parallel with the
+    # other jobs.
+    name: Full Stripe OpenAPI generate / format / build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          gleam-version: "1.15"
+          rebar3-version: "3"
+
+      - name: Cache Gleam build
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/packages
+            build/dev/erlang/oaspec
+            ~/.cache/gleam
+          key: ${{ runner.os }}-gleam-build-${{ hashFiles('manifest.toml', 'gleam.toml', 'src/**') }}
+          restore-keys: |
+            ${{ runner.os }}-gleam-build-${{ hashFiles('manifest.toml', 'gleam.toml') }}-
+            ${{ runner.os }}-gleam-build-
+
+      - name: Download dependencies
+        run: gleam deps download
+
+      - name: Build oaspec (warnings as errors)
+        run: gleam build --warnings-as-errors
+
+      - name: Generate / format / build full Stripe OpenAPI
+        run: bash integration_test/stripe_full.sh

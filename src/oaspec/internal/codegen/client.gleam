@@ -175,6 +175,7 @@ fn emit_deep_object_query_param(
   sb: se.StringBuilder,
   p: spec.Parameter(Resolved),
   param_name: String,
+  op_id: String,
   ctx: Context,
 ) -> se.StringBuilder {
   let #(outer_props, required_set) = deep_object_properties_and_required(p, ctx)
@@ -182,6 +183,11 @@ fn emit_deep_object_query_param(
     True -> param_name
     False -> "v"
   }
+  // The hoist pass exposes deepObject param schemas under
+  // `<snake_case(op_id)>_param_<param_name>`, matching the
+  // `encode.encode_<...>_to_string` helpers `encoders.gleam` mints.
+  let parent_path =
+    naming.to_snake_case(op_id) <> "_param_" <> naming.to_snake_case(p.name)
   let inner_emit = fn(sb: se.StringBuilder) -> se.StringBuilder {
     list.fold(outer_props, sb, fn(sb, prop) {
       let #(prop_name, prop_ref) = prop
@@ -195,6 +201,8 @@ fn emit_deep_object_query_param(
         field_access,
         prop_ref,
         is_required,
+        prop_name,
+        parent_path,
         ctx,
       )
     })
@@ -257,6 +265,8 @@ fn emit_deep_object_property(
   field_access: String,
   prop_ref: schema.SchemaRef,
   is_required_prop: Bool,
+  prop_name: String,
+  parent_path: String,
   ctx: Context,
 ) -> se.StringBuilder {
   // For non-required *properties* we unwrap the `Option(_)` wrapper
@@ -271,12 +281,16 @@ fn emit_deep_object_property(
         field_access,
         inner_props,
         is_required_prop,
+        prop_name,
+        parent_path,
         ctx,
       )
     // Composite (`oneOf` / `anyOf` / `allOf`) properties don't fit
     // the bracketed-string wire format; emit them via the JSON
     // escape hatch (`parent[<prop>]=<JSON string>`), the same shape
-    // PR #542 introduced for form-urlencoded bodies.
+    // PR #542 introduced for form-urlencoded bodies. Arrays of
+    // non-primitive items take the same path — there's no string
+    // representation for `List(<RecordType>)` either.
     Some(schema.OneOfSchema(..))
     | Some(schema.AnyOfSchema(..))
     | Some(schema.AllOfSchema(..)) ->
@@ -287,6 +301,31 @@ fn emit_deep_object_property(
         prop_ref,
         is_required_prop,
       )
+    Some(schema.ArraySchema(items:, ..)) ->
+      case
+        schema_dispatch.schema_ref_qualified_type(items)
+        |> string.starts_with("types.")
+      {
+        True ->
+          emit_deep_object_json_array_property(
+            sb,
+            key,
+            field_access,
+            items,
+            is_required_prop,
+          )
+        False ->
+          emit_deep_object_primitive(
+            sb,
+            key,
+            field_access,
+            prop_ref,
+            is_required_prop,
+            prop_name,
+            parent_path,
+            ctx,
+          )
+      }
     Some(_) | None ->
       emit_deep_object_primitive(
         sb,
@@ -294,8 +333,42 @@ fn emit_deep_object_property(
         field_access,
         prop_ref,
         is_required_prop,
+        prop_name,
+        parent_path,
         ctx,
       )
+  }
+}
+
+fn emit_deep_object_json_array_property(
+  sb: se.StringBuilder,
+  key: String,
+  field_access: String,
+  items: schema.SchemaRef,
+  is_required: Bool,
+) -> se.StringBuilder {
+  let item_encoder = case items {
+    schema.Reference(name:, ..) ->
+      "encode.encode_" <> naming.to_snake_case(name) <> "_json"
+    _ -> schema_dispatch.json_encoder_fn(items)
+  }
+  let value_expr = "json.to_string(json.array(v_inner, " <> item_encoder <> "))"
+  case is_required {
+    True ->
+      sb
+      |> se.indent(1, "let query = {")
+      |> se.indent(2, "let v_inner = " <> field_access)
+      |> se.indent(2, "[#(\"" <> key <> "\", " <> value_expr <> "), ..query]")
+      |> se.indent(1, "}")
+    False ->
+      sb
+      |> se.indent(1, "let query = case " <> field_access <> " {")
+      |> se.indent(
+        2,
+        "Some(v_inner) -> [#(\"" <> key <> "\", " <> value_expr <> "), ..query]",
+      )
+      |> se.indent(2, "None -> query")
+      |> se.indent(1, "}")
   }
 }
 
@@ -306,10 +379,12 @@ fn emit_deep_object_json_property(
   prop_ref: schema.SchemaRef,
   is_required: Bool,
 ) -> se.StringBuilder {
-  let value_expr =
-    "json.to_string("
-    <> schema_dispatch.json_encoder_expr(prop_ref, "v_inner")
-    <> ")"
+  let inner = case prop_ref {
+    schema.Reference(name:, ..) ->
+      "encode.encode_" <> naming.to_snake_case(name) <> "_json(v_inner)"
+    _ -> schema_dispatch.json_encoder_expr(prop_ref, "v_inner")
+  }
+  let value_expr = "json.to_string(" <> inner <> ")"
   case is_required {
     True ->
       sb
@@ -335,10 +410,24 @@ fn emit_deep_object_primitive(
   field_access: String,
   prop_ref: schema.SchemaRef,
   is_required: Bool,
+  prop_name: String,
+  parent_path: String,
   ctx: Context,
 ) -> se.StringBuilder {
-  let value_expr =
-    schema_dispatch.schema_ref_to_string_expr(prop_ref, "v_inner", ctx)
+  // Inline-enum properties (Stripe's `scope.type`, `flow_data.type`,
+  // …) need the matching `encode.encode_<...>_to_string` helper, not
+  // the raw value — `schema_ref_to_string_expr` only resolves named
+  // `$ref` enums.
+  let value_expr = case prop_ref {
+    schema.Inline(schema.StringSchema(enum_values:, ..)) if enum_values != [] -> {
+      let enum_type =
+        ir_build.inline_enum_type_name_for(parent_path, prop_name, ctx)
+      "encode.encode_"
+      <> naming.to_snake_case(enum_type)
+      <> "_to_string(v_inner)"
+    }
+    _ -> schema_dispatch.schema_ref_to_string_expr(prop_ref, "v_inner", ctx)
+  }
   case is_required {
     True ->
       sb
@@ -364,9 +453,15 @@ fn emit_deep_object_nested_object(
   outer_access: String,
   inner_props: dict.Dict(String, schema.SchemaRef),
   outer_is_required: Bool,
+  outer_prop_name: String,
+  parent_path: String,
   ctx: Context,
 ) -> se.StringBuilder {
   let entries = ir_build.sorted_entries(inner_props)
+  // The hoist pass exposes each nested deepObject sub-object under
+  // `<parent_path>_<outer_prop>`, so inline-enum encoders for inner
+  // fields resolve relative to that path.
+  let inner_parent = parent_path <> "_" <> naming.to_snake_case(outer_prop_name)
   // For an optional outer object the body unwraps via `Some(o) -> ...`;
   // a required outer object dereferences directly through `outer_access`.
   let inner_emit = fn(sb, scope_access) {
@@ -381,7 +476,16 @@ fn emit_deep_object_nested_object(
       // field as optional — matches the type `ir_build` emits and is
       // safe for required fields too (the generated `Some` branch is
       // unreachable but compiles).
-      emit_deep_object_primitive(sb, key, field_access, inner_ref, False, ctx)
+      emit_deep_object_primitive(
+        sb,
+        key,
+        field_access,
+        inner_ref,
+        False,
+        inner_name,
+        inner_parent,
+        ctx,
+      )
     })
   }
   case outer_is_required {
@@ -937,7 +1041,7 @@ fn generate_build_body(
           // tuple. Nested-object properties recurse one more level
           // (`filter[outer][inner]=value`).
           case operation_ir.is_deep_object_param(p, ctx) {
-            True -> emit_deep_object_query_param(sb, p, param_name, ctx)
+            True -> emit_deep_object_query_param(sb, p, param_name, op_id, ctx)
             False ->
               case client_request.is_exploded_array_param(p, ctx) {
                 True ->
@@ -1243,7 +1347,30 @@ fn generate_form_urlencoded_body_emission(
   op_id: String,
   ctx: Context,
 ) -> se.StringBuilder {
-  let sb = client_request.generate_form_urlencoded_body(sb, rb, op_id, ctx)
-  sb
-  |> se.indent(1, "let body = transport.TextBody(body_str)")
+  case rb.required {
+    True -> {
+      let sb = client_request.generate_form_urlencoded_body(sb, rb, op_id, ctx)
+      sb |> se.indent(1, "let body = transport.TextBody(body_str)")
+    }
+    // An optional form-urlencoded body is bound as
+    // `Option(<RequestType>)`. The form-urlencoded emitter dereferences
+    // `body.<field>` directly, so we unwrap the option through a `case`
+    // first; on `None` we fall back to an empty body. A single
+    // `let body = transport.TextBody(body_str)` follows so the rest of
+    // the build-request flow doesn't have to special-case the shape.
+    False ->
+      sb
+      |> se.indent(1, "let body_str = case body {")
+      |> se.indent(2, "Some(body) -> {")
+      |> client_request.generate_form_urlencoded_body(rb, op_id, ctx)
+      |> se.indent(3, "body_str")
+      |> se.indent(2, "}")
+      |> se.indent(2, "None -> \"\"")
+      |> se.indent(1, "}")
+      |> se.indent(
+        1,
+        "let body_content_type = \"application/x-www-form-urlencoded\"",
+      )
+      |> se.indent(1, "let body = transport.TextBody(body_str)")
+  }
 }
