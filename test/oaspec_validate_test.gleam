@@ -3,6 +3,10 @@ import oaspec_support as support
 pub fn validator_core_acceptance_test() {
   let _ = support.validate_accepts_array_parameter_case()
   let _ = support.validate_accepts_optional_array_parameter_case()
+  let _ = support.validate_rejects_response_header_with_ref_schema_case()
+  let _ = support.validate_rejects_response_header_with_object_schema_case()
+  let _ = support.validate_rejects_response_header_with_oneof_schema_case()
+  let _ = support.validate_accepts_response_header_with_string_schema_case()
   let _ = support.validate_accepts_text_plain_response_case()
   let _ = support.validate_accepts_text_plain_request_body_case()
   let _ = support.validate_accepts_octet_stream_request_body_case()

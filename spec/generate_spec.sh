@@ -1168,12 +1168,17 @@ EOF
   Before 'setup_ref_header_config'
   After 'cleanup_ref_header_config'
 
-  It 'refuses to generate a client when a response header uses a $ref schema'
+  It 'refuses to generate a client when a response header uses a ref schema'
+    # Issue #552: validate.validate_response_headers now catches this
+    # at validate time and emits a structured Diagnostic instead of
+    # letting codegen panic. The CLI surfaces the diagnostic with the
+    # header name + offending kind in the message; the previous
+    # "Cannot generate client extractor for response header" wording
+    # is gone, replaced by the validation hint.
     When run generate --config=./test_ref_header.yaml
     The status should be failure
-    The output should include "Cannot generate client extractor for response header"
-    The output should include "X-Item-Kind"
-    The output should include "issue #387"
+    The output should include "Response header 'X-Item-Kind' has an unsupported schema"
+    The output should include "ref to component schema"
   End
 End
 

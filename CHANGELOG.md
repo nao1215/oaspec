@@ -10,6 +10,23 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Fixed
+
+- `oaspec generate` no longer panics on a response header whose
+  schema is a `$ref` or any composite shape (object, array, allOf,
+  oneOf, anyOf). The codegen path used to crash with a stack trace
+  on any such spec — perfectly valid OpenAPI 3.x — taking the whole
+  CLI process down. `validate.validate_response_headers` now catches
+  these shapes during the existing validate phase and surfaces a
+  structured `Diagnostic` ("Response header 'X-Foo' has an
+  unsupported schema for the client extractor: …") with the
+  offending header name and a hint pointing at the supported
+  inline-primitive shapes (issue #387 tracks the typed-extraction
+  work for composite shapes). The codegen-time panics in
+  `client_response.classify_header_schema` are now defensive
+  unreachable markers; reaching them indicates the validator was
+  bypassed or regressed. (#552)
+
 ### Breaking
 
 - **`oaspec/transport.Method` gains an `Other(String)` variant.**
