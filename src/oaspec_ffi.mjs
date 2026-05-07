@@ -18,3 +18,21 @@ export function monotonic_ms() {
       : Date.now();
   return Math.trunc(ms);
 }
+
+// Run a thunk and report (panicked, message) to the caller. Mirrors
+// the BEAM implementation in `oaspec_ffi.erl`. Used by tests that
+// exercise functions which intentionally panic on invalid input.
+export function capture_panic(thunk) {
+  try {
+    thunk();
+    return [false, ""];
+  } catch (error) {
+    let message;
+    if (error && typeof error === "object" && error.message) {
+      message = error.message;
+    } else {
+      message = String(error);
+    }
+    return [true, message];
+  }
+}

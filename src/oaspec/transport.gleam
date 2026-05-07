@@ -5,6 +5,7 @@
 //// `Send` / `AsyncSend` to a real runtime; tests can plug in arbitrary
 //// fake transport values via `oaspec/mock`.
 
+import gleam/bool
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
@@ -235,6 +236,17 @@ pub fn with_base_url(
 /// clobbers them — and the helper works with both sync and async send
 /// functions.
 ///
+/// **Validation.** Both `name` and `value` are checked at construction
+/// time for the absence of CR (`\r`), LF (`\n`), and NUL (`\u{0000}`)
+/// bytes. Those bytes enable HTTP response-splitting / header
+/// injection if they reach the wire — see RFC 9112 §2.2. A value that
+/// contains any of them panics with a structured message naming the
+/// offending byte and the recommendation: pre-encode binary values
+/// via Base64 or RFC 8187 before passing them in. The check fires at
+/// the outer call (i.e. when the wrapper is built), so a static
+/// misconfiguration surfaces immediately at startup rather than
+/// per-request.
+///
 /// **Composition order.** Each call wraps the previous send. When two
 /// `with_default_header` wrappers target the same name (case-insensitive),
 /// the **outermost** wrapper (the one most recently piped in) wins,
@@ -248,6 +260,15 @@ pub fn with_default_header(
   name name: String,
   value value: String,
 ) -> fn(Request) -> a {
+  validate_header_name(
+    api_name: "oaspec.transport.with_default_header",
+    name: name,
+  )
+  validate_header_value(
+    api_name: "oaspec.transport.with_default_header",
+    name: name,
+    value: value,
+  )
   fn(req: Request) {
     case has_header(req.headers, name) {
       True -> send(req)
@@ -263,6 +284,13 @@ pub fn with_default_header(
 /// declare them. Iteration order is preserved so callers get
 /// deterministic ordering on the wire, and the helper works with both
 /// sync and async send functions.
+///
+/// **Validation.** Every `name` and every `value` in `headers` is
+/// checked at construction time for the absence of CR, LF, and NUL
+/// bytes (see `with_default_header` for the rationale). The first
+/// invalid entry panics with a structured message naming the
+/// offending byte; the check fires at the outer call, so a static
+/// misconfiguration surfaces immediately rather than per-request.
 ///
 /// **Duplicate names within `headers`.** Header-name comparison is
 /// case-insensitive (per RFC 7230). When the supplied list contains the
@@ -282,6 +310,18 @@ pub fn with_default_headers(
   send send: fn(Request) -> a,
   headers headers: List(#(String, String)),
 ) -> fn(Request) -> a {
+  list.each(headers, fn(kv) {
+    let #(name, value) = kv
+    validate_header_name(
+      api_name: "oaspec.transport.with_default_headers",
+      name: name,
+    )
+    validate_header_value(
+      api_name: "oaspec.transport.with_default_headers",
+      name: name,
+      value: value,
+    )
+  })
   fn(req: Request) {
     // Build with prepend + final reverse so the fold is O(N) over the
     // header list instead of the O(N²) shape we get from
@@ -330,6 +370,56 @@ fn has_header(headers: List(#(String, String)), name: String) -> Bool {
     let #(k, _) = h
     string.lowercase(k) == lowered
   })
+}
+
+// Reject header names that contain CR / LF / NUL bytes. The name
+// itself is rarely user-derived (most callers pass a string literal),
+// but defending the same surface as `validate_header_value` keeps the
+// API symmetrical and shuts the door on a future call site that flips
+// from literal-name to runtime-name without thinking through the
+// injection surface.
+fn validate_header_name(api_name api_name: String, name name: String) -> Nil {
+  case forbidden_byte(name) {
+    None -> Nil
+    Some(byte_label) ->
+      panic as {
+        api_name
+        <> ": header name contains forbidden control byte "
+        <> byte_label
+        <> " — header names must not include CR, LF, or NUL"
+      }
+  }
+}
+
+// Reject header values that contain CR / LF / NUL bytes — those are
+// the bytes that enable HTTP response-splitting / header injection if
+// they reach the wire (RFC 9112 §2.2). Pre-encode binary values via
+// Base64 or RFC 8187 before passing them in.
+fn validate_header_value(
+  api_name api_name: String,
+  name name: String,
+  value value: String,
+) -> Nil {
+  case forbidden_byte(value) {
+    None -> Nil
+    Some(byte_label) ->
+      panic as {
+        api_name
+        <> ": header value for `"
+        <> name
+        <> "` contains forbidden control byte "
+        <> byte_label
+        <> " (CR/LF/NUL enable header injection per RFC 9112 §2.2);"
+        <> " pre-encode binary values via Base64 or RFC 8187"
+      }
+  }
+}
+
+fn forbidden_byte(s: String) -> Option(String) {
+  use <- bool.guard(string.contains(s, "\r"), Some("CR (\\r)"))
+  use <- bool.guard(string.contains(s, "\n"), Some("LF (\\n)"))
+  use <- bool.guard(string.contains(s, "\u{0000}"), Some("NUL (\\u{0000})"))
+  None
 }
 
 fn pick_alternative(

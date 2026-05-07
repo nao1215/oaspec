@@ -83,6 +83,11 @@ unwrap_used = "error"
 # functions and ignore their heterogeneous return values; lint the case bodies
 # themselves rather than forcing every wrapper call to pattern-match.
 "test/oaspec_*_test.gleam" = ["discarded_result"]
+# transport_test exercises with_default_header*'s panic surface via
+# capture_panic; the unused wrapper return value (a fn(Request) -> a)
+# is intentional — the test only cares whether construction panicked
+# before the fn was returned. (#546)
+"test/transport_test.gleam" = ["discarded_result"]
 # Codegen and OpenAPI traversal code takes many unlabelled helper
 # parameters and is naturally branchy; fixing these cleanly would require a
 # project-wide refactor that is out of scope for enabling glinter.
@@ -96,6 +101,13 @@ unwrap_used = "error"
 # must fail fast instead of silently generating broken code (#290).
 "src/oaspec/internal/codegen/*.gleam" = ["label_possible", "deep_nesting", "avoid_panic"]
 "src/oaspec/codegen/writer.gleam" = ["label_possible"]
+# transport.gleam validates header names / values for CR/LF/NUL injection
+# at construction time (#546). The panic surfaces a security-relevant
+# misconfiguration immediately rather than silently propagating a
+# poison value to the wire — a Result-returning signature would force
+# every caller to handle a never-error case for a literal-string call
+# site.
+"src/oaspec/transport.gleam" = ["avoid_panic"]
 "src/oaspec/internal/openapi/*.gleam" = ["label_possible", "deep_nesting"]
 "src/oaspec/openapi/parser.gleam" = ["label_possible", "deep_nesting"]
 "src/oaspec/openapi/diagnostic.gleam" = ["label_possible"]
