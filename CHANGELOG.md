@@ -62,6 +62,20 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Documentation
 
+- `oaspec/openapi/parser.parse_string` docstring now documents the
+  YAML 1.1 type-coercion rules that yamerl applies to scalars but
+  OTP's JSON decoder does not. The two parsers diverge on the same
+  JSON bytes whenever a scalar matches a YAML 1.1 implicit-type
+  pattern: `"Yes"` / `"No"` / `"On"` / `"Off"` get coerced to
+  booleans, `1.10` loses its trailing zero, hex-prefixed integers
+  and sexagesimal numerals are recognised by yamerl but rejected by
+  the JSON decoder. For JSON OpenAPI documents (Stripe, GitHub,
+  AsyncAPI), prefer `parse_json_string` or
+  `parse_string_or_json_with_locations` (auto-routes by first
+  non-whitespace byte). New regression tests pin
+  `parse_json_string`'s verbatim handling of `"Yes"` and `"1.10"`
+  so a future regression that breaks the JSON path surfaces here.
+  (#549)
 - `oaspec/transport.with_default_headers` and
   `with_default_header` docstrings now spell out the dedup contracts
   explicitly. The list form is **first-occurrence-wins** (e.g.

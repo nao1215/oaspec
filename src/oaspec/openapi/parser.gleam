@@ -190,6 +190,27 @@ fn cyclic_external_ref_diagnostic(
 /// REST OpenAPI is ~12 MB and yamerl effectively hangs — see issue
 /// #352). Use `parse_json_string` directly when the content is known
 /// to be JSON.
+///
+/// **YAML 1.1 type coercion: parse_string vs parse_json_string.**
+/// yamerl applies YAML 1.1 implicit-type rules to scalars before they
+/// reach metamon's tree walker. The OTP `json:decode/3` frontend used
+/// by `parse_json_string` does not. The two parsers therefore diverge
+/// on the same JSON bytes whenever a value matches a YAML 1.1
+/// implicit-type pattern:
+///
+/// | JSON literal | `parse_string` (yamerl, YAML 1.1) | `parse_json_string` (OTP) |
+/// | --- | --- | --- |
+/// | `"version": "Yes"` | bool `True` | string `"Yes"` |
+/// | `"role": "No"` | bool `False` | string `"No"` |
+/// | `"flag": "On"` / `"Off"` | bool `True` / `False` | string `"On"` / `"Off"` |
+/// | `"version": 1.10` | float `1.1` (trailing zero lost) | float `1.10` |
+/// | `"hex": 0x10` | int `16` (yamerl extension) | parse error (not valid JSON) |
+///
+/// For JSON OpenAPI documents — Stripe, GitHub, AsyncAPI, etc. — prefer
+/// `parse_json_string` (or `parse_string_or_json_with_locations`,
+/// which auto-routes by inspecting the first non-whitespace byte).
+/// `parse_string` remains correct for YAML input and for JSON inputs
+/// whose values do not collide with YAML 1.1 implicit-type patterns.
 pub fn parse_string(
   content: String,
 ) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
