@@ -11,6 +11,12 @@ pub fn parser_smoke_test() {
   let _ = support.parse_json_string_rejects_malformed_case()
   let _ = support.parse_json_string_malformed_has_diagnostic_shape_case()
   let _ = support.parse_file_dispatches_json_path_for_json_extension_case()
+  let _ = support.parse_json_string_with_locations_returns_same_spec_case()
+  let _ = support.parse_json_string_with_locations_index_is_empty_case()
+  let _ = support.parse_string_or_json_with_locations_routes_json_test_case()
+  let _ = support.parse_string_or_json_with_locations_routes_yaml_test_case()
+  let _ =
+    support.parse_string_or_json_with_locations_array_root_routes_json_case()
   let _ = support.oss_oai_petstore_expanded_yaml_and_json_agree_case()
   let _ = support.oss_oai_petstore_expanded_yaml_path_count_pinned_case()
   let _ = support.oss_oai_webhook_example_yaml_and_json_agree_case()
