@@ -8,23 +8,23 @@
 # `style: deepObject` query parameters, and array query parameters
 # whose items resolve to objects.
 #
-# The Stripe spec is committed in-repo
-# (`doc/reference/oss/libopenapi/test_specs/stripe.yaml`), so this
-# job has no network dependency — it always runs.
-#
 # Steps:
-#   1. Run `oaspec generate` against `stripe.yaml` with
-#      `validate: true` so every codegen module is exercised end-
-#      to-end against the residual shapes PR #543 fixed.
-#   2. Verify the generated files are formatted and carry the
+#   1. Download the Stripe OpenAPI yaml from the upstream
+#      `stripe/openapi` GitHub repository, cached under /tmp and
+#      refreshed weekly. A failed download is a soft skip on the
+#      assumption contributors may be offline.
+#   2. Run `oaspec generate` against the spec with `validate: true`
+#      so every codegen module is exercised end-to-end against the
+#      residual shapes PR #543 / #544 fixed.
+#   3. Verify the generated files are formatted and carry the
 #      codegen provenance header.
-#   3. Build the generated package with `--warnings-as-errors`.
+#   4. Build the generated package.
 #
 # Glinter is intentionally NOT run against the generated full-Stripe
 # package; same rationale as `github_full.sh` (quadratic on module
 # size, the project's own sources already cover every rule).
 #
-# Set `OASPEC_SKIP_STRIPE_TEST=1` to skip everything.
+# Set `OASPEC_SKIP_STRIPE_TEST=1` to skip everything (offline runs).
 
 set -e
 
@@ -75,10 +75,29 @@ fi
 
 info "Full Stripe OpenAPI generation + format + build test..."
 
-STRIPE_SPEC="$PROJECT_ROOT/doc/reference/oss/libopenapi/test_specs/stripe.yaml"
-if [ ! -f "$STRIPE_SPEC" ]; then
-  fail "Stripe spec not found at $STRIPE_SPEC"
+STRIPE_API_CACHE="${OASPEC_STRIPE_API_CACHE:-/tmp/oaspec_stripe_api.yaml}"
+STRIPE_API_URL="https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.yaml"
+
+# Refresh the cache when missing OR older than 7 days.
+needs_download=0
+if [ ! -f "$STRIPE_API_CACHE" ]; then
+  needs_download=1
+elif [ -n "$(find "$STRIPE_API_CACHE" -mtime +7 -print 2>/dev/null)" ]; then
+  needs_download=1
 fi
+
+if [ "$needs_download" = "1" ]; then
+  info "Downloading Stripe OpenAPI to $STRIPE_API_CACHE ..."
+  if ! curl -fsSL --max-time 180 -o "$STRIPE_API_CACHE.tmp" "$STRIPE_API_URL"; then
+    rm -f "$STRIPE_API_CACHE.tmp"
+    info "WARNING: download failed (network or rate limit)."
+    info "Skipping full Stripe OpenAPI test."
+    info "(Set OASPEC_SKIP_STRIPE_TEST=1 to silence this notice.)"
+    exit 0
+  fi
+  mv "$STRIPE_API_CACHE.tmp" "$STRIPE_API_CACHE"
+fi
+STRIPE_SPEC="$STRIPE_API_CACHE"
 
 STRIPE_TEST_DIR="$SCRIPT_DIR/stripe_full_test"
 rm -rf "$STRIPE_TEST_DIR"

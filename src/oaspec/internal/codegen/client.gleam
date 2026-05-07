@@ -414,6 +414,55 @@ fn emit_deep_object_primitive(
   parent_path: String,
   ctx: Context,
 ) -> se.StringBuilder {
+  // Array-of-non-primitive properties surfaced this deep (Stripe
+  // exposes `filter.applicability_scope.prices: [...]` as a
+  // deepObject inner-inner field) cannot be stringified, so they
+  // take the JSON escape hatch — the same shape PR #543 / #544
+  // installs everywhere else.
+  let array_with_complex_items = case resolve_param_schema(prop_ref, ctx) {
+    Some(schema.ArraySchema(items:, ..)) ->
+      case items {
+        schema.Inline(schema.StringSchema(..))
+        | schema.Inline(schema.IntegerSchema(..))
+        | schema.Inline(schema.NumberSchema(..))
+        | schema.Inline(schema.BooleanSchema(..)) -> None
+        _ -> Some(items)
+      }
+    _ -> None
+  }
+  case array_with_complex_items {
+    Some(items) ->
+      emit_deep_object_json_array_property(
+        sb,
+        key,
+        field_access,
+        items,
+        is_required,
+      )
+    None ->
+      emit_deep_object_primitive_inner(
+        sb,
+        key,
+        field_access,
+        prop_ref,
+        is_required,
+        prop_name,
+        parent_path,
+        ctx,
+      )
+  }
+}
+
+fn emit_deep_object_primitive_inner(
+  sb: se.StringBuilder,
+  key: String,
+  field_access: String,
+  prop_ref: schema.SchemaRef,
+  is_required: Bool,
+  prop_name: String,
+  parent_path: String,
+  ctx: Context,
+) -> se.StringBuilder {
   // Inline-enum properties (Stripe's `scope.type`, `flow_data.type`,
   // …) need the matching `encode.encode_<...>_to_string` helper, not
   // the raw value — `schema_ref_to_string_expr` only resolves named
