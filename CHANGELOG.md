@@ -10,6 +10,27 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Added
+
+- `oaspec/openapi/parser.parse_string_with_limits(content, limits)`
+  is a DoS-aware variant of `parse_string`. The new `ParseLimits`
+  config caps parser-side resources that an attacker-controlled or
+  accidentally-pathological spec could exhaust on a CI runner or in
+  a service that accepts user-supplied specs (admin uploads,
+  contract-validation pipelines). `parse_string` is unchanged and
+  remains the right entry point for trusted local files; reach for
+  `parse_string_with_limits` (and `default_limits()` as a starting
+  point) when the input is untrusted. The first enforced cap is
+  `max_input_bytes` (default 16 MiB — Stripe's full OpenAPI is
+  ~6 MB and GitHub's REST API is ~12 MB, both well under the cap),
+  rejected with a structured `parse_limit_exceeded` Diagnostic
+  before yamerl or `json:decode/3` allocate any tree memory. The
+  `ParseLimits` type also declares `max_schema_depth`,
+  `max_allof_chain`, `max_external_ref_hops`, `max_paths`, and
+  `max_parameters_per_op` fields that future PRs will start
+  enforcing — listing them in the type now lets callers pin the
+  contract surface up front. (#553)
+
 ### Tests
 
 - `test/normalize_argv_property_test.gleam` adds metamon

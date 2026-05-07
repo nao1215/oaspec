@@ -184,12 +184,73 @@ fn cyclic_external_ref_diagnostic(
   )
 }
 
+/// Configuration for `parse_string_with_limits`.
+///
+/// Each field caps a parser-side resource that an attacker-controlled
+/// or accidentally-pathological spec could exhaust. The defaults
+/// returned by `default_limits` are sized for real-world specs
+/// (Stripe / GitHub / AsyncAPI all fit comfortably) and are tight
+/// enough that a CI runner targeting an attacker-supplied spec is
+/// not a denial-of-service surface.
+///
+/// Currently enforced:
+///
+/// - `max_input_bytes`: the size of `content` in bytes. Checked
+///   before any parser work begins, so a 100 MB pathological input
+///   is rejected before yamerl or `json:decode/3` allocates a tree.
+///
+/// Documented but **not yet enforced** (future work — issue #553
+/// tracks the rest):
+///
+/// - `max_schema_depth`, `max_allof_chain`, `max_external_ref_hops`,
+///   `max_paths`, `max_parameters_per_op`. Constructing these limits
+///   in the type today lets callers pin the contract; the parser
+///   will start enforcing them in follow-up PRs.
+pub type ParseLimits {
+  ParseLimits(
+    max_input_bytes: Int,
+    max_schema_depth: Int,
+    max_allof_chain: Int,
+    max_external_ref_hops: Int,
+    max_paths: Int,
+    max_parameters_per_op: Int,
+  )
+}
+
+/// Project-default limits sized for real-world specs.
+///
+/// - `max_input_bytes`: 16 MiB — Stripe's full OpenAPI is ~6 MB,
+///   GitHub's REST API is ~12 MB; 16 MiB clears both with headroom.
+/// - `max_schema_depth`: 100. Real specs rarely nest beyond ~12.
+/// - `max_allof_chain`: 32.
+/// - `max_external_ref_hops`: 16.
+/// - `max_paths`: 4096. Stripe (~1k operations), GitHub (~1k), and
+///   AsyncAPI (~50) all fit comfortably.
+/// - `max_parameters_per_op`: 64. The largest real-world operation
+///   the audit found has ~20 parameters.
+pub fn default_limits() -> ParseLimits {
+  ParseLimits(
+    max_input_bytes: 16 * 1024 * 1024,
+    max_schema_depth: 100,
+    max_allof_chain: 32,
+    max_external_ref_hops: 16,
+    max_paths: 4096,
+    max_parameters_per_op: 64,
+  )
+}
+
 /// Parse an OpenAPI spec from a YAML/JSON string. The default path
 /// runs the input through yamerl, which preserves YAML semantics and
 /// source locations but is too slow on large JSON specs (the GitHub
 /// REST OpenAPI is ~12 MB and yamerl effectively hangs — see issue
 /// #352). Use `parse_json_string` directly when the content is known
 /// to be JSON.
+///
+/// `parse_string` does **not** apply the DoS limits documented in
+/// `ParseLimits`. Reach for `parse_string_with_limits` when the input
+/// is attacker-controlled or sourced from an untrusted file system
+/// (admin-uploaded specs, contract-validation pipelines, CI runners
+/// over user-supplied specs) — see issue #553.
 ///
 /// **YAML 1.1 type coercion: parse_string vs parse_json_string.**
 /// yamerl applies YAML 1.1 implicit-type rules to scalars before they
@@ -227,6 +288,45 @@ pub fn parse_string_with_locations(
   use #(root, index) <- result.try(parse_to_node(content))
   use spec <- result.map(parse_root(root, index))
   #(spec, index)
+}
+
+/// Parse an OpenAPI spec with DoS-aware resource limits. Currently
+/// enforces `limits.max_input_bytes` before parsing begins; the other
+/// fields on `ParseLimits` are reserved for future enforcement (see
+/// issue #553).
+///
+/// The byte cap is checked via `string.byte_size` so the function
+/// returns immediately on oversized input rather than handing it to
+/// yamerl / `json:decode/3` (both of which allocate proportional
+/// tree memory before the size could be discovered downstream).
+///
+/// Returns the same `Diagnostic`-bearing `Result` as `parse_string`
+/// when the limit is satisfied; returns a structured
+/// `parse_limit_exceeded` diagnostic when the limit is exceeded.
+pub fn parse_string_with_limits(
+  content: String,
+  limits: ParseLimits,
+) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
+  case enforce_input_byte_limit(content, limits) {
+    Error(d) -> Error(d)
+    Ok(_) -> parse_string(content)
+  }
+}
+
+fn enforce_input_byte_limit(
+  content: String,
+  limits: ParseLimits,
+) -> Result(Nil, Diagnostic) {
+  let actual = string.byte_size(content)
+  case actual > limits.max_input_bytes {
+    False -> Ok(Nil)
+    True ->
+      Error(diagnostic.parse_limit_exceeded(
+        limit: "max_input_bytes",
+        configured: limits.max_input_bytes,
+        actual: actual,
+      ))
+  }
 }
 
 /// Parse an OpenAPI spec from a JSON string using OTP's native JSON
