@@ -10,6 +10,20 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Documentation
+
+- `oaspec/transport.with_default_headers` and
+  `with_default_header` docstrings now spell out the dedup contracts
+  explicitly. The list form is **first-occurrence-wins** (e.g.
+  `[#("X-Env", "staging"), #("X-Env", "prod")]` keeps `staging` and
+  silently drops `prod`); the wrapper form is
+  **outermost-wrapper-wins** when piping the same name through
+  multiple `with_default_header` calls. Pick one shape per code path
+  to avoid surprises. New tests pin the list-form rule for duplicate
+  names (case-insensitive dedup, order preserved between distinct
+  names). The wrapper-form composition rule is documented but tested
+  separately in #555. (#547)
+
 ## [0.59.0] - 2026-05-07
 
 This release lifts oaspec's `application/x-www-form-urlencoded`,
