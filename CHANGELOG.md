@@ -10,58 +10,7 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
-### Added
-
-- `oaspec/openapi/parser.parse_string_with_limits(content, limits)`
-  is a DoS-aware variant of `parse_string`. The new `ParseLimits`
-  config caps parser-side resources that an attacker-controlled or
-  accidentally-pathological spec could exhaust on a CI runner or in
-  a service that accepts user-supplied specs (admin uploads,
-  contract-validation pipelines). `parse_string` is unchanged and
-  remains the right entry point for trusted local files; reach for
-  `parse_string_with_limits` (and `default_limits()` as a starting
-  point) when the input is untrusted. The first enforced cap is
-  `max_input_bytes` (default 16 MiB — Stripe's full OpenAPI is
-  ~6 MB and GitHub's REST API is ~12 MB, both well under the cap),
-  rejected with a structured `parse_limit_exceeded` Diagnostic
-  before yamerl or `json:decode/3` allocate any tree memory. The
-  `ParseLimits` type also declares `max_schema_depth`,
-  `max_allof_chain`, `max_external_ref_hops`, `max_paths`, and
-  `max_parameters_per_op` fields that future PRs will start
-  enforcing — listing them in the type now lets callers pin the
-  contract surface up front. (#553)
-
-### Tests
-
-- `test/normalize_argv_property_test.gleam` adds metamon
-  property-based tests pinning `oaspec.normalize_argv`'s algebraic
-  invariants: idempotency (a second pass is a no-op), length
-  non-increasing (pair-collapse can only shrink the list), bit-for-bit
-  pass-through when the argv contains no value-bearing long flags,
-  equivalence between `--name value` and `--name=value` for the
-  flags listed in `cli.value_flag_names`, the absence of any bare
-  `--name <value>` pair in the output, and commutation with
-  appending an unrelated bool flag. The generators draw from
-  `cli.value_flag_names` directly rather than duplicating the list,
-  so adding a new value flag automatically extends the property's
-  input space. metamon is added to `[dev-dependencies]`. (#551)
-
-### Fixed
-
-- `oaspec generate` no longer panics on a response header whose
-  schema is a `$ref` or any composite shape (object, array, allOf,
-  oneOf, anyOf). The codegen path used to crash with a stack trace
-  on any such spec — perfectly valid OpenAPI 3.x — taking the whole
-  CLI process down. `validate.validate_response_headers` now catches
-  these shapes during the existing validate phase and surfaces a
-  structured `Diagnostic` ("Response header 'X-Foo' has an
-  unsupported schema for the client extractor: …") with the
-  offending header name and a hint pointing at the supported
-  inline-primitive shapes (issue #387 tracks the typed-extraction
-  work for composite shapes). The codegen-time panics in
-  `client_response.classify_header_schema` are now defensive
-  unreachable markers; reaching them indicates the validator was
-  bypassed or regressed. (#552)
+## [0.60.0] - 2026-05-07
 
 ### Breaking
 
@@ -82,6 +31,24 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Added
 
+- `oaspec/openapi/parser.parse_string_with_limits(content, limits)`
+  is a DoS-aware variant of `parse_string`. The new `ParseLimits`
+  config caps parser-side resources that an attacker-controlled or
+  accidentally-pathological spec could exhaust on a CI runner or in
+  a service that accepts user-supplied specs (admin uploads,
+  contract-validation pipelines). `parse_string` is unchanged and
+  remains the right entry point for trusted local files; reach for
+  `parse_string_with_limits` (and `default_limits()` as a starting
+  point) when the input is untrusted. The first enforced cap is
+  `max_input_bytes` (default 16 MiB — Stripe's full OpenAPI is
+  ~6 MB and GitHub's REST API is ~12 MB, both well under the cap),
+  rejected with a structured `parse_limit_exceeded` Diagnostic
+  before yamerl or `json:decode/3` allocate any tree memory. The
+  `ParseLimits` type also declares `max_schema_depth`,
+  `max_allof_chain`, `max_external_ref_hops`, `max_paths`, and
+  `max_parameters_per_op` fields that future PRs will start
+  enforcing — listing them in the type now lets callers pin the
+  contract surface up front. (#553)
 - `oaspec/openapi/parser.parse_json_string_with_locations` is now
   public, mirroring `parse_string_with_locations` (the YAML variant).
   OTP's `json:decode/3` does not expose token positions, so the
@@ -96,6 +63,20 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Fixed
 
+- `oaspec generate` no longer panics on a response header whose
+  schema is a `$ref` or any composite shape (object, array, allOf,
+  oneOf, anyOf). The codegen path used to crash with a stack trace
+  on any such spec — perfectly valid OpenAPI 3.x — taking the whole
+  CLI process down. `validate.validate_response_headers` now catches
+  these shapes during the existing validate phase and surfaces a
+  structured `Diagnostic` ("Response header 'X-Foo' has an
+  unsupported schema for the client extractor: …") with the
+  offending header name and a hint pointing at the supported
+  inline-primitive shapes (issue #387 tracks the typed-extraction
+  work for composite shapes). The codegen-time panics in
+  `client_response.classify_header_schema` are now defensive
+  unreachable markers; reaching them indicates the validator was
+  bypassed or regressed. (#552)
 - `oaspec/codegen/writer.write_all` no longer writes shared files
   twice when `mode = Both` and `output_server` resolves to the same
   directory as `output_client`. The previous behaviour wrote every
@@ -166,6 +147,21 @@ within `Changed` / `Fixed` and stay as-is.
   beats every stacked wrapper layer. The two rules are inverse to
   each other; the docs and tests now make that explicit so users do
   not mistake one for the other when mixing the two shapes. (#555)
+
+### Tests
+
+- `test/normalize_argv_property_test.gleam` adds metamon
+  property-based tests pinning `oaspec.normalize_argv`'s algebraic
+  invariants: idempotency (a second pass is a no-op), length
+  non-increasing (pair-collapse can only shrink the list), bit-for-bit
+  pass-through when the argv contains no value-bearing long flags,
+  equivalence between `--name value` and `--name=value` for the
+  flags listed in `cli.value_flag_names`, the absence of any bare
+  `--name <value>` pair in the output, and commutation with
+  appending an unrelated bool flag. The generators draw from
+  `cli.value_flag_names` directly rather than duplicating the list,
+  so adding a new value flag automatically extends the property's
+  input space. metamon is added to `[dev-dependencies]`. (#551)
 
 ## [0.59.0] - 2026-05-07
 
