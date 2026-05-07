@@ -1165,35 +1165,94 @@ fn validate_responses(
   list.flat_map(entries, fn(entry) {
     let #(status_code, response) = entry
     let content_entries = dict.to_list(response.content)
-    list.flat_map(content_entries, fn(ce) {
-      let #(media_type_name, media_type) = ce
-      let path =
-        op_id <> ".responses." <> http.status_code_to_string(status_code)
-      let content_type_errors = case
-        content_type.is_supported_response(content_type.from_string(
-          media_type_name,
-        ))
-      {
-        True -> []
-        False -> [
-          diagnostic.validation_error_both(
-            path: path,
-            detail: "Response content type '"
-              <> media_type_name
-              <> "' is not supported. Supported response content types: application/json (and +json suffix types), text/plain, application/x-ndjson, application/octet-stream, application/xml (and +xml suffix types), text/xml, */*.",
-            hint: Some(
-              "Use application/json (or a +json suffix type), text/plain, application/x-ndjson, application/octet-stream, application/xml (or a +xml suffix type), text/xml, or */*.",
+    let response_path =
+      op_id <> ".responses." <> http.status_code_to_string(status_code)
+    let header_errors = validate_response_headers(response_path, response)
+    let content_errors =
+      list.flat_map(content_entries, fn(ce) {
+        let #(media_type_name, media_type) = ce
+        let path = response_path
+        let content_type_errors = case
+          content_type.is_supported_response(content_type.from_string(
+            media_type_name,
+          ))
+        {
+          True -> []
+          False -> [
+            diagnostic.validation_error_both(
+              path: path,
+              detail: "Response content type '"
+                <> media_type_name
+                <> "' is not supported. Supported response content types: application/json (and +json suffix types), text/plain, application/x-ndjson, application/octet-stream, application/xml (and +xml suffix types), text/xml, */*.",
+              hint: Some(
+                "Use application/json (or a +json suffix type), text/plain, application/x-ndjson, application/octet-stream, application/xml (or a +xml suffix type), text/xml, or */*.",
+              ),
             ),
-          ),
-        ]
-      }
-      let schema_errors = case media_type.schema {
-        Some(schema_ref) -> validate_schema_ref_recursive(path, schema_ref, ctx)
-        None -> []
-      }
-      list.append(content_type_errors, schema_errors)
-    })
+          ]
+        }
+        let schema_errors = case media_type.schema {
+          Some(schema_ref) ->
+            validate_schema_ref_recursive(path, schema_ref, ctx)
+          None -> []
+        }
+        list.append(content_type_errors, schema_errors)
+      })
+    list.append(header_errors, content_errors)
   })
+}
+
+// Issue #552: codegen's response-header extractor (`classify_header_schema`
+// in `client_response.gleam`) only knows how to emit code for inline
+// String / Int / Float / Bool. Composite shapes ($ref, object, array,
+// allOf, oneOf, anyOf) used to panic in codegen, taking the whole
+// process down on a syntactically valid spec. Catch those shapes here
+// at validate time and surface a Diagnostic instead — the codegen
+// path now defensively panics with an "unreachable" message that
+// should never actually fire if validation ran.
+fn validate_response_headers(
+  response_path: String,
+  response: spec.Response(Resolved),
+) -> List(Diagnostic) {
+  dict.to_list(response.headers)
+  |> list.flat_map(fn(entry) {
+    let #(header_name, header) = entry
+    let header_path = response_path <> ".headers." <> header_name
+    case unsupported_header_schema_kind(header.schema) {
+      None -> []
+      Some(kind) -> [
+        diagnostic.validation_error_both(
+          path: header_path,
+          detail: "Response header '"
+            <> header_name
+            <> "' has an unsupported schema for the client extractor: "
+            <> kind
+            <> ". oaspec can only emit typed extraction for inline String, Integer, Number, and Boolean schemas today.",
+          hint: Some(
+            "Replace the header schema with an inline { type: string }, { type: integer }, { type: number }, or { type: boolean }, or remove the header from the spec if it is not part of the typed contract. Track issue #387 if you need typed extraction for this shape.",
+          ),
+        ),
+      ]
+    }
+  })
+}
+
+fn unsupported_header_schema_kind(
+  schema_opt: Option(SchemaRef),
+) -> Option(String) {
+  case schema_opt {
+    None -> None
+    Some(Inline(StringSchema(..))) -> None
+    Some(Inline(IntegerSchema(..))) -> None
+    Some(Inline(NumberSchema(..))) -> None
+    Some(Inline(BooleanSchema(..))) -> None
+    Some(Reference(name:, ..)) ->
+      Some("$ref to component schema '" <> name <> "'")
+    Some(Inline(ObjectSchema(..))) -> Some("inline object schema")
+    Some(Inline(ArraySchema(..))) -> Some("inline array schema")
+    Some(Inline(AllOfSchema(..))) -> Some("allOf composition")
+    Some(Inline(OneOfSchema(..))) -> Some("oneOf composition")
+    Some(Inline(AnyOfSchema(..))) -> Some("anyOf composition")
+  }
 }
 
 /// Validate component schemas recursively.

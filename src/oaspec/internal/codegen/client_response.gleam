@@ -328,9 +328,15 @@ pub fn build_headers_record(
 }
 
 /// Classification of a response header's schema, restricted to
-/// shapes the client extractor can produce code for. Anything
-/// outside this set falls back to a codegen-time panic via
-/// `header_field_extraction`.
+/// shapes the client extractor can produce code for.
+///
+/// Composite shapes ($ref, object, array, allOf, oneOf, anyOf) are
+/// caught at validate time by `validate.validate_response_headers`
+/// (issue #552) and surface as a `Diagnostic` before codegen runs.
+/// Reaching them here therefore means the validator was bypassed or
+/// regressed — the panic is defensive and should never fire on a
+/// spec that went through the standard `parse_file → validate →
+/// generate` pipeline.
 type HeaderFieldType {
   StringHeader
   IntHeader
@@ -349,31 +355,32 @@ fn classify_header_schema(
     Some(Inline(NumberSchema(..))) -> FloatHeader
     Some(Inline(BooleanSchema(..))) -> BoolHeader
     Some(Reference(name:, ..)) ->
-      panic as response_header_unsupported(
+      panic as unreachable_header_panic(
           header_name,
           "$ref to component schema '" <> name <> "'",
         )
     Some(Inline(ObjectSchema(..))) ->
-      panic as response_header_unsupported(header_name, "inline object schema")
+      panic as unreachable_header_panic(header_name, "inline object schema")
     Some(Inline(ArraySchema(..))) ->
-      panic as response_header_unsupported(header_name, "inline array schema")
+      panic as unreachable_header_panic(header_name, "inline array schema")
     Some(Inline(AllOfSchema(..))) ->
-      panic as response_header_unsupported(header_name, "allOf composition")
+      panic as unreachable_header_panic(header_name, "allOf composition")
     Some(Inline(OneOfSchema(..))) ->
-      panic as response_header_unsupported(header_name, "oneOf composition")
+      panic as unreachable_header_panic(header_name, "oneOf composition")
     Some(Inline(AnyOfSchema(..))) ->
-      panic as response_header_unsupported(header_name, "anyOf composition")
+      panic as unreachable_header_panic(header_name, "anyOf composition")
   }
 }
 
-fn response_header_unsupported(header_name: String, kind: String) -> String {
-  "Cannot generate client extractor for response header '"
+fn unreachable_header_panic(header_name: String, kind: String) -> String {
+  "oaspec internal error: codegen reached an unsupported response header"
+  <> " schema (header '"
   <> header_name
-  <> "' (unsupported schema: "
+  <> "', schema kind: "
   <> kind
-  <> "). Supported shapes today are inline String / Int / Float / Bool. "
-  <> "File a follow-up to oaspec issue #387 if you need typed extraction "
-  <> "for this header."
+  <> "). validate.validate_response_headers should have rejected this spec"
+  <> " before codegen ran. Please report this with the spec attached so the"
+  <> " validation gap can be fixed."
 }
 
 fn header_field_extraction(

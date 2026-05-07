@@ -1518,6 +1518,136 @@ paths:
   |> should.be_false()
 }
 
+// Issue #552: codegen panicked on response headers whose schema was a
+// $ref or any composite shape (object / array / allOf / oneOf / anyOf).
+// validate.validate_response_headers now catches those at validate
+// time so the user sees a Diagnostic instead of a stack trace.
+
+pub fn validate_rejects_response_header_with_ref_schema_case() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /thing:
+    get:
+      operationId: getThing
+      responses:
+        '200':
+          description: ok
+          headers:
+            X-Custom:
+              schema:
+                $ref: '#/components/schemas/CustomHeader'
+components:
+  schemas:
+    CustomHeader: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  // Exactly one diagnostic, naming the header and the unsupported kind.
+  case errors {
+    [d, ..] -> {
+      should.be_true(string.contains(d.message, "X-Custom"))
+      should.be_true(string.contains(d.message, "$ref"))
+    }
+    [] -> should.fail()
+  }
+}
+
+pub fn validate_rejects_response_header_with_object_schema_case() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /thing:
+    get:
+      operationId: getThing
+      responses:
+        '200':
+          description: ok
+          headers:
+            X-Meta:
+              schema:
+                type: object
+                properties:
+                  k: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  case errors {
+    [d, ..] -> should.be_true(string.contains(d.message, "object"))
+    [] -> should.fail()
+  }
+}
+
+pub fn validate_rejects_response_header_with_oneof_schema_case() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /thing:
+    get:
+      operationId: getThing
+      responses:
+        '200':
+          description: ok
+          headers:
+            X-Choice:
+              schema:
+                oneOf:
+                  - { type: string }
+                  - { type: integer }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  case errors {
+    [d, ..] -> should.be_true(string.contains(d.message, "oneOf"))
+    [] -> should.fail()
+  }
+}
+
+pub fn validate_accepts_response_header_with_string_schema_case() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /thing:
+    get:
+      operationId: getThing
+      responses:
+        '200':
+          description: ok
+          headers:
+            X-Trace:
+              schema: { type: string }
+            X-Count:
+              schema: { type: integer }
+            X-Ratio:
+              schema: { type: number }
+            X-On:
+              schema: { type: boolean }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let errors = validate.validate(ctx)
+  errors |> should.equal([])
+}
+
 pub fn validate_accepts_text_plain_response_case() {
   let yaml =
     "
