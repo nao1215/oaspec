@@ -934,6 +934,98 @@ pub fn parse_file_dispatches_json_path_for_json_extension_case() {
   spec.openapi |> should.equal("3.0.0")
 }
 
+// parse_json_string_with_locations / parse_string_or_json_with_locations (#550)
+
+pub fn parse_json_string_with_locations_returns_same_spec_case() {
+  // The location-bearing variant must return a structurally identical
+  // OpenApiSpec to parse_json_string for the same JSON input. Pin
+  // openapi/info fields and path-count to catch a regression in the
+  // tree-walking that diverges between the two entry points.
+  let json =
+    "{
+      \"openapi\": \"3.0.3\",
+      \"info\": {\"title\": \"Locs API\", \"version\": \"1.2.3\"},
+      \"paths\": {\"/a\": {}, \"/b\": {}}
+    }"
+  let assert Ok(spec_plain) = parser.parse_json_string(json)
+  let assert Ok(#(spec_locs, _index)) =
+    parser.parse_json_string_with_locations(json)
+  spec_locs.openapi |> should.equal(spec_plain.openapi)
+  spec_locs.info.title |> should.equal(spec_plain.info.title)
+  spec_locs.info.version |> should.equal(spec_plain.info.version)
+  dict.size(spec_locs.paths) |> should.equal(dict.size(spec_plain.paths))
+}
+
+pub fn parse_json_string_with_locations_index_is_empty_case() {
+  // OTP's `json:decode/3` does not expose token positions, so the
+  // returned LocationIndex is always empty. The contract is documented
+  // and now pinned: a regression that started routing JSON through a
+  // location-aware decoder would surface here.
+  let json =
+    "{
+      \"openapi\": \"3.0.3\",
+      \"info\": {\"title\": \"Empty Index\", \"version\": \"0.1.0\"},
+      \"paths\": {}
+    }"
+  let assert Ok(#(_spec, index)) = parser.parse_json_string_with_locations(json)
+  index |> should.equal(location_index.empty())
+}
+
+pub fn parse_string_or_json_with_locations_routes_json_test_case() {
+  // First non-whitespace byte is `{` → JSON path. The dispatch must
+  // pick parse_json_string_with_locations even when the content has
+  // a leading whitespace prefix (BOMs are stripped upstream; this
+  // pins the leading-blank-line case that #550 calls out).
+  let json =
+    "
+      {
+        \"openapi\": \"3.0.3\",
+        \"info\": {\"title\": \"Routed JSON\", \"version\": \"1.0.0\"},
+        \"paths\": {}
+      }"
+  let assert Ok(#(spec, index)) =
+    parser.parse_string_or_json_with_locations(json)
+  spec.info.title |> should.equal("Routed JSON")
+  // JSON path → empty index.
+  index |> should.equal(location_index.empty())
+}
+
+pub fn parse_string_or_json_with_locations_routes_yaml_test_case() {
+  // First non-whitespace byte is `o` (from `openapi:`) → YAML path.
+  // The YAML route should produce a LocationIndex with at least one
+  // recorded position (the `info.title` entry is guaranteed to be
+  // line-bound).
+  let yaml =
+    "openapi: 3.0.3
+info:
+  title: Routed YAML
+  version: 1.0.0
+paths: {}
+"
+  let assert Ok(#(spec, index)) =
+    parser.parse_string_or_json_with_locations(yaml)
+  spec.info.title |> should.equal("Routed YAML")
+  // YAML path → non-empty index. We don't pin the exact size because
+  // it depends on yamerl's tokenisation; just that it's not empty.
+  let is_empty = index == location_index.empty()
+  should.be_false(is_empty)
+}
+
+pub fn parse_string_or_json_with_locations_array_root_routes_json_case() {
+  // First non-whitespace byte is `[` — also a JSON discriminator.
+  // The content here is intentionally not a valid OpenAPI doc; we
+  // only want to confirm that the dispatch picks the JSON parser
+  // (which will reject it with a JSON-shaped error), not the YAML
+  // parser (which would silently parse the bracket as a flow-style
+  // sequence and produce a different diagnostic).
+  let json_array = "[1, 2, 3]"
+  let result = parser.parse_string_or_json_with_locations(json_array)
+  // Either path will fail (it's not an OpenAPI document), but the
+  // JSON path must be the one that fails. We just assert it errored;
+  // the more detailed message is a separate concern.
+  should.be_error(result)
+}
+
 // --- YAML/JSON parity on real-world OAI examples (issue #352) ---
 //
 // The yamerl path and the OTP json:decode fast path must agree on

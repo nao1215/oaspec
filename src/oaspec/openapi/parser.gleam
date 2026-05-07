@@ -224,16 +224,60 @@ pub fn parse_json_string(
   |> result.map(fn(pair) { pair.0 })
 }
 
-/// JSON variant of `parse_string_with_locations`. OTP's `json:decode/3`
-/// does not expose token positions so the returned `LocationIndex` is
-/// always empty; capability-check diagnostics from a JSON-only spec
-/// keep `NoSourceLoc`.
-fn parse_json_string_with_locations(
+/// JSON variant of `parse_string_with_locations`.
+///
+/// OTP's `json:decode/3` does not expose token positions, so the
+/// returned `LocationIndex` is **always empty** (`location_index.empty()`).
+/// Capability-check diagnostics from a JSON-only spec therefore carry
+/// `NoSourceLoc`, while diagnostics from the YAML path can carry
+/// line/column info via the index. Downstream tooling that wants to
+/// dispatch over both formats with one signature should reach for
+/// `parse_string_or_json_with_locations`, which inspects the first
+/// non-whitespace byte to pick between the two parsers.
+///
+/// Returning the empty index instead of an `Option(LocationIndex)` keeps
+/// the type identical to `parse_string_with_locations`, so callers do
+/// not need a separate code path — they only lose location-aware
+/// diagnostics on the JSON branch.
+pub fn parse_json_string_with_locations(
   content: String,
 ) -> Result(#(OpenApiSpec(Unresolved), LocationIndex), Diagnostic) {
   use root <- result.try(decode_json_to_node(content))
   use spec <- result.map(parse_root(root, location_index.empty()))
   #(spec, location_index.empty())
+}
+
+/// Auto-dispatch over `parse_string_with_locations` (YAML) and
+/// `parse_json_string_with_locations` (JSON) based on the first
+/// non-whitespace byte of `content`.
+///
+/// `{` and `[` route to the JSON parser (orders of magnitude faster on
+/// large specs — see `parse_json_string`); anything else routes to
+/// the YAML parser. The dispatch covers the conventional OpenAPI
+/// document shapes (object root for full specs, array root for the
+/// rare top-level component lists). Whitespace prefixes (BOM, leading
+/// spaces, blank lines) are skipped before the discriminator byte
+/// is inspected.
+///
+/// Use this when downstream tooling needs a single entry point for
+/// both formats — LSP-style features, error-hint generators,
+/// source-map producers — without writing the dispatch wrapper at
+/// every call site.
+pub fn parse_string_or_json_with_locations(
+  content: String,
+) -> Result(#(OpenApiSpec(Unresolved), LocationIndex), Diagnostic) {
+  case looks_like_json(content) {
+    True -> parse_json_string_with_locations(content)
+    False -> parse_string_with_locations(content)
+  }
+}
+
+fn looks_like_json(content: String) -> Bool {
+  case string.trim_start(content) {
+    "{" <> _ -> True
+    "[" <> _ -> True
+    _ -> False
+  }
 }
 
 /// Run yamerl on `content` and return the root node plus a

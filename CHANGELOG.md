@@ -10,6 +10,20 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Added
+
+- `oaspec/openapi/parser.parse_json_string_with_locations` is now
+  public, mirroring `parse_string_with_locations` (the YAML variant).
+  OTP's `json:decode/3` does not expose token positions, so the
+  returned `LocationIndex` is always `location_index.empty()` — the
+  type signature still matches the YAML path so downstream tooling
+  (LSP-style features, error-hint generators, source-map producers)
+  can dispatch over both formats with one signature, only losing
+  location-aware diagnostics on the JSON branch. New
+  `parse_string_or_json_with_locations` auto-routes by inspecting
+  the first non-whitespace byte (`{` or `[` → JSON, else YAML), so
+  callers do not have to write the dispatch wrapper themselves. (#550)
+
 ### Fixed
 
 - **Security:** `oaspec/transport.with_default_header` and
