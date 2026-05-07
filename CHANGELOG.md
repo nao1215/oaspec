@@ -10,6 +10,111 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-05-07
+
+This release lifts oaspec's `application/x-www-form-urlencoded`,
+deepObject, and array-query coverage from "small fixtures" to
+"real-world specs": the unmodified upstream Stripe OpenAPI document
+(~1k operations, heavy on form bodies, deepObject queries, composite
+fields, and inline enums nested several levels deep) now generates
+and compiles end-to-end, validated by a new CI integration job that
+runs alongside the existing `Full GitHub OpenAPI` job.
+
+### Added
+
+- **`encoding.<field>.contentType: application/json` escape hatch
+  for `application/x-www-form-urlencoded` bodies (#541).** A property
+  flagged with this annotation is JSON-encoded into a single string
+  and that string is percent-encoded as one form value. Stripe and
+  similar specs use this for `metadata`-shaped open hashes; the
+  generator now honors the spec instead of forcing the
+  bracket-index encoding.
+- **Composite (`oneOf` / `anyOf` / `allOf`) field support for
+  form-urlencoded bodies (#542).** Composite fields and any field
+  that *transitively* contains a composite (object → array → items
+  : composite) automatically take the same JSON escape hatch — no
+  spec changes needed.
+- **Nested arrays inside form-body objects (#540).** Primitive
+  nested arrays serialise as repeated keys
+  (`profile[scores]=10&profile[scores]=20`) for round-trip
+  compatibility with the existing server decoder; nested arrays of
+  objects use Stripe / qs `indices` style
+  (`features[0][name]=foo`). The artificial 5-level depth cap is
+  removed.
+- **Query-array parameters with non-primitive items + deepObject
+  parameters with composite or array-of-object sub-properties
+  (#543).** Both routes now use the JSON escape hatch on the client
+  side. Server mode still rejects with a server-only diagnostic.
+- **`Full Stripe OpenAPI` GitHub Actions job (#544).** A new
+  `integration_test/stripe_full.sh` script downloads the upstream
+  `stripe/openapi` spec (cached weekly under `/tmp`, soft-skips
+  with `OASPEC_SKIP_STRIPE_TEST=1` for offline contributors), runs
+  `oaspec generate` with `validate: true`, checks file headers and
+  formatting, and builds the generated package. The job runs in
+  parallel with `Full GitHub OpenAPI`.
+
+### Fixed
+
+- **`schema_dispatch` no longer panics on inline composites that
+  slip past the hoist contract (#543).** `decoder_expr`,
+  `json_encoder_expr`, `json_encoder_fn`, and `to_string_fn` now
+  fall back to permissive shapes (`dyn_decode.dynamic`,
+  `json.null()`, `fn(_) { json.null() }`, `fn(_) { "" }`) so a
+  hoist gap surfaces as a runtime null/empty payload instead of a
+  build-time crash.
+- **Optional form-urlencoded request bodies (#544).** An optional
+  body is now unwrapped via `case body { Some(b) -> ... None ->
+  transport.EmptyBody }` before any `body.<field>` access. The
+  `None` branch produces `transport.EmptyBody`, so the downstream
+  content-type-suppression rule actually drops the form
+  `content-type` for absent bodies.
+- **Inline-enum encoder resolution under deeply nested form / multipart
+  / deepObject paths (#544).** Recursive emitters (nested objects,
+  bracket fields, array-of-object items, indexed arrays, deepObject
+  sub-properties, multipart simple fields) all carry a `parent_path`
+  so an inline enum at any depth resolves to the matching
+  `encode.encode_<...>_to_string` helper. `generate_inline_enum_encoders`
+  recurses into nested object / allOf properties so the helpers it
+  mints align with the same path.
+- **Constant-property fields land on the wire as a literal value
+  (#544).** Required single-value string-enums dropped from the
+  generated record (Issue #309) now emit
+  `<key>=<constant>` parts on every form path — top-level,
+  nested-object, indexed-array, and bracket-fields — instead of
+  triggering an `Unknown record field` for the hoisted-out field.
+- **`gleam/float` / `gleam/int` / `gleam/bool` imports for
+  form-urlencoded bodies (#544).** The import-needs analyser now
+  walks form-body property trees recursively and pulls each
+  `<gleam>.to_string` module in whenever the matching primitive
+  surfaces at any nesting depth.
+- **Inline enum constructor collisions with same-named record types
+  (#544).** Stripe's `source.type` enum's variants
+  (`SourceTypeThreeDSecure`, …) collide with the constructor names
+  of records like `SourceTypeThreeDSecure` (generated from
+  `source_type_three_d_secure`). Variant names now run through a
+  global dedup against the component-type-name set, suffixing with
+  `Variant` (and a numeric tail if needed).
+- **`dedup_enum_variants` numeric suffix is now Gleam-valid for
+  PascalCase outputs (#544).** Stripe's `Etc/GMT-0`, `Etc/GMT+0`,
+  `Etc/GMT-1` collisions used to render as `EtcGMT0_2` / `EtcGMT0_3`,
+  rejected by the parser. PascalCase dedup now uses a bare numeric
+  suffix (`EtcGMT02`); snake_case dedup keeps `_<n>`.
+- **String length / pattern guards skip enum-valued schemas (#544).**
+  The generated record carries the enum type, not `String`, so a
+  `validate_<field>_length(value.field)` call would not type-check.
+  Guards for the enum field are now skipped end-to-end (constraint
+  collection, top-level functions, composite validators).
+- **Query array parameter types render with the `types.` prefix
+  (#544).** `resolve_param_type` now resolves array items through
+  `schema_ref_qualified_type_recursive` so nested `$ref` items
+  show up as `Option(List(types.<Item>))` in the generated client.
+
+### Documentation
+
+- `doc/openapi-support.md` updates the deepObject / array-query /
+  form-urlencoded rows to reflect the JSON-escape-hatch coverage on
+  the client side.
+
 ## [0.58.1] - 2026-05-06
 
 ### Fixed
