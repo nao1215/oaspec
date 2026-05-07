@@ -189,6 +189,56 @@ pub fn with_default_headers_skips_existing_test() {
   |> should.equal(Ok("default"))
 }
 
+// Pin the documented "first occurrence wins" rule for duplicate names
+// inside the supplied list. The reverse rule ("last wins") is more common
+// in HTTP intuition, so the surprising-but-deterministic contract is
+// exercised explicitly. (#547)
+pub fn with_default_headers_first_occurrence_wins_for_duplicates_test() {
+  let send =
+    transport.with_default_headers(echo_to_response(), [
+      #("X-Env", "staging"),
+      #("X-Env", "prod"),
+    ])
+  let assert Ok(resp) = send(empty_request())
+  resp.headers
+  |> list.key_find("X-Env")
+  |> should.equal(Ok("staging"))
+}
+
+pub fn with_default_headers_dedup_is_case_insensitive_test() {
+  let send =
+    transport.with_default_headers(echo_to_response(), [
+      #("X-Env", "staging"),
+      #("x-env", "prod"),
+    ])
+  let assert Ok(resp) = send(empty_request())
+  resp.headers
+  |> list.key_find("X-Env")
+  |> should.equal(Ok("staging"))
+  // The lower-case duplicate must not slip in under a different key.
+  resp.headers
+  |> list.key_find("x-env")
+  |> should.equal(Error(Nil))
+}
+
+pub fn with_default_headers_first_wins_preserves_order_for_others_test() {
+  // [#("X-A", "a"), #("X-B", "b"), #("X-A", "c")] — the second X-A is
+  // dropped, but the X-B between them survives in input order.
+  let send =
+    transport.with_default_headers(echo_to_response(), [
+      #("X-A", "a"),
+      #("X-B", "b"),
+      #("X-A", "c"),
+    ])
+  let assert Ok(resp) = send(empty_request())
+  let kept =
+    list.filter(resp.headers, fn(h) {
+      let #(k, _) = h
+      k == "X-A" || k == "X-B"
+    })
+  kept |> should.equal([#("X-A", "a"), #("X-B", "b")])
+}
+
 // ---------------------------------------------------------------------------
 // with_security: bearer
 // ---------------------------------------------------------------------------

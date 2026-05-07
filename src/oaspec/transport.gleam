@@ -212,9 +212,21 @@ pub fn with_base_url(
   fn(req: Request) { send(Request(..req, base_url: Some(base_url))) }
 }
 
-// Inject a single header when the request does not already declare it.
-// Explicit request headers win — middleware never clobbers them, and the
-// helper works with both sync and async send functions.
+/// Inject a single default header when the request does not already
+/// declare it. Header-name comparison is case-insensitive (per RFC 7230),
+/// so a request that already carries `x-trace-id` blocks a default
+/// `X-Trace-Id`. Explicit request headers always win — middleware never
+/// clobbers them — and the helper works with both sync and async send
+/// functions.
+///
+/// **Composition order.** Each call wraps the previous send. When two
+/// `with_default_header` wrappers target the same name (case-insensitive),
+/// the **outermost** wrapper (the one most recently piped in) wins,
+/// because the request reaches it first and inserts before the inner
+/// check runs. This is the *opposite* of the list form below — see
+/// `with_default_headers` for the in-list rule. Reach for the
+/// `with_default_headers([...])` shape if you want a single source of
+/// truth for the dedup ordering.
 pub fn with_default_header(
   send send: fn(Request) -> a,
   name name: String,
@@ -231,9 +243,25 @@ pub fn with_default_header(
   }
 }
 
-// Inject a list of default headers. Iteration order is preserved so callers
-// get deterministic ordering on the wire, and the helper works with both sync
-// and async send functions.
+/// Inject a list of default headers when the request does not already
+/// declare them. Iteration order is preserved so callers get
+/// deterministic ordering on the wire, and the helper works with both
+/// sync and async send functions.
+///
+/// **Duplicate names within `headers`.** Header-name comparison is
+/// case-insensitive (per RFC 7230). When the supplied list contains the
+/// same name twice (e.g. `[#("X-Env", "staging"), #("X-Env", "prod")]`),
+/// the **first occurrence is kept** and subsequent entries with the
+/// same name are silently dropped. Headers already present on the
+/// inbound request always win over every entry in `headers` regardless
+/// of position.
+///
+/// This is the *opposite* of the wrapper form's composition rule (see
+/// `with_default_header`, where the outermost wrapper wins). The two
+/// rules are each correct in isolation: the list form picks the first
+/// caller-supplied entry; the wrapper form picks the most recently
+/// piped wrapper. Pick one shape per code path and stick to it to
+/// avoid surprises.
 pub fn with_default_headers(
   send send: fn(Request) -> a,
   headers headers: List(#(String, String)),
