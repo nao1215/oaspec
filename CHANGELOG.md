@@ -23,6 +23,15 @@ within `Changed` / `Fixed` and stay as-is.
   names (case-insensitive dedup, order preserved between distinct
   names). The wrapper-form composition rule is documented but tested
   separately in #555. (#547)
+- The transport module gains a "Header middleware composition" comment
+  block above the `with_default_header*` family that summarises both
+  rules side-by-side, and the wrapper-form composition rule
+  (`with_default_header` outermost wins) is now pinned by three new
+  tests: same name → outermost wrapper wins, same rule under
+  case-insensitive name comparison, and an explicit request header
+  beats every stacked wrapper layer. The two rules are inverse to
+  each other; the docs and tests now make that explicit so users do
+  not mistake one for the other when mixing the two shapes. (#555)
 
 ## [0.59.0] - 2026-05-07
 
