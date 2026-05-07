@@ -259,6 +259,21 @@ fn resolve_param_schema(
   }
 }
 
+/// Returns `True` when the array's items resolve to a primitive
+/// (string / integer / number / boolean) shape — including a
+/// Reference whose component schema is a primitive (e.g. an enum
+/// alias). Anything else is treated as "complex" and routes through
+/// the JSON escape hatch.
+fn items_resolve_to_primitive(items: schema.SchemaRef, ctx: Context) -> Bool {
+  case resolve_param_schema(items, ctx) {
+    Some(schema.StringSchema(..))
+    | Some(schema.IntegerSchema(..))
+    | Some(schema.NumberSchema(..))
+    | Some(schema.BooleanSchema(..)) -> True
+    _ -> False
+  }
+}
+
 fn emit_deep_object_property(
   sb: se.StringBuilder,
   key: String,
@@ -302,19 +317,8 @@ fn emit_deep_object_property(
         is_required_prop,
       )
     Some(schema.ArraySchema(items:, ..)) ->
-      case
-        schema_dispatch.schema_ref_qualified_type(items)
-        |> string.starts_with("types.")
-      {
+      case items_resolve_to_primitive(items, ctx) {
         True ->
-          emit_deep_object_json_array_property(
-            sb,
-            key,
-            field_access,
-            items,
-            is_required_prop,
-          )
-        False ->
           emit_deep_object_primitive(
             sb,
             key,
@@ -324,6 +328,14 @@ fn emit_deep_object_property(
             prop_name,
             parent_path,
             ctx,
+          )
+        False ->
+          emit_deep_object_json_array_property(
+            sb,
+            key,
+            field_access,
+            items,
+            is_required_prop,
           )
       }
     Some(_) | None ->
@@ -418,15 +430,14 @@ fn emit_deep_object_primitive(
   // exposes `filter.applicability_scope.prices: [...]` as a
   // deepObject inner-inner field) cannot be stringified, so they
   // take the JSON escape hatch — the same shape PR #543 / #544
-  // installs everywhere else.
+  // installs everywhere else. The classification has to resolve
+  // `$ref` items, since a `Reference(_)` to a primitive enum is
+  // still safe to stringify with `encode.encode_<...>_to_string`.
   let array_with_complex_items = case resolve_param_schema(prop_ref, ctx) {
     Some(schema.ArraySchema(items:, ..)) ->
-      case items {
-        schema.Inline(schema.StringSchema(..))
-        | schema.Inline(schema.IntegerSchema(..))
-        | schema.Inline(schema.NumberSchema(..))
-        | schema.Inline(schema.BooleanSchema(..)) -> None
-        _ -> Some(items)
+      case items_resolve_to_primitive(items, ctx) {
+        True -> None
+        False -> Some(items)
       }
     _ -> None
   }
@@ -1404,9 +1415,10 @@ fn generate_form_urlencoded_body_emission(
     // An optional form-urlencoded body is bound as
     // `Option(<RequestType>)`. The form-urlencoded emitter dereferences
     // `body.<field>` directly, so we unwrap the option through a `case`
-    // first; on `None` we fall back to an empty body. A single
-    // `let body = transport.TextBody(body_str)` follows so the rest of
-    // the build-request flow doesn't have to special-case the shape.
+    // first. On `None` we emit `transport.EmptyBody` (not
+    // `transport.TextBody("")`), so the downstream header logic — which
+    // suppresses `content-type` only for `EmptyBody` — actually drops
+    // the form `content-type` for absent bodies.
     False ->
       sb
       |> se.indent(1, "let body_str = case body {")
@@ -1420,6 +1432,9 @@ fn generate_form_urlencoded_body_emission(
         1,
         "let body_content_type = \"application/x-www-form-urlencoded\"",
       )
-      |> se.indent(1, "let body = transport.TextBody(body_str)")
+      |> se.indent(1, "let body = case body {")
+      |> se.indent(2, "Some(_) -> transport.TextBody(body_str)")
+      |> se.indent(2, "None -> transport.EmptyBody")
+      |> se.indent(1, "}")
   }
 }

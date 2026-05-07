@@ -63,7 +63,7 @@ verify_generated_format() {
     fi
   done <<< "$files"
 
-  # shellcheck disable=SC2086 -- intentional word-splitting on find output
+  # shellcheck disable=SC2086 # intentional word-splitting on find output
   gleam format --check $files \
     || fail "Generated code under $target_dir is not gleam-formatted."
 }
@@ -90,10 +90,15 @@ if [ "$needs_download" = "1" ]; then
   info "Downloading Stripe OpenAPI to $STRIPE_API_CACHE ..."
   if ! curl -fsSL --max-time 180 -o "$STRIPE_API_CACHE.tmp" "$STRIPE_API_URL"; then
     rm -f "$STRIPE_API_CACHE.tmp"
-    info "WARNING: download failed (network or rate limit)."
-    info "Skipping full Stripe OpenAPI test."
-    info "(Set OASPEC_SKIP_STRIPE_TEST=1 to silence this notice.)"
-    exit 0
+    # An offline contributor can opt into a soft skip via the
+    # explicit env flag; otherwise the test must fail loud rather
+    # than silently passing the CI job without exercising any of
+    # the codegen surface it exists to verify.
+    if [ "${OASPEC_SKIP_STRIPE_TEST:-0}" = "1" ]; then
+      info "Download failed; OASPEC_SKIP_STRIPE_TEST=1 is set, skipping."
+      exit 0
+    fi
+    fail "Failed to download Stripe OpenAPI from $STRIPE_API_URL (network or rate limit). Set OASPEC_SKIP_STRIPE_TEST=1 for offline runs."
   fi
   mv "$STRIPE_API_CACHE.tmp" "$STRIPE_API_CACHE"
 fi
