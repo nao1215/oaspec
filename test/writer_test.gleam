@@ -227,6 +227,181 @@ pub fn write_all_skip_if_exists_preserves_user_handler_test() {
   writer_cleanup(scratch)
 }
 
+// Issue #548: when mode = Both and output_server resolves to the
+// same directory as output_client, shared files must be written
+// once, not twice. The audit reproducer (output_server == output_client
+// both set to "out/") used to write every shared file twice and
+// double-fire on_write; both behaviours are now pinned.
+
+fn writer_test_config_same_path(
+  scratch: String,
+  trailing_slash_client: Bool,
+) -> config.Config {
+  let server = scratch <> "/shared_out"
+  let client = case trailing_slash_client {
+    True -> server <> "/"
+    False -> server
+  }
+  config.new(
+    input: "test.yaml",
+    output_server: server,
+    output_client: client,
+    package: "api",
+    mode: config.Both,
+    validate: False,
+  )
+}
+
+pub fn write_all_dedupes_shared_files_when_paths_overlap_test() {
+  let scratch = writer_scratch("write_all_overlap_dedup")
+  let cfg = writer_test_config_same_path(scratch, False)
+
+  // Use the smaller payload below: one shared file, one server file,
+  // one client file. handlers.gleam's SkipIfExists machinery would
+  // muddle the dedup story; keep this case crisp.
+  let files = [
+    context.GeneratedFile(
+      path: "types.gleam",
+      content: "// shared types\n",
+      target: context.SharedTarget,
+      write_mode: context.Overwrite,
+    ),
+    context.GeneratedFile(
+      path: "server.gleam",
+      content: "// server\n",
+      target: context.ServerTarget,
+      write_mode: context.Overwrite,
+    ),
+    context.GeneratedFile(
+      path: "client.gleam",
+      content: "// client\n",
+      target: context.ClientTarget,
+      write_mode: context.Overwrite,
+    ),
+  ]
+
+  let counter_path = scratch <> "/.callback_log"
+  let assert Ok(Nil) = simplifile.create_directory_all(scratch)
+  let assert Ok(Nil) = simplifile.write(counter_path, "")
+  let on_write = fn(p: String) {
+    let _ignored_log_write = case simplifile.read(counter_path) {
+      Ok(prior) -> simplifile.write(counter_path, prior <> p <> "\n")
+      // nolint: thrown_away_error -- callback can only swallow read errors; the surrounding test asserts on log content
+      Error(_) -> Ok(Nil)
+    }
+    Nil
+  }
+
+  let assert Ok(written) = writer.write_all(files, cfg, on_write)
+
+  // 3 unique destinations: types (once, not twice), server, client.
+  list.length(written) |> should.equal(3)
+
+  // The returned list must not contain types.gleam twice.
+  let types_count =
+    list.filter(written, fn(p) { string.contains(p, "shared_out/types.gleam") })
+    |> list.length
+  types_count |> should.equal(1)
+
+  // Callback log should mention types.gleam exactly once. Counting
+  // newline occurrences of the path is the simplest proxy.
+  let assert Ok(log) = simplifile.read(counter_path)
+  let lines = string.split(log, "\n")
+  let types_callback_count =
+    list.filter(lines, fn(l) { string.contains(l, "types.gleam") })
+    |> list.length
+  types_callback_count |> should.equal(1)
+
+  writer_cleanup(scratch)
+}
+
+pub fn write_all_dedupes_shared_files_under_trailing_slash_overlap_test() {
+  // Same scenario but the client path has a trailing slash. The
+  // overlap check should treat "out" and "out/" as the same dir.
+  let scratch = writer_scratch("write_all_overlap_trailing_slash")
+  let cfg = writer_test_config_same_path(scratch, True)
+
+  let files = [
+    context.GeneratedFile(
+      path: "types.gleam",
+      content: "// shared types\n",
+      target: context.SharedTarget,
+      write_mode: context.Overwrite,
+    ),
+  ]
+
+  let assert Ok(written) = writer.write_all(files, cfg, fn(_) { Nil })
+  list.length(written) |> should.equal(1)
+
+  writer_cleanup(scratch)
+}
+
+pub fn write_all_distinct_paths_still_writes_shared_to_both_test() {
+  // Existing dual-output behaviour — when paths differ, shared files
+  // land in BOTH directories. This pins the regression boundary so a
+  // future cleanup that overzealously dedupes does not break the
+  // server / client split that is the whole reason mode=Both exists.
+  let scratch = writer_scratch("write_all_distinct_paths")
+  let cfg = writer_test_config(config.Both, scratch)
+
+  let files = [
+    context.GeneratedFile(
+      path: "types.gleam",
+      content: "// shared types\n",
+      target: context.SharedTarget,
+      write_mode: context.Overwrite,
+    ),
+  ]
+
+  let assert Ok(written) = writer.write_all(files, cfg, fn(_) { Nil })
+  // 2 entries: shared file written once to server path AND once to client.
+  list.length(written) |> should.equal(2)
+
+  // Both physical files should exist.
+  let assert Ok(_) = simplifile.read(scratch <> "/server/types.gleam")
+  let assert Ok(_) = simplifile.read(scratch <> "/client/types.gleam")
+
+  writer_cleanup(scratch)
+}
+
+pub fn resolve_paths_dedupes_shared_files_when_paths_overlap_test() {
+  let cfg =
+    config.new(
+      input: "test.yaml",
+      output_server: "./out",
+      output_client: "./out",
+      package: "api",
+      mode: config.Both,
+      validate: False,
+    )
+  let result = writer.resolve_paths(test_files(), cfg)
+  result
+  |> should.equal([
+    #("./out/types.gleam", "// types"),
+    #("./out/server.gleam", "// server"),
+    #("./out/client.gleam", "// client"),
+  ])
+}
+
+pub fn expected_paths_dedupes_shared_files_when_paths_overlap_test() {
+  let cfg =
+    config.new(
+      input: "test.yaml",
+      output_server: "./out",
+      output_client: "./out",
+      package: "api",
+      mode: config.Both,
+      validate: False,
+    )
+  let result = writer.expected_paths(test_files(), cfg)
+  result
+  |> should.equal([
+    "./out/types.gleam",
+    "./out/server.gleam",
+    "./out/client.gleam",
+  ])
+}
+
 pub fn write_all_on_write_callback_fires_per_written_file_test() {
   // The on_write callback is the hook the CLI uses for "Generated:
   // <path>" output. Every Overwrite file must trigger it exactly once;

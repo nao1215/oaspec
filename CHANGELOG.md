@@ -10,6 +10,24 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Fixed
+
+- `oaspec/codegen/writer.write_all` no longer writes shared files
+  twice when `mode = Both` and `output_server` resolves to the same
+  directory as `output_client`. The previous behaviour wrote every
+  shared file to the server path then again to the client path; with
+  identical paths, the second write silently overwrote the first,
+  fired `on_write` twice, and returned the path twice in the result
+  list. Each unique destination path now triggers one
+  `simplifile.write` call, one `on_write` callback, and one entry in
+  the returned list. The overlap check normalises trailing slashes
+  (`"out"` and `"out/"` are treated as the same directory). Distinct
+  server / client paths preserve the existing dual-output behaviour
+  — the regression boundary is pinned by a new test. The matching
+  fix lands in `resolve_paths` and `expected_paths` so `--check`
+  does not double-count drift on shared files when paths overlap.
+  (#548)
+
 ### Added
 
 - `oaspec/openapi/parser.parse_json_string_with_locations` is now
