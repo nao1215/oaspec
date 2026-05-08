@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.61.0] - 2026-05-08
+
 ### Changed
 - **Default output directory is now `./src` instead of `./gen`.** A
   freshly-generated project (`oaspec init` + `oaspec generate` with no
