@@ -1,5 +1,5 @@
 name = "oaspec_httpc"
-version = "0.1.0"
+version = "0.2.0"
 target = "erlang"
 description = "BEAM HTTP adapter for oaspec generated clients (gleam_httpc-backed)."
 licences = ["MIT"]

@@ -1,5 +1,5 @@
 name = "oaspec_fetch"
-version = "0.1.0"
+version = "0.2.0"
 target = "javascript"
 description = "JavaScript fetch adapter for oaspec generated clients."
 licences = ["MIT"]
