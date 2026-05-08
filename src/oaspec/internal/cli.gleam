@@ -220,15 +220,19 @@ package: api
 # override the mode-dependent default.
 # validate: true
 
-# Output settings (optional).
+# Output settings (optional). Defaults land inside ./src so a
+# freshly-generated project is buildable by `gleam build` without
+# any further config (#568):
+#   server -> ./src/<package>
+#   client -> ./src/<package>_client (Both mode) or ./src/<package> (Client mode)
+# Override individual targets via output.server / output.client, or
+# set output.dir to change the base directory for both at once.
 # output:
-#   dir: ./gen                    # Base directory; default paths are
-#                                 #   server -> <dir>/<package>
-#                                 #   client -> <dir>/<package>_client
-#                                 # so a single `gleam build` rooted at <dir>
-#                                 # picks up both.
-#   server: ./gen/api             # Override server output path
-#   client: ./gen/api_client      # Override client output path
+#   dir: ./src                    # Base directory; defaults to ./src
+#                                 # so generated modules drop into the
+#                                 # standard Gleam project layout.
+#   server: ./src/api             # Override server output path
+#   client: ./src/api_client      # Override client output path
 
 # Operation filter (optional, Issue #387). When set, codegen only
 # emits operations whose tag list intersects `tags` OR whose path

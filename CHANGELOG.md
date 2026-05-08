@@ -10,6 +10,20 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Changed
+- **Default output directory is now `./src` instead of `./gen`.** A
+  freshly-generated project (`oaspec init` + `oaspec generate` with no
+  `output:` block) now writes to `./src/<package>` and
+  `./src/<package>_client`, the standard Gleam project layout that
+  `gleam build` picks up without further config. Previously the default
+  was `./gen/<package>`, outside `./src`, which produced the worst-of-
+  both first-contact friction: the generator reported success but the
+  freshly-built project couldn't see the modules. Callers who set
+  `output.dir` / `output.server` / `output.client` explicitly are
+  unaffected. The `init` template's commented-out `output:` block is
+  refreshed with the new defaults; `doc/configuration.md` and
+  `doc/library-api.md` updated. (#568)
+
 ## [0.60.0] - 2026-05-07
 
 ### Breaking

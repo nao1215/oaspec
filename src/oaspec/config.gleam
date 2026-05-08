@@ -315,7 +315,15 @@ fn parse_target_node(
 
   // Determine output base directory, then derive mode-aware
   // server/client defaults. Priority: output.server/client
-  // (explicit) > output.dir (base) > default "./gen".
+  // (explicit) > output.dir (base) > default "./src".
+  //
+  // The default lands inside `./src` so a freshly-generated project
+  // is buildable by `gleam build` in one step — `./src` is the
+  // standard location Gleam picks modules from. Earlier versions
+  // defaulted to `./gen`, which produced the worst-of-both first-
+  // contact friction: the generator reported success but
+  // `gleam build` could not see the generated modules until the
+  // user added an `output:` block. (Issue #568.)
   //
   // The `_client` suffix is only needed in `Both` mode to
   // disambiguate the two output trees inside a single `<dir>`. In
@@ -329,7 +337,7 @@ fn parse_target_node(
   // for diagnostics; it is never read by the writer or codegen.
   let output_dir =
     extract_nested_string(node, "output", "dir")
-    |> option.unwrap("./gen")
+    |> option.unwrap("./src")
 
   let server_default = output_dir <> "/" <> package
   let client_default = case mode {

@@ -199,6 +199,9 @@ pub fn config_validate_default_client_case() {
 pub fn config_client_only_default_drops_client_suffix_case() {
   let assert Ok(cfg) =
     config.load("test/fixtures/oaspec_client_default_path.yaml")
+  // Fixture explicitly sets `output.dir: ./gen`. The test name says
+  // "default" because it pins the **client mode default** of dropping
+  // the `_client` suffix (#262) — `output.dir` itself is supplied.
   config.output_client(cfg) |> should.equal("./gen/api")
 }
 
