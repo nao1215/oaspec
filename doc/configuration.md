@@ -17,7 +17,7 @@ projects, set `output.server` and/or `output.client` explicitly.
 | `package` | no | `api` | Gleam module namespace prefix |
 | `mode` | no | `both` | `server`, `client`, or `both` |
 | `validate` | no | mode-dependent (`true` for `server` / `both`, `false` for `client`) | Enable guard validation in generated server/client code |
-| `output.dir` | no | `./gen` | Base output directory |
+| `output.dir` | no | `./src` | Base output directory (defaults inside `./src` so generated modules drop into the standard Gleam project layout — #568) |
 | `output.server` | no | `<dir>/<package>` | Server output path |
 | `output.client` | no | `<dir>/<package>_client` | Client output path |
 | `include.tags` | no | `[]` | Operation tag allowlist (filter) |

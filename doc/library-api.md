@@ -41,8 +41,8 @@ import oaspec/openapi/parser
 let assert Ok(spec) = parser.parse_file("openapi.yaml")
 let cfg = config.new(
   input: "openapi.yaml",
-  output_server: "./gen/my_api",
-  output_client: "./gen/my_api_client",
+  output_server: "./src/my_api",
+  output_client: "./src/my_api_client",
   package: "my_api",
   mode: config.Both,
   validate: False,

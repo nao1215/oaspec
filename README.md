@@ -102,7 +102,7 @@ Given one OpenAPI spec, `oaspec` writes modules you can keep in your
 repository:
 
 ```text
-gen/my_api/                  # server (mode: server | both)
+src/my_api/                  # server (mode: server | both)
   types.gleam
   decode.gleam
   encode.gleam
@@ -113,7 +113,7 @@ gen/my_api/                  # server (mode: server | both)
   handlers_generated.gleam
   router.gleam
 
-gen/my_api_client/           # client (mode: client | both)
+src/my_api_client/           # client (mode: client | both)
   types.gleam
   decode.gleam
   encode.gleam
@@ -122,6 +122,12 @@ gen/my_api_client/           # client (mode: client | both)
   guards.gleam
   client.gleam
 ```
+
+The default base directory is `./src` so the generated modules drop
+straight into the standard Gleam project layout — `gleam build` picks
+them up immediately. Override via `output.dir` (or per-target
+`output.server` / `output.client`) in `oaspec.yaml` if you want them
+elsewhere.
 
 `handlers.gleam` is the one user-owned file — the generator writes panic
 stubs on the first run and skips it afterwards, so your implementations
