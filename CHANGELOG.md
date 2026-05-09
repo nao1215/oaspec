@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-05-09
+
 ### Fixed
 
 - **`oaspec validate` and `oaspec generate` now reject specs that
