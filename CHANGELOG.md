@@ -10,6 +10,24 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`openapi.parser.parse_string` no longer crashes the BEAM with a
+  `case_clause` for YAML containing an alias (`*foo`) whose anchor
+  (`&foo`) is missing or unresolved.** yay v2.0.x's FFI returns
+  `{error, {yaml_error, Msg, {Line, Col}}}` for yamerl errors that
+  surface a structured message, which doesn't match the documented
+  `yay.YamlError` Gleam encoding (`{parsing_error, Msg,
+  {yaml_error_loc, Line, Col}}`); the runtime case match in
+  `parse_to_node` then falls through to a BEAM `case_clause`. A
+  one-line malformed YAML payload was enough to DoS any server-side
+  parser context (CI plugins, public spec linters, multi-tenant
+  gateways). Add a small Erlang FFI shim
+  (`oaspec_yaml_safe_ffi.erl`) that normalises the FFI tuple shape
+  to the Gleam encoding before it reaches the case match. Same
+  family as #524 (non-YAML config) and #553 (DoS-limit config).
+  (#576)
+
 ### Added
 
 - Property-based tests for `oaspec/internal/util/naming` using

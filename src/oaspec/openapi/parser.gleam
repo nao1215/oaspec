@@ -404,11 +404,26 @@ fn looks_like_json(content: String) -> Bool {
 /// Run yamerl on `content` and return the root node plus a
 /// location index built from the same content. Both pieces are
 /// consumed by `parse_root` to produce the OpenApiSpec.
+@external(erlang, "oaspec_yaml_safe_ffi", "parse_string")
+fn ffi_parse_yaml_safe(
+  content: String,
+) -> Result(List(yay.Document), yay.YamlError)
+
 fn parse_to_node(
   content: String,
 ) -> Result(#(yay.Node, LocationIndex), Diagnostic) {
   use docs <- result.try(
-    yay.parse_string(content)
+    // `oaspec_yaml_safe_ffi.parse_string` is a thin adapter over
+    // `yay:parse_string/1` that normalises yay v2.0.x's raw
+    // `{yaml_error, Msg, {Line, Col}}` FFI tuple into the Gleam
+    // encoding `yay.YamlError` is documented to carry. Calling
+    // `yay.parse_string` directly here would crash the BEAM with a
+    // `case_clause` for any input that triggers the alias /
+    // anchor resolution path (Issue #576) — a one-line malformed
+    // YAML payload can DoS a server-side spec validator. The
+    // adapter is local to this module; the rest of the parser
+    // keeps consuming the documented `yay.YamlError` surface.
+    ffi_parse_yaml_safe(content)
     |> result.map_error(fn(e) {
       case e {
         yay.ParsingError(msg:, loc:) ->
