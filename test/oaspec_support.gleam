@@ -966,6 +966,46 @@ paths:
   should.be_true(string.contains(d.message, "responses"))
 }
 
+pub fn parser_rejects_yaml_alias_without_anchor_case() {
+  // Issue #576: YAML aliases (`*foo`) that reference a missing
+  // anchor (`&foo`) must surface a `yaml_error` Diagnostic instead
+  // of crashing the parsing process with a BEAM `case_clause`.
+  // Server-side spec validators that accept user-uploaded specs
+  // could be DoS'd by a one-line malformed YAML payload.
+  let yaml =
+    "openapi: 3.0.0
+info:
+  title: t
+  version: \"1\"
+paths:
+  /a: &a
+    get: *a
+"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("yaml_error")
+  // The yamerl message names the unresolved alias so the user can
+  // locate the dangling reference in their spec.
+  should.be_true(string.contains(d.message, "alias"))
+}
+
+pub fn parser_rejects_yaml_alias_with_no_matching_anchor_path_case() {
+  // Variant of the alias-error path: the anchor `&p` would be
+  // defined under `paths:` but on a key whose flow-style is
+  // ambiguous, so yamerl never registers it before `*p` resolves.
+  let yaml =
+    "openapi: 3.0.0
+info:
+  title: t
+  version: \"1\"
+paths:
+  &p
+    a: &q
+    b: *p
+"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("yaml_error")
+}
+
 pub fn parser_rejects_duplicate_components_response_name_case() {
   let yaml =
     "
