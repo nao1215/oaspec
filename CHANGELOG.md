@@ -10,6 +10,25 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Added
+
+- Property-based tests for `oaspec/internal/util/naming` using
+  [metamon](https://github.com/nao1215/metamon). Lives in
+  `test/naming_property_test.gleam` and pins the algebraic
+  invariants the public naming helpers (`to_pascal_case`,
+  `to_snake_case`, `capitalize`, `deduplicate_names`,
+  `schema_to_type_name`, `operation_to_function_name`) are
+  documented to hold so a future refactor of the regex-driven word
+  splitter surfaces a regression here instead of cascading into
+  the codegen golden tests. Highlights: case converters are
+  idempotent and drop snake / kebab / dot separators;
+  `capitalize` preserves length and is idempotent;
+  `deduplicate_names` preserves length, yields a unique-by-set
+  output, keeps the first occurrence unchanged, and is the
+  identity on already-unique inputs; the public type / function
+  name helpers produce pascal-case and snake-case outputs
+  respectively. Bumps the metamon dev dependency to v0.6.0.
+
 ## [0.62.0] - 2026-05-09
 
 ### Fixed
