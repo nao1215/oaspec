@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.63.0] - 2026-05-10
+
 ### Fixed
 
 - **`openapi.parser.parse_string` no longer crashes the BEAM with a
