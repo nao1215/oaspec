@@ -939,6 +939,54 @@ pub fn parse_file_dispatches_json_path_for_json_extension_case() {
 
 // parse_string_with_limits / ParseLimits (#553) — DoS-aware parser limits
 
+// Issue #573: a YAML mapping must not silently accept duplicate keys.
+// yamerl tolerates them (later wins), but `oaspec validate` is the
+// "is my spec OK?" surface and should catch this class of error.
+pub fn parser_rejects_duplicate_response_status_code_case() {
+  let yaml =
+    "
+openapi: 3.0.0
+info:
+  title: Broken
+  version: 1.0.0
+paths:
+  /broken:
+    get:
+      responses:
+        '200':
+          description: OK
+        '200':
+          description: dup
+"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("duplicate_key")
+  // Diagnostic must name the duplicated key so the user knows which
+  // entry to remove.
+  should.be_true(string.contains(d.message, "200"))
+  should.be_true(string.contains(d.message, "responses"))
+}
+
+pub fn parser_rejects_duplicate_components_response_name_case() {
+  let yaml =
+    "
+openapi: 3.0.0
+info:
+  title: DupComponents
+  version: 1.0.0
+paths: {}
+components:
+  responses:
+    NotFound:
+      description: A
+    NotFound:
+      description: B
+"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("duplicate_key")
+  should.be_true(string.contains(d.message, "NotFound"))
+  should.be_true(string.contains(d.message, "components.responses"))
+}
+
 pub fn parse_string_with_limits_accepts_input_under_default_cap_case() {
   // A small inline spec is well under the 16 MiB default cap; the
   // limit-aware entry point must accept it and produce the same spec

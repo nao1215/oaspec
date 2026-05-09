@@ -13,6 +13,8 @@ pub fn parser_smoke_test() {
   let _ = support.parse_file_dispatches_json_path_for_json_extension_case()
   let _ = support.parse_json_string_preserves_yes_no_string_values_case()
   let _ = support.parse_json_string_preserves_dotted_version_literal_case()
+  let _ = support.parser_rejects_duplicate_response_status_code_case()
+  let _ = support.parser_rejects_duplicate_components_response_name_case()
   let _ =
     support.parse_string_with_limits_accepts_input_under_default_cap_case()
   let _ = support.parse_string_with_limits_rejects_input_over_byte_cap_case()

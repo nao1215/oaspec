@@ -10,6 +10,18 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`oaspec validate` and `oaspec generate` now reject specs that
+  contain duplicate keys in `responses` or `components.responses`**
+  with a `duplicate_key` diagnostic, instead of silently dropping one
+  of the two definitions. yamerl tolerates duplicate mapping keys, so
+  before this change two `'200':` entries on the same operation (or
+  two same-named entries under `components.responses`) would silently
+  overwrite — only the last value survived, and `validate` printed
+  `Validation passed.`. The check runs at parse time so both `validate`
+  and `generate` surface the diagnostic. (#573)
+
 ## [0.61.0] - 2026-05-08
 
 ### Changed
