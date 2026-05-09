@@ -147,6 +147,34 @@ pub fn invalid_value(
   )
 }
 
+/// Issue #573: a YAML mapping at `path` contains the same key twice.
+/// yamerl tolerates duplicate mapping keys (only the last value
+/// survives), so this is the only signal users get that their spec
+/// silently dropped one of two definitions. Surfaced as a parse-phase
+/// error so `oaspec validate` rejects the file before generation.
+///
+/// `key` is the duplicated key as it appears in the source (e.g.
+/// `"200"` for a duplicated response status code, `"foo"` for a
+/// duplicated component name).
+pub fn duplicate_key(
+  path path: String,
+  key key: String,
+  loc loc: SourceLoc,
+) -> Diagnostic {
+  Diagnostic(
+    code: "duplicate_key",
+    phase: PhaseParse,
+    severity: SeverityError,
+    target: TargetBoth,
+    pointer: path,
+    source_loc: loc,
+    message: "Duplicate key '" <> key <> "' in " <> path,
+    hint: Some(
+      "OpenAPI inherits JSON-object key uniqueness; YAML 1.2 §3.2.1.3 leaves duplicate mapping keys undefined. Remove or rename the duplicate so the spec parses unambiguously.",
+    ),
+  )
+}
+
 // ============================================================================
 // Convenience constructors for resolve phase
 // ============================================================================

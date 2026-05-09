@@ -1274,6 +1274,15 @@ fn parse_responses(
 ) -> Result(Dict(http.HttpStatusCode, RefOr(Response(Unresolved))), Diagnostic) {
   case yay.select_sugar(from: node, selector: "responses") {
     Ok(yay.NodeMap(entries)) -> {
+      // Issue #573: yamerl tolerates duplicate mapping keys, so two
+      // `'200':` entries on the same operation would silently overwrite
+      // (later wins). Reject duplicates explicitly before the
+      // dict.insert loop so users see a parse-time error.
+      use _ <- result.try(check_unique_yaml_keys(
+        entries: entries,
+        path: "responses",
+        index: index,
+      ))
       list.try_fold(entries, dict.new(), fn(acc, entry) {
         let #(key_node, value_node) = entry
         case key_node {
@@ -1303,6 +1312,57 @@ fn parse_responses(
       })
     }
     _ -> Ok(dict.new())
+  }
+}
+
+/// Issue #573: detect duplicate keys in a YAML mapping before consuming
+/// it into a `Dict`. yamerl preserves the original `entries` list with
+/// both occurrences of a duplicate key, but `dict.insert` silently
+/// overwrites — so without this check, duplicates disappear into
+/// undefined behavior (whichever entry happens to be inserted last
+/// wins). Returns the *first* duplicate as a `Diagnostic`; we don't
+/// accumulate every duplicate to keep the parse-phase contract
+/// (one error stops parsing).
+///
+/// The `index` argument is reserved for a future source-location
+/// lookup (so the diagnostic can name the line of the second
+/// occurrence). For now the location index does not retain per-key
+/// positions inside arbitrary maps, so the diagnostic carries
+/// `NoSourceLoc` and the user-facing message names the path
+/// (`responses`, `components.responses`) instead.
+fn check_unique_yaml_keys(
+  entries entries: List(#(yay.Node, yay.Node)),
+  path path: String,
+  index index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  let loc = location_index.lookup(index, path)
+  list.try_fold(entries, [], fn(seen, entry) {
+    let #(key_node, _) = entry
+    case key_node_to_string(key_node) {
+      Some(key) ->
+        case list.contains(seen, key) {
+          True ->
+            Error(diagnostic.duplicate_key(path: path, key: key, loc: loc))
+          False -> Ok([key, ..seen])
+        }
+      None -> Ok(seen)
+    }
+  })
+  |> result.map(fn(_) { Nil })
+}
+
+/// Render a `yay` key node as a comparable string for duplicate
+/// detection. Returns `None` for node types that cannot occur as
+/// OpenAPI map keys (lists, maps, etc.); those positions are handled
+/// elsewhere as `invalid_value` errors and do not need duplicate
+/// checking.
+fn key_node_to_string(node: yay.Node) -> Option(String) {
+  case node {
+    yay.NodeStr(s) -> Some(s)
+    yay.NodeInt(n) -> Some(int.to_string(n))
+    yay.NodeBool(True) -> Some("true")
+    yay.NodeBool(False) -> Some("false")
+    _ -> None
   }
 }
 
@@ -1522,6 +1582,14 @@ fn parse_responses_map(
 ) -> Result(Dict(String, RefOr(Response(Unresolved))), Diagnostic) {
   case yay.select_sugar(from: components_node, selector: "responses") {
     Ok(yay.NodeMap(entries)) -> {
+      // Issue #573: same duplicate-key concern as `parse_responses` —
+      // duplicate component names would silently overwrite without this
+      // check.
+      use _ <- result.try(check_unique_yaml_keys(
+        entries: entries,
+        path: "components.responses",
+        index: index,
+      ))
       list.try_fold(entries, dict.new(), fn(acc, entry) {
         let #(key_node, value_node) = entry
         case key_node {
