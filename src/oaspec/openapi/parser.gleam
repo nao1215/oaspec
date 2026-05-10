@@ -286,7 +286,7 @@ pub fn parse_string_with_locations(
   content: String,
 ) -> Result(#(OpenApiSpec(Unresolved), LocationIndex), Diagnostic) {
   use #(root, index) <- result.try(parse_to_node(content))
-  use spec <- result.map(parse_root(root, index))
+  use spec <- result.map(parse_root(root, index, strict_types: False))
   #(spec, index)
 }
 
@@ -364,7 +364,11 @@ pub fn parse_json_string_with_locations(
   content: String,
 ) -> Result(#(OpenApiSpec(Unresolved), LocationIndex), Diagnostic) {
   use root <- result.try(decode_json_to_node(content))
-  use spec <- result.map(parse_root(root, location_index.empty()))
+  use spec <- result.map(parse_root(
+    root,
+    location_index.empty(),
+    strict_types: True,
+  ))
   #(spec, location_index.empty())
 }
 
@@ -492,26 +496,9 @@ fn looks_like_json_path(path: String) -> Bool {
 fn parse_root(
   node: yay.Node,
   index: LocationIndex,
+  strict_types strict_types: Bool,
 ) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
-  // openapi field may be a string ("3.0.3") or a YAML number (3.0 parsed as float)
-  use openapi <- result.try(
-    yay.extract_string(node, "openapi")
-    |> result.lazy_or(fn() {
-      yay.extract_float(node, "openapi")
-      |> result.map(fn(f) {
-        case f == int.to_float(float.truncate(f)) {
-          True -> int.to_string(float.truncate(f)) <> ".0"
-          False -> float.to_string(f)
-        }
-      })
-    })
-    |> result.map_error(parser_yay_error.missing_field_from_extraction(
-      _,
-      path: "",
-      field: "openapi",
-      loc: location_index.lookup_field(index, "", "openapi"),
-    )),
-  )
+  use openapi <- result.try(extract_openapi_field(node, index, strict_types))
 
   use _ <- result.try(validate_openapi_version(
     openapi,
@@ -519,6 +506,18 @@ fn parse_root(
   ))
 
   use info <- result.try(parse_info(node, index))
+
+  // OAS 3.0 marks `paths` as required at the document root; OAS 3.1
+  // makes it optional (the spec may consist of `webhooks` /
+  // `components` only). Enforce the 3.0 contract here so the
+  // `validate` subcommand and downstream codegen do not silently
+  // accept a 3.0 document with no operations. Run after `parse_info`
+  // so a spec missing both reports the info-missing error first
+  // (matches existing diagnostic priority). (#580 case A)
+  use _ <- result.try(case is_openapi_3_0(openapi) {
+    True -> require_paths_present(node, index)
+    False -> Ok(Nil)
+  })
 
   // Parse components FIRST so we can resolve $ref during path parsing.
   // Components section is optional, but if present it must parse correctly.
@@ -579,6 +578,99 @@ fn is_supported_openapi_version(version: String) -> Bool {
     // like `openapi: 3.0` arrive as "3.0" after normalization.
     ["3", "0"] | ["3", "1"] -> True
     _ -> False
+  }
+}
+
+/// Extract the root `openapi` field. The OAS 3.0 / 3.1 schema requires
+/// this field to be a string. The `strict_types` flag controls whether
+/// we honour the YAML 1.1 number-coercion compatibility path:
+///
+/// - `strict_types: True` (JSON callers) — only `NodeStr` is accepted.
+///   JSON has explicit string syntax; an unquoted number is the
+///   author's mistake, not a yamerl quirk, so we surface it cleanly
+///   rather than silently coercing. (#580 case B)
+/// - `strict_types: False` (YAML callers) — falls back to `extract_float`
+///   so a yamerl-coerced `openapi: 3.0` (no quotes) keeps parsing as
+///   `"3.0"`. The compatibility path is documented and exercised by
+///   `parse_accepts_openapi_3_0_from_yaml_float_case`.
+fn extract_openapi_field(
+  node: yay.Node,
+  index: LocationIndex,
+  strict_types: Bool,
+) -> Result(String, Diagnostic) {
+  let loc = location_index.lookup_field(index, "", "openapi")
+  case strict_types {
+    True ->
+      yay.extract_string(node, "openapi")
+      |> result.map_error(parser_yay_error.missing_field_from_extraction(
+        _,
+        path: "",
+        field: "openapi",
+        loc: loc,
+      ))
+    False ->
+      yay.extract_string(node, "openapi")
+      |> result.lazy_or(fn() {
+        yay.extract_float(node, "openapi")
+        |> result.map(fn(f) {
+          case f == int.to_float(float.truncate(f)) {
+            True -> int.to_string(float.truncate(f)) <> ".0"
+            False -> float.to_string(f)
+          }
+        })
+      })
+      |> result.map_error(parser_yay_error.missing_field_from_extraction(
+        _,
+        path: "",
+        field: "openapi",
+        loc: loc,
+      ))
+  }
+}
+
+/// Mirror of yay's private `node_type_name` for the diagnostic
+/// detail line. Kept local because yay does not export the helper
+/// and the alternative (re-pattern-matching at every call site) is
+/// noisier than a four-line wrapper.
+fn node_kind_name(node: yay.Node) -> String {
+  case node {
+    yay.NodeNil -> "nil"
+    yay.NodeStr(_) -> "string"
+    yay.NodeBool(_) -> "bool"
+    yay.NodeInt(_) -> "int"
+    yay.NodeFloat(_) -> "float"
+    yay.NodeSeq(_) -> "list"
+    yay.NodeMap(_) -> "map"
+  }
+}
+
+/// Whether the validated version string belongs to the OAS 3.0.x
+/// branch (where `paths` is required at the document root). Accepts
+/// both the three-segment `3.0.x` form and the two-segment `3.0`
+/// form that `is_supported_openapi_version` tolerates for
+/// yamerl-coerced floats.
+fn is_openapi_3_0(version: String) -> Bool {
+  case string.split(version, ".") {
+    ["3", "0", _] | ["3", "0"] -> True
+    _ -> False
+  }
+}
+
+/// Verify the `paths` field exists at the document root. Used only
+/// for OAS 3.0; `parse_paths` itself stays lenient on the missing
+/// case so 3.1 documents continue to parse without `paths`.
+fn require_paths_present(
+  root: yay.Node,
+  index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  case yay.select_sugar(from: root, selector: "paths") {
+    Ok(_) -> Ok(Nil)
+    Error(_) ->
+      Error(diagnostic.missing_field(
+        path: "",
+        field: "paths",
+        loc: location_index.lookup_field(index, "", "paths"),
+      ))
   }
 }
 
@@ -719,6 +811,21 @@ fn parse_paths(
         }
       })
     }
+    // `paths` is present but not a map. The OAS 3.0 / 3.1 schema
+    // marks Paths Object as `"type": "object"`, so a list / scalar /
+    // null value here is a spec violation. Reject loudly so the
+    // `validate` subcommand and downstream codegen do not silently
+    // produce empty output. (#580 case C)
+    Ok(other) ->
+      Error(diagnostic.invalid_value(
+        path: "paths",
+        detail: "paths must be a Paths Object (map), got "
+          <> node_kind_name(other),
+        loc: location_index.lookup_field(index, "", "paths"),
+      ))
+    // `paths` is absent. Stay lenient here: the 3.0-required check is
+    // enforced earlier in `parse_root` via `require_paths_present`,
+    // and 3.1 documents may legitimately omit `paths`.
     _ -> Ok(dict.new())
   }
 }

@@ -3,7 +3,7 @@ info:
   title: test schema
   version: "1.0.0"
 
-paths:
+paths: {}
 
 components:
   schemas:

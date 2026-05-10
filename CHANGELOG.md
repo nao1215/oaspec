@@ -10,6 +10,43 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`parse_json_string` now enforces three OAS 3.0 root-schema rules
+  the JSON path was silently letting through.** All three slipped past
+  `validate` and produced empty / wrong codegen downstream:
+  - **Missing `paths`** in an OpenAPI 3.0 document — `paths` is in
+    `#/required` of the OAS 3.0 schema. Rejected with the standard
+    `missing_field` diagnostic. OAS 3.1 keeps `paths` optional, so
+    `paths`-less 3.1 specs (the `webhooks`-only / `components`-only
+    shapes) continue to parse. (#580 case A)
+  - **Non-string `openapi`** field on the JSON path — `openapi` has
+    `"type": "string"` per `#/properties/openapi/type`. The lenient
+    string-or-float fallback was added for yamerl-coerced YAML
+    numbers (`openapi: 3.0` → float 3.0); JSON has explicit string
+    syntax and never needs it. The JSON path now rejects integer /
+    float values up front; the YAML path's float fallback is
+    preserved (the existing
+    `parse_accepts_openapi_3_0_from_yaml_float_case` regression-protection
+    test still passes). (#580 case B)
+  - **`paths` as a non-map** (list, scalar, bool) — `paths` is the
+    Paths Object, typed `"object"` per the OAS 3.0 schema. Previously
+    the catch-all branch accepted it and returned an empty paths
+    dict. Now rejected with `invalid_value` naming the actual node
+    kind. The fix applies to both JSON and YAML paths since the
+    type mismatch is unambiguous regardless of source format. (#580
+    case C)
+
+  Three test fixtures (`oss_oapi_codegen_allof_additional.yaml`,
+  `oss_oapi_codegen_issue_2185.yaml`,
+  `oss_swagger_parser_java_additional_props_false.yaml`,
+  `oss_swagger_parser_java_nested_objects.yaml`) gain a `paths: {}`
+  line — they previously relied on the silent acceptance of
+  pathless 3.0 documents. The fixtures' original purpose
+  (additional-properties / allof / nested-object handling) is
+  unchanged; only the OAS-conformance surface they incidentally
+  exercised has been corrected.
+
 ## [0.63.0] - 2026-05-10
 
 ### Fixed
