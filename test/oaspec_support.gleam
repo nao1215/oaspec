@@ -2290,6 +2290,69 @@ paths: {}
   )) = result
 }
 
+// ---------------------------------------------------------------------------
+// #580 regression — strict OAS 3.0 schema enforcement at the document root.
+// Three cases with a shared root cause (parse_root did not enforce
+// schema-required fields / value-types). Each case uses the JSON path,
+// matching the issue reproduction; the YAML path is exercised by the
+// `parse_accepts_openapi_3_0_from_yaml_float_case` regression-protection
+// test which still passes because the YAML lenient path is preserved.
+// ---------------------------------------------------------------------------
+
+/// Case A from #580: `paths` is required at the root for OAS 3.0.
+/// `parse_json_string` previously returned `Ok(_)` for a 3.0 spec
+/// missing `paths` — the `validate` subcommand happily passed the
+/// document and downstream codegen produced empty output. Now rejected
+/// with the standard `missing_field` diagnostic.
+pub fn parse_json_oas_30_rejects_missing_paths_case() {
+  let json =
+    "{\"openapi\":\"3.0.3\",\"info\":{\"title\":\"X\",\"version\":\"1.0.0\"}}"
+  let result = parser.parse_json_string(json)
+  let assert Error(Diagnostic(
+    code: "missing_field",
+    pointer: "",
+    message: "Missing required field: paths",
+    ..,
+  )) = result
+}
+
+/// Case B from #580: `openapi` MUST be a string per the OAS 3.0 schema.
+/// `parse_json_string` previously coerced an integer `openapi: 3`
+/// through the lenient float fallback (intended for YAML 1.1 number
+/// coercion only). The JSON path now rejects non-string values up front;
+/// the YAML path keeps the lenient behaviour for unquoted versions like
+/// `openapi: 3.0`.
+pub fn parse_json_rejects_integer_openapi_field_case() {
+  let json =
+    "{\"openapi\":3,\"info\":{\"title\":\"X\",\"version\":\"1.0.0\"},\"paths\":{}}"
+  let result = parser.parse_json_string(json)
+  let assert Error(Diagnostic(code: "missing_field", pointer: "", ..)) = result
+}
+
+/// Case C from #580: `paths` is the Paths Object (must be a map) per
+/// the OAS 3.0 schema. `parse_json_string` previously fell into the
+/// catch-all branch when `paths` was an array / scalar / bool and
+/// silently returned an empty paths dict. Now rejected with an
+/// `invalid_value` diagnostic naming the actual node kind.
+pub fn parse_json_rejects_paths_as_list_case() {
+  let json =
+    "{\"openapi\":\"3.0.3\",\"info\":{\"title\":\"X\",\"version\":\"1.0.0\"},\"paths\":[\"/a\",\"/b\"]}"
+  let result = parser.parse_json_string(json)
+  let assert Error(Diagnostic(code: "invalid_value", pointer: "paths", ..)) =
+    result
+}
+
+/// Companion regression: 3.1 documents may legitimately omit `paths`
+/// (the spec may consist of `webhooks` / `components` only). The
+/// require-paths-for-3.0 fix MUST NOT regress this case — it is the
+/// "defensible disagreement" called out in #580.
+pub fn parse_json_oas_31_accepts_missing_paths_case() {
+  let json =
+    "{\"openapi\":\"3.1.0\",\"info\":{\"title\":\"X\",\"version\":\"1.0.0\"}}"
+  let assert Ok(spec) = parser.parse_json_string(json)
+  spec.openapi |> should.equal("3.1.0")
+}
+
 pub fn validate_deep_inline_oneof_in_request_body_accepted_case() {
   // Inline oneOf in requestBody is now handled by hoisting
   let ctx = make_ctx("test/fixtures/deep_unsupported.yaml")
