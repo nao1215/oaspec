@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.64.0] - 2026-05-10
+
 ### Fixed
 
 - **`parse_json_string` now enforces three OAS 3.0 root-schema rules
