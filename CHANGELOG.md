@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-05-11
+
 ### Documentation
 
 - `to_snake_case` and `to_pascal_case` are now documented as
