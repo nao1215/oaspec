@@ -1145,6 +1145,47 @@ pub fn parser_rejects_space_in_path_case() {
   should.be_true(string.contains(d.message, "space"))
 }
 
+// Issue #592: OAS 3.0 §4.7.10.5 says operation parameter lists MUST NOT
+// include duplicated parameters, where the (name, in) pair is the
+// uniqueness key. Pre-fix, a parameter declared twice with different
+// schemas flowed through to codegen and produced duplicate Gleam
+// bindings — either a compile error in the output or a silently-broken
+// handler. Same-name-different-in is still allowed by spec.
+
+pub fn parser_rejects_duplicate_query_parameter_case() {
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n"
+    <> "  /a:\n    get:\n"
+    <> "      parameters:\n"
+    <> "        - name: p\n          in: query\n          schema: {type: string}\n"
+    <> "        - name: p\n          in: query\n          schema: {type: integer}\n"
+    <> "      responses:\n"
+    <> "        '200':\n          description: ok\n"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "query/p"))
+}
+
+pub fn parser_accepts_same_name_different_in_case() {
+  // Sanity: per OAS 3.0 §4.7.10.5, two parameters with the same name
+  // in different locations (query vs header) are valid and must
+  // continue to parse.
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n"
+    <> "  /a:\n    get:\n"
+    <> "      parameters:\n"
+    <> "        - name: p\n          in: query\n          schema: {type: string}\n"
+    <> "        - name: p\n          in: header\n          schema: {type: string}\n"
+    <> "      responses:\n"
+    <> "        '200':\n          description: ok\n"
+  let assert Ok(_) = parser.parse_string(yaml)
+  Nil
+}
+
 pub fn parser_rejects_duplicate_path_key_case() {
   // Issue #584: yamerl silently keeps the last duplicate path entry,
   // dropping the earlier one without warning. Per OAS, path keys are

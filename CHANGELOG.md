@@ -12,6 +12,17 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Fixed
 
+- **Operation parameter lists now reject duplicate `(name, in)`
+  entries.** OAS 3.0 §4.7.10.5 says a unique parameter is defined by
+  the combination of its name and location, and that the parameter
+  list MUST NOT include duplicates. Pre-fix, a parameter declared
+  twice with different schemas flowed through to codegen and produced
+  either a compile error in the generated Gleam (two bindings for the
+  same wire parameter) or a silently-broken handler. The parser now
+  surfaces an `invalid_value` diagnostic naming the colliding
+  `<in>/<name>` pair. Inline parameters are checked at parse time;
+  `$ref` entries are skipped because the resolved (name, in) pair is
+  not visible until the references resolve. (#592)
 - **`content_type.from_string` / `is_json_compatible` /
   `is_xml_compatible` now normalise the input before classification.**
   Pre-fix the classifier used case-sensitive direct equality and did
