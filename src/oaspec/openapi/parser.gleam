@@ -1390,20 +1390,49 @@ fn parse_responses(
                     ))
                     Ok(dict.insert(acc, code, resp))
                   }
-                  // nolint: thrown_away_error -- tolerant parse; unparsable status codes (including "default") are handled elsewhere
-                  Error(_) -> Ok(acc)
+                  Error(_) ->
+                    Error(invalid_response_status_diagnostic(status_code, index))
                 }
             }
-          yay.NodeInt(code) -> {
-            use resp <- result.try(parse_response(value_node, components, index))
-            Ok(dict.insert(acc, http.Status(code), resp))
-          }
+          yay.NodeInt(code) ->
+            case http.http_status_from_int(code) {
+              Ok(status) -> {
+                use resp <- result.try(parse_response(
+                  value_node,
+                  components,
+                  index,
+                ))
+                Ok(dict.insert(acc, status, resp))
+              }
+              Error(_) ->
+                Error(invalid_response_status_diagnostic(
+                  int.to_string(code),
+                  index,
+                ))
+            }
           _ -> Ok(acc)
         }
       })
     }
     _ -> Ok(dict.new())
   }
+}
+
+/// Build the parse-time diagnostic for a response status-code key that
+/// is outside the OAS-allowed grammar (#587). Listed at module scope so
+/// the YAML-string path and the YAML-int path emit the same message.
+fn invalid_response_status_diagnostic(
+  key: String,
+  index: LocationIndex,
+) -> Diagnostic {
+  diagnostic.invalid_value(
+    path: "responses",
+    detail: "Invalid response status code key '"
+      <> key
+      <> "'. OpenAPI accepts 100-599 (canonical 3-digit), the wildcards "
+      <> "1XX-5XX, or 'default'.",
+    loc: location_index.lookup_field(index, "", "responses"),
+  )
 }
 
 /// Issue #573: detect duplicate keys in a YAML mapping before consuming

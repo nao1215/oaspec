@@ -1,5 +1,7 @@
+import gleam/bool
 import gleam/int
 import gleam/list
+import gleam/result
 
 /// Type-safe HTTP status code representation.
 /// Replaces raw String status codes throughout the codebase.
@@ -13,7 +15,17 @@ pub type HttpStatusCode {
 }
 
 /// Parse a raw status code string from an OpenAPI spec into an HttpStatusCode.
-/// Returns Error(Nil) for unrecognisable strings.
+/// Returns `Error(Nil)` for strings outside the OAS-allowed grammar.
+///
+/// The OpenAPI 3.0 Responses Object accepts:
+/// - canonical 3-digit decimal in the HTTP range 100-599 (RFC 7231 §6),
+/// - the wildcards `1XX`-`5XX` (case-insensitive),
+/// - the catch-all `default`.
+///
+/// Anything else — `'0'`, `'-1'`, `'1000'`, `'+200'`, the leading-zero form
+/// `'0200'`, integer overflow — is rejected here so the codegen does not
+/// emit dead Gleam decode arms for codes the HTTP layer cannot deliver and
+/// so `'0200'` does not silently collapse onto `'200'` (#587).
 pub fn parse_status_code(code: String) -> Result(HttpStatusCode, Nil) {
   case code {
     "default" -> Ok(DefaultStatus)
@@ -22,12 +34,36 @@ pub fn parse_status_code(code: String) -> Result(HttpStatusCode, Nil) {
     "3XX" | "3xx" -> Ok(StatusRange(3))
     "4XX" | "4xx" -> Ok(StatusRange(4))
     "5XX" | "5xx" -> Ok(StatusRange(5))
-    _ ->
-      case int.parse(code) {
-        Ok(n) -> Ok(Status(n))
-        Error(_) -> Error(Nil)
-      }
+    _ -> parse_canonical_http_status(code)
   }
+}
+
+/// Variant of `parse_status_code` for callers that already have an `Int`
+/// (e.g. the YAML walker reaching a `NodeInt` key). Applies the same
+/// 100-599 range check, but cannot verify the canonical-form invariant
+/// the string path enforces — yamerl has already discarded the original
+/// byte representation by the time we see an Int. Leading-zero collapse
+/// (`'0200'` → `Status(200)`) is therefore caught only on the string
+/// path; on the Int path we accept the value if it falls in range and
+/// rely on a separate "canonical YAML key" rule to surface stylistic
+/// concerns. (#587)
+pub fn http_status_from_int(n: Int) -> Result(HttpStatusCode, Nil) {
+  use <- bool.guard(when: n < 100 || n > 599, return: Error(Nil))
+  Ok(Status(n))
+}
+
+fn parse_canonical_http_status(code: String) -> Result(HttpStatusCode, Nil) {
+  use n <- result.try(int.parse(code))
+  // Canonical decimal form: a round-trip through `int.to_string` must
+  // return the exact input bytes. This rejects:
+  // - leading zeros (`'0200'` → `200` and the round-trip diverges),
+  // - explicit `+` sign (`'+200'` would parse but round-trip to `200`),
+  // - extra-wide integers (`'12345678901234567890'` overflows on the
+  //   round-trip on JS targets and on a 64-bit Erlang target alike).
+  // The `>= 100 && <= 599` range matches RFC 7231 §6.
+  use <- bool.guard(when: int.to_string(n) != code, return: Error(Nil))
+  use <- bool.guard(when: n < 100 || n > 599, return: Error(Nil))
+  Ok(Status(n))
 }
 
 /// Convert an HttpStatusCode back to its canonical string form.

@@ -966,6 +966,99 @@ paths:
   should.be_true(string.contains(d.message, "responses"))
 }
 
+// Issue #587: response status-code keys must fall in the OAS-allowed
+// grammar (100-599 canonical 3-digit, the wildcards 1XX-5XX, or
+// 'default'). Pre-fix, `parse_status_code` accepted whatever `int.parse`
+// returned, so adversarial / malformed status keys flowed through to
+// codegen and produced dead Gleam decode arms. The cases below pin
+// each boundary the issue called out.
+
+fn make_response_status_spec(status: String) -> String {
+  "openapi: 3.0.0\n"
+  <> "info:\n  title: x\n  version: '1.0'\n"
+  <> "paths:\n  /a:\n    get:\n      responses:\n"
+  <> "        '"
+  <> status
+  <> "':\n          description: weird\n"
+}
+
+pub fn parser_rejects_response_status_below_100_case() {
+  let assert Error(d) = parser.parse_string(make_response_status_spec("99"))
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "99"))
+}
+
+pub fn parser_rejects_response_status_above_599_case() {
+  let assert Error(d) = parser.parse_string(make_response_status_spec("1000"))
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "1000"))
+}
+
+pub fn parser_rejects_response_status_zero_case() {
+  let assert Error(d) = parser.parse_string(make_response_status_spec("0"))
+  d.code |> should.equal("invalid_value")
+}
+
+pub fn parser_rejects_response_status_negative_case() {
+  let assert Error(d) = parser.parse_string(make_response_status_spec("-1"))
+  d.code |> should.equal("invalid_value")
+}
+
+pub fn parser_rejects_response_status_leading_zero_case() {
+  // '0200' parses to 200 via int.parse, but is not the canonical 3-digit
+  // form — round-tripping the parsed int back to string returns "200",
+  // which the canonicality guard catches. Without this check, '0200'
+  // and '200' would collide on `Status(200)` in the responses Dict.
+  let assert Error(d) = parser.parse_string(make_response_status_spec("0200"))
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "0200"))
+}
+
+pub fn parser_rejects_response_status_huge_int_case() {
+  let assert Error(d) =
+    parser.parse_string(make_response_status_spec("12345678901234567890"))
+  d.code |> should.equal("invalid_value")
+}
+
+pub fn parser_rejects_response_status_explicit_plus_case() {
+  let assert Error(d) = parser.parse_string(make_response_status_spec("+200"))
+  d.code |> should.equal("invalid_value")
+}
+
+pub fn parser_accepts_response_status_canonical_3_digit_case() {
+  // Sanity: the fix does not regress the happy path. Every code in
+  // 100-599 with canonical 3-digit form keeps working.
+  let assert Ok(_) = parser.parse_string(make_response_status_spec("200"))
+  let assert Ok(_) = parser.parse_string(make_response_status_spec("404"))
+  let assert Ok(_) = parser.parse_string(make_response_status_spec("599"))
+  Nil
+}
+
+pub fn parser_accepts_response_status_wildcards_case() {
+  let assert Ok(_) = parser.parse_string(make_response_status_spec("2XX"))
+  let assert Ok(_) = parser.parse_string(make_response_status_spec("5xx"))
+  Nil
+}
+
+pub fn parser_accepts_response_status_default_case() {
+  let assert Ok(_) = parser.parse_string(make_response_status_spec("default"))
+  Nil
+}
+
+pub fn parser_rejects_yaml_int_response_status_below_100_case() {
+  // `responses: 99` parses to NodeInt(99) on the YAML path; the
+  // diagnostic comes from `http_status_from_int`, which mirrors the
+  // string-path range check for callers that have already lost the
+  // original byte representation. (#587)
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n  /a:\n    get:\n      responses:\n"
+    <> "        99:\n          description: too-low\n"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("invalid_value")
+}
+
 pub fn parser_rejects_yaml_alias_without_anchor_case() {
   // Issue #576: YAML aliases (`*foo`) that reference a missing
   // anchor (`&foo`) must surface a `yaml_error` Diagnostic instead
