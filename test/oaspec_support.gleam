@@ -15242,6 +15242,31 @@ pub fn to_snake_case_with_dots_case() {
   |> should.equal("app_dot_name")
 }
 
+pub fn to_snake_case_is_not_idempotent_on_dot_inputs_case() {
+  // Issue #586: the `_dot_` -> `_dot_literal_` escape that
+  // disambiguates `.` from a literal `dot` token is asymmetric, so
+  // re-running the converter on its own output grows the `_literal_`
+  // segment each pass. This case pins the documented non-idempotence
+  // — callers (codegen) must apply the converter at most once per
+  // identifier; we test the *observed* behaviour so a future fix that
+  // restores idempotence is intentional, not silent.
+  let once = naming.to_snake_case("user.name")
+  once |> should.equal("user_dot_name")
+  let twice = naming.to_snake_case(once)
+  twice |> should.equal("user_dot_literal_name")
+}
+
+pub fn to_pascal_case_is_not_idempotent_on_dot_inputs_case() {
+  // Mirror of the snake-case non-idempotence pin (#586).
+  let once = naming.to_pascal_case("user.name")
+  once |> should.equal("UserDotName")
+  // Re-running the converter on its own output grows the Literal
+  // segment: `UserDotName` is the pascal form of `user_dot_name`,
+  // and pascal-of-`user_dot_name` becomes `UserDotLiteralName`.
+  let cycled = naming.to_pascal_case(naming.to_snake_case(once))
+  cycled |> should.equal("UserDotLiteralName")
+}
+
 // ===========================================================================
 // Server/client generation for edge cases
 // ===========================================================================

@@ -84,6 +84,16 @@ fn compile_regexes() -> Regexes {
 /// alongside `payment_intent_processing` produce distinct Gleam type
 /// names (`PaymentIntentDotProcessing` vs `PaymentIntentProcessing`)
 /// instead of colliding on `PaymentIntentProcessing`.
+///
+/// **Not idempotent on inputs containing `_dot_` (issue #586).** A
+/// literal `_dot_` in the input is escaped to `_dot_literal_` to keep
+/// it distinguishable from a real `.`, so re-running the converter on
+/// its own output grows the `_literal_` segment each pass:
+/// `to_pascal_case(to_pascal_case("user.name")) != to_pascal_case("user.name")`.
+/// The codegen pipeline must therefore apply this function at most
+/// once per identifier. Callers that need to round-trip names through
+/// snake/pascal multiple times should cache the first result instead
+/// of re-running the converter.
 pub fn to_pascal_case(input: String) -> String {
   let re = cached_regexes()
   input
@@ -128,6 +138,13 @@ fn ensure_letter_start_pascal(input: String) -> String {
 /// like `DiscussionReactions(1: Int, 1_2: Int, ...)` on the GitHub
 /// REST API spec, where `+1` and `-1` both collapsed to `1` (issue
 /// #352).
+///
+/// **Not idempotent on inputs containing `_dot_` (issue #586).** See
+/// `to_pascal_case` for the same caveat — the `_dot_` → `_dot_literal_`
+/// escape used to disambiguate `.` from a literal `dot` token grows
+/// the `_literal_` segment each time the converter runs on its own
+/// output. The codegen pipeline must therefore apply this function
+/// at most once per identifier.
 pub fn to_snake_case(input: String) -> String {
   let re = cached_regexes()
   let result =
@@ -288,6 +305,14 @@ fn bump_inline_enum_suffix_set(
 /// schema name still produce a name distinct from a sibling that
 /// uses `.` at the same position (`a_dot_b` → `ADotLiteralB`,
 /// `a.b` → `ADotB`).
+///
+/// **Asymmetric escape — not reversible (issue #586).** The
+/// `_dot_literal_` escape preserves the disambiguation between `.`
+/// and a literal `dot` token, but at the cost of idempotence: every
+/// pass over an already-escaped name grows another `_literal_`. The
+/// case converters that wrap this helper (`to_snake_case`,
+/// `to_pascal_case`) inherit the property; their docstrings warn
+/// callers to apply each converter at most once per identifier.
 fn rewrite_dot_segments(input: String) -> String {
   input
   |> string.replace("_dot_", "_dot_literal_")

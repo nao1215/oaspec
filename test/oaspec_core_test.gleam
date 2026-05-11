@@ -18,6 +18,8 @@ pub fn naming_basics_test() {
   let _ = support.to_pascal_case_with_numbers_case()
   let _ = support.to_snake_case_with_hyphen_case()
   let _ = support.to_snake_case_with_dots_case()
+  let _ = support.to_snake_case_is_not_idempotent_on_dot_inputs_case()
+  let _ = support.to_pascal_case_is_not_idempotent_on_dot_inputs_case()
 }
 
 pub fn config_defaults_test() {
