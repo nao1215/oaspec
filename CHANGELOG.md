@@ -10,6 +10,24 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Breaking
+
+- **`parse_string` / `parse_file` (YAML path) now require the `openapi`
+  field to be a YAML string, matching the contract `parse_json_string`
+  has enforced since #580.** Previously the YAML walker fell back to
+  the float-extractor when `openapi` was an unquoted number, so a
+  document with `openapi: 3.0` (parsed by yamerl as the float `3.0`)
+  was silently coerced back to the string `"3.0"` and accepted. The
+  same document via the JSON path was already rejected, producing a
+  surprising format-dependent verdict for users feeding the same spec
+  to both targets. Both paths now reject non-string `openapi` values
+  with the standard `missing_field` diagnostic; authors who relied on
+  the unquoted YAML form must add quotes (`openapi: '3.0'`) or pin a
+  three-segment patch (`openapi: 3.0.3` — yamerl resolves that as a
+  string, no quotes required). The `strict_types` toggle on
+  `parse_root` / `extract_openapi_field` has been removed; both
+  callers share a single string-extraction path. (#583)
+
 ## [0.64.0] - 2026-05-10
 
 ### Fixed

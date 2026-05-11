@@ -1352,12 +1352,17 @@ pub fn oss_oai_webhook_example_components_match_case() {
 // output, so the parser rejects anything outside 3.0.x / 3.1.x up front.
 
 pub fn parse_rejects_openapi_2_0_case() {
+  // Quoting the version so we reach the version-gate logic; #583 closed
+  // the YAML-float compatibility path that this test originally relied
+  // on. Bare `openapi: 2.0` is now rejected one step earlier as a
+  // missing-field-of-the-right-type, exercised by the YAML-path tests
+  // alongside the #580 / #583 regression block.
   let yaml =
     "
-openapi: 2.0
+openapi: '2.0'
 info:
   title: Wrong API
-  version: 1.0.0
+  version: '1.0.0'
 paths: {}
 "
   let result = parser.parse_string(yaml)
@@ -1484,11 +1489,12 @@ paths: {}
   spec.openapi |> should.equal("3.1.0")
 }
 
-pub fn parse_accepts_openapi_3_0_from_yaml_float_case() {
-  // YAML numbers like `openapi: 3.0` arrive as the float 3.0 and get
-  // normalized to the string "3.0". That two-segment form must still
-  // parse so existing specs that rely on YAML float semantics keep
-  // working.
+pub fn parse_rejects_unquoted_openapi_float_from_yaml_case() {
+  // YAML 1.1 parses an unquoted `openapi: 3.0` as a float. The JSON
+  // path already rejects non-string `openapi` values after #580; the
+  // YAML path now mirrors that contract (#583) so the same document
+  // gets the same verdict regardless of file format. Authors must
+  // quote the version: `openapi: '3.0'`.
   let yaml =
     "
 openapi: 3.0
@@ -1497,8 +1503,41 @@ info:
   version: 1.0.0
 paths: {}
 "
+  let result = parser.parse_string(yaml)
+  let assert Error(Diagnostic(code: "missing_field", pointer: "", ..)) = result
+}
+
+pub fn parse_accepts_quoted_openapi_3_0_from_yaml_case() {
+  // Counterpart to parse_rejects_unquoted_openapi_float_from_yaml_case:
+  // the post-#583 contract is that the version must be a YAML string,
+  // not that the two-segment form is invalid. Quoting the version
+  // keeps the historical short form working.
+  let yaml =
+    "
+openapi: '3.0'
+info:
+  title: API
+  version: 1.0.0
+paths: {}
+"
   let assert Ok(spec) = parser.parse_string(yaml)
   spec.openapi |> should.equal("3.0")
+}
+
+pub fn parse_rejects_unquoted_openapi_int_from_yaml_case() {
+  // `openapi: 3` arrives from yamerl as the integer 3. The OAS 3.0
+  // schema requires a string; reject so downstream `validate` /
+  // `generate` do not operate on a non-string version value. (#583)
+  let yaml =
+    "
+openapi: 3
+info:
+  title: API
+  version: '1.0.0'
+paths: {}
+"
+  let result = parser.parse_string(yaml)
+  let assert Error(Diagnostic(code: "missing_field", pointer: "", ..)) = result
 }
 
 pub fn parse_secure_api_has_security_schemes_case() {
@@ -2294,9 +2333,9 @@ paths: {}
 // #580 regression — strict OAS 3.0 schema enforcement at the document root.
 // Three cases with a shared root cause (parse_root did not enforce
 // schema-required fields / value-types). Each case uses the JSON path,
-// matching the issue reproduction; the YAML path is exercised by the
-// `parse_accepts_openapi_3_0_from_yaml_float_case` regression-protection
-// test which still passes because the YAML lenient path is preserved.
+// matching the issue reproduction; the YAML-path symmetry is covered
+// by `parse_rejects_unquoted_openapi_float_from_yaml_case` and the
+// other YAML-side cases above, added in #583.
 // ---------------------------------------------------------------------------
 
 /// Case A from #580: `paths` is required at the root for OAS 3.0.
@@ -2319,9 +2358,9 @@ pub fn parse_json_oas_30_rejects_missing_paths_case() {
 /// Case B from #580: `openapi` MUST be a string per the OAS 3.0 schema.
 /// `parse_json_string` previously coerced an integer `openapi: 3`
 /// through the lenient float fallback (intended for YAML 1.1 number
-/// coercion only). The JSON path now rejects non-string values up front;
-/// the YAML path keeps the lenient behaviour for unquoted versions like
-/// `openapi: 3.0`.
+/// coercion only). The JSON path rejects non-string values up front,
+/// and after #583 the YAML path mirrors that contract — both targets
+/// require a quoted string.
 pub fn parse_json_rejects_integer_openapi_field_case() {
   let json =
     "{\"openapi\":3,\"info\":{\"title\":\"X\",\"version\":\"1.0.0\"},\"paths\":{}}"
