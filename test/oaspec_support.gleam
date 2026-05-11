@@ -1165,6 +1165,38 @@ pub fn parser_rejects_space_in_path_case() {
 // to have a matching `in: path` parameter, and conversely every `in:
 // path` parameter to reference a variable that exists in the template.
 
+// Issue #593: OAS 3.0 §4.7.9.1 says templated paths with the same
+// hierarchy but different placeholder names are identical. Pre-fix,
+// `/users/{id}` and `/users/{name}` both flowed through and the
+// codegen emitted two handlers for one route.
+
+pub fn parser_rejects_template_collision_simple_case() {
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n"
+    <> "  /users/{id}:\n    get:\n      parameters:\n        - name: id\n          in: path\n          required: true\n          schema: {type: string}\n      responses:\n        '200':\n          description: ok\n"
+    <> "  /users/{name}:\n    get:\n      parameters:\n        - name: name\n          in: path\n          required: true\n          schema: {type: string}\n      responses:\n        '200':\n          description: ok\n"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "/users/{}"))
+}
+
+pub fn parser_accepts_distinct_path_templates_case() {
+  // Sanity: paths with distinct hierarchies still parse. The
+  // template-collision check must not flag `/users/{id}` vs
+  // `/groups/{id}` (different hierarchies) or `/users/{id}/posts/{pid}`
+  // vs `/users/{id}` (different number of segments).
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n"
+    <> "  /users/{id}:\n    get:\n      parameters:\n        - name: id\n          in: path\n          required: true\n          schema: {type: string}\n      responses:\n        '200':\n          description: ok\n"
+    <> "  /groups/{id}:\n    get:\n      parameters:\n        - name: id\n          in: path\n          required: true\n          schema: {type: string}\n      responses:\n        '200':\n          description: ok\n"
+  let assert Ok(_) = parser.parse_string(yaml)
+  Nil
+}
+
 pub fn parser_rejects_path_var_without_matching_param_case() {
   let yaml =
     "openapi: 3.0.0\n"
