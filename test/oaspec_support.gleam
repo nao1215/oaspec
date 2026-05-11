@@ -1152,6 +1152,79 @@ pub fn parser_rejects_space_in_path_case() {
 // bindings — either a compile error in the output or a silently-broken
 // handler. Same-name-different-in is still allowed by spec.
 
+// Issue #590: OAS 3.0 §4.7.12.1 requires `required: true` to be
+// explicit on every path parameter, and parameters must have non-empty,
+// non-whitespace names. Pre-fix the parser silently defaulted missing
+// `required` to True for path params and accepted any name string.
+
+pub fn parser_rejects_path_param_without_required_true_case() {
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n  /users/{id}:\n    get:\n"
+    <> "      parameters:\n"
+    <> "        - name: id\n          in: path\n          schema: {type: string}\n"
+    <> "      responses:\n        '200':\n          description: ok\n"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "required"))
+}
+
+pub fn parser_rejects_path_param_with_required_false_case() {
+  // Already covered by pre-existing code; this case pins the behaviour
+  // continues to hold after the missing-required tightening (#590).
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n  /users/{id}:\n    get:\n"
+    <> "      parameters:\n"
+    <> "        - name: id\n          in: path\n          required: false\n"
+    <> "          schema: {type: string}\n"
+    <> "      responses:\n        '200':\n          description: ok\n"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("invalid_value")
+}
+
+pub fn parser_rejects_empty_parameter_name_case() {
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n  /a:\n    get:\n"
+    <> "      parameters:\n"
+    <> "        - name: ''\n          in: query\n          schema: {type: string}\n"
+    <> "      responses:\n        '200':\n          description: ok\n"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "empty"))
+}
+
+pub fn parser_rejects_whitespace_parameter_name_case() {
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n  /a:\n    get:\n"
+    <> "      parameters:\n"
+    <> "        - name: 'with space'\n          in: query\n          schema: {type: string}\n"
+    <> "      responses:\n        '200':\n          description: ok\n"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "space"))
+}
+
+pub fn parser_accepts_explicit_required_true_path_param_case() {
+  // Sanity: the happy path still parses.
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n  /users/{id}:\n    get:\n"
+    <> "      parameters:\n"
+    <> "        - name: id\n          in: path\n          required: true\n"
+    <> "          schema: {type: string}\n"
+    <> "      responses:\n        '200':\n          description: ok\n"
+  let assert Ok(_) = parser.parse_string(yaml)
+  Nil
+}
+
 pub fn parser_rejects_duplicate_query_parameter_case() {
   let yaml =
     "openapi: 3.0.0\n"

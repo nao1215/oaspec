@@ -12,6 +12,15 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Fixed
 
+- **Path parameters now require an explicit `required: true`** per OAS
+  3.0 §4.7.12.1, and parameter names must be non-empty and free of
+  spaces / tabs. Pre-fix the parser silently defaulted missing
+  `required` to `True` on path params (masking spec violations the
+  validator should surface) and accepted any name string. Both classes
+  now reject with an `invalid_value` diagnostic naming the parameter.
+  The `oss_swagger_parser_java_multiple_tags.json` fixture grew an
+  explicit `"required": true` on its `time` path param to keep the
+  spec valid after the tightening. (#590)
 - **Operation parameter lists now reject duplicate `(name, in)`
   entries.** OAS 3.0 §4.7.10.5 says a unique parameter is defined by
   the combination of its name and location, and that the parameter

@@ -24,6 +24,7 @@
             {
               "in": "path",
               "name": "time",
+              "required": true,
               "content": {
                 "application/json": {
                   "schema": {
