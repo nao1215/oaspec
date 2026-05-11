@@ -10,6 +10,25 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`parse_string` / `parse_json_string` now reject response-map keys
+  outside the OAS-allowed grammar.** Previously
+  `oaspec/internal/util/http.parse_status_code` accepted any string
+  `int.parse` recognised, so `'0'`, `'-1'`, `'1000'`, the leading-zero
+  form `'0200'`, an explicit `'+200'`, and even
+  `'12345678901234567890'` flowed through the responses walker; the
+  codegen then emitted Gleam decode arms for status codes the HTTP
+  layer cannot deliver and `'0200'` silently collapsed onto `'200'`
+  in the responses Dict. The parser now requires canonical 3-digit
+  decimals in 100-599 (`'200'`, `'404'`, `'599'`), the wildcards
+  `1XX`-`5XX` (case-insensitive), or `default`; anything else is
+  rejected with an `invalid_value` diagnostic that names the offending
+  key. The YAML `NodeInt` path (where yamerl has already discarded the
+  original byte representation) shares the 100-599 range check via the
+  new `http_status_from_int/1` helper, so an unquoted `99:` key under
+  `responses:` is rejected with the same diagnostic. (#587)
+
 ### Breaking
 
 - **`parse_string` / `parse_file` (YAML path) now require the `openapi`
