@@ -1,6 +1,5 @@
 import gleam/bool
 import gleam/dict.{type Dict}
-import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -286,7 +285,7 @@ pub fn parse_string_with_locations(
   content: String,
 ) -> Result(#(OpenApiSpec(Unresolved), LocationIndex), Diagnostic) {
   use #(root, index) <- result.try(parse_to_node(content))
-  use spec <- result.map(parse_root(root, index, strict_types: False))
+  use spec <- result.map(parse_root(root, index))
   #(spec, index)
 }
 
@@ -364,11 +363,7 @@ pub fn parse_json_string_with_locations(
   content: String,
 ) -> Result(#(OpenApiSpec(Unresolved), LocationIndex), Diagnostic) {
   use root <- result.try(decode_json_to_node(content))
-  use spec <- result.map(parse_root(
-    root,
-    location_index.empty(),
-    strict_types: True,
-  ))
+  use spec <- result.map(parse_root(root, location_index.empty()))
   #(spec, location_index.empty())
 }
 
@@ -496,9 +491,8 @@ fn looks_like_json_path(path: String) -> Bool {
 fn parse_root(
   node: yay.Node,
   index: LocationIndex,
-  strict_types strict_types: Bool,
 ) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
-  use openapi <- result.try(extract_openapi_field(node, index, strict_types))
+  use openapi <- result.try(extract_openapi_field(node, index))
 
   use _ <- result.try(validate_openapi_version(
     openapi,
@@ -574,58 +568,33 @@ fn is_supported_openapi_version(version: String) -> Bool {
         Ok(n) if n >= 0 -> True
         _ -> False
       }
-    // Two-segment "3.0" / "3.1" is tolerated: float-parsed YAML numbers
-    // like `openapi: 3.0` arrive as "3.0" after normalization.
+    // Two-segment "3.0" / "3.1" is tolerated for authors who quote the
+    // short form intentionally (`openapi: '3.0'`). The unquoted YAML
+    // float path that this branch originally served was removed in #583.
     ["3", "0"] | ["3", "1"] -> True
     _ -> False
   }
 }
 
 /// Extract the root `openapi` field. The OAS 3.0 / 3.1 schema requires
-/// this field to be a string. The `strict_types` flag controls whether
-/// we honour the YAML 1.1 number-coercion compatibility path:
-///
-/// - `strict_types: True` (JSON callers) — only `NodeStr` is accepted.
-///   JSON has explicit string syntax; an unquoted number is the
-///   author's mistake, not a yamerl quirk, so we surface it cleanly
-///   rather than silently coercing. (#580 case B)
-/// - `strict_types: False` (YAML callers) — falls back to `extract_float`
-///   so a yamerl-coerced `openapi: 3.0` (no quotes) keeps parsing as
-///   `"3.0"`. The compatibility path is documented and exercised by
-///   `parse_accepts_openapi_3_0_from_yaml_float_case`.
+/// this field to be a string, and both parsers enforce that contract
+/// uniformly. The YAML caller used to fall back to `extract_float` so
+/// an unquoted `openapi: 3.0` (which yamerl resolves as a float) would
+/// coerce back to `"3.0"`; that lenient path was the YAML-side of the
+/// #580 asymmetry and #583 closes it. Authors who relied on unquoted
+/// version numbers must quote them (`openapi: '3.0'`).
 fn extract_openapi_field(
   node: yay.Node,
   index: LocationIndex,
-  strict_types: Bool,
 ) -> Result(String, Diagnostic) {
   let loc = location_index.lookup_field(index, "", "openapi")
-  case strict_types {
-    True ->
-      yay.extract_string(node, "openapi")
-      |> result.map_error(parser_yay_error.missing_field_from_extraction(
-        _,
-        path: "",
-        field: "openapi",
-        loc: loc,
-      ))
-    False ->
-      yay.extract_string(node, "openapi")
-      |> result.lazy_or(fn() {
-        yay.extract_float(node, "openapi")
-        |> result.map(fn(f) {
-          case f == int.to_float(float.truncate(f)) {
-            True -> int.to_string(float.truncate(f)) <> ".0"
-            False -> float.to_string(f)
-          }
-        })
-      })
-      |> result.map_error(parser_yay_error.missing_field_from_extraction(
-        _,
-        path: "",
-        field: "openapi",
-        loc: loc,
-      ))
-  }
+  yay.extract_string(node, "openapi")
+  |> result.map_error(parser_yay_error.missing_field_from_extraction(
+    _,
+    path: "",
+    field: "openapi",
+    loc: loc,
+  ))
 }
 
 /// Mirror of yay's private `node_type_name` for the diagnostic

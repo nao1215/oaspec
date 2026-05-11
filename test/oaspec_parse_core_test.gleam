@@ -43,7 +43,9 @@ pub fn openapi_version_gate_test() {
   let _ = support.parse_rejects_bare_openapi_3_case()
   let _ = support.parse_accepts_openapi_3_0_3_case()
   let _ = support.parse_accepts_openapi_3_1_0_case()
-  let _ = support.parse_accepts_openapi_3_0_from_yaml_float_case()
+  let _ = support.parse_rejects_unquoted_openapi_float_from_yaml_case()
+  let _ = support.parse_accepts_quoted_openapi_3_0_from_yaml_case()
+  let _ = support.parse_rejects_unquoted_openapi_int_from_yaml_case()
 }
 
 pub fn parser_security_and_shape_test() {
