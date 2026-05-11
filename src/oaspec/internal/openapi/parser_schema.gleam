@@ -5,6 +5,7 @@
 //// recursive internal machinery.
 
 import gleam/dict.{type Dict}
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
@@ -285,6 +286,26 @@ fn parse_typed_schema(
       let min_length = parser_value.optional_int(node, "minLength")
       let max_length = parser_value.optional_int(node, "maxLength")
       let pattern = parser_value.optional_string(node, "pattern")
+      use _ <- result.try(check_non_negative(
+        min_length,
+        "minLength",
+        path,
+        index,
+      ))
+      use _ <- result.try(check_non_negative(
+        max_length,
+        "maxLength",
+        path,
+        index,
+      ))
+      use _ <- result.try(check_min_le_max_int(
+        min_length,
+        max_length,
+        "minLength",
+        "maxLength",
+        path,
+        index,
+      ))
       Ok(StringSchema(
         metadata:,
         format:,
@@ -328,6 +349,20 @@ fn parse_typed_schema(
         _, _, _ -> #(raw_maximum, None)
       }
       let multiple_of = parser_value.optional_int(node, "multipleOf")
+      use _ <- result.try(check_strictly_positive_int(
+        multiple_of,
+        "multipleOf",
+        path,
+        index,
+      ))
+      use _ <- result.try(check_min_le_max_int(
+        minimum,
+        maximum,
+        "minimum",
+        "maximum",
+        path,
+        index,
+      ))
       Ok(IntegerSchema(
         metadata:,
         format:,
@@ -369,6 +404,20 @@ fn parse_typed_schema(
         _, _, _ -> #(raw_maximum, None)
       }
       let multiple_of = parser_value.optional_float(node, "multipleOf")
+      use _ <- result.try(check_strictly_positive_float(
+        multiple_of,
+        "multipleOf",
+        path,
+        index,
+      ))
+      use _ <- result.try(check_min_le_max_float(
+        minimum,
+        maximum,
+        "minimum",
+        "maximum",
+        path,
+        index,
+      ))
       Ok(NumberSchema(
         metadata:,
         format:,
@@ -398,6 +447,16 @@ fn parse_typed_schema(
       let min_items = parser_value.optional_int(node, "minItems")
       let max_items = parser_value.optional_int(node, "maxItems")
       let unique_items = parser_value.bool_default(node, "uniqueItems", False)
+      use _ <- result.try(check_non_negative(min_items, "minItems", path, index))
+      use _ <- result.try(check_non_negative(max_items, "maxItems", path, index))
+      use _ <- result.try(check_min_le_max_int(
+        min_items,
+        max_items,
+        "minItems",
+        "maxItems",
+        path,
+        index,
+      ))
       Ok(ArraySchema(metadata:, items:, min_items:, max_items:, unique_items:))
     }
 
@@ -427,6 +486,32 @@ fn parse_typed_schema(
       )
       let min_properties = parser_value.optional_int(node, "minProperties")
       let max_properties = parser_value.optional_int(node, "maxProperties")
+      use _ <- result.try(check_non_negative(
+        min_properties,
+        "minProperties",
+        path,
+        index,
+      ))
+      use _ <- result.try(check_non_negative(
+        max_properties,
+        "maxProperties",
+        path,
+        index,
+      ))
+      use _ <- result.try(check_min_le_max_int(
+        min_properties,
+        max_properties,
+        "minProperties",
+        "maxProperties",
+        path,
+        index,
+      ))
+      // The "required must be a subset of properties" check is left to
+      // a later phase: at parse time we cannot see allOf / discriminator
+      // inheritance, and real-world specs (openapi-generator samples
+      // among them) routinely list inherited-property names under
+      // `required` while leaving the explicit `properties` map narrow.
+      // Surfacing those as parse-time errors creates false positives.
       Ok(ObjectSchema(
         metadata:,
         properties:,
@@ -506,4 +591,116 @@ fn parse_discriminator(
   }
 
   Ok(Discriminator(property_name:, mapping:))
+}
+
+// Issue #589: helpers that catch schema constraint violations at parse
+// time. Pre-fix the parser silently stored values like `multipleOf: 0`
+// or `minLength: 10, maxLength: 5`, and downstream codegen emitted
+// guards that were never satisfied. Each helper returns Ok(Nil) when
+// the constraint holds and surfaces an invalid_value diagnostic
+// otherwise.
+
+fn check_non_negative(
+  value: option.Option(Int),
+  field: String,
+  path: String,
+  index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  case value {
+    Some(n) if n < 0 ->
+      Error(diagnostic.invalid_value(
+        path: path <> "." <> field,
+        detail: field
+          <> " must be non-negative, got "
+          <> int.to_string(n)
+          <> ".",
+        loc: location_index.lookup_field(index, path, field),
+      ))
+    _ -> Ok(Nil)
+  }
+}
+
+fn check_strictly_positive_int(
+  value: option.Option(Int),
+  field: String,
+  path: String,
+  index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  case value {
+    Some(n) if n <= 0 ->
+      Error(diagnostic.invalid_value(
+        path: path <> "." <> field,
+        detail: field
+          <> " must be strictly greater than 0, got "
+          <> int.to_string(n)
+          <> ".",
+        loc: location_index.lookup_field(index, path, field),
+      ))
+    _ -> Ok(Nil)
+  }
+}
+
+fn check_strictly_positive_float(
+  value: option.Option(Float),
+  field: String,
+  path: String,
+  index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  case value {
+    Some(n) if n <=. 0.0 ->
+      Error(diagnostic.invalid_value(
+        path: path <> "." <> field,
+        detail: field <> " must be strictly greater than 0.",
+        loc: location_index.lookup_field(index, path, field),
+      ))
+    _ -> Ok(Nil)
+  }
+}
+
+fn check_min_le_max_int(
+  min: option.Option(Int),
+  max: option.Option(Int),
+  min_field: String,
+  max_field: String,
+  path: String,
+  index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  case min, max {
+    Some(lo), Some(hi) if lo > hi ->
+      Error(diagnostic.invalid_value(
+        path: path,
+        detail: min_field
+          <> " ("
+          <> int.to_string(lo)
+          <> ") must be less than or equal to "
+          <> max_field
+          <> " ("
+          <> int.to_string(hi)
+          <> ").",
+        loc: location_index.lookup(index, path),
+      ))
+    _, _ -> Ok(Nil)
+  }
+}
+
+fn check_min_le_max_float(
+  min: option.Option(Float),
+  max: option.Option(Float),
+  min_field: String,
+  max_field: String,
+  path: String,
+  index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  case min, max {
+    Some(lo), Some(hi) if lo >. hi ->
+      Error(diagnostic.invalid_value(
+        path: path,
+        detail: min_field
+          <> " must be less than or equal to "
+          <> max_field
+          <> ".",
+        loc: location_index.lookup(index, path),
+      ))
+    _, _ -> Ok(Nil)
+  }
 }
