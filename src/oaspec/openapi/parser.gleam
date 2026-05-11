@@ -3,6 +3,7 @@ import gleam/dict.{type Dict}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/regexp
 import gleam/result
 import gleam/string
 import oaspec/internal/openapi/external_loader
@@ -758,6 +759,7 @@ fn parse_paths(
             case string.starts_with(path, "x-") {
               True -> Ok(acc)
               False -> {
+                use _ <- result.try(validate_path_template_key(path, index))
                 // Check for $ref first — resolve from components.pathItems
                 use ref_or_path_item <- result.try(
                   case parser_value.optional_string(value_node, "$ref") {
@@ -796,6 +798,152 @@ fn parse_paths(
     // enforced earlier in `parse_root` via `require_paths_present`,
     // and 3.1 documents may legitimately omit `paths`.
     _ -> Ok(dict.new())
+  }
+}
+
+/// Validate that a `paths:` key conforms to the OAS 3.0 §4.7.9.1 path
+/// templating grammar. The parser used to forward any string to the
+/// codegen pipeline, which then emitted routes the HTTP layer cannot
+/// serve (no leading slash, embedded `?` / `#`, whitespace, malformed
+/// `{var}` placeholders, ...). The checks here cover the deviations
+/// listed in #588:
+///
+/// - non-empty,
+/// - starts with `/`,
+/// - no consecutive `//`,
+/// - no `?` (query) or `#` (fragment),
+/// - no unencoded whitespace (the OAS path grammar inherits URL path
+///   character rules and excludes space / tab in the literal segment),
+/// - balanced `{` / `}` with each placeholder matching `[A-Za-z0-9_-]+`,
+/// - each placeholder name unique within the path.
+fn validate_path_template_key(
+  path: String,
+  index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  let reject = fn(detail: String) -> Result(Nil, Diagnostic) {
+    Error(diagnostic.invalid_value(
+      path: "paths",
+      detail: "Invalid path key '" <> path <> "': " <> detail,
+      loc: location_index.lookup_field(index, "", "paths"),
+    ))
+  }
+  use <- bool.guard(when: path == "", return: reject("must not be empty"))
+  use <- bool.guard(
+    when: !string.starts_with(path, "/"),
+    return: reject("must start with '/'"),
+  )
+  use <- bool.guard(
+    when: string.contains(path, "//"),
+    return: reject("must not contain '//'"),
+  )
+  use <- bool.guard(
+    when: string.contains(path, "?"),
+    return: reject("must not contain a query string"),
+  )
+  use <- bool.guard(
+    when: string.contains(path, "#"),
+    return: reject("must not contain a URL fragment"),
+  )
+  use <- bool.guard(
+    when: string.contains(path, " "),
+    return: reject("must not contain spaces"),
+  )
+  use <- bool.guard(
+    when: string.contains(path, "\t"),
+    return: reject("must not contain tab characters"),
+  )
+  validate_path_placeholders(path, reject)
+}
+
+/// Errors the placeholder scanner can surface. Kept as an ADT so the
+/// caller does not have to inspect raw strings — the user-facing
+/// diagnostic detail is rebuilt from the variant in
+/// `placeholder_error_detail`.
+type PlaceholderError {
+  Unclosed
+  NestedBrace
+  UnmatchedClose
+  InvalidName(name: String)
+}
+
+/// Walk the path string and verify that every `{...}` placeholder
+/// matches `[A-Za-z0-9_-]+` and that no placeholder name repeats.
+/// Returns the same `Result(Nil, Diagnostic)` as the caller's
+/// `reject` continuation so the diagnostic path / location stays
+/// consistent.
+fn validate_path_placeholders(
+  path: String,
+  reject: fn(String) -> Result(Nil, Diagnostic),
+) -> Result(Nil, Diagnostic) {
+  case extract_placeholder_names(path, "", False, []) {
+    Error(err) -> reject(placeholder_error_detail(err))
+    Ok(names) ->
+      case has_duplicate_name(names, []) {
+        Some(dup) ->
+          reject("placeholder '{" <> dup <> "}' appears more than once")
+        None -> Ok(Nil)
+      }
+  }
+}
+
+fn placeholder_error_detail(err: PlaceholderError) -> String {
+  case err {
+    Unclosed -> "unclosed '{' placeholder"
+    NestedBrace -> "'{' nested inside another placeholder"
+    UnmatchedClose -> "'}' without a matching '{'"
+    InvalidName(name) ->
+      "placeholder name '" <> name <> "' must match [A-Za-z0-9_-]+"
+  }
+}
+
+fn extract_placeholder_names(
+  remaining: String,
+  current: String,
+  inside: Bool,
+  acc: List(String),
+) -> Result(List(String), PlaceholderError) {
+  case string.pop_grapheme(remaining) {
+    Error(Nil) ->
+      case inside {
+        True -> Error(Unclosed)
+        False -> Ok(list.reverse(acc))
+      }
+    Ok(#("{", rest)) ->
+      case inside {
+        True -> Error(NestedBrace)
+        False -> extract_placeholder_names(rest, "", True, acc)
+      }
+    Ok(#("}", rest)) ->
+      case inside {
+        False -> Error(UnmatchedClose)
+        True ->
+          case is_valid_placeholder_name(current) {
+            False -> Error(InvalidName(current))
+            True -> extract_placeholder_names(rest, "", False, [current, ..acc])
+          }
+      }
+    Ok(#(ch, rest)) ->
+      case inside {
+        True -> extract_placeholder_names(rest, current <> ch, True, acc)
+        False -> extract_placeholder_names(rest, current, False, acc)
+      }
+  }
+}
+
+fn is_valid_placeholder_name(name: String) -> Bool {
+  // nolint: assert_ok_pattern -- the placeholder grammar regex is a fixed, known-valid literal
+  let assert Ok(re) = regexp.from_string("^[A-Za-z0-9_-]+$")
+  regexp.check(with: re, content: name)
+}
+
+fn has_duplicate_name(names: List(String), seen: List(String)) -> Option(String) {
+  case names {
+    [] -> None
+    [head, ..rest] ->
+      case list.contains(seen, head) {
+        True -> Some(head)
+        False -> has_duplicate_name(rest, [head, ..seen])
+      }
   }
 }
 
