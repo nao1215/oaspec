@@ -109,6 +109,22 @@ if [ "$needs_download" = "1" ]; then
   mv "$GITHUB_API_CACHE.tmp" "$GITHUB_API_CACHE"
 fi
 
+# Sanitise: drop the `/users/{username}/attestations/{subject_digest}` path
+# block. GitHub ships this alongside `/users/{username}/attestations/{attestation_id}`,
+# but the two collide on the same routing template `/users/{}/attestations/{}`,
+# which OAS 3.0 §4.7.9.1 forbids (and oaspec rejects since #593). Removing
+# the duplicate keeps the rest of the spec testable end-to-end without
+# masking the parser's spec-conformance check. The spec uses double-quoted
+# path keys, hence the `^  "` prefix in the match.
+SANITISED_CACHE="$GITHUB_API_CACHE.sanitised"
+awk '
+  /^  "\/users\/\{username\}\/attestations\/\{subject_digest\}":[[:space:]]*$/ { skip = 1; next }
+  /^  "\/orgs\/\{org\}\/attestations\/\{subject_digest\}":[[:space:]]*$/ { skip = 1; next }
+  /^  "?\// { skip = 0 }
+  !skip
+' "$GITHUB_API_CACHE" > "$SANITISED_CACHE.tmp" && mv "$SANITISED_CACHE.tmp" "$SANITISED_CACHE"
+GITHUB_API_CACHE="$SANITISED_CACHE"
+
 GITHUB_TEST_DIR="$SCRIPT_DIR/github_full_test"
 rm -rf "$GITHUB_TEST_DIR"
 mkdir -p "$GITHUB_TEST_DIR/src"

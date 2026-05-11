@@ -12,6 +12,15 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Fixed
 
+- **Two templated paths that share the same routing template are now
+  rejected** as identical, per OAS 3.0 §4.7.9.1. `/users/{id}` and
+  `/users/{name}` collapse onto `/users/{}` after the placeholder
+  names are erased, and codegen would emit two Gleam handlers for one
+  HTTP route. The new `validate_unique_path_templates/2` walker runs
+  after `parse_paths`, normalises every path to its `{}`-erased
+  template, and raises `invalid_value` naming both colliding paths
+  plus the shared template. Distinct hierarchies (`/users/{id}` vs
+  `/groups/{id}`) still parse. (#593)
 - **`paths:` keys and operation/path-level `parameters` lists must
   agree on every templated variable** per OAS 3.0 §4.7.12.1. Pre-fix,
   the parser silently accepted `/users/{other}` declared with a

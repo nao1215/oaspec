@@ -36,6 +36,8 @@ pub fn parser_smoke_test() {
   let _ = support.parser_rejects_query_in_path_case()
   let _ = support.parser_rejects_fragment_in_path_case()
   let _ = support.parser_rejects_space_in_path_case()
+  let _ = support.parser_rejects_template_collision_simple_case()
+  let _ = support.parser_accepts_distinct_path_templates_case()
   let _ = support.parser_rejects_path_var_without_matching_param_case()
   let _ = support.parser_rejects_in_path_param_not_in_template_case()
   let _ = support.parser_rejects_path_with_no_parameters_list_case()

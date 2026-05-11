@@ -537,6 +537,11 @@ fn parse_root(
   // path template. Path-level and operation-level parameters are merged
   // per operation before the cross-check. (#594)
   use _ <- result.try(validate_path_template_params(paths, index))
+  // OAS 3.0 §4.7.9.1: templated paths with the same hierarchy but
+  // different placeholder names are identical — `/users/{id}` and
+  // `/users/{name}` collide on the same routing template. Reject the
+  // collision so codegen does not emit two handlers for one route. (#593)
+  use _ <- result.try(validate_unique_path_templates(paths, index))
   use servers <- result.try(parse_servers(node, index))
   use security <- result.try(parse_security_requirements(node, "", index))
   use webhooks <- result.try(parse_webhooks(node, components, index))
@@ -926,6 +931,91 @@ fn cross_check_path_vs_params(
         Error(Nil) -> Ok(Nil)
       }
     }
+  }
+}
+
+/// Reject `paths:` entries that share the same routing template after
+/// the placeholder names are erased. `/users/{id}` and `/users/{name}`
+/// produce the same `/users/{}` signature and therefore collapse onto
+/// one HTTP route. (#593)
+fn validate_unique_path_templates(
+  paths: Dict(String, RefOr(PathItem(Unresolved))),
+  index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  let template_pairs =
+    dict.keys(paths)
+    |> list.map(fn(p) { #(normalise_path_template(p), p) })
+  case find_first_template_collision(template_pairs, []) {
+    None -> Ok(Nil)
+    Some(#(template, original_a, original_b)) ->
+      Error(diagnostic.invalid_value(
+        path: "paths",
+        detail: "Paths '"
+          <> original_a
+          <> "' and '"
+          <> original_b
+          <> "' share the same routing template '"
+          <> template
+          <> "' (OAS 3.0 §4.7.9.1: templated paths with the same hierarchy but different placeholder names are identical).",
+        loc: location_index.lookup(index, "paths"),
+      ))
+  }
+}
+
+fn normalise_path_template(path: String) -> String {
+  case normalise_path_template_loop(path, "", False, "") {
+    Ok(s) -> s
+    // The placeholder walker (#588) already rejected malformed paths,
+    // so reaching this branch means the input was either well-formed
+    // (handled above) or already-unparseable (in which case returning
+    // the raw path is enough — it cannot collide with another well-
+    // formed path on the normalised key anyway).
+    Error(Nil) -> path
+  }
+}
+
+fn normalise_path_template_loop(
+  remaining: String,
+  acc: String,
+  inside: Bool,
+  _current: String,
+) -> Result(String, Nil) {
+  case string.pop_grapheme(remaining) {
+    Error(Nil) ->
+      case inside {
+        True -> Error(Nil)
+        False -> Ok(acc)
+      }
+    Ok(#("{", rest)) ->
+      case inside {
+        True -> Error(Nil)
+        False -> normalise_path_template_loop(rest, acc <> "{}", True, "")
+      }
+    Ok(#("}", rest)) ->
+      case inside {
+        True -> normalise_path_template_loop(rest, acc, False, "")
+        False -> Error(Nil)
+      }
+    Ok(#(ch, rest)) ->
+      case inside {
+        True -> normalise_path_template_loop(rest, acc, True, ch)
+        False -> normalise_path_template_loop(rest, acc <> ch, False, "")
+      }
+  }
+}
+
+fn find_first_template_collision(
+  pairs: List(#(String, String)),
+  seen: List(#(String, String)),
+) -> Option(#(String, String, String)) {
+  case pairs {
+    [] -> None
+    [#(template, original), ..rest] ->
+      case list.find(seen, fn(s) { s.0 == template }) {
+        Ok(#(_, prior_original)) -> Some(#(template, prior_original, original))
+        Error(Nil) ->
+          find_first_template_collision(rest, [#(template, original), ..seen])
+      }
   }
 }
 
