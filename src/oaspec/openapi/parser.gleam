@@ -1188,9 +1188,68 @@ fn parse_parameters_list(
   index: LocationIndex,
 ) -> Result(List(RefOr(Parameter(Unresolved))), Diagnostic) {
   case yay.select_sugar(from: node, selector: "parameters") {
-    Ok(yay.NodeSeq(items)) ->
-      list.try_map(items, fn(item) { parse_parameter(item, components, index) })
+    Ok(yay.NodeSeq(items)) -> {
+      use parsed <- result.try(
+        list.try_map(items, fn(item) {
+          parse_parameter(item, components, index)
+        }),
+      )
+      // OAS 3.0 §4.7.10.5: "The list MUST NOT include duplicated
+      // parameters. A unique parameter is defined by a combination
+      // of a name and location." Inline parameters are checked here;
+      // `Ref` entries are skipped because the resolved (name, in)
+      // pair is not visible at parse time. (#592)
+      use _ <- result.try(check_unique_parameters(parsed, index))
+      Ok(parsed)
+    }
     _ -> Ok([])
+  }
+}
+
+fn check_unique_parameters(
+  parameters: List(RefOr(Parameter(Unresolved))),
+  index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  let keys =
+    list.filter_map(parameters, fn(p) {
+      case p {
+        Value(param) -> Ok(parameter_in_string(param.in_) <> "/" <> param.name)
+        Ref(_) -> Error(Nil)
+      }
+    })
+  case find_first_duplicate(keys, []) {
+    None -> Ok(Nil)
+    Some(dup) ->
+      Error(diagnostic.invalid_value(
+        path: "parameters",
+        detail: "Duplicate parameter (name + in): '"
+          <> dup
+          <> "'. OAS 3.0 §4.7.10.5 requires the (name, in) pair to be unique within an operation.",
+        loc: location_index.lookup(index, "parameters"),
+      ))
+  }
+}
+
+fn parameter_in_string(in_: spec.ParameterIn) -> String {
+  case in_ {
+    spec.InPath -> "path"
+    spec.InQuery -> "query"
+    spec.InHeader -> "header"
+    spec.InCookie -> "cookie"
+  }
+}
+
+fn find_first_duplicate(
+  remaining: List(String),
+  seen: List(String),
+) -> Option(String) {
+  case remaining {
+    [] -> None
+    [head, ..rest] ->
+      case list.contains(seen, head) {
+        True -> Some(head)
+        False -> find_first_duplicate(rest, [head, ..seen])
+      }
   }
 }
 
