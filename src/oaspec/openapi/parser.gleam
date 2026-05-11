@@ -1206,6 +1206,44 @@ fn parse_parameters_list(
   }
 }
 
+/// Reject parameter names the OAS path-template grammar and the
+/// URL query/header word grammar both refuse — empty strings,
+/// strings made entirely of whitespace, strings containing a space
+/// or tab. Lets through the conservative `[A-Za-z0-9_.-]+` set the
+/// HTTP grammars share. (#590)
+fn validate_parameter_name(
+  name: String,
+  index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  use <- bool.guard(
+    when: name == "",
+    return: Error(diagnostic.invalid_value(
+      path: "parameter",
+      detail: "Parameter name must not be empty.",
+      loc: location_index.lookup_field(index, "parameter", "name"),
+    )),
+  )
+  use <- bool.guard(
+    when: string.trim(name) == "",
+    return: Error(diagnostic.invalid_value(
+      path: "parameter",
+      detail: "Parameter name must not be whitespace-only.",
+      loc: location_index.lookup_field(index, "parameter", "name"),
+    )),
+  )
+  use <- bool.guard(
+    when: string.contains(name, " ") || string.contains(name, "\t"),
+    return: Error(diagnostic.invalid_value(
+      path: "parameter",
+      detail: "Parameter name must not contain spaces or tabs (got '"
+        <> name
+        <> "').",
+      loc: location_index.lookup_field(index, "parameter", "name"),
+    )),
+  )
+  Ok(Nil)
+}
+
 fn check_unique_parameters(
   parameters: List(RefOr(Parameter(Unresolved))),
   index: LocationIndex,
@@ -1275,6 +1313,12 @@ fn parse_parameter(
         )),
       )
 
+      // OAS does not document an empty parameter name. Whitespace-laden
+      // names break the `[A-Za-z0-9_-]+` path-template grammar and the
+      // URL query/header word grammar alike. Reject both early so the
+      // codegen does not produce empty-keyed bindings. (#590)
+      use _ <- result.try(validate_parameter_name(name, index))
+
       use in_str <- result.try(
         yay.extract_string(node, "in")
         |> result.map_error(parser_yay_error.missing_field_from_extraction(
@@ -1291,15 +1335,18 @@ fn parse_parameter(
 
       let explicit_required = parser_value.optional_bool(node, "required")
 
-      // OpenAPI 3.x: path parameters MUST have required: true
+      // OAS 3.0 §4.7.12.1: "If the parameter location is 'path', this
+      // property is REQUIRED and its value MUST be true." Both the
+      // missing-`required` case (#590) and the explicit
+      // `required: false` case must reject.
       use required <- result.try(case in_, explicit_required {
-        spec.InPath, Some(False) ->
+        spec.InPath, Some(True) -> Ok(True)
+        spec.InPath, _ ->
           Error(diagnostic.invalid_value(
             path: "parameter." <> name,
             detail: "Path parameters must have required: true",
             loc: location_index.lookup(index, "parameter." <> name),
           ))
-        spec.InPath, _ -> Ok(True)
         _, Some(v) -> Ok(v)
         _, None -> Ok(False)
       })
