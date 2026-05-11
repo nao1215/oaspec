@@ -48,8 +48,26 @@ pub type ContentType {
 /// the name from the spec, not from `to_string`), so the wire-level
 /// content type is preserved even though the in-memory typing falls
 /// back. This mirrors the existing `application/x-ndjson` aliasing.
+/// Strip media-type parameters and lowercase the type/subtype tokens
+/// so `application/JSON`, `application/json`, `application/json;
+/// charset=utf-8`, and `application/json;charset=utf-8` all normalise
+/// to `application/json` before classification. Per RFC 7231 §3.1.1.5
+/// the type and subtype tokens are case-insensitive, and §3.1.1.1
+/// excludes parameters from the type identity itself. The previous
+/// case-sensitive direct-equality lookup misclassified every real-world
+/// `application/json; charset=utf-8` declaration as
+/// `UnsupportedContentType`, which then skipped JSON codegen for the
+/// affected endpoints. (#585)
+fn normalise(content_type: String) -> String {
+  case string.split_once(content_type, ";") {
+    Ok(#(head, _)) -> string.trim(head)
+    Error(Nil) -> string.trim(content_type)
+  }
+  |> string.lowercase
+}
+
 pub fn from_string(content_type: String) -> ContentType {
-  case content_type {
+  case normalise(content_type) {
     "application/json" -> ApplicationJson
     "text/plain" -> TextPlain
     // application/x-ndjson (newline-delimited JSON) is widely deployed for
@@ -91,15 +109,22 @@ pub fn from_string(content_type: String) -> ContentType {
 }
 
 /// Check if a content type string is JSON-compatible.
-/// Matches "application/json" and any type with a "+json" suffix.
+/// Matches `application/json` and any type with a `+json` suffix, with
+/// the same case-insensitive and parameter-stripping normalisation
+/// `from_string` applies (#585).
 pub fn is_json_compatible(s: String) -> Bool {
-  s == "application/json" || string.ends_with(s, "+json")
+  let normalised = normalise(s)
+  normalised == "application/json" || string.ends_with(normalised, "+json")
 }
 
 /// Check if a content type string is XML-compatible.
-/// Matches "application/xml", "text/xml", and any type with a "+xml" suffix.
+/// Matches `application/xml`, `text/xml`, and any type with a `+xml`
+/// suffix, with the same normalisation as `is_json_compatible`. (#585)
 pub fn is_xml_compatible(s: String) -> Bool {
-  s == "application/xml" || s == "text/xml" || string.ends_with(s, "+xml")
+  let normalised = normalise(s)
+  normalised == "application/xml"
+  || normalised == "text/xml"
+  || string.ends_with(normalised, "+xml")
 }
 
 /// Convert a ContentType back to its string representation.

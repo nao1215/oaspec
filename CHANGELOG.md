@@ -12,6 +12,23 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Fixed
 
+- **`content_type.from_string` / `is_json_compatible` /
+  `is_xml_compatible` now normalise the input before classification.**
+  Pre-fix the classifier used case-sensitive direct equality and did
+  not strip media-type parameters, so `application/JSON`,
+  `application/json; charset=utf-8`, `application/json;charset=utf-8`,
+  and `Application/XML` all classified as `UnsupportedContentType` —
+  the codegen then silently skipped JSON / XML decode-encode paths for
+  any endpoint declaring the parameterised form (and `Content-Type:
+  application/json; charset=utf-8` is what every mainstream framework
+  ships by default). The new `normalise/1` helper strips parameters
+  (`; charset=...`, `; q=...`) and lowercases the type/subtype tokens
+  per RFC 7231 §3.1.1.5 before the case-table lookup, so all four
+  shapes route to `ApplicationJson`/`ApplicationXml` as expected. The
+  in-memory `UnsupportedContentType` carrier still receives the
+  pre-normalised string of the fallback path; the wire-level
+  `Content-Type` header keeps the spec's original form because codegen
+  pulls the literal name from the spec, not from `to_string`. (#585)
 - **`parse_string` / `parse_json_string` now reject duplicate keys in
   the top-level `paths` mapping.** yamerl tolerates duplicate YAML
   mapping keys and silently keeps the last entry, so a document with
