@@ -15,8 +15,15 @@ paths:
           description: OK
   /items:
     get:
-      # Issue 2 (continued): same operationId as /users.get.
-      operationId: listItems
+      # Issue 2: operation-level security names a second nonexistent scheme,
+      # so the validator must surface a distinct error from the global one
+      # without short-circuiting after the first finding. (Was previously a
+      # duplicate operationId; the parser now rejects that earlier per
+      # #591, so this fixture uses two distinct security-ref issues to
+      # exercise the same aggregation contract.)
+      operationId: listOtherItems
+      security:
+        - missing_scheme_in_operation: []
       responses:
         "200":
           description: OK

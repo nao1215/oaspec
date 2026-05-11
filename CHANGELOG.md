@@ -12,6 +12,22 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Fixed
 
+- **`operationId` uniqueness is enforced at parse time** per OAS 3.0
+  §4.7.10.1, and **components map keys must match
+  `^[a-zA-Z0-9._-]+$`** per OAS 3.0 §4.7.7.1. Pre-fix, duplicate
+  operationIds flowed through to codegen and either produced compile
+  errors in the generated Gleam or got silently dedup-renamed by an
+  internal pass (mutating the user's public API surface). Invalid
+  component names (empty, whitespace, `/`, `@`, non-ASCII, ...)
+  produced Gleam identifiers the type system rejected at compile
+  time. Both classes now reject with `invalid_value` diagnostics that
+  name the offending operationId or component key. The previous
+  validator-level duplicate-operationId pass (#237) was moved up to
+  parse time; programmatic in-memory specs still see the same
+  diagnostic shape. Fixtures `error_duplicate_operation_id.yaml`,
+  `error_multiple_issues.yaml`, and
+  `oss_swagger_parser_java_31_security.yaml` were updated to remain
+  valid after the tightening. (#591)
 - **Path parameters now require an explicit `required: true`** per OAS
   3.0 §4.7.12.1, and parameter names must be non-empty and free of
   spaces / tabs. Pre-fix the parser silently defaulted missing

@@ -1157,6 +1157,71 @@ pub fn parser_rejects_space_in_path_case() {
 // non-whitespace names. Pre-fix the parser silently defaulted missing
 // `required` to True for path params and accepted any name string.
 
+// Issue #591: operationId must be globally unique (OAS 3.0 §4.7.10.1)
+// and component map keys must match `^[a-zA-Z0-9._-]+$`
+// (OAS 3.0 §4.7.7.1). Both rules were unenforced at parse time.
+
+pub fn parser_rejects_duplicate_operation_id_across_paths_case() {
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n"
+    <> "  /a:\n    get:\n      operationId: getThing\n      responses:\n        '200':\n          description: ok\n"
+    <> "  /b:\n    get:\n      operationId: getThing\n      responses:\n        '200':\n          description: ok\n"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "operationId"))
+  should.be_true(string.contains(d.message, "getThing"))
+}
+
+pub fn parser_rejects_duplicate_operation_id_same_path_case() {
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n  /a:\n"
+    <> "    get:\n      operationId: doStuff\n      responses:\n        '200':\n          description: ok\n"
+    <> "    post:\n      operationId: doStuff\n      responses:\n        '200':\n          description: ok\n"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "doStuff"))
+}
+
+pub fn parser_rejects_component_schema_name_with_slash_case() {
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths: {}\n"
+    <> "components:\n  schemas:\n"
+    <> "    'foo/bar':\n      type: string\n"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "foo/bar"))
+}
+
+pub fn parser_rejects_component_schema_empty_name_case() {
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths: {}\n"
+    <> "components:\n  schemas:\n"
+    <> "    '':\n      type: string\n"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("invalid_value")
+}
+
+pub fn parser_accepts_canonical_component_schema_name_case() {
+  // Sanity: the canonical `[a-zA-Z0-9._-]+` shape still parses.
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths: {}\n"
+    <> "components:\n  schemas:\n"
+    <> "    UserAccount.V2:\n      type: string\n"
+    <> "    snake_case_name:\n      type: string\n"
+  let assert Ok(_) = parser.parse_string(yaml)
+  Nil
+}
+
 pub fn parser_rejects_path_param_without_required_true_case() {
   let yaml =
     "openapi: 3.0.0\n"
@@ -2739,22 +2804,18 @@ pub fn validate_deep_additional_properties_in_response_case() {
 }
 
 pub fn validate_rejects_duplicate_operation_id_case() {
-  // Issue #237: duplicate operationIds must fail validation with a clear
-  // diagnostic that names every site that claimed the colliding ID.
-  // (Previously the dedup pass silently renamed the second occurrence,
-  // mutating the generated public API surface without notifying the
-  // user.)
-  let ctx = make_ctx("test/fixtures/error_duplicate_operation_id.yaml")
-  let errors = validate.validate(ctx)
-  let messages = list.map(errors, validate.error_to_string)
-  list.any(messages, fn(s) { string.contains(s, "Duplicate operationId") })
-  |> should.be_true()
-  list.any(messages, fn(s) { string.contains(s, "listItems") })
-  |> should.be_true()
-  list.any(messages, fn(s) {
-    string.contains(s, "GET /users") && string.contains(s, "GET /items")
-  })
-  |> should.be_true()
+  // Issue #237 originally surfaced this check in the validator. With
+  // #591 the same uniqueness rule is enforced at parse time (OAS 3.0
+  // §4.7.10.1 puts the contract on the spec itself), so this test
+  // now pins the parser-level rejection — the previous file-based
+  // validator path is unreachable because the parser refuses the
+  // fixture upstream.
+  let result =
+    parser.parse_file("test/fixtures/error_duplicate_operation_id.yaml")
+  let assert Error(d) = result
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "Duplicate operationId"))
+  should.be_true(string.contains(d.message, "listItems"))
 }
 
 /// Multi-error aggregation contract: validate.validate must surface
@@ -2780,13 +2841,15 @@ pub fn validate_aggregates_multiple_errors_in_one_pass_case() {
       panic as "expected >= 2 diagnostics, validator returned fewer"
   }
 
-  // Both classes of error must be represented; otherwise the
-  // aggregator is silently dropping one of them.
-  list.any(messages, fn(s) { string.contains(s, "Duplicate operationId") })
+  // Both distinct missing-scheme references must be represented;
+  // otherwise the aggregator is silently dropping one of them.
+  // (Was previously asserting Duplicate operationId + missing scheme;
+  // the operationId case now fails at parse-time per #591, so this
+  // fixture uses two missing-scheme refs to exercise the same
+  // aggregation contract.)
+  list.any(messages, fn(s) { string.contains(s, "nonexistent_scheme") })
   |> should.be_true()
-  list.any(messages, fn(s) {
-    string.contains(s, "nonexistent_scheme") || string.contains(s, "security")
-  })
+  list.any(messages, fn(s) { string.contains(s, "missing_scheme_in_operation") })
   |> should.be_true()
 }
 
@@ -14867,13 +14930,17 @@ pub fn error_invalid_json_as_yaml_parsed_but_may_fail_case() {
 }
 
 pub fn error_duplicate_operation_id_parses_case() {
-  // The parser accepts a spec with duplicate operationIds — the uniqueness
-  // constraint is surfaced as a validation error (see issue #237 and
-  // `validate_rejects_duplicate_operation_id_test`), not a parse failure,
-  // so tooling can still load and inspect the broken spec.
-  let assert Ok(spec) =
+  // Pre-#591, the parser accepted duplicate operationIds and left the
+  // uniqueness check to the validator. The parser now rejects the spec
+  // directly (per OAS 3.0 §4.7.10.1), so this case asserts the
+  // earlier-and-stricter rejection. The validator-side regression test
+  // for #237 still pins the validator path on a hand-crafted in-memory
+  // duplicate spec; see validate_rejects_duplicate_operation_id_test.
+  let result =
     parser.parse_file("test/fixtures/error_duplicate_operation_id.yaml")
-  dict.size(spec.paths) |> should.equal(2)
+  let assert Error(d) = result
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "Duplicate operationId"))
 }
 
 pub fn error_missing_path_param_case() {
