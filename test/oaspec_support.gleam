@@ -1059,6 +1059,103 @@ pub fn parser_rejects_yaml_int_response_status_below_100_case() {
   d.code |> should.equal("invalid_value")
 }
 
+// Issue #588: `paths:` keys must follow the OAS 3.0 §4.7.9.1 path-template
+// grammar. Pre-fix, any string flowed through the parser and into codegen,
+// which emitted routes the HTTP layer cannot serve. Each case below pins
+// one deviation listed in the issue.
+
+fn make_path_spec(path_key: String) -> String {
+  "openapi: 3.0.0\n"
+  <> "info:\n  title: x\n  version: '1.0'\n"
+  <> "paths:\n"
+  <> "  '"
+  <> path_key
+  <> "':\n"
+  <> "    get:\n"
+  <> "      responses:\n"
+  <> "        '200':\n"
+  <> "          description: ok\n"
+}
+
+pub fn parser_rejects_path_without_leading_slash_case() {
+  let assert Error(d) = parser.parse_string(make_path_spec("users"))
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "must start with '/'"))
+}
+
+pub fn parser_rejects_empty_path_case() {
+  let assert Error(d) = parser.parse_string(make_path_spec(""))
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "must not be empty"))
+}
+
+pub fn parser_rejects_double_slash_path_case() {
+  let assert Error(d) = parser.parse_string(make_path_spec("//users"))
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "//"))
+}
+
+pub fn parser_rejects_empty_placeholder_path_case() {
+  let assert Error(d) = parser.parse_string(make_path_spec("/users/{}"))
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "placeholder"))
+}
+
+pub fn parser_rejects_whitespace_placeholder_path_case() {
+  // The early space-check fires first, so the diagnostic is the generic
+  // "no whitespace in path" rather than a placeholder-specific message.
+  // Either way the path is rejected, which is what #588 demands.
+  let assert Error(d) = parser.parse_string(make_path_spec("/users/{ id }"))
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "space"))
+}
+
+pub fn parser_rejects_duplicate_placeholder_path_case() {
+  let assert Error(d) = parser.parse_string(make_path_spec("/users/{id}/{id}"))
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "id"))
+}
+
+pub fn parser_rejects_unclosed_placeholder_path_case() {
+  let assert Error(d) = parser.parse_string(make_path_spec("/users/{id"))
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "unclosed"))
+}
+
+pub fn parser_rejects_nested_brace_path_case() {
+  let assert Error(d) = parser.parse_string(make_path_spec("/{{id}}"))
+  d.code |> should.equal("invalid_value")
+}
+
+pub fn parser_rejects_query_in_path_case() {
+  let assert Error(d) = parser.parse_string(make_path_spec("/?query=1"))
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "query"))
+}
+
+pub fn parser_rejects_fragment_in_path_case() {
+  let assert Error(d) = parser.parse_string(make_path_spec("/users#fragment"))
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "fragment"))
+}
+
+pub fn parser_rejects_space_in_path_case() {
+  let assert Error(d) = parser.parse_string(make_path_spec("/with space"))
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "space"))
+}
+
+pub fn parser_accepts_canonical_path_with_placeholder_case() {
+  // Sanity: the canonical happy path still parses. Placeholders with
+  // letters / digits / underscores / hyphens are all allowed by
+  // the regex `[A-Za-z0-9_-]+`.
+  let assert Ok(_) = parser.parse_string(make_path_spec("/users/{id}"))
+  let assert Ok(_) = parser.parse_string(make_path_spec("/v1/items/{item_id}"))
+  let assert Ok(_) =
+    parser.parse_string(make_path_spec("/users/{userId}/posts/{postId}"))
+  Nil
+}
+
 pub fn parser_rejects_yaml_alias_without_anchor_case() {
   // Issue #576: YAML aliases (`*foo`) that reference a missing
   // anchor (`&foo`) must surface a `yaml_error` Diagnostic instead

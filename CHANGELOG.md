@@ -12,6 +12,18 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Fixed
 
+- **`parse_string` / `parse_json_string` now reject `paths:` keys that
+  do not match the OAS 3.0 §4.7.9.1 path-template grammar.** The walker
+  forwarded any string to downstream codegen, which then emitted Gleam
+  routes the HTTP layer cannot serve: keys without a leading `/`, the
+  empty key, paths containing `//`, embedded `?` / `#` (query /
+  fragment), unencoded whitespace, malformed `{var}` placeholders
+  (empty, whitespace inside, unclosed, nested braces), and duplicate
+  variable names within a single path. Each deviation now surfaces an
+  `invalid_value` diagnostic that names the offending path and the
+  specific rule it violates. The canonical happy path
+  (`/users/{id}`, `/v1/items/{item_id}`, `/users/{userId}/posts/{postId}`)
+  is unchanged. (#588)
 - **`parse_string` / `parse_json_string` now reject response-map keys
   outside the OAS-allowed grammar.** Previously
   `oaspec/internal/util/http.parse_status_code` accepted any string
