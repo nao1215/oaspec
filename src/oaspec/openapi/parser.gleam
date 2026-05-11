@@ -517,8 +517,20 @@ fn parse_root(
   // Parse components FIRST so we can resolve $ref during path parsing.
   // Components section is optional, but if present it must parse correctly.
   use components <- result.try(parse_optional_components(node, index))
+  // OAS 3.0 §4.7.7.1: component map keys MUST match `^[a-zA-Z0-9._-]+$`.
+  // Walking the parsed Components dicts is enough — invalid keys would
+  // already be there. Validate-after-parse keeps the per-map parsers
+  // unchanged and centralises the diagnostic. (#591)
+  use _ <- result.try(case components {
+    Some(c) -> validate_component_keys(c, index)
+    None -> Ok(Nil)
+  })
 
   use paths <- result.try(parse_paths(node, components, index))
+  // OAS 3.0 §4.7.10.1: operationId MUST be unique across all operations
+  // in the API. Collect from every Value(PathItem) — Ref entries skipped
+  // since the resolved operationId is not visible at parse time. (#591)
+  use _ <- result.try(validate_unique_operation_ids(paths, index))
   use servers <- result.try(parse_servers(node, index))
   use security <- result.try(parse_security_requirements(node, "", index))
   use webhooks <- result.try(parse_webhooks(node, components, index))
@@ -642,6 +654,118 @@ fn require_paths_present(
         loc: location_index.lookup_field(index, "", "paths"),
       ))
   }
+}
+
+/// OAS 3.0 §4.7.7.1: keys of the maps inside `components` MUST match
+/// `^[a-zA-Z0-9._-]+$`. Pre-fix, arbitrary strings (empty, whitespace,
+/// `/`, `@`, non-ASCII) flowed into the codegen and produced Gleam
+/// identifiers the type system would reject. The check runs after the
+/// per-map parsers populate the Dicts and rejects the first
+/// non-conforming key. (#591)
+fn validate_component_keys(
+  components: Components(Unresolved),
+  index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  use _ <- result.try(check_component_keys(components.schemas, "schemas", index))
+  use _ <- result.try(check_component_keys(
+    components.responses,
+    "responses",
+    index,
+  ))
+  use _ <- result.try(check_component_keys(
+    components.parameters,
+    "parameters",
+    index,
+  ))
+  use _ <- result.try(check_component_keys(
+    components.examples,
+    "examples",
+    index,
+  ))
+  use _ <- result.try(check_component_keys(
+    components.request_bodies,
+    "requestBodies",
+    index,
+  ))
+  use _ <- result.try(check_component_keys(components.headers, "headers", index))
+  use _ <- result.try(check_component_keys(
+    components.security_schemes,
+    "securitySchemes",
+    index,
+  ))
+  use _ <- result.try(check_component_keys(components.links, "links", index))
+  use _ <- result.try(check_component_keys(
+    components.callbacks,
+    "callbacks",
+    index,
+  ))
+  Ok(Nil)
+}
+
+fn check_component_keys(
+  m: Dict(String, a),
+  category: String,
+  index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  // nolint: assert_ok_pattern -- the component-key regex is a fixed, known-valid literal
+  let assert Ok(re) = regexp.from_string("^[a-zA-Z0-9._-]+$")
+  dict.keys(m)
+  |> list.try_fold(Nil, fn(_, key) {
+    case regexp.check(with: re, content: key) {
+      True -> Ok(Nil)
+      False ->
+        Error(diagnostic.invalid_value(
+          path: "components." <> category,
+          detail: "Component key '"
+            <> key
+            <> "' must match the OAS regex '^[a-zA-Z0-9._-]+$'.",
+          loc: location_index.lookup_field(index, "components", category),
+        ))
+    }
+  })
+  |> result.map(fn(_) { Nil })
+}
+
+/// Collect every Value(PathItem) operationId across the paths Dict and
+/// reject the first duplicate. Ref entries are skipped because the
+/// resolved operationId is not visible at parse time. (#591)
+fn validate_unique_operation_ids(
+  paths: Dict(String, RefOr(PathItem(Unresolved))),
+  index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  let ids =
+    dict.values(paths)
+    |> list.flat_map(fn(p) {
+      case p {
+        Value(pi) -> path_item_operation_ids(pi)
+        Ref(_) -> []
+      }
+    })
+  case find_first_duplicate(ids, []) {
+    None -> Ok(Nil)
+    Some(dup) ->
+      Error(diagnostic.invalid_value(
+        path: "paths",
+        detail: "Duplicate operationId '"
+          <> dup
+          <> "'. OAS 3.0 §4.7.10.1 requires operationId to be unique across all operations in the API.",
+        loc: location_index.lookup(index, "paths"),
+      ))
+  }
+}
+
+fn path_item_operation_ids(pi: PathItem(Unresolved)) -> List(String) {
+  [pi.get, pi.put, pi.post, pi.delete, pi.options, pi.head, pi.patch, pi.trace]
+  |> list.filter_map(fn(op) {
+    case op {
+      Some(o) ->
+        case o.operation_id {
+          Some(id) -> Ok(id)
+          None -> Error(Nil)
+        }
+      None -> Error(Nil)
+    }
+  })
 }
 
 /// Parse optional components section.
