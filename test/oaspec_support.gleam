@@ -3474,6 +3474,53 @@ pub fn content_type_from_string_case() {
   |> should.equal(content_type.TextPlain)
 }
 
+// Issue #585: content-type strings carry case-insensitive type/subtype
+// tokens (RFC 7231 §3.1.1.5) and parameters (`; charset=utf-8`) that
+// are NOT part of the type identity. The pre-fix classifier did
+// case-sensitive direct equality and never stripped parameters, so
+// `application/JSON` and `application/json; charset=utf-8` were both
+// misclassified as `UnsupportedContentType`. The cases below pin each
+// shape from the issue.
+
+pub fn content_type_classifier_normalises_case_case() {
+  content_type.from_string("application/JSON")
+  |> should.equal(content_type.ApplicationJson)
+  content_type.from_string("Application/XML")
+  |> should.equal(content_type.ApplicationXml)
+}
+
+pub fn content_type_classifier_strips_charset_parameter_case() {
+  content_type.from_string("application/json; charset=utf-8")
+  |> should.equal(content_type.ApplicationJson)
+  content_type.from_string("application/json;charset=utf-8")
+  |> should.equal(content_type.ApplicationJson)
+  content_type.from_string("application/xml; charset=utf-8")
+  |> should.equal(content_type.ApplicationXml)
+}
+
+pub fn content_type_classifier_preserves_structured_suffix_with_param_case() {
+  content_type.from_string("application/vnd.api+json; charset=utf-8")
+  |> should.equal(content_type.ApplicationJson)
+  content_type.from_string("application/vnd.api+xml; q=1.0")
+  |> should.equal(content_type.ApplicationXml)
+}
+
+pub fn content_type_is_json_compatible_normalised_case() {
+  content_type.is_json_compatible("application/JSON") |> should.be_true()
+  content_type.is_json_compatible("application/json; charset=utf-8")
+  |> should.be_true()
+  content_type.is_json_compatible("application/vnd.api+json; charset=utf-8")
+  |> should.be_true()
+}
+
+pub fn content_type_is_xml_compatible_normalised_case() {
+  content_type.is_xml_compatible("Application/XML") |> should.be_true()
+  content_type.is_xml_compatible("text/XML; charset=utf-8")
+  |> should.be_true()
+  content_type.is_xml_compatible("application/atom+xml; charset=utf-8")
+  |> should.be_true()
+}
+
 pub fn content_type_x_ndjson_is_supported_response_case() {
   content_type.is_supported_response(content_type.from_string(
     "application/x-ndjson",

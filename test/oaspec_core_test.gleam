@@ -95,6 +95,12 @@ pub fn include_filter_test() {
 
 pub fn content_type_helpers_test() {
   let _ = support.content_type_from_string_case()
+  let _ = support.content_type_classifier_normalises_case_case()
+  let _ = support.content_type_classifier_strips_charset_parameter_case()
+  let _ =
+    support.content_type_classifier_preserves_structured_suffix_with_param_case()
+  let _ = support.content_type_is_json_compatible_normalised_case()
+  let _ = support.content_type_is_xml_compatible_normalised_case()
   let _ = support.content_type_x_ndjson_is_supported_response_case()
   let _ = support.content_type_text_html_aliases_to_text_plain_case()
   let _ = support.content_type_text_x_markdown_aliases_to_text_plain_case()
