@@ -752,6 +752,16 @@ fn parse_paths(
 ) -> Result(Dict(String, RefOr(PathItem(Unresolved))), Diagnostic) {
   case yay.select_sugar(from: root, selector: "paths") {
     Ok(yay.NodeMap(entries)) -> {
+      // Path keys are URL templates that MUST be unique per OAS.
+      // yamerl silently keeps the last duplicate, so without this check
+      // the user's earlier definition disappears into undefined
+      // behaviour. Mirror of the #573 duplicate-key guard on the
+      // responses surface. (#584)
+      use _ <- result.try(check_unique_yaml_keys(
+        entries: entries,
+        path: "paths",
+        index: index,
+      ))
       list.try_fold(entries, dict.new(), fn(acc, entry) {
         let #(key_node, value_node) = entry
         case key_node {
