@@ -10,6 +10,22 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Documentation
+
+- `to_snake_case` and `to_pascal_case` are now documented as
+  **non-idempotent on inputs containing `_dot_`**. The `_dot_` →
+  `_dot_literal_` escape introduced in #494 to keep `payment_intent.processing`
+  distinct from `payment_intent_processing` is asymmetric — re-running
+  the converter on its own output grows the `_literal_` segment each
+  pass. The fix from the issue's option (2): document the property
+  prominently on both public converters and on the internal
+  `rewrite_dot_segments` helper, and pin the observed behaviour with
+  regression tests so a future change to restore idempotence is
+  intentional rather than silent. Callers (codegen) must apply each
+  converter at most once per identifier; an in-place Unicode-escape
+  redesign is left for a follow-up that does not change `_dot_`
+  semantics for already-deployed specs. (#586)
+
 ### Fixed
 
 - **Schema constraint values are validated at parse time** per JSON
