@@ -12,6 +12,14 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Fixed
 
+- **`parse_string` / `parse_json_string` now reject duplicate keys in
+  the top-level `paths` mapping.** yamerl tolerates duplicate YAML
+  mapping keys and silently keeps the last entry, so a document with
+  two `/users:` definitions would discard the earlier one without
+  warning. Path keys are URL templates that MUST be unique per OAS, so
+  the parser now surfaces a `duplicate_key` diagnostic naming the
+  offending path — same shape as the #573 fix on the responses
+  surface. (#584)
 - **`parse_string` / `parse_json_string` now reject `paths:` keys that
   do not match the OAS 3.0 §4.7.9.1 path-template grammar.** The walker
   forwarded any string to downstream codegen, which then emitted Gleam

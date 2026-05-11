@@ -1145,6 +1145,25 @@ pub fn parser_rejects_space_in_path_case() {
   should.be_true(string.contains(d.message, "space"))
 }
 
+pub fn parser_rejects_duplicate_path_key_case() {
+  // Issue #584: yamerl silently keeps the last duplicate path entry,
+  // dropping the earlier one without warning. Per OAS, path keys are
+  // URL templates that MUST be unique. Same UX class as #573 but on
+  // the paths surface.
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n"
+    <> "  /a:\n    get:\n      summary: first\n      responses:\n"
+    <> "        '200':\n          description: ok\n"
+    <> "  /a:\n    get:\n      summary: dup\n      responses:\n"
+    <> "        '200':\n          description: ok\n"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("duplicate_key")
+  should.be_true(string.contains(d.message, "/a"))
+  should.be_true(string.contains(d.message, "paths"))
+}
+
 pub fn parser_accepts_canonical_path_with_placeholder_case() {
   // Sanity: the canonical happy path still parses. Placeholders with
   // letters / digits / underscores / hyphens are all allowed by
