@@ -531,6 +531,12 @@ fn parse_root(
   // in the API. Collect from every Value(PathItem) — Ref entries skipped
   // since the resolved operationId is not visible at parse time. (#591)
   use _ <- result.try(validate_unique_operation_ids(paths, index))
+  // OAS 3.0 §4.7.12.1: every templated path variable MUST correspond to
+  // a parameter included in the parameters list, and conversely every
+  // `in: path` parameter MUST reference a variable that exists in the
+  // path template. Path-level and operation-level parameters are merged
+  // per operation before the cross-check. (#594)
+  use _ <- result.try(validate_path_template_params(paths, index))
   use servers <- result.try(parse_servers(node, index))
   use security <- result.try(parse_security_requirements(node, "", index))
   use webhooks <- result.try(parse_webhooks(node, components, index))
@@ -751,6 +757,175 @@ fn validate_unique_operation_ids(
           <> "'. OAS 3.0 §4.7.10.1 requires operationId to be unique across all operations in the API.",
         loc: location_index.lookup(index, "paths"),
       ))
+  }
+}
+
+/// Cross-validate every path's templated variables against the
+/// `in: path` parameters of every operation in that path item, plus
+/// the path-level parameter list. Each direction is required by OAS:
+///
+/// - every `{var}` in the path MUST have a corresponding parameter,
+/// - every `in: path` parameter MUST reference a `{var}` in the path.
+///
+/// Path-level parameters are inherited by every operation, so the
+/// effective parameter set per operation is the path-level list plus
+/// the operation's own list. Inline parameters only; `Ref` entries
+/// are skipped because the resolved (name, in) is invisible here.
+/// (#594)
+fn validate_path_template_params(
+  paths: Dict(String, RefOr(PathItem(Unresolved))),
+  index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  dict.to_list(paths)
+  |> list.try_fold(Nil, fn(_, entry) {
+    let #(path, ref_or_pi) = entry
+    case ref_or_pi {
+      Ref(_) -> Ok(Nil)
+      Value(pi) ->
+        // The path-template walker (#588) rejected malformed paths
+        // already, so reaching this point implies the path parses;
+        // any extractor error is treated as "no placeholders" rather
+        // than re-emitted.
+        case extract_placeholder_names(path, "", False, []) {
+          // nolint: thrown_away_error -- the path-template walker (#588) already surfaced any extractor error upstream
+          Error(_) -> Ok(Nil)
+          Ok(path_vars) -> validate_path_item_params(path, path_vars, pi, index)
+        }
+    }
+  })
+  |> result.map(fn(_) { Nil })
+}
+
+fn validate_path_item_params(
+  path: String,
+  path_vars: List(String),
+  pi: PathItem(Unresolved),
+  index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  let path_level_path_names = inline_path_param_names(pi.parameters)
+  let path_level_has_ref = has_parameter_ref(pi.parameters)
+  // Operations inherit path-level parameters per OAS, so the
+  // effective set for each operation is the union of both lists.
+  let operations =
+    [
+      pi.get,
+      pi.put,
+      pi.post,
+      pi.delete,
+      pi.options,
+      pi.head,
+      pi.patch,
+      pi.trace,
+    ]
+    |> list.filter_map(fn(op) {
+      case op {
+        Some(o) -> Ok(o)
+        None -> Error(Nil)
+      }
+    })
+  case operations {
+    [] ->
+      cross_check_path_vs_params(
+        path,
+        path_vars,
+        path_level_path_names,
+        path_level_has_ref,
+        index,
+      )
+    ops ->
+      list.try_fold(ops, Nil, fn(_, op) {
+        let op_path_names = inline_path_param_names(op.parameters)
+        let effective =
+          list.append(path_level_path_names, op_path_names)
+          |> deduplicate_strings([])
+        let has_ref = path_level_has_ref || has_parameter_ref(op.parameters)
+        cross_check_path_vs_params(path, path_vars, effective, has_ref, index)
+      })
+      |> result.map(fn(_) { Nil })
+  }
+}
+
+fn has_parameter_ref(params: List(RefOr(Parameter(Unresolved)))) -> Bool {
+  list.any(params, fn(p) {
+    case p {
+      Ref(_) -> True
+      Value(_) -> False
+    }
+  })
+}
+
+fn inline_path_param_names(
+  params: List(RefOr(Parameter(Unresolved))),
+) -> List(String) {
+  list.filter_map(params, fn(p) {
+    case p {
+      Value(param) ->
+        case param.in_ {
+          spec.InPath -> Ok(param.name)
+          _ -> Error(Nil)
+        }
+      Ref(_) -> Error(Nil)
+    }
+  })
+}
+
+fn deduplicate_strings(items: List(String), acc: List(String)) -> List(String) {
+  case items {
+    [] -> list.reverse(acc)
+    [head, ..rest] ->
+      case list.contains(acc, head) {
+        True -> deduplicate_strings(rest, acc)
+        False -> deduplicate_strings(rest, [head, ..acc])
+      }
+  }
+}
+
+fn cross_check_path_vs_params(
+  path: String,
+  path_vars: List(String),
+  inline_param_names: List(String),
+  has_ref: Bool,
+  index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  // Skip the missing-param direction when the parameter list contains
+  // any `$ref` entries — the resolved (name, in) is invisible at parse
+  // time and the validator picks the case up after resolution. The
+  // dangling-param direction stays checked: an inline `in: path` name
+  // that does not appear in the template is unambiguously wrong even
+  // when other parameters are refs.
+  let missing_param = case has_ref {
+    True -> Error(Nil)
+    False ->
+      list.find(path_vars, fn(v) { !list.contains(inline_param_names, v) })
+  }
+  case missing_param {
+    Ok(v) ->
+      Error(diagnostic.invalid_value(
+        path: "paths",
+        detail: "Path '"
+          <> path
+          <> "' declares template variable '{"
+          <> v
+          <> "}' but no matching parameter entry exists in the operation or path-level parameters list (OAS 3.0 §4.7.12.1).",
+        loc: location_index.lookup_field(index, "", "paths"),
+      ))
+    Error(Nil) -> {
+      let dangling_param =
+        list.find(inline_param_names, fn(p) { !list.contains(path_vars, p) })
+      case dangling_param {
+        Ok(p) ->
+          Error(diagnostic.invalid_value(
+            path: "paths",
+            detail: "Path '"
+              <> path
+              <> "' has an `in: path` parameter '"
+              <> p
+              <> "' that does not appear in the path template (OAS 3.0 §4.7.12.1).",
+            loc: location_index.lookup_field(index, "", "paths"),
+          ))
+        Error(Nil) -> Ok(Nil)
+      }
+    }
   }
 }
 

@@ -1161,6 +1161,63 @@ pub fn parser_rejects_space_in_path_case() {
 // and component map keys must match `^[a-zA-Z0-9._-]+$`
 // (OAS 3.0 §4.7.7.1). Both rules were unenforced at parse time.
 
+// Issue #594: OAS 3.0 §4.7.12.1 requires every templated path variable
+// to have a matching `in: path` parameter, and conversely every `in:
+// path` parameter to reference a variable that exists in the template.
+
+pub fn parser_rejects_path_var_without_matching_param_case() {
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n  /users/{other}:\n    get:\n"
+    <> "      parameters:\n"
+    <> "        - name: id\n          in: path\n          required: true\n          schema: {type: string}\n"
+    <> "      responses:\n        '200':\n          description: ok\n"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "{other}"))
+}
+
+pub fn parser_rejects_in_path_param_not_in_template_case() {
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n  /users/me:\n    get:\n"
+    <> "      parameters:\n"
+    <> "        - name: id\n          in: path\n          required: true\n          schema: {type: string}\n"
+    <> "      responses:\n        '200':\n          description: ok\n"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "id"))
+}
+
+pub fn parser_rejects_path_with_no_parameters_list_case() {
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n  /users/{id}:\n    get:\n"
+    <> "      responses:\n        '200':\n          description: ok\n"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "{id}"))
+}
+
+pub fn parser_accepts_path_level_parameter_binds_template_case() {
+  // Path-level parameters are inherited by every operation in the
+  // path item, so a `{id}` declared once at path level satisfies the
+  // cross-check for every operation under it.
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n  /users/{id}:\n"
+    <> "    parameters:\n"
+    <> "      - name: id\n        in: path\n        required: true\n        schema: {type: string}\n"
+    <> "    get:\n      responses:\n        '200':\n          description: ok\n"
+    <> "    delete:\n      responses:\n        '204':\n          description: ok\n"
+  let assert Ok(_) = parser.parse_string(yaml)
+  Nil
+}
+
 pub fn parser_rejects_duplicate_operation_id_across_paths_case() {
   let yaml =
     "openapi: 3.0.0\n"
@@ -1344,13 +1401,20 @@ pub fn parser_rejects_duplicate_path_key_case() {
 }
 
 pub fn parser_accepts_canonical_path_with_placeholder_case() {
-  // Sanity: the canonical happy path still parses. Placeholders with
-  // letters / digits / underscores / hyphens are all allowed by
-  // the regex `[A-Za-z0-9_-]+`.
-  let assert Ok(_) = parser.parse_string(make_path_spec("/users/{id}"))
-  let assert Ok(_) = parser.parse_string(make_path_spec("/v1/items/{item_id}"))
-  let assert Ok(_) =
-    parser.parse_string(make_path_spec("/users/{userId}/posts/{postId}"))
+  // Sanity: the canonical happy path still parses. The `make_path_spec`
+  // helper does not emit a `parameters` section, so the path-template
+  // cross-check from #594 now requires us to declare each placeholder
+  // explicitly. Inline the YAML so the parameter list is present.
+  let yaml =
+    "openapi: 3.0.0\n"
+    <> "info:\n  title: x\n  version: '1.0'\n"
+    <> "paths:\n  /users/{id}:\n"
+    <> "    get:\n"
+    <> "      parameters:\n"
+    <> "        - name: id\n          in: path\n          required: true\n"
+    <> "          schema: {type: string}\n"
+    <> "      responses:\n        '200':\n          description: ok\n"
+  let assert Ok(_) = parser.parse_string(yaml)
   Nil
 }
 
@@ -7153,26 +7217,14 @@ paths:
       responses:
         '200': { description: ok }
 "
-  let assert Ok(spec) = parser.parse_string(yaml)
-  let assert Ok(spec) = resolve.resolve(spec)
-  let spec = hoist.hoist(spec)
-  let spec = dedup.dedup(spec)
-  let ctx =
-    context.new(
-      spec,
-      config.new(
-        input: "test.yaml",
-        output_server: "./test_output/api",
-        output_client: "./test_output_client/api",
-        package: "api",
-        mode: config.Client,
-        validate: False,
-      ),
-    )
-  let errors = validate.validate(ctx)
-  // Must report at least one validation error for unbound {id}
-  list.is_empty(errors)
-  |> should.be_false()
+  // Pre-#594 the parser accepted unbound path templates and left
+  // detection to the validator. The parser now rejects the spec
+  // directly per OAS 3.0 §4.7.12.1, so this case asserts the
+  // earlier-and-stricter rejection.
+  let result = parser.parse_string(yaml)
+  let assert Error(d) = result
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "{id}"))
 }
 
 /// Path template with parameter defined at path-item level must pass.
@@ -9516,7 +9568,7 @@ pub fn parameter_style_is_adt_case() {
 openapi: 3.0.3
 info: { title: T, version: 1.0.0 }
 paths:
-  /x:
+  /x/{id}:
     get:
       operationId: getX
       parameters:
@@ -9537,7 +9589,7 @@ paths:
         '200': { description: ok }
 "
   let assert Ok(parsed) = parser.parse_string(yaml)
-  let assert Ok(spec.Value(pi)) = dict.get(parsed.paths, "/x")
+  let assert Ok(spec.Value(pi)) = dict.get(parsed.paths, "/x/{id}")
   let assert Some(op) = pi.get
   let assert [spec.Value(deep), spec.Value(form), spec.Value(simple)] =
     op.parameters

@@ -12,6 +12,20 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Fixed
 
+- **`paths:` keys and operation/path-level `parameters` lists must
+  agree on every templated variable** per OAS 3.0 §4.7.12.1. Pre-fix,
+  the parser silently accepted `/users/{other}` declared with a
+  parameter named `id`, an `in: path` parameter that never appeared
+  in the template, and path templates whose variables had no matching
+  parameter entry at all. Codegen then emitted routes the HTTP layer
+  cannot serve. The new `validate_path_template_params/2` walker
+  cross-checks every `Value(PathItem)` against its path template and
+  raises an `invalid_value` diagnostic naming the offending
+  `{var}` or `parameter`. The check skips the missing-param direction
+  when any parameter entry is a `$ref` (the resolved (name, in) is
+  invisible at parse time); the validator's earlier post-resolve
+  check (which existed via the lossless-AST tests) is therefore
+  superseded for the common inline case. (#594)
 - **`operationId` uniqueness is enforced at parse time** per OAS 3.0
   §4.7.10.1, and **components map keys must match
   `^[a-zA-Z0-9._-]+$`** per OAS 3.0 §4.7.7.1. Pre-fix, duplicate
