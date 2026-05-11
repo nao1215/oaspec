@@ -1170,6 +1170,85 @@ pub fn parser_rejects_space_in_path_case() {
 // `/users/{id}` and `/users/{name}` both flowed through and the
 // codegen emitted two handlers for one route.
 
+// Issue #589: schema constraint values must satisfy the JSON Schema /
+// OAS validation rules — multipleOf > 0, min* >= 0, min* <= max*.
+// Pre-fix the parser silently stored values that downstream codegen
+// then turned into guards that were always satisfied (or never).
+
+fn make_schema_spec(schema_yaml: String) -> String {
+  "openapi: 3.0.0\n"
+  <> "info:\n  title: x\n  version: '1.0'\n"
+  <> "paths: {}\n"
+  <> "components:\n  schemas:\n    A:\n"
+  <> schema_yaml
+}
+
+pub fn parser_rejects_integer_multiple_of_zero_case() {
+  let assert Error(d) =
+    parser.parse_string(make_schema_spec(
+      "      type: integer\n      multipleOf: 0\n",
+    ))
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "multipleOf"))
+}
+
+pub fn parser_rejects_integer_multiple_of_negative_case() {
+  let assert Error(d) =
+    parser.parse_string(make_schema_spec(
+      "      type: integer\n      multipleOf: -1\n",
+    ))
+  d.code |> should.equal("invalid_value")
+}
+
+pub fn parser_rejects_number_multiple_of_zero_case() {
+  let assert Error(d) =
+    parser.parse_string(make_schema_spec(
+      "      type: number\n      multipleOf: 0.0\n",
+    ))
+  d.code |> should.equal("invalid_value")
+}
+
+pub fn parser_rejects_string_min_length_negative_case() {
+  let assert Error(d) =
+    parser.parse_string(make_schema_spec(
+      "      type: string\n      minLength: -1\n",
+    ))
+  d.code |> should.equal("invalid_value")
+}
+
+pub fn parser_rejects_integer_minimum_greater_than_maximum_case() {
+  let assert Error(d) =
+    parser.parse_string(make_schema_spec(
+      "      type: integer\n      minimum: 100\n      maximum: 50\n",
+    ))
+  d.code |> should.equal("invalid_value")
+  should.be_true(string.contains(d.message, "minimum"))
+}
+
+pub fn parser_rejects_string_min_length_greater_than_max_length_case() {
+  let assert Error(d) =
+    parser.parse_string(make_schema_spec(
+      "      type: string\n      minLength: 10\n      maxLength: 5\n",
+    ))
+  d.code |> should.equal("invalid_value")
+}
+
+pub fn parser_rejects_array_min_items_greater_than_max_items_case() {
+  let assert Error(d) =
+    parser.parse_string(make_schema_spec(
+      "      type: array\n      items: {type: integer}\n      minItems: 10\n      maxItems: 5\n",
+    ))
+  d.code |> should.equal("invalid_value")
+}
+
+pub fn parser_accepts_valid_schema_constraints_case() {
+  let assert Ok(_) =
+    parser.parse_string(make_schema_spec(
+      "      type: integer\n      multipleOf: 5\n      minimum: 0\n      maximum: 100\n",
+    ))
+  Nil
+}
+
 pub fn parser_rejects_template_collision_simple_case() {
   let yaml =
     "openapi: 3.0.0\n"

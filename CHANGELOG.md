@@ -12,6 +12,19 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Fixed
 
+- **Schema constraint values are validated at parse time** per JSON
+  Schema and OAS rules. `multipleOf` must be strictly greater than 0
+  (integer and number branches), `minLength` / `maxLength` /
+  `minItems` / `maxItems` / `minProperties` / `maxProperties` must be
+  non-negative, and each `min*` / `max*` pair must satisfy
+  `min* <= max*`. Pre-fix the parser silently stored values like
+  `multipleOf: 0` or `minLength: 10, maxLength: 5`, and downstream
+  codegen emitted guards that were always satisfied (or never).
+  Each violation now surfaces an `invalid_value` diagnostic naming
+  the offending field. The `required must be a subset of properties`
+  rule is intentionally NOT enforced here — real-world specs rely on
+  allOf / discriminator inheritance for the property merge, so that
+  check stays deferred to the validator after schema resolution. (#589)
 - **Two templated paths that share the same routing template are now
   rejected** as identical, per OAS 3.0 §4.7.9.1. `/users/{id}` and
   `/users/{name}` collapse onto `/users/{}` after the placeholder
