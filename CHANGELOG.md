@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.66.0] - 2026-05-16
+
 ### Documentation
 
 - README quick-start now includes a "Using oaspec as a library (without the CLI)" subsection with a runnable end-to-end snippet built on `oaspec/openapi/parser.parse_string` and `parser.parse_error_to_string`. The CLI quick-start above stays — the new section is the companion path for callers who want a runtime validate / inspect step from in-process Gleam code without installing the escript or wiring `oaspec.yaml`. (#609)
