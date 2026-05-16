@@ -96,6 +96,38 @@ the current working directory when `oaspec` runs, not the config file
 location. See [doc/configuration.md](./doc/configuration.md) for the
 full set of fields, CLI flags, multi-target codegen, and validate mode.
 
+### Using oaspec as a library (without the CLI)
+
+If you only want to load and inspect a spec — no codegen, no `oaspec.yaml`,
+no escript install — call `oaspec/openapi/parser.parse_string` directly
+from your Gleam code. The function returns
+`Result(OpenApiSpec(Unresolved), Diagnostic)`; render the diagnostic with
+`parser.parse_error_to_string` for human-readable output.
+
+```gleam
+import gleam/io
+import oaspec/openapi/parser
+
+pub fn main() {
+  let spec_yaml =
+    "openapi: \"3.0.3\"\n"
+    <> "info:\n"
+    <> "  title: Demo\n"
+    <> "  version: \"1.0.0\"\n"
+    <> "paths: {}\n"
+
+  case parser.parse_string(spec_yaml) {
+    Ok(_spec) -> io.println("parsed OK")
+    Error(diagnostic) -> io.println(parser.parse_error_to_string(diagnostic))
+  }
+}
+```
+
+Use this path when you want a runtime validate / inspect step (for
+example, validating a spec uploaded via an HTTP endpoint). Reach for the
+CLI quick-start above when you want generated client / server / schema
+modules committed to your repository.
+
 ## Generated files
 
 Given one OpenAPI spec, `oaspec` writes modules you can keep in your
