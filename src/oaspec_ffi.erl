@@ -33,7 +33,7 @@ collect_exit(Port) ->
         {Port, {exit_status, Code}} ->
             Code
     after 60000 ->
-        catch port_close(Port),
+        try port_close(Port) catch _:_ -> ok end,
         1
     end.
 
