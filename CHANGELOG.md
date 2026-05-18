@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.67.0] - 2026-05-18
+
 ### Fixed
 
 - `oaspec_ffi`: replaced the deprecated `catch port_close(Port)` form with `try port_close(Port) catch _:_ -> ok end`. The old expression form of `catch` is deprecated in recent OTP releases and emitted a `'catch ...' is deprecated; please use 'try ... catch ... end' instead` warning at every `gleam build` of any project that depends on `oaspec`. The new form preserves the original intent (swallow any error when closing an already-closed port). (#612)
