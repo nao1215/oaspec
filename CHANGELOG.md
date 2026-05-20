@@ -10,6 +10,10 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Added
+
+- `oaspec/openapi/parser.parse_string_resolved` parses a spec and validates every `$ref` it contains, rejecting missing schema targets and circular schema reference chains so downstream callers no longer have to re-implement the check on top of `parse_string`. (#616)
+
 ### Changed
 
 - The OpenAPI spec AST types (`OpenApiSpec`, `Info`, `PathItem`, `Operation`, `Parameter`, `RequestBody`, `Response`, `Schema*`, `RefOr`, `Components`, `MediaType`, `Server`, `Tag`, `License`, `Contact`, `ExternalDoc`, `SecurityScheme`, and the rest of the public-by-intent surface returned by `oaspec/openapi/parser`) now live in the new public modules `oaspec/openapi/spec` and `oaspec/openapi/schema`, moved out of `oaspec/internal/openapi/*`. Callers can now destructure parsed values and pattern-match nested variants without reaching into `oaspec/internal/*`. (#615)

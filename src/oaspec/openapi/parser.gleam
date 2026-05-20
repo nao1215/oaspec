@@ -9,9 +9,12 @@ import gleam/string
 import oaspec/internal/openapi/external_loader
 import oaspec/internal/openapi/external_loader_planner
 import oaspec/internal/openapi/location_index.{type LocationIndex}
+import oaspec/internal/openapi/normalize
 import oaspec/internal/openapi/parser_schema
 import oaspec/internal/openapi/parser_value
 import oaspec/internal/openapi/parser_yay_error
+import oaspec/internal/openapi/ref_validation
+import oaspec/internal/openapi/resolve
 import oaspec/internal/progress.{type Reporter}
 import oaspec/internal/util/http
 import oaspec/openapi/diagnostic.{type Diagnostic, NoSourceLoc, SourceLoc}
@@ -20,7 +23,7 @@ import oaspec/openapi/spec.{
   type Callback, type Components, type Contact, type Encoding, type ExternalDoc,
   type Header, type Info, type License, type Link, type MediaType,
   type OpenApiSpec, type Operation, type Parameter, type ParameterIn,
-  type PathItem, type RefOr, type RequestBody, type Response,
+  type PathItem, type RefOr, type RequestBody, type Resolved, type Response,
   type SecurityRequirement, type Server, type ServerVariable, type Tag,
   type Unresolved, Callback, Components, Contact, Encoding, ExternalDoc, Header,
   Info, License, Link, MediaType, OpenApiSpec, Operation, Parameter, PathItem,
@@ -272,6 +275,12 @@ pub fn default_limits() -> ParseLimits {
 /// which auto-routes by inspecting the first non-whitespace byte).
 /// `parse_string` remains correct for YAML input and for JSON inputs
 /// whose values do not collide with YAML 1.1 implicit-type patterns.
+///
+/// `parse_string` is intentionally **structural only**: it returns an
+/// `OpenApiSpec(Unresolved)` and does not verify that every `$ref`
+/// points at an existing component or that schema-level reference
+/// chains terminate. Reach for `parse_string_resolved` when the caller
+/// also wants missing-target and circular-reference detection. (#616)
 pub fn parse_string(
   content: String,
 ) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
@@ -288,6 +297,65 @@ pub fn parse_string_with_locations(
   use #(root, index) <- result.try(parse_to_node(content))
   use spec <- result.map(parse_root(root, index))
   #(spec, index)
+}
+
+/// Parse an OpenAPI spec from a YAML/JSON string AND validate every
+/// `$ref` it contains.
+///
+/// `parse_string` is **structural only** — it accepts any spec whose
+/// YAML/JSON layout parses into the OpenAPI shape, even when a
+/// `$ref` points at a component that does not exist or forms a cycle.
+/// `parse_string_resolved` adds the missing validation layer on top:
+///
+///   1. parse the document (`parse_string`),
+///   2. normalise OAS 3.1 → 3.0 patterns,
+///   3. resolve component-level `RefOr` aliases (rejecting missing /
+///      cyclic component aliases),
+///   4. walk every `SchemaRef` reachable from the spec and verify it
+///      resolves (rejecting missing schema targets and circular schema
+///      reference chains).
+///
+/// Returns an `OpenApiSpec(Resolved)` on success — the phantom stage
+/// flips from `Unresolved` to `Resolved` so callers can pass the value
+/// straight into the resolved-spec APIs (`resolver.resolve_schema_ref`,
+/// codegen contexts, ...) without re-running resolve themselves.
+///
+/// Use `parse_string_resolved` when the caller wants a `$ref`-clean
+/// spec for downstream traversal (validators, doc generators, ad-hoc
+/// inspection). Reach for plain `parse_string` only when the structural
+/// shape is enough — for example, when the caller intends to mutate
+/// the spec before resolving it. (#616)
+pub fn parse_string_resolved(
+  content: String,
+) -> Result(OpenApiSpec(Resolved), Diagnostic) {
+  use spec <- result.try(parse_string(content))
+  let normalised = normalize.normalize(spec)
+  use resolved <- result.try(
+    resolve.resolve(normalised)
+    |> result.map_error(first_diagnostic),
+  )
+  use _ <- result.try(
+    ref_validation.validate_schema_refs(resolved)
+    |> result.map_error(first_diagnostic),
+  )
+  Ok(resolved)
+}
+
+/// Surface the first diagnostic from a list of resolve / validation
+/// errors. `parse_string_resolved` matches `parse_string`'s
+/// `Result(_, Diagnostic)` shape, so internal multi-diagnostic
+/// pipelines collapse to the first reported failure (closely matching
+/// the behaviour callers already get from the structural parser).
+fn first_diagnostic(errors: List(Diagnostic)) -> Diagnostic {
+  case errors {
+    [first, ..] -> first
+    [] ->
+      diagnostic.invalid_value(
+        path: "",
+        detail: "Reference validation failed without a diagnostic — this is a bug, please report it.",
+        loc: NoSourceLoc,
+      )
+  }
 }
 
 /// Parse an OpenAPI spec with DoS-aware resource limits. Currently
