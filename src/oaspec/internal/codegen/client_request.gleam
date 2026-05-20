@@ -10,11 +10,11 @@ import oaspec/internal/codegen/operation_ir
 import oaspec/internal/codegen/schema_dispatch
 import oaspec/internal/codegen/schema_utils
 import oaspec/internal/openapi/dedup
-import oaspec/internal/openapi/schema.{Inline, Reference}
-import oaspec/internal/openapi/spec.{type Resolved, ParameterSchema, Value}
 import oaspec/internal/util/content_type
 import oaspec/internal/util/naming
 import oaspec/internal/util/string_extra as se
+import oaspec/openapi/schema.{Inline, Reference}
+import oaspec/openapi/spec.{type Resolved, ParameterSchema, Value}
 
 /// Map from a parameter's `(wire name, location)` pair to its deduped Gleam
 /// field name within an operation. Used to keep type emission, server

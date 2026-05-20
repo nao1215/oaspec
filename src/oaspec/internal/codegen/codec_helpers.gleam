@@ -10,7 +10,7 @@
 import gleam/string
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/schema_dispatch
-import oaspec/internal/openapi/schema.{
+import oaspec/openapi/schema.{
   type SchemaRef, ArraySchema, BooleanSchema, Inline, IntegerSchema,
   NumberSchema, StringSchema,
 }

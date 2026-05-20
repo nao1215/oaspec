@@ -12,8 +12,8 @@ import gleeunit/should
 import oaspec/internal/codegen/context
 import oaspec/internal/openapi/operations
 import oaspec/internal/openapi/resolver
-import oaspec/internal/openapi/schema
-import oaspec/internal/openapi/spec
+import oaspec/openapi/schema
+import oaspec/openapi/spec
 import test_helpers
 
 pub fn main() {

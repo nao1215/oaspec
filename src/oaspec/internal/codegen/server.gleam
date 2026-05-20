@@ -13,12 +13,12 @@ import oaspec/internal/codegen/router_ir
 import oaspec/internal/codegen/runtime_snippets
 import oaspec/internal/codegen/server_request_decode as decode_helpers
 import oaspec/internal/openapi/dedup
-import oaspec/internal/openapi/schema.{Inline, Reference}
-import oaspec/internal/openapi/spec.{type Resolved, Value}
 import oaspec/internal/util/content_type
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
 import oaspec/internal/util/string_extra as se
+import oaspec/openapi/schema.{Inline, Reference}
+import oaspec/openapi/spec.{type Resolved, Value}
 
 /// Generate server stub files.
 ///

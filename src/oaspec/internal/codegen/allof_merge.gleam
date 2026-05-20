@@ -2,7 +2,7 @@ import gleam/dict
 import gleam/int
 import gleam/list
 import oaspec/internal/codegen/context.{type Context}
-import oaspec/internal/openapi/schema.{
+import oaspec/openapi/schema.{
   type AdditionalProperties, type SchemaRef, Forbidden, Inline, ObjectSchema,
   Typed, Unspecified, Untyped,
 }

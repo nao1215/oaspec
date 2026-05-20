@@ -2,12 +2,12 @@ import gleam/dict.{type Dict}
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
-import oaspec/internal/openapi/schema.{
+import oaspec/internal/util/naming
+import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AnyOfSchema, Forbidden, Inline,
   ObjectSchema, OneOfSchema, Reference, Typed, Unspecified, Untyped,
 }
-import oaspec/internal/openapi/spec.{type OpenApiSpec, Components, OpenApiSpec}
-import oaspec/internal/util/naming
+import oaspec/openapi/spec.{type OpenApiSpec, Components, OpenApiSpec}
 
 /// Deduplicate names within schemas to avoid collisions in generated code.
 /// This is a pre-processing pass that runs after hoisting and before validation.

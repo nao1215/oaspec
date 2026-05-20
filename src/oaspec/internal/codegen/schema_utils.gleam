@@ -5,7 +5,7 @@ import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import oaspec/internal/codegen/context.{type Context}
-import oaspec/internal/openapi/schema.{
+import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, Forbidden, Inline,
   ObjectSchema, OneOfSchema, Reference, StringSchema, Typed, Untyped,
 }

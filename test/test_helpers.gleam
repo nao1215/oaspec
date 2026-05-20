@@ -7,9 +7,9 @@ import oaspec/internal/codegen/context
 import oaspec/internal/openapi/dedup
 import oaspec/internal/openapi/hoist
 import oaspec/internal/openapi/resolve
-import oaspec/internal/openapi/schema
-import oaspec/internal/openapi/spec
 import oaspec/openapi/parser
+import oaspec/openapi/schema
+import oaspec/openapi/spec
 
 /// Create a context from a parsed (unresolved) spec.
 pub fn make_ctx_from_spec(spec) -> context.Context {

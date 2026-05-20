@@ -54,12 +54,12 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import oaspec/internal/openapi/external_loader_planner as planner
-import oaspec/internal/openapi/schema.{type SchemaRef, Inline, Reference}
-import oaspec/internal/openapi/spec.{
-  type Components, type OpenApiSpec, type Unresolved, Components, OpenApiSpec,
-}
 import oaspec/internal/util/http
 import oaspec/openapi/diagnostic.{type Diagnostic}
+import oaspec/openapi/schema.{type SchemaRef, Inline, Reference}
+import oaspec/openapi/spec.{
+  type Components, type OpenApiSpec, type Unresolved, Components, OpenApiSpec,
+}
 
 /// Load every `components.schemas` entry whose value is an external
 /// filesystem ref, merge the referenced schema into the main spec, and

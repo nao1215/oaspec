@@ -16,12 +16,12 @@ import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
-import oaspec/internal/openapi/schema.{type SchemaRef, Inline, Reference}
-import oaspec/internal/openapi/spec.{
+import oaspec/openapi/diagnostic.{type Diagnostic}
+import oaspec/openapi/schema.{type SchemaRef, Inline, Reference}
+import oaspec/openapi/spec.{
   type Components, type OpenApiSpec, type Parameter, type PathItem,
   type RequestBody, type Response, type Unresolved,
 }
-import oaspec/openapi/diagnostic.{type Diagnostic}
 
 /// Names in the current spec that are *not themselves* external refs.
 /// These are the schemas the external loader must not silently overwrite.

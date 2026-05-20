@@ -1,7 +1,7 @@
 import gleam/option.{type Option, None, Some}
 import oaspec/internal/codegen/context.{type Context}
-import oaspec/internal/openapi/schema
-import oaspec/internal/openapi/spec
+import oaspec/openapi/schema
+import oaspec/openapi/spec
 
 /// Compute the effective explode value for a parameter.
 /// OpenAPI 3.x default: true for form/deepObject style, false otherwise.

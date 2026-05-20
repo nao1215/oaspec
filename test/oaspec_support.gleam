@@ -30,8 +30,6 @@ import oaspec/internal/openapi/provenance
 import oaspec/internal/openapi/reachability
 import oaspec/internal/openapi/resolve
 import oaspec/internal/openapi/resolver
-import oaspec/internal/openapi/schema
-import oaspec/internal/openapi/spec
 import oaspec/internal/openapi/value
 import oaspec/internal/progress
 import oaspec/internal/util/content_type
@@ -39,6 +37,8 @@ import oaspec/internal/util/http
 import oaspec/internal/util/naming
 import oaspec/openapi/diagnostic.{Diagnostic, NoSourceLoc, SourceLoc}
 import oaspec/openapi/parser
+import oaspec/openapi/schema
+import oaspec/openapi/spec
 import simplifile
 
 pub fn main() {

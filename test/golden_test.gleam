@@ -11,9 +11,9 @@ import oaspec/generate
 import oaspec/internal/codegen/context
 import oaspec/internal/formatter
 import oaspec/internal/openapi/resolve
-import oaspec/internal/openapi/spec
 import oaspec/internal/util/http
 import oaspec/openapi/parser
+import oaspec/openapi/spec
 import simplifile
 
 pub fn main() {

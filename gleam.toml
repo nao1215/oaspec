@@ -112,6 +112,12 @@ unwrap_used = "error"
 "src/oaspec/internal/openapi/*.gleam" = ["label_possible", "deep_nesting"]
 "src/oaspec/openapi/parser.gleam" = ["label_possible", "deep_nesting"]
 "src/oaspec/openapi/diagnostic.gleam" = ["label_possible"]
+# spec.gleam and schema.gleam moved from oaspec/internal/openapi/* to the
+# public oaspec/openapi/* surface as part of #615. The label_possible
+# and deep_nesting suppressions follow the types to their new home —
+# the underlying argument-shape concerns are unchanged by the move.
+"src/oaspec/openapi/spec.gleam" = ["label_possible", "deep_nesting"]
+"src/oaspec/openapi/schema.gleam" = ["label_possible", "deep_nesting"]
 "src/oaspec/internal/util/*.gleam" = ["label_possible", "deep_nesting"]
 # naming.gleam memoizes its three pre-compiled regexes via a tiny
 # `oaspec_naming_ffi:memoize/2` helper backed by `persistent_term`.

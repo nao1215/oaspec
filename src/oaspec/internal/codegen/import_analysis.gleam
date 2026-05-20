@@ -1,10 +1,8 @@
 import gleam/dict
 import gleam/list
 import gleam/option.{Some}
-import oaspec/internal/openapi/schema.{
-  AllOfSchema, Inline, ObjectSchema, Reference,
-}
-import oaspec/internal/openapi/spec.{
+import oaspec/openapi/schema.{AllOfSchema, Inline, ObjectSchema, Reference}
+import oaspec/openapi/spec.{
   type HttpMethod, type Operation, type Resolved, ParameterSchema, Value,
 }
 

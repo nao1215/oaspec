@@ -7,10 +7,10 @@ import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/guards
 import oaspec/internal/codegen/import_analysis
 import oaspec/internal/codegen/server_request_decode as decode_helpers
-import oaspec/internal/openapi/schema.{Inline, Reference}
-import oaspec/internal/openapi/spec.{type Resolved, Value}
 import oaspec/internal/util/content_type
 import oaspec/internal/util/naming
+import oaspec/openapi/schema.{Inline, Reference}
+import oaspec/openapi/spec.{type Resolved, Value}
 
 /// Structured requirements for router generation.
 pub type RouterRequirements {

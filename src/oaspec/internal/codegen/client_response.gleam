@@ -3,16 +3,16 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/internal/codegen/context.{type Context}
-import oaspec/internal/openapi/schema.{
-  type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema, BooleanSchema, Inline,
-  IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema, Reference,
-  StringSchema,
-}
-import oaspec/internal/openapi/spec.{type Resolved}
 import oaspec/internal/util/content_type
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
 import oaspec/internal/util/string_extra as se
+import oaspec/openapi/schema.{
+  type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema, BooleanSchema, Inline,
+  IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema, Reference,
+  StringSchema,
+}
+import oaspec/openapi/spec.{type Resolved}
 
 /// Issue #483: the `default` response branch must capture the actual
 /// runtime status code so the decoded `XxxResponseDefault(...)`

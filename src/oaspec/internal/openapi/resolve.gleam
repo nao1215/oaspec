@@ -5,13 +5,13 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/set
 import gleam/string
-import oaspec/internal/openapi/spec.{
+import oaspec/openapi/diagnostic.{type Diagnostic, NoSourceLoc}
+import oaspec/openapi/spec.{
   type Callback, type Components, type OpenApiSpec, type Operation,
   type Parameter, type PathItem, type RefOr, type RequestBody, type Resolved,
   type Response, type Unresolved, Callback, Components, Operation, PathItem, Ref,
   Value,
 }
-import oaspec/openapi/diagnostic.{type Diagnostic, NoSourceLoc}
 
 /// Resolve all RefOr aliases in the spec.
 /// Call after parse and normalize, before capability_check and codegen.

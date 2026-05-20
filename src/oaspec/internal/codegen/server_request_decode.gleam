@@ -6,13 +6,13 @@ import gleam/string
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/ir_build
 import oaspec/internal/codegen/operation_ir
-import oaspec/internal/openapi/schema.{
+import oaspec/internal/util/content_type
+import oaspec/internal/util/naming
+import oaspec/openapi/schema.{
   type AdditionalProperties, type SchemaRef, Forbidden, Inline, ObjectSchema,
   Reference, Typed, Unspecified, Untyped,
 }
-import oaspec/internal/openapi/spec.{type Resolved, Value}
-import oaspec/internal/util/content_type
-import oaspec/internal/util/naming
+import oaspec/openapi/spec.{type Resolved, Value}
 
 /// Expression that case-insensitively parses a string to Bool.
 /// Accepts "true"/"True"/"TRUE" etc. as True, everything else as False.

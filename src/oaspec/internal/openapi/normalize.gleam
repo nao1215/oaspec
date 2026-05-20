@@ -1,20 +1,20 @@
 import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
-import oaspec/internal/openapi/schema.{
+import oaspec/internal/openapi/value
+import oaspec/openapi/schema.{
   type SchemaMetadata, type SchemaObject, type SchemaRef, AllOfSchema,
   AnyOfSchema, ArraySchema, BooleanSchema, Forbidden, Inline, IntegerSchema,
   NumberSchema, ObjectSchema, OneOfSchema, Reference, SchemaMetadata,
   StringSchema, Typed,
 }
-import oaspec/internal/openapi/spec.{
+import oaspec/openapi/spec.{
   type Callback, type Components, type Header, type MediaType, type OpenApiSpec,
   type Operation, type Parameter, type PathItem, type RefOr, type RequestBody,
   type Response, Callback, Components, Header, MediaType, OpenApiSpec, Operation,
   Parameter, ParameterContent, ParameterSchema, PathItem, Ref, RequestBody,
   Response, Value,
 }
-import oaspec/internal/openapi/value
 
 /// Normalize an OpenApiSpec after parsing.
 /// Converts OAS 3.1 patterns to 3.0-compatible representations:

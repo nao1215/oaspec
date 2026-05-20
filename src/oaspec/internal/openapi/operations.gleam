@@ -2,7 +2,7 @@ import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
-import oaspec/internal/openapi/spec.{
+import oaspec/openapi/spec.{
   type HttpMethod, type OpenApiSpec, type Operation, type Resolved,
 }
 

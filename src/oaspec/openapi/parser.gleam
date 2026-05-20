@@ -12,8 +12,11 @@ import oaspec/internal/openapi/location_index.{type LocationIndex}
 import oaspec/internal/openapi/parser_schema
 import oaspec/internal/openapi/parser_value
 import oaspec/internal/openapi/parser_yay_error
-import oaspec/internal/openapi/schema.{type SchemaRef}
-import oaspec/internal/openapi/spec.{
+import oaspec/internal/progress.{type Reporter}
+import oaspec/internal/util/http
+import oaspec/openapi/diagnostic.{type Diagnostic, NoSourceLoc, SourceLoc}
+import oaspec/openapi/schema.{type SchemaRef}
+import oaspec/openapi/spec.{
   type Callback, type Components, type Contact, type Encoding, type ExternalDoc,
   type Header, type Info, type License, type Link, type MediaType,
   type OpenApiSpec, type Operation, type Parameter, type ParameterIn,
@@ -24,9 +27,6 @@ import oaspec/internal/openapi/spec.{
   Ref, RequestBody, Response, SecurityRequirement, Server, ServerVariable, Tag,
   Value,
 }
-import oaspec/internal/progress.{type Reporter}
-import oaspec/internal/util/http
-import oaspec/openapi/diagnostic.{type Diagnostic, NoSourceLoc, SourceLoc}
 import simplifile
 import yay
 

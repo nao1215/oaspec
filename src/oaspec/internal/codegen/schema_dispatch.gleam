@@ -9,12 +9,12 @@
 /// client.gleam, and guards.gleam (14+ functions with the same dispatch).
 import gleam/option.{type Option, None, Some}
 import oaspec/internal/codegen/context.{type Context}
-import oaspec/internal/openapi/schema.{
+import oaspec/internal/util/naming
+import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
   BooleanSchema, Inline, IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema,
   Reference, StringSchema,
 }
-import oaspec/internal/util/naming
 
 /// Map a schema object to its Gleam type string (without nullable wrapping).
 pub fn schema_base_type(schema: SchemaObject) -> String {

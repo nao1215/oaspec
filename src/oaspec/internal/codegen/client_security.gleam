@@ -4,7 +4,7 @@ import gleam/list
 import gleam/option.{Some}
 import gleam/string
 import oaspec/internal/codegen/context.{type Context}
-import oaspec/internal/openapi/spec.{type Resolved}
+import oaspec/openapi/spec.{type Resolved}
 
 /// Capitalize the first letter of a string. Used to render HTTP scheme
 /// prefixes like `Bearer` / `Basic` / `Digest` in the emitted security

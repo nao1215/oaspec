@@ -7,10 +7,10 @@ import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
 import oaspec/internal/openapi/external_loader_planner as planner
-import oaspec/internal/openapi/schema.{
+import oaspec/openapi/schema.{
   type SchemaObject, BooleanSchema, Inline, IntegerSchema, Reference,
 }
-import oaspec/internal/openapi/spec.{
+import oaspec/openapi/spec.{
   type Components, type OpenApiSpec, Components, OpenApiSpec, Value,
 }
 

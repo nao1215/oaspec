@@ -23,14 +23,14 @@ import oaspec/internal/codegen/runtime_snippets
 import oaspec/internal/codegen/schema_dispatch
 import oaspec/internal/codegen/schema_utils
 import oaspec/internal/openapi/dedup
-import oaspec/internal/openapi/schema.{
+import oaspec/internal/util/naming
+import oaspec/internal/util/string_extra as se
+import oaspec/openapi/schema.{
   type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema, BooleanSchema,
   Forbidden, Inline, IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema,
   Reference, StringSchema, Typed, Unspecified, Untyped,
 }
-import oaspec/internal/openapi/spec.{type Resolved, Value}
-import oaspec/internal/util/naming
-import oaspec/internal/util/string_extra as se
+import oaspec/openapi/spec.{type Resolved, Value}
 
 /// Generate the `encode.gleam` module for the resolved spec.
 pub fn generate(ctx: Context) -> List(GeneratedFile) {
