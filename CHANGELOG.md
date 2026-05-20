@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.68.0] - 2026-05-21
+
 ### Added
 
 - `oaspec/openapi/parser.parse_string_resolved` parses a spec and validates every `$ref` it contains, rejecting missing schema targets and circular schema reference chains so downstream callers no longer have to re-implement the check on top of `parse_string`. (#616)
