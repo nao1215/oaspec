@@ -6,9 +6,9 @@ import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/guards
 import oaspec/internal/codegen/import_analysis
 import oaspec/internal/codegen/operation_ir
-import oaspec/internal/openapi/schema.{Inline, Reference}
-import oaspec/internal/openapi/spec.{ParameterSchema, Value}
 import oaspec/internal/util/content_type as ct_util
+import oaspec/openapi/schema.{Inline, Reference}
+import oaspec/openapi/spec.{ParameterSchema, Value}
 
 /// Structured import / helper requirements for client generation.
 pub type ClientRequirements {

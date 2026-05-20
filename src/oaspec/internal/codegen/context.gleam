@@ -4,13 +4,13 @@ import gleam/option.{type Option, None, Some}
 import oaspec/config.{type Config}
 import oaspec/internal/openapi/operations
 import oaspec/internal/openapi/resolver
-import oaspec/internal/openapi/schema.{
+import oaspec/internal/util/naming
+import oaspec/openapi/schema.{
   type SchemaMetadata, type SchemaObject, type SchemaRef, Inline, Reference,
 }
-import oaspec/internal/openapi/spec.{
+import oaspec/openapi/spec.{
   type HttpMethod, type OpenApiSpec, type Operation, type Resolved,
 }
-import oaspec/internal/util/naming
 
 /// The version of oaspec used for generated code headers.
 pub const version = "0.67.0"

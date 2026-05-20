@@ -16,11 +16,11 @@ import oaspec/internal/codegen/server as server_gen
 import oaspec/internal/codegen/server_request_decode
 import oaspec/internal/codegen/types as types_gen
 import oaspec/internal/openapi/hoist
-import oaspec/internal/openapi/schema
-import oaspec/internal/openapi/spec
 import oaspec/internal/util/content_type
 import oaspec/internal/util/http
 import oaspec/openapi/parser
+import oaspec/openapi/schema
+import oaspec/openapi/spec
 import test_helpers
 
 pub fn main() {

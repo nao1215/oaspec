@@ -8,8 +8,8 @@ import oaspec/codegen/writer
 import oaspec/config
 import oaspec/internal/codegen/context
 import oaspec/internal/codegen/import_analysis
-import oaspec/internal/openapi/schema
-import oaspec/internal/openapi/spec
+import oaspec/openapi/schema
+import oaspec/openapi/spec
 import simplifile
 
 pub fn main() {

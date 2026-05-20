@@ -7,17 +7,17 @@ import oaspec/config
 import oaspec/internal/capability
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/openapi/location_index.{type LocationIndex}
-import oaspec/internal/openapi/schema.{
-  type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
-  Inline, ObjectSchema, OneOfSchema, Reference, Typed,
-}
-import oaspec/internal/openapi/spec.{
-  type HttpMethod, type OpenApiSpec, type Resolved, Value,
-}
 import oaspec/internal/util/http
 import oaspec/openapi/diagnostic.{
   type Diagnostic, type SourceLoc, SeverityError, SeverityWarning, TargetBoth,
   TargetServer,
+}
+import oaspec/openapi/schema.{
+  type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
+  Inline, ObjectSchema, OneOfSchema, Reference, Typed,
+}
+import oaspec/openapi/spec.{
+  type HttpMethod, type OpenApiSpec, type Resolved, Value,
 }
 
 /// Run capability checks on a resolved spec.

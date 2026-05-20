@@ -24,12 +24,12 @@
 import gleam/dict.{type Dict}
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import oaspec/internal/openapi/schema.{
+import oaspec/openapi/schema.{
   type Discriminator, type SchemaObject, type SchemaRef, AllOfSchema,
   AnyOfSchema, ArraySchema, Forbidden, Inline, ObjectSchema, OneOfSchema,
   Reference, Typed, Unspecified, Untyped,
 }
-import oaspec/internal/openapi/spec.{
+import oaspec/openapi/spec.{
   type Callback, type MediaType, type OpenApiSpec, type Operation,
   type Parameter, type PathItem, type RefOr, type Resolved, type Response,
   Callback, Components, OpenApiSpec, ParameterContent, ParameterSchema, Ref,

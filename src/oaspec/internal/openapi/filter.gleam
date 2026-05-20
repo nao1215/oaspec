@@ -14,7 +14,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/config.{type Include}
-import oaspec/internal/openapi/spec.{
+import oaspec/openapi/spec.{
   type OpenApiSpec, type Operation, type PathItem, type RefOr, type Resolved,
   OpenApiSpec, PathItem, Ref, Value,
 }

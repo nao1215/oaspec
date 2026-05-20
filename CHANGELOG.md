@@ -10,6 +10,10 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Changed
+
+- The OpenAPI spec AST types (`OpenApiSpec`, `Info`, `PathItem`, `Operation`, `Parameter`, `RequestBody`, `Response`, `Schema*`, `RefOr`, `Components`, `MediaType`, `Server`, `Tag`, `License`, `Contact`, `ExternalDoc`, `SecurityScheme`, and the rest of the public-by-intent surface returned by `oaspec/openapi/parser`) now live in the new public modules `oaspec/openapi/spec` and `oaspec/openapi/schema`, moved out of `oaspec/internal/openapi/*`. Callers can now destructure parsed values and pattern-match nested variants without reaching into `oaspec/internal/*`. (#615)
+
 ## [0.67.0] - 2026-05-18
 
 ### Fixed

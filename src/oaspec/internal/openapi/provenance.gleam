@@ -5,12 +5,12 @@
 import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
-import oaspec/internal/openapi/schema.{
+import oaspec/openapi/schema.{
   HoistedAdditionalProperties, HoistedAllOfPart, HoistedAnyOfVariant,
   HoistedArrayItem, HoistedOneOfVariant, HoistedParameter, HoistedProperty,
   HoistedRequestBody, HoistedResponse, Inline, UserAuthored,
 }
-import oaspec/internal/openapi/spec.{type OpenApiSpec}
+import oaspec/openapi/spec.{type OpenApiSpec}
 
 /// Breakdown of component schemas by origin after hoisting.
 pub type HoistedSummary {

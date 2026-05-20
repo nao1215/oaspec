@@ -3,19 +3,19 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
-import oaspec/internal/openapi/schema.{
+import oaspec/internal/util/http
+import oaspec/internal/util/naming
+import oaspec/openapi/schema.{
   type OriginKind, type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema,
   ArraySchema, HoistedAdditionalProperties, HoistedAllOfPart,
   HoistedAnyOfVariant, HoistedArrayItem, HoistedOneOfVariant, HoistedParameter,
   HoistedProperty, HoistedRequestBody, HoistedResponse, Inline, ObjectSchema,
   OneOfSchema, Reference, Typed,
 }
-import oaspec/internal/openapi/spec.{
+import oaspec/openapi/spec.{
   type OpenApiSpec, type PathItem, type RefOr, Components, OpenApiSpec, PathItem,
   Ref, Value,
 }
-import oaspec/internal/util/http
-import oaspec/internal/util/naming
 
 /// Accumulated state during the hoisting traversal.
 type HoistState {

@@ -16,11 +16,11 @@ import oaspec/internal/codegen/ir_build
 import oaspec/internal/codegen/operation_ir
 import oaspec/internal/codegen/runtime_snippets
 import oaspec/internal/codegen/schema_dispatch
-import oaspec/internal/openapi/schema
-import oaspec/internal/openapi/spec.{type Resolved, Value}
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
 import oaspec/internal/util/string_extra as se
+import oaspec/openapi/schema
+import oaspec/openapi/spec.{type Resolved, Value}
 
 /// Generate client SDK files.
 pub fn generate(ctx: Context) -> List(GeneratedFile) {

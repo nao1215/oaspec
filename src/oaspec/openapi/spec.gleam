@@ -1,8 +1,8 @@
 import gleam/dict.{type Dict}
 import gleam/option.{type Option}
-import oaspec/internal/openapi/schema.{type SchemaRef}
 import oaspec/internal/openapi/value.{type JsonValue}
 import oaspec/internal/util/http
+import oaspec/openapi/schema.{type SchemaRef}
 
 // ============================================================================
 // Stage and RefOr: core of the stage-typed AST

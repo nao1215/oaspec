@@ -12,12 +12,12 @@ import gleam/result
 import oaspec/internal/openapi/location_index.{type LocationIndex}
 import oaspec/internal/openapi/parser_value
 import oaspec/internal/openapi/parser_yay_error
-import oaspec/internal/openapi/schema.{
+import oaspec/openapi/diagnostic.{type Diagnostic}
+import oaspec/openapi/schema.{
   type Discriminator, type SchemaObject, type SchemaRef, AllOfSchema,
   AnyOfSchema, ArraySchema, BooleanSchema, Discriminator, Inline, IntegerSchema,
   NumberSchema, ObjectSchema, OneOfSchema, StringSchema,
 }
-import oaspec/openapi/diagnostic.{type Diagnostic}
 import yay
 
 /// Parse a schema ref (`$ref`) or an inline schema object.
