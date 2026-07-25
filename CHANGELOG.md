@@ -10,6 +10,17 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.69.0] - 2026-07-25
+
+### Fixed
+
+- OpenAPI 3.1 schemas that express nullable branches as sibling `null` entries inside `anyOf` / `oneOf` now generate correctly. `oaspec` no longer rejects or mis-models the common shape where a concrete schema is paired with a sibling `{"type": "null"}` branch. (#625)
+
+### Changed
+
+- The CLI E2E suite now runs on `atago v0.11.0` instead of ShellSpec. The new black-box scenarios cover `init`, `validate`, `generate`, `check_sync.sh`, output layouts, failure paths, and snapshot-stable generated artifacts, and CI / release workflows now install and run atago directly. (#626)
+- GitHub Actions workflows now use `actions/checkout@v7` and `actions/cache@v6`. (#621, #622)
+
 ## [0.68.0] - 2026-05-21
 
 ### Added
