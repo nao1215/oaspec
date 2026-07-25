@@ -344,6 +344,7 @@ This project uses [mise](https://mise.jdx.dev/) for tool versions and
 
 ```sh
 mise install
+go install github.com/nao1215/atago@v0.11.0
 just check
 just e2e
 just integration

@@ -108,3 +108,26 @@ scenarios:
             contains: Validation passed
           stderr:
             empty: true
+
+  - name: validate accepts the space-separated --config form
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} validate --config oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Validation passed
+          stderr:
+            empty: true
