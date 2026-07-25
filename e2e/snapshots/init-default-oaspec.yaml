@@ -1,0 +1,67 @@
+# oaspec configuration file
+# See https://github.com/nao1215/oaspec for documentation.
+
+# Path to your OpenAPI 3.x specification (YAML or JSON).
+input: openapi.yaml
+
+# Gleam module namespace for generated code.
+# Generated imports will be `import <package>/types`, etc.
+package: api
+
+# Generation mode: server, client, or both (default: both).
+# mode: both
+
+# Enable guard validation in generated server/client code.
+# Default: true for mode: server / both (fail-closed: server handlers
+# should not receive schema-invalid input by default), false for
+# mode: client (clients pre-validating before sending is nice but
+# optional). When enabled, generated routers validate request bodies
+# against schema constraints and return 422 on failure. Generated
+# clients validate request bodies before sending. Set explicitly to
+# override the mode-dependent default.
+# validate: true
+
+# Output settings (optional). Defaults land inside ./src so a
+# freshly-generated project is buildable by `gleam build` without
+# any further config (#568):
+#   server -> ./src/<package>
+#   client -> ./src/<package>_client (Both mode) or ./src/<package> (Client mode)
+# Override individual targets via output.server / output.client, or
+# set output.dir to change the base directory for both at once.
+# output:
+#   dir: ./src                    # Base directory; defaults to ./src
+#                                 # so generated modules drop into the
+#                                 # standard Gleam project layout.
+#   server: ./src/api             # Override server output path
+#   client: ./src/api_client      # Override client output path
+
+# Operation filter (optional, Issue #387). When set, codegen only
+# emits operations whose tag list intersects `tags` OR whose path
+# matches one of `paths` (the two lists are unioned, not
+# intersected). Path patterns ending in `/**` match any path that
+# extends the prefix with a `/<rest>` segment. Both lists empty /
+# both keys omitted = no filter.
+# include:
+#   tags:
+#     - issues
+#   paths:
+#     - "/users/{username}"
+#     - "/repos/**"
+
+# Multi-target codegen (optional, Issue #387). When `targets:` is
+# set, the same input spec is generated once per entry, each with
+# its own `package`, `output`, and `include`. The top-level
+# `input`, `mode`, and `validate` are shared across every target.
+# Targets whose output paths overlap are rejected at config-load
+# time. `--output` cannot be used with multi-target configs.
+# targets:
+#   - package: my_app/issues
+#     output:
+#       dir: ./src
+#     include:
+#       tags: [issues]
+#   - package: my_app/repos
+#     output:
+#       dir: ./src
+#     include:
+#       paths: ["/repos/**"]

@@ -29,7 +29,7 @@ _OASPEC_MISE_TOOLS="gleam escript erl rebar3"
 
 oaspec_mise_bootstrap() {
   # ~/.local/bin is the canonical install dir for developer tools
-  # that are not managed by mise (e.g. ShellSpec). Keep it on PATH
+  # that are not managed by mise (e.g. atago). Keep it on PATH
   # independently of the mise-managed toolchain probe below.
   if [ -n "${HOME:-}" ] && [ -d "$HOME/.local/bin" ]; then
     _oaspec_mise_prepend "$HOME/.local/bin"

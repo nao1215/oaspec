@@ -345,14 +345,14 @@ This project uses [mise](https://mise.jdx.dev/) for tool versions and
 ```sh
 mise install
 just check
-just shellspec
+just e2e
 just integration
 ```
 
 | Command | Tool | What it tests |
 |---------|------|---------------|
 | `just test` | gleeunit | Parser, validator, naming, config, collision detection |
-| `just shellspec` | ShellSpec | CLI behaviour, file generation, content, unsupported feature detection |
+| `just e2e` | atago | CLI behaviour, generated file trees, content snapshots, unsupported feature detection |
 | `just integration` | gleeunit | Generated code compiles and the generated modules work together |
 
 ## License
