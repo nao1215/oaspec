@@ -130,6 +130,8 @@ pub fn parser_security_and_shape_test() {
   let _ = support.openapi_31_oneof_with_null_branch_parses_case()
   let _ = support.openapi_31_standalone_null_type_parses_as_nullable_case()
   let _ = support.openapi_31_type_array_nullable_case()
+  let _ = support.openapi_31_oneof_with_sibling_null_type_parses_case()
+  let _ = support.openapi_31_anyof_with_sibling_null_type_parses_case()
   let _ = support.parser_rejects_request_body_missing_content_case()
   let _ = support.parser_rejects_response_missing_description_case()
   let _ = support.unrecognized_schema_type_rejected_case()

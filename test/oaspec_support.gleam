@@ -6033,6 +6033,107 @@ components:
 }
 
 // --- drift detection between capability registry and README ---
+pub fn openapi_31_oneof_with_sibling_null_type_parses_case() {
+  // GitHub's OpenAPI 3.1 spec expresses nullable oneOf via a sibling
+  // `type: ['null', 'object']` rather than a `type: 'null'` branch
+  // inside the oneOf array. Before this fix, the parser never consulted
+  // the sibling `type` field when `oneOf` was present, so the resulting
+  // OneOfSchema had `nullable: False` and the generated decoder failed
+  // to wrap in `decode.optional(...)`.
+  let yaml =
+    "
+openapi: 3.1.0
+info:
+  title: T
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Commit:
+      type: object
+      properties:
+        author:
+          oneOf:
+            - $ref: '#/components/schemas/SimpleUser'
+            - $ref: '#/components/schemas/EmptyObject'
+          type:
+            - 'null'
+            - object
+    SimpleUser:
+      type: object
+      properties:
+        login: { type: string }
+    EmptyObject:
+      type: object
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let assert Some(components) = spec.components
+  let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
+    dict.get(components.schemas, "Commit")
+  let assert Ok(schema.Inline(schema.OneOfSchema(
+    metadata: meta,
+    schemas: branches,
+    ..,
+  ))) = dict.get(props, "author")
+  // Both $ref branches must be preserved (no null branch to strip).
+  list.length(branches) |> should.equal(2)
+  // Nullability must be detected from the sibling type field.
+  meta.nullable |> should.be_true()
+}
+
+pub fn openapi_31_anyof_with_sibling_null_type_parses_case() {
+  // Same pattern but with anyOf instead of oneOf.
+  let yaml =
+    "
+openapi: 3.1.0
+info:
+  title: T
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200': { description: ok }
+components:
+  schemas:
+    Wrapper:
+      type: object
+      properties:
+        value:
+          anyOf:
+            - $ref: '#/components/schemas/StringVal'
+            - $ref: '#/components/schemas/IntVal'
+          type:
+            - 'null'
+            - object
+    StringVal:
+      type: object
+      properties:
+        s: { type: string }
+    IntVal:
+      type: object
+      properties:
+        n: { type: integer }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let assert Some(components) = spec.components
+  let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
+    dict.get(components.schemas, "Wrapper")
+  let assert Ok(schema.Inline(schema.AnyOfSchema(
+    metadata: meta,
+    schemas: branches,
+    ..,
+  ))) = dict.get(props, "value")
+  list.length(branches) |> should.equal(2)
+  meta.nullable |> should.be_true()
+}
+
 pub fn external_file_ref_for_component_schema_case() {
   // A spec whose components.schemas entry is a ref to a schema in a
   // sibling YAML file should parse cleanly: the referenced schema is

@@ -85,7 +85,8 @@ fn parse_schema_object(
       case yay.select_sugar(from: node, selector: "oneOf") {
         Ok(yay.NodeSeq(items)) -> {
           let #(non_null_items, has_null) = partition_null_branches(items)
-          let metadata = case has_null {
+          let has_null_in_type = has_null_in_sibling_type(node)
+          let metadata = case has_null || has_null_in_type {
             True -> schema.SchemaMetadata(..metadata, nullable: True)
             False -> metadata
           }
@@ -116,7 +117,8 @@ fn parse_schema_object(
           case yay.select_sugar(from: node, selector: "anyOf") {
             Ok(yay.NodeSeq(items)) -> {
               let #(non_null_items, has_null) = partition_null_branches(items)
-              let metadata = case has_null {
+              let has_null_in_type = has_null_in_sibling_type(node)
+              let metadata = case has_null || has_null_in_type {
                 True -> schema.SchemaMetadata(..metadata, nullable: True)
                 False -> metadata
               }
@@ -183,6 +185,23 @@ fn partition_null_branches(items: List(yay.Node)) -> #(List(yay.Node), Bool) {
       }
     })
   #(list.reverse(non_null), has_null)
+}
+
+/// Check if a sibling `type` field (array form) contains `"null"`.
+/// OpenAPI 3.1 allows `type: ['null', 'object']` alongside `oneOf`/`anyOf`
+/// to express nullability, in addition to the branch-based `type: "null"`
+/// pattern that `partition_null_branches` handles.
+fn has_null_in_sibling_type(node: yay.Node) -> Bool {
+  case yay.select_sugar(from: node, selector: "type") {
+    Ok(yay.NodeSeq(type_nodes)) ->
+      list.any(type_nodes, fn(n) {
+        case n {
+          yay.NodeStr("null") -> True
+          _ -> False
+        }
+      })
+    _ -> False
+  }
 }
 
 /// Detect unsupported JSON Schema 2020-12 keywords present in a schema node.
