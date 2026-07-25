@@ -1,0 +1,793 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nao1215/atago/v0.11.0/schema/atago.schema.json
+version: "1"
+
+scrub:
+  - {pattern: 'oaspec v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?', placeholder: 'oaspec v<VERSION>'}
+
+suite:
+  name: oaspec generate
+
+scenarios:
+  - name: generate help shows usage
+    steps:
+      - run:
+          command: ${env:OASPEC_BIN} generate --help
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains:
+              - generate
+              - config
+          stderr:
+            empty: true
+
+  - name: generate fails when the config file does not exist
+    steps:
+      - fixture:
+          file: project/.keep
+          content: ""
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=missing.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code:
+            not: 0
+          stderr:
+            contains: Error
+
+  - name: generate exits non-zero when the spec fails to parse
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/error_missing_info.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code:
+            not: 0
+          stderr:
+            contains: Error
+
+  - name: generate accepts the space-separated --config form
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Successfully generated
+
+  - name: generate accepts the space-separated --mode form
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config oaspec.yaml --mode server
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Successfully generated
+      - assert:
+          dir:
+            path: project/generated/api_client
+            exists: false
+
+  - name: generate writes the full petstore server and client tree
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains:
+              - Successfully generated
+              - 16 files
+          stderr:
+            empty: true
+          changes:
+            created: project/generated/**
+            modified: []
+            deleted: []
+      - assert:
+          dir:
+            path: project/generated
+            snapshot: snapshots/generate-petstore-tree.txt
+      - assert:
+          file:
+            path: project/generated/api/types.gleam
+            snapshot: snapshots/generate-petstore-types.gleam
+      - assert:
+          file:
+            path: project/generated/api_client/client.gleam
+            snapshot: snapshots/generate-petstore-client.gleam
+
+  - name: generate honors the --output=DIR override
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml --output=./override_eq
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Successfully generated
+      - assert:
+          dir:
+            path: project/override_eq
+            contains:
+              - api/types.gleam
+              - api_client/client.gleam
+      - assert:
+          dir:
+            path: project/generated
+            exists: false
+
+  - name: generate honors the --output DIR override
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml --output ./override_space
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Successfully generated
+      - assert:
+          dir:
+            path: project/override_space
+            contains:
+              - api/types.gleam
+              - api_client/client.gleam
+
+  - name: generate mode server only omits the client tree
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml --mode=server
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Successfully generated
+      - assert:
+          dir:
+            path: project/generated/api
+            contains:
+              - handlers.gleam
+              - router.gleam
+      - assert:
+          dir:
+            path: project/generated/api_client
+            exists: false
+
+  - name: generate mode client only omits the server tree
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml --mode=client
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Successfully generated
+      - assert:
+          dir:
+            path: project/generated/api_client
+            contains:
+              - client.gleam
+              - types.gleam
+      - assert:
+          dir:
+            path: project/generated/api
+            exists: false
+
+  - name: generate prints the regexp dependency note when pattern guards are emitted
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/guard_constraints_api.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+            validate: true
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains:
+              - Successfully generated
+              - gleam/regexp for pattern validation
+              - gleam add gleam_regexp
+          stderr:
+            empty: true
+
+  - name: generate does not print the regexp note when no pattern guards exist
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Successfully generated
+            not_contains: gleam_regexp
+          stderr:
+            empty: true
+
+  - name: generate filters server-only validation in client mode
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/broken_openapi.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml --mode=client
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Successfully generated
+      - assert:
+          dir:
+            path: project/generated/api_client
+            contains:
+              - client.gleam
+      - assert:
+          dir:
+            path: project/generated/api
+            exists: false
+
+  - name: generate supports include path filters
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+            include:
+              paths:
+                - "/pets/**"
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Successfully generated
+      - assert:
+          file:
+            path: project/generated/api/handlers.gleam
+            contains:
+              - pub fn get_pet
+              - pub fn delete_pet
+      - assert:
+          file:
+            path: project/generated/api/handlers.gleam
+            not_contains:
+              - pub fn list_pets
+              - pub fn create_pet
+
+  - name: generate supports an exact include path filter
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+            include:
+              paths:
+                - "/pets"
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Successfully generated
+      - assert:
+          file:
+            path: project/generated/api/handlers.gleam
+            contains:
+              - pub fn list_pets
+              - pub fn create_pet
+      - assert:
+          file:
+            path: project/generated/api/handlers.gleam
+            not_contains:
+              - pub fn get_pet
+              - pub fn delete_pet
+
+  - name: generate supports tag filters
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+            include:
+              tags:
+                - pets
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Successfully generated
+      - assert:
+          file:
+            path: project/generated/api/handlers.gleam
+            contains:
+              - pub fn list_pets
+              - pub fn get_pet
+
+  - name: generate supports multi-target client emission
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            mode: client
+            targets:
+              - package: petshop/listing
+                output:
+                  dir: ./generated
+                include:
+                  paths:
+                    - "/pets"
+              - package: petshop/details
+                output:
+                  dir: ./generated
+                include:
+                  paths:
+                    - "/pets/**"
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains:
+              - Successfully generated
+              - "[target: petshop/listing]"
+              - "[target: petshop/details]"
+      - assert:
+          file:
+            path: project/generated/petshop/listing/client.gleam
+            contains:
+              - pub fn list_pets
+              - pub fn create_pet
+      - assert:
+          file:
+            path: project/generated/petshop/listing/client.gleam
+            not_contains:
+              - pub fn get_pet
+      - assert:
+          file:
+            path: project/generated/petshop/details/client.gleam
+            contains:
+              - pub fn get_pet
+              - pub fn delete_pet
+      - assert:
+          file:
+            path: project/generated/petshop/details/client.gleam
+            not_contains:
+              - pub fn list_pets
+
+  - name: generate rejects overlapping multi-target output directories
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            mode: client
+            targets:
+              - package: shared/api
+                output:
+                  dir: ./generated
+                include:
+                  paths:
+                    - "/pets"
+              - package: shared/api
+                output:
+                  dir: ./generated
+                include:
+                  paths:
+                    - "/pets/**"
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code:
+            not: 0
+          stderr:
+            contains: two targets resolve to the same output directory
+      - assert:
+          dir:
+            path: project/generated
+            exists: false
+
+  - name: generate accepts shared output for a single mode-both target
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            mode: both
+            package: api
+            output:
+              server: ./generated/api
+              client: ./generated/api
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Successfully generated
+            not_contains: two targets resolve to the same output directory
+      - assert:
+          dir:
+            path: project/generated/api
+            contains:
+              - types.gleam
+              - router.gleam
+              - client.gleam
+
+  - name: generate rejects output override on a multi-target config
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            mode: client
+            targets:
+              - package: foo/listing
+                output:
+                  dir: ./generated
+                include:
+                  paths:
+                    - "/pets"
+              - package: foo/details
+                output:
+                  dir: ./generated
+                include:
+                  paths:
+                    - "/pets/**"
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml --output=./somewhere_else
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code:
+            not: 0
+          stderr:
+            contains: cannot override the output directory for a multi-target config
+
+  - name: generate derives default output paths under output.dir
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./custom_root
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Successfully generated
+      - assert:
+          dir:
+            path: project/custom_root
+            contains:
+              - api/types.gleam
+              - api_client/types.gleam
+      - assert:
+          dir:
+            path: project/custom_root_client
+            exists: false
+
+  - name: generate preserves nested package layouts
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: dco_check/github
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+      - assert:
+          dir:
+            path: project/generated
+            contains:
+              - dco_check/github/types.gleam
+              - dco_check/github/router.gleam
+              - dco_check/github_client/types.gleam
+              - dco_check/github_client/client.gleam
+            not_contains:
+              - dco_check_github
+      - assert:
+          file:
+            path: project/generated/dco_check/github_client/client.gleam
+            contains: import dco_check/github/types
+
+  - name: generate --check passes when the output is up to date
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml --check
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: check passed
+          stderr:
+            empty: true
+
+  - name: generate --check fails when no generated output exists yet
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml --check
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code:
+            not: 0
+          stderr:
+            contains: out of date
+
+  - name: generate --fail-on-warnings succeeds for a clean spec
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml --fail-on-warnings
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Successfully generated
+
+  - name: generate --fail-on-warnings rejects specs with warnings
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/spec-with-warnings.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml --fail-on-warnings
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code:
+            not: 0
+          stderr:
+            contains:
+              - "Warnings:"
+              - --fail-on-warnings is set
+
+  - name: generate rejects ref-typed response header schemas for clients
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/issue_387_response_header_ref.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: ref_header
+            mode: client
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code:
+            not: 0
+          stderr:
+            contains:
+              - "Response header 'X-Item-Kind' has an unsupported schema"
+              - ref to component schema

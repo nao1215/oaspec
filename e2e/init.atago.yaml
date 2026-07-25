@@ -1,0 +1,92 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nao1215/atago/v0.11.0/schema/atago.schema.json
+version: "1"
+
+suite:
+  name: oaspec init
+
+scenarios:
+  - name: init writes the default oaspec.yaml template
+    steps:
+      - fixture:
+          file: project/.keep
+          content: ""
+      - run:
+          command: ${env:OASPEC_BIN} init
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Created
+          stderr:
+            empty: true
+          changes:
+            created: project/oaspec.yaml
+            modified: []
+            deleted: []
+      - assert:
+          file:
+            path: project/oaspec.yaml
+            snapshot: snapshots/init-default-oaspec.yaml
+
+  - name: init honors --output for a custom target path
+    steps:
+      - fixture:
+          file: project/.keep
+          content: ""
+      - run:
+          command: ${env:OASPEC_BIN} init --output=custom.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: custom.yaml
+          stderr:
+            empty: true
+      - assert:
+          file:
+            path: project/custom.yaml
+            exists: true
+
+  - name: init refuses to overwrite an existing target
+    steps:
+      - fixture:
+          file: project/oaspec.yaml
+          content: "already here\n"
+      - run:
+          command: ${env:OASPEC_BIN} init
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code:
+            not: 0
+          stderr:
+            contains: already exists
+
+  - name: init template round-trips through validate with a real spec
+    steps:
+      - fixture:
+          file: project/.keep
+          content: ""
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - run:
+          command: ${env:OASPEC_BIN} init --output=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Created
+      - run:
+          command: ${env:OASPEC_BIN} validate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Validation passed
+          stderr:
+            empty: true

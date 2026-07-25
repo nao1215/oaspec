@@ -1,0 +1,102 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nao1215/atago/v0.11.0/schema/atago.schema.json
+version: "1"
+
+suite:
+  name: check_sync script
+
+scenarios:
+  - name: check_sync reports success on a consistent minimal tree
+    steps:
+      - fixture:
+          file: project/scripts/check_sync.sh
+          from: ../scripts/check_sync.sh
+      - fixture:
+          file: project/gleam.toml
+          content: |
+            name = "oaspec"
+            version = "0.68.0"
+      - fixture:
+          file: project/CHANGELOG.md
+          content: |
+            ## [Unreleased]
+      - fixture:
+          file: project/src/oaspec/internal/codegen/context.gleam
+          content: |
+            pub const version = "0.68.0"
+      - fixture:
+          file: project/test/sample_test.gleam
+          content: |
+            pub fn smoke_test() {
+              Nil
+            }
+      - fixture:
+          file: project/test/fixtures/sample.yaml
+          content: |
+            openapi: "3.0.3"
+      - fixture:
+          file: project/test/fixtures/oss_sample.json
+          content: |
+            {}
+      - run:
+          command: bash scripts/check_sync.sh
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains:
+              - Checking version consistency
+              - Live test counts
+              - Versions and counts are in sync
+            not_contains:
+              - boundaries
+              - update_sync.sh
+          stderr:
+            empty: true
+
+  - name: check_sync reports actionable drift when versions diverge
+    steps:
+      - fixture:
+          file: project/scripts/check_sync.sh
+          from: ../scripts/check_sync.sh
+      - fixture:
+          file: project/gleam.toml
+          content: |
+            name = "oaspec"
+            version = "99.99.99"
+      - fixture:
+          file: project/CHANGELOG.md
+          content: |
+            ## [Unreleased]
+      - fixture:
+          file: project/src/oaspec/internal/codegen/context.gleam
+          content: |
+            pub const version = "0.68.0"
+      - fixture:
+          file: project/test/sample_test.gleam
+          content: |
+            pub fn smoke_test() {
+              Nil
+            }
+      - fixture:
+          file: project/test/fixtures/sample.yaml
+          content: |
+            openapi: "3.0.3"
+      - fixture:
+          file: project/test/fixtures/oss_sample.json
+          content: |
+            {}
+      - run:
+          command: bash scripts/check_sync.sh
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code:
+            not: 0
+          stdout:
+            contains:
+              - "DRIFT:"
+              - "FAILED:"
+              - Fix the inconsistencies listed above manually
+          stderr:
+            empty: true

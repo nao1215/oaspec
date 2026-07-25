@@ -1,0 +1,133 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nao1215/atago/v0.11.0/schema/atago.schema.json
+version: "1"
+
+suite:
+  name: oaspec validate
+
+scenarios:
+  - name: validate help shows usage
+    steps:
+      - run:
+          command: ${env:OASPEC_BIN} validate --help
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains:
+              - validate
+              - config
+          stderr:
+            empty: true
+
+  - name: validate accepts a valid spec without generating files
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} validate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Validation passed
+            not_contains:
+              - Generated
+              - Successfully generated
+          stderr:
+            empty: true
+          changes:
+            created: []
+            modified: []
+            deleted: []
+
+  - name: validate fails when the config file does not exist
+    steps:
+      - fixture:
+          file: project/.keep
+          content: ""
+      - run:
+          command: ${env:OASPEC_BIN} validate --config=missing.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code:
+            not: 0
+          stderr:
+            contains: Error
+
+  - name: validate exits non-zero when the underlying spec fails to parse
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/error_missing_info.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} validate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code:
+            not: 0
+          stderr:
+            contains: Error
+
+  - name: validate accepts the --mode=client override
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} validate --config=oaspec.yaml --mode=client
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Validation passed
+          stderr:
+            empty: true
+
+  - name: validate accepts the space-separated --config form
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} validate --config oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: Validation passed
+          stderr:
+            empty: true

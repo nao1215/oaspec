@@ -1,0 +1,65 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nao1215/atago/v0.11.0/schema/atago.schema.json
+version: "1"
+
+suite:
+  name: oaspec cli surface
+
+scenarios:
+  - name: top-level help lists commands without ansi escapes
+    steps:
+      - run:
+          command: ${env:OASPEC_BIN} --help
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains:
+              - "Commands:"
+              - init
+              - generate
+              - validate
+              - version
+            not_matches: "\\x1b\\["
+          stderr:
+            empty: true
+      - assert:
+          stdout:
+            snapshot: snapshots/cli-help.txt
+
+  - name: top-level help still suppresses ansi when NO_COLOR is set
+    steps:
+      - run:
+          command: ${env:OASPEC_BIN} --help
+          sandbox_home: true
+          env:
+            NO_COLOR: "1"
+      - assert:
+          exit_code: 0
+          stdout:
+            not_matches: "\\x1b\\["
+          stderr:
+            empty: true
+
+  - name: version flag prints the version banner
+    steps:
+      - run:
+          command: ${env:OASPEC_BIN} --version
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            matches: "^oaspec v[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?(?:\\r?\\n)?$"
+          stderr:
+            empty: true
+
+  - name: version subcommand prints the version banner
+    steps:
+      - run:
+          command: ${env:OASPEC_BIN} version
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            matches: "^oaspec v[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?(?:\\r?\\n)?$"
+          stderr:
+            empty: true

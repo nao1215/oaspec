@@ -40,8 +40,8 @@ escript:
 smoke-escript: escript
   bash scripts/smoke_escript.sh ./oaspec
 
-shellspec:
-  shellspec
+e2e: escript
+  OASPEC_BIN="$PWD/oaspec" atago run --ci --parallel 1 ./e2e
 
 integration:
   bash integration_test/run.sh
@@ -55,16 +55,16 @@ check: clean
 
 ci: deps check
 
-# Run all tests and checks (format, lint, build, unit, shellspec, integration, escript)
+# Run all tests and checks (format, lint, build, unit, e2e, integration, escript)
 all: clean deps
   gleam format --check src/ test/
   gleam check
   gleam run -m glinter -- --stats
   gleam build --warnings-as-errors
   gleam test
-  shellspec
-  bash integration_test/run.sh
   gleam run -m gleescript
+  OASPEC_BIN="$PWD/oaspec" atago run --ci --parallel 1 ./e2e
+  bash integration_test/run.sh
   bash scripts/smoke_escript.sh ./oaspec
   @echo ""
   @echo "All checks passed."

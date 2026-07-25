@@ -1,0 +1,23 @@
+Generate Gleam code from OpenAPI 3.x specifications
+
+Commands:
+  init       Create a default oaspec.yaml config file
+  generate   Generate Gleam code from an OpenAPI spec
+  validate   Validate an OpenAPI spec without generating code
+  version    Print the oaspec version and exit
+
+Run 'oaspec <command> --help' for more information.
+Use 'oaspec --version' for a flag-style version check.
+
+USAGE:
+    oaspec ( generate | init | validate | version ) [ ARGS ]
+
+SUBCOMMANDS:
+    generate              Generate Gleam code from an OpenAPI specification
+
+    init                  Create a oaspec.yaml config file
+
+    validate              Validate an OpenAPI specification without generating
+                          code
+
+    version               Print the oaspec version and exit
