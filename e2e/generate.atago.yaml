@@ -136,7 +136,25 @@ scenarios:
       - assert:
           dir:
             path: project/generated
-            snapshot: snapshots/generate-petstore-tree.txt
+            recursive: true
+            count: 16
+            contains:
+              - api/decode.gleam
+              - api/encode.gleam
+              - api/guards.gleam
+              - api/handlers.gleam
+              - api/handlers_generated.gleam
+              - api/request_types.gleam
+              - api/response_types.gleam
+              - api/router.gleam
+              - api/types.gleam
+              - api_client/client.gleam
+              - api_client/decode.gleam
+              - api_client/encode.gleam
+              - api_client/guards.gleam
+              - api_client/request_types.gleam
+              - api_client/response_types.gleam
+              - api_client/types.gleam
       - assert:
           file:
             path: project/generated/api/types.gleam
