@@ -15,7 +15,7 @@ jobs:
     name: Build / unit / atago e2e / integration / escript
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: erlef/setup-beam@v1
         with:
@@ -77,7 +77,7 @@ jobs:
     name: Full GitHub OpenAPI generate / format / build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: erlef/setup-beam@v1
         with:
@@ -127,7 +127,7 @@ jobs:
     name: Full Stripe OpenAPI generate / format / build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: erlef/setup-beam@v1
         with:

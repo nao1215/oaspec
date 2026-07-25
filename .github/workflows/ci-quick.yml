@@ -15,7 +15,7 @@ jobs:
     name: Format / typecheck / lint / sync
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: erlef/setup-beam@v1
         with:
