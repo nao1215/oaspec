@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.69.1] - 2026-08-15
+
 ### Fixed
 
 - A generated client compiles when one operation's name is another operation's name plus `_async`. GitHub's OpenAPI document declares both `pulls/merge` and `pulls/merge-async`: the async transport variant of the first claimed `pulls_merge_async`, which is also the second's own call function, and `gleam build` rejected the module with `Duplicate definition: pulls_merge_async` — 143k lines in, naming neither operation. The operation keeps the name and the derived variant takes a numeric suffix (`pulls_merge_async2`), the rule `synthetic_list_suffix` (#493) and `inline_enum_type_name` (#492) already follow, since an operationId belongs to the spec author and `_async` is a name oaspec invented. The renamed function says so in its doc comment. `<op>_with_request` and `<op>_with_request_async` are disambiguated the same way. (#633)
