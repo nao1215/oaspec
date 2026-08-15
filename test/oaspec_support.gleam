@@ -17971,3 +17971,53 @@ pub fn deep_object_composite_property_emits_json_escape_case() {
   string.contains(content, "\"customer_details[email]\"")
   |> should.be_true()
 }
+
+pub fn client_renames_async_variant_that_an_operation_already_claims_case() {
+  // GitHub's OpenAPI document declares both `pulls/merge` and
+  // `pulls/merge-async`. The async variant of the first generated
+  // `pulls_merge_async`, which is also the second's own call function, and the
+  // generated client failed to compile with `Duplicate definition`. The
+  // operation keeps the name; the derived one takes a numeric suffix.
+  let yaml =
+    "openapi: 3.0.3
+info: { title: t, version: '1' }
+paths:
+  /pulls/merge:
+    put:
+      operationId: pulls/merge
+      responses:
+        '200': { description: ok }
+  /pulls/merge-async:
+    put:
+      operationId: pulls/merge-async
+      responses:
+        '200': { description: ok }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec(spec)
+  let assert Ok(client_file) =
+    list.find(client_gen.generate(ctx), fn(f) {
+      string.contains(f.path, "client.gleam")
+    })
+
+  // Every emitted `pub fn` name must be distinct, which is the property the
+  // Gleam compiler was enforcing from 143k lines away.
+  let fn_names =
+    string.split(client_file.content, "\npub fn ")
+    |> list.drop(1)
+    |> list.filter_map(fn(rest) {
+      case string.split_once(rest, "(") {
+        Ok(#(name, _)) -> Ok(name)
+        Error(Nil) -> Error(Nil)
+      }
+    })
+  list.length(list.unique(fn_names))
+  |> should.equal(list.length(fn_names))
+
+  // The operation named `pulls/merge-async` keeps the natural name, and the
+  // async variant of `pulls/merge` is the one that yielded.
+  string.contains(client_file.content, "pub fn pulls_merge_async(send send:")
+  |> should.be_true()
+  string.contains(client_file.content, "pub fn pulls_merge_async2(")
+  |> should.be_true()
+}

@@ -388,6 +388,54 @@ pub fn operation_to_function_name(operation_id: String) -> String {
   |> to_snake_case
 }
 
+/// Compute the name of a function the codegen derives from an operation's own
+/// function name — `<op>_async`, `<op>_with_request`, `<op>_with_request_async`
+/// — disambiguated against the function names the operations themselves claim.
+///
+/// GitHub's OpenAPI document declares both `pulls/merge` and
+/// `pulls/merge-async`. The first generates `pulls_merge` plus the async
+/// variant `pulls_merge_async`; the second generates `pulls_merge_async` as its
+/// own call function, and `gleam build` rejects the result with
+/// `Duplicate definition: pulls_merge_async` — 143k lines into a generated
+/// module, naming neither operation.
+///
+/// The operation's name wins and the derived name yields, the rule
+/// `synthetic_list_suffix` (#493) and `inline_enum_type_name` (#492) already
+/// follow: an operationId is the user's API surface, or their upstream
+/// vendor's, and cannot be renamed from here, while `_async` is a name oaspec
+/// invented. Disambiguation appends a numeric suffix (`2`, `3`, …), so
+/// `pulls/merge`'s async variant becomes `pulls_merge_async2`.
+///
+/// The check is against operation names only, not against other derived names,
+/// which leaves one pathological case open: an operationId spelled exactly
+/// `<other_op>_with_request` collides with that operation's own
+/// `_with_request_async` wrapper. Catching it needs a whole-document pass over
+/// derived names, and no real spec has been seen to need one.
+pub fn derived_function_name(
+  base: String,
+  suffix: String,
+  operation_function_names: dict.Dict(String, Nil),
+) -> String {
+  let candidate = base <> suffix
+  use <- bool.guard(
+    !dict.has_key(operation_function_names, candidate),
+    candidate,
+  )
+  bump_derived_function_suffix(candidate, 2, operation_function_names)
+}
+
+fn bump_derived_function_suffix(
+  base: String,
+  suffix: Int,
+  taken: dict.Dict(String, Nil),
+) -> String {
+  let candidate = base <> int.to_string(suffix)
+  case dict.has_key(taken, candidate) {
+    False -> candidate
+    True -> bump_derived_function_suffix(base, suffix + 1, taken)
+  }
+}
+
 /// Convert an OpenAPI schema name to a valid Gleam type name.
 pub fn schema_to_type_name(schema_name: String) -> String {
   schema_name
