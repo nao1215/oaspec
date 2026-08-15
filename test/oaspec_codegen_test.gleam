@@ -15,6 +15,8 @@ pub fn codegen_core_regressions_test() {
   let _ = support.generation_is_idempotent_case()
   let _ = support.generated_type_fields_are_alphabetically_ordered_case()
   let _ = support.client_emits_with_request_wrappers_case()
+  let _ =
+    support.client_renames_async_variant_that_an_operation_already_claims_case()
   let _ = support.middleware_gleam_is_not_emitted_case()
   let _ = support.callbacks_do_not_emit_handler_stubs_case()
   let _ = support.client_uses_transport_send_contract_case()

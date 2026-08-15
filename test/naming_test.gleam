@@ -1,3 +1,4 @@
+import gleam/dict
 import gleam/list
 import gleeunit
 import gleeunit/should
@@ -219,4 +220,43 @@ pub fn naming_inline_enum_type_name_collision_appends_numeric_suffix_test() {
 pub fn naming_inline_enum_type_name_chained_collision_bumps_suffix_test() {
   naming.inline_enum_type_name("foo", "status", ["foo_status", "foo_status_2"])
   |> should.equal("FooStatus3")
+}
+
+// Issue: GitHub declares both `pulls/merge` and `pulls/merge-async`, so the
+// async variant of the first claims the function name the second owns. The
+// operation keeps its name and the derived one yields.
+
+fn taken(names: List(String)) -> dict.Dict(String, Nil) {
+  list.fold(names, dict.new(), fn(acc, name) { dict.insert(acc, name, Nil) })
+}
+
+pub fn naming_derived_function_name_no_collision_returns_base_test() {
+  naming.derived_function_name("pulls_merge", "_async", taken(["pulls_merge"]))
+  |> should.equal("pulls_merge_async")
+}
+
+pub fn naming_derived_function_name_collision_appends_numeric_suffix_test() {
+  naming.derived_function_name(
+    "pulls_merge",
+    "_async",
+    taken(["pulls_merge", "pulls_merge_async"]),
+  )
+  |> should.equal("pulls_merge_async2")
+}
+
+pub fn naming_derived_function_name_chained_collision_bumps_suffix_test() {
+  naming.derived_function_name(
+    "pulls_merge",
+    "_async",
+    taken(["pulls_merge", "pulls_merge_async", "pulls_merge_async2"]),
+  )
+  |> should.equal("pulls_merge_async3")
+}
+
+pub fn naming_derived_function_name_disambiguates_request_wrappers_test() {
+  let names = taken(["get_thing", "get_thing_with_request"])
+  naming.derived_function_name("get_thing", "_with_request", names)
+  |> should.equal("get_thing_with_request2")
+  naming.derived_function_name("get_thing", "_with_request_async", names)
+  |> should.equal("get_thing_with_request_async")
 }

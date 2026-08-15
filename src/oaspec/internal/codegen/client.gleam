@@ -617,6 +617,15 @@ fn generate_client_function(
   let fn_name = naming.operation_to_function_name(op_id)
   let build_fn = "build_" <> fn_name <> "_request"
   let decode_fn = "decode_" <> fn_name <> "_response"
+  // The names below are oaspec's, not the spec author's, so they are the ones
+  // that yield when an operation already claims them (GitHub declares both
+  // `pulls/merge` and `pulls/merge-async`).
+  let taken_fn_names = context.operation_function_names(ctx)
+  let async_fn = naming.derived_function_name(fn_name, "_async", taken_fn_names)
+  let with_request_fn =
+    naming.derived_function_name(fn_name, "_with_request", taken_fn_names)
+  let with_request_async_fn =
+    naming.derived_function_name(fn_name, "_with_request_async", taken_fn_names)
   let response_type = naming.schema_to_type_name(op_id) <> "Response"
 
   let unwrapped_params =
@@ -716,12 +725,13 @@ fn generate_client_function(
     |> se.doc_comment(
       "Async transport variant of "
       <> fn_name
-      <> ". Resolves to the typed response or a client error.",
+      <> ". Resolves to the typed response or a client error."
+      <> async_rename_note(fn_name, async_fn),
     )
     |> se.line(
       "pub fn "
-      <> fn_name
-      <> "_async(async_send async_send: transport.AsyncSend"
+      <> async_fn
+      <> "(async_send async_send: transport.AsyncSend"
       <> params_signature
       <> ") -> transport.Async(Result(response_types."
       <> response_type
@@ -897,8 +907,8 @@ fn generate_client_function(
       )
       |> se.line(
         "pub fn "
-        <> fn_name
-        <> "_with_request(send send: transport.Send, request request: request_types."
+        <> with_request_fn
+        <> "(send send: transport.Send, request request: request_types."
         <> request_type
         <> ") -> Result(response_types."
         <> response_type
@@ -909,13 +919,13 @@ fn generate_client_function(
       |> se.blank_line()
       |> se.doc_comment(
         "Async request-object wrapper. Delegates to "
-        <> fn_name
-        <> "_async with fields unpacked from the request record.",
+        <> async_fn
+        <> " with fields unpacked from the request record.",
       )
       |> se.line(
         "pub fn "
-        <> fn_name
-        <> "_with_request_async(async_send async_send: transport.AsyncSend, request request: request_types."
+        <> with_request_async_fn
+        <> "(async_send async_send: transport.AsyncSend, request request: request_types."
         <> request_type
         <> ") -> transport.Async(Result(response_types."
         <> response_type
@@ -923,13 +933,27 @@ fn generate_client_function(
       )
       |> se.indent(
         1,
-        fn_name <> "_async(async_send" <> rebind_request_fields(extra) <> ")",
+        async_fn <> "(async_send" <> rebind_request_fields(extra) <> ")",
       )
       |> se.line("}")
       |> se.blank_line()
     }
     None -> sb
   }
+}
+
+/// Say so in the generated doc comment when the async variant could not take
+/// the `<op>_async` name a reader would look for, so the rename is visible
+/// where it is used rather than only in oaspec's release notes.
+fn async_rename_note(fn_name: String, async_fn: String) -> String {
+  use <- bool.guard(async_fn == fn_name <> "_async", "")
+  " Named `"
+  <> async_fn
+  <> "` rather than `"
+  <> fn_name
+  <> "_async` because another operation in this spec already generates `"
+  <> fn_name
+  <> "_async`."
 }
 
 /// Build the call-args list passed from `<op>` to `build_<op>_request`.

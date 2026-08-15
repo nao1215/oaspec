@@ -35,6 +35,7 @@ pub opaque type Context {
     operations: List(AnalyzedOperation),
     schema_cache: dict.Dict(String, Result(SchemaObject, resolver.ResolveError)),
     component_type_names: dict.Dict(String, Nil),
+    operation_function_names: dict.Dict(String, Nil),
   )
 }
 
@@ -45,12 +46,14 @@ pub opaque type Context {
 /// read them via `operations/1` / `resolve_schema_ref/2` instead of
 /// rebuilding the same analysis at unrelated call sites (issue #371).
 pub fn new(spec: OpenApiSpec(Resolved), config: Config) -> Context {
+  let analyzed = operations.collect_operations(spec)
   Context(
     spec:,
     config:,
-    operations: operations.collect_operations(spec),
+    operations: analyzed,
     schema_cache: build_schema_cache(spec),
     component_type_names: build_component_type_names(spec),
+    operation_function_names: build_operation_function_names(analyzed),
   )
 }
 
@@ -111,6 +114,26 @@ pub fn schema_metadata(
 /// large specs.
 pub fn component_type_names(ctx: Context) -> dict.Dict(String, Nil) {
   ctx.component_type_names
+}
+
+/// Pre-computed set of every operation's generated function name, the set the
+/// codegen's own derived names (`<op>_async`, `<op>_with_request`, …) have to
+/// stay clear of. GitHub's spec declares both `pulls/merge` and
+/// `pulls/merge-async`, so the async variant of the first claims the name the
+/// second owns — see `naming.derived_function_name`. Precomputed here for the
+/// same reason as `component_type_names`: rebuilding it per operation would be
+/// O(N_operations²) on a spec with a thousand of them.
+pub fn operation_function_names(ctx: Context) -> dict.Dict(String, Nil) {
+  ctx.operation_function_names
+}
+
+fn build_operation_function_names(
+  analyzed: List(AnalyzedOperation),
+) -> dict.Dict(String, Nil) {
+  list.fold(analyzed, dict.new(), fn(acc, entry) {
+    let #(op_id, _operation, _path, _method) = entry
+    dict.insert(acc, naming.operation_to_function_name(op_id), Nil)
+  })
 }
 
 fn build_component_type_names(
