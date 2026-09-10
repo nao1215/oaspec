@@ -60,11 +60,12 @@ fn mask_version_header(content: String) -> String {
   )
 }
 
-/// Helper: compare a generated file's content against the golden file on disk.
+/// Helper: compare a generated file's content against the golden content.
 /// Panics with a diff-friendly message on mismatch.
-fn assert_matches_golden(file: context.GeneratedFile, golden_dir: String) -> Nil {
-  let golden_path = golden_dir <> "/" <> file.path
-  let assert Ok(expected_raw) = simplifile.read(golden_path)
+fn assert_matches_golden(
+  file: context.GeneratedFile,
+  expected_raw expected_raw: String,
+) -> Nil {
   let generated = mask_version_header(file.content)
   let expected = mask_version_header(expected_raw)
   case generated == expected {
@@ -118,13 +119,24 @@ fn find_first_diff(
 }
 
 /// Helper: run golden comparison for all files from a spec.
-/// Formats generated content via temp files before comparison to match
-/// the formatted golden files on disk.
+/// Both the generated files and the golden files go through the `gleam format`
+/// on PATH before comparison. The formatter's line wrapping changes between
+/// compiler releases, and CI runs both the declared minimum compiler and the
+/// latest one, so formatting only the generated side would tie the snapshots
+/// to whichever compiler last ran `just update-golden`.
 fn assert_all_golden(spec_path: String, golden_dir: String) -> Nil {
-  let files = golden_generate(spec_path)
-  let formatted_files = format_generated_files(files)
-  list.each(formatted_files, fn(file) {
-    assert_matches_golden(file, golden_dir)
+  let generated = format_generated_files(golden_generate(spec_path))
+  let golden =
+    generated
+    |> list.map(fn(file) {
+      let assert Ok(content) = simplifile.read(golden_dir <> "/" <> file.path)
+      context.GeneratedFile(..file, content: content)
+    })
+    |> format_generated_files
+  list.zip(generated, golden)
+  |> list.each(fn(pair) {
+    let #(file, golden_file) = pair
+    assert_matches_golden(file, expected_raw: golden_file.content)
   })
 }
 
