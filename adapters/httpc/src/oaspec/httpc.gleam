@@ -149,11 +149,7 @@ fn convert_response(resp: response.Response(BitArray)) -> transport.Response {
       }
     False -> transport.BytesBody(resp.body)
   }
-  transport.Response(
-    status: resp.status,
-    headers: resp.headers,
-    body: body,
-  )
+  transport.Response(status: resp.status, headers: resp.headers, body: body)
 }
 
 fn is_text_content_type(ct: String) -> Bool {

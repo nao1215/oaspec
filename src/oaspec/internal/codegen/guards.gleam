@@ -271,7 +271,9 @@ fn render_guard_function(
   |> se.blank_line()
 }
 
-fn dedupe_guard_functions(functions: List(GuardFunction)) -> List(GuardFunction) {
+fn dedupe_guard_functions(
+  functions: List(GuardFunction),
+) -> List(GuardFunction) {
   let canonical_by_key =
     list.fold(functions, dict.new(), fn(acc, function) {
       case function.kind {

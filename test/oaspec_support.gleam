@@ -6725,7 +6725,9 @@ pub fn capability_registry_names_appear_in_readme_boundaries_case() {
     string.split_once(after_begin, "<!-- END GENERATED:BOUNDARIES -->")
   list.each(capability.registry(), fn(c) {
     case c.level {
-      capability.Unsupported | capability.NotHandled | capability.ParsedNotUsed ->
+      capability.Unsupported
+      | capability.NotHandled
+      | capability.ParsedNotUsed ->
         case string.contains(boundaries_block, c.name) {
           True -> Nil
           False -> {

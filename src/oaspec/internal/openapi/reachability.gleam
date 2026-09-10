@@ -125,7 +125,9 @@ fn refs_from_operation(op: Operation(Resolved)) -> List(SchemaRef) {
   list.flatten([parameter_refs, body_refs, response_refs, callback_refs])
 }
 
-fn refs_from_callback_ref(cb_ref: RefOr(Callback(Resolved))) -> List(SchemaRef) {
+fn refs_from_callback_ref(
+  cb_ref: RefOr(Callback(Resolved)),
+) -> List(SchemaRef) {
   case cb_ref {
     Value(Callback(entries:)) ->
       dict.values(entries)
@@ -134,7 +136,9 @@ fn refs_from_callback_ref(cb_ref: RefOr(Callback(Resolved))) -> List(SchemaRef) 
   }
 }
 
-fn refs_from_parameter_ref(pref: RefOr(Parameter(Resolved))) -> List(SchemaRef) {
+fn refs_from_parameter_ref(
+  pref: RefOr(Parameter(Resolved)),
+) -> List(SchemaRef) {
   case pref {
     Value(p) ->
       case p.payload {

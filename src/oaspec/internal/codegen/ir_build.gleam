@@ -293,7 +293,9 @@ fn build_response_header_records(
 
 /// Convert a header schema to a Gleam type string.
 /// Handles both inline primitive schemas and `$ref` references (#294).
-fn header_schema_to_type(schema_opt: option.Option(schema.SchemaRef)) -> String {
+fn header_schema_to_type(
+  schema_opt: option.Option(schema.SchemaRef),
+) -> String {
   case schema_opt {
     Some(Inline(IntegerSchema(..))) -> "Int"
     Some(Inline(NumberSchema(..))) -> "Float"
@@ -305,7 +307,9 @@ fn header_schema_to_type(schema_opt: option.Option(schema.SchemaRef)) -> String 
 }
 
 /// Check if any response header record has optional fields.
-fn response_headers_need_option(records: List(ir.ResponseHeaderRecord)) -> Bool {
+fn response_headers_need_option(
+  records: List(ir.ResponseHeaderRecord),
+) -> Bool {
   list.any(records, fn(rec) {
     list.any(rec.fields, fn(f) { string.starts_with(f.type_expr, "Option(") })
   })

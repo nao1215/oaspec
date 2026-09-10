@@ -47,7 +47,9 @@ pub fn encode_filter_op_to_string(value: types.FilterOp) -> String {
   }
 }
 
-pub fn encode_regular_user_type_json(value: types.RegularUserType) -> json.Json {
+pub fn encode_regular_user_type_json(
+  value: types.RegularUserType,
+) -> json.Json {
   let str = case value {
     types.RegularUserTypeAdmin -> "admin"
     types.RegularUserTypeRegular -> "regular"

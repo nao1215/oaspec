@@ -1097,7 +1097,10 @@ fn validate_server_multipart_request_body(
   }
 }
 
-fn multipart_server_field_supported(schema_ref: SchemaRef, ctx: Context) -> Bool {
+fn multipart_server_field_supported(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Bool {
   case resolve_schema_object(Some(schema_ref), ctx) {
     Some(StringSchema(..))
     | Some(IntegerSchema(..))
@@ -1122,7 +1125,10 @@ fn multipart_server_array_item_supported(
   }
 }
 
-fn multipart_field_is_stringifiable(schema_ref: SchemaRef, ctx: Context) -> Bool {
+fn multipart_field_is_stringifiable(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Bool {
   case resolve_schema_object(Some(schema_ref), ctx) {
     Some(StringSchema(..))
     | Some(IntegerSchema(..))

@@ -417,7 +417,11 @@ fn print_resolved_paths_for_all(
   }
 }
 
-fn print_target_outputs(cfg: config.Config, cwd: String, prefix: String) -> Nil {
+fn print_target_outputs(
+  cfg: config.Config,
+  cwd: String,
+  prefix: String,
+) -> Nil {
   case config.mode(cfg) {
     config.Server -> {
       io.println(

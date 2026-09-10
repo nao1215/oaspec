@@ -1191,7 +1191,8 @@ fn generate_response_conversion(
                             is_default: is_default,
                           )
                       }
-                    content_type.ApplicationOctetStream | content_type.Wildcard ->
+                    content_type.ApplicationOctetStream
+                    | content_type.Wildcard ->
                       // Issue #304: binary responses thread bytes end-to-end
                       // via `BytesBody(BitArray)` instead of being smuggled
                       // through `String`. The matching response_types

@@ -490,7 +490,9 @@ pub fn with_output(config: Config, output: Option(String)) -> Config {
 /// `_client` suffix attaches to the LAST package segment only, matching
 /// the single-segment behaviour (`dco_check/github` →
 /// `dco_check/github_client`, never `dco_check_client/github`).
-pub fn validate_output_package_match(config: Config) -> Result(Nil, ConfigError) {
+pub fn validate_output_package_match(
+  config: Config,
+) -> Result(Nil, ConfigError) {
   let pkg = package_segments(config.package)
   case pkg {
     // Empty package would make the rule vacuously true; bail out

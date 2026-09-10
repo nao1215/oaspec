@@ -196,7 +196,10 @@ pub fn set_internal(schema: SchemaObject) -> SchemaObject {
 /// Stamp the origin of a hoisted schema onto its metadata so downstream
 /// consumers (diagnostics, tooling) can distinguish user-authored schemas
 /// from synthetic ones created during the hoist pass.
-pub fn set_provenance(schema: SchemaObject, origin: OriginKind) -> SchemaObject {
+pub fn set_provenance(
+  schema: SchemaObject,
+  origin: OriginKind,
+) -> SchemaObject {
   let meta = get_metadata(schema)
   let meta = SchemaMetadata(..meta, provenance: origin)
   set_metadata(schema, meta)
@@ -208,7 +211,10 @@ pub fn get_provenance(schema: SchemaObject) -> OriginKind {
 }
 
 /// Replace the metadata on a schema object.
-pub fn set_metadata(schema: SchemaObject, meta: SchemaMetadata) -> SchemaObject {
+pub fn set_metadata(
+  schema: SchemaObject,
+  meta: SchemaMetadata,
+) -> SchemaObject {
   case schema {
     StringSchema(format:, enum_values:, min_length:, max_length:, pattern:, ..) ->
       StringSchema(

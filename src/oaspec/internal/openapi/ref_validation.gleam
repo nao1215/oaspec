@@ -61,7 +61,9 @@ pub fn validate_schema_refs(
   }
 }
 
-fn validate_components_schemas(spec: OpenApiSpec(Resolved)) -> List(Diagnostic) {
+fn validate_components_schemas(
+  spec: OpenApiSpec(Resolved),
+) -> List(Diagnostic) {
   case spec.components {
     None -> []
     Some(components) ->

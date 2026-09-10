@@ -408,7 +408,9 @@ pub fn check_cross_file_collision(
 /// Detect a `./...#/components/schemas/Name` or `../...#/components/schemas/Name`
 /// ref. Returns `Some(#(file_path, schema_name))` when it matches, `None`
 /// otherwise.
-pub fn extract_external_ref(schema_ref: SchemaRef) -> Option(#(String, String)) {
+pub fn extract_external_ref(
+  schema_ref: SchemaRef,
+) -> Option(#(String, String)) {
   case schema_ref {
     Reference(ref:, ..) ->
       case string.starts_with(ref, "./") || string.starts_with(ref, "../") {

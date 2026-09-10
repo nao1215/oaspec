@@ -651,7 +651,10 @@ fn form_array_item_to_string(
 /// True when `schema_ref` resolves to an `ObjectSchema` post-`$ref`
 /// resolution. Used to dispatch nested-form encoding into the
 /// recursive bracket-key path.
-fn schema_resolves_to_object(schema_ref: schema.SchemaRef, ctx: Context) -> Bool {
+fn schema_resolves_to_object(
+  schema_ref: schema.SchemaRef,
+  ctx: Context,
+) -> Bool {
   case schema_ref {
     Inline(schema.ObjectSchema(..)) -> True
     Reference(..) ->
@@ -664,7 +667,10 @@ fn schema_resolves_to_object(schema_ref: schema.SchemaRef, ctx: Context) -> Bool
 }
 
 /// True when `schema_ref` resolves to an `ArraySchema`.
-fn schema_resolves_to_array(schema_ref: schema.SchemaRef, ctx: Context) -> Bool {
+fn schema_resolves_to_array(
+  schema_ref: schema.SchemaRef,
+  ctx: Context,
+) -> Bool {
   case schema_ref {
     Inline(schema.ArraySchema(..)) -> True
     Reference(..) ->
