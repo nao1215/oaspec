@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+# Read-only Hex key for dependency resolution in the integration tests; see the
+# note in ci-tests.yml. Publishing still uses HEXPM_API_KEY in the publish job.
+env:
+  HEXPM_READ_API_KEY: ${{ secrets.HEXPM_READ_API_KEY }}
+
 jobs:
   build:
     name: Build and verify
