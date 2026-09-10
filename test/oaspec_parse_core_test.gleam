@@ -125,6 +125,14 @@ pub fn parser_security_and_shape_test() {
   let _ = support.parse_rejects_optional_path_parameter_case()
   let _ = support.parse_accepts_oauth2_scheme_case()
   let _ = support.parse_accepts_apikey_cookie_case()
+  let _ = support.parse_rejects_security_scheme_type_outside_enum_case()
+  let _ =
+    support.parse_reports_security_scheme_type_location_and_allowed_values_case()
+  let _ = support.parse_accepts_every_oas_security_scheme_type_case()
+  let _ = support.parse_skips_ref_security_scheme_in_type_check_case()
+  let _ =
+    support.parse_reports_first_invalid_security_scheme_type_by_name_case()
+  let _ = support.parse_security_scheme_missing_type_stays_missing_field_case()
   let _ = support.parse_ignores_callbacks_case()
   let _ = support.openapi_31_anyof_with_null_branch_parses_case()
   let _ = support.openapi_31_oneof_with_null_branch_parses_case()

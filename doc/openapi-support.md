@@ -109,7 +109,9 @@ and OpenAPI features that have no faithful Gleam translation today:
   `unevaluatedProperties`, `unevaluatedItems`, `contentEncoding`,
   `contentMediaType`, `contentSchema`
 - XML request/response bodies with structural decoding, `xml`
-  annotations, and `mutualTLS` security
+  annotations, and OpenAPI 3.1 `mutualTLS` security
+
+A security scheme whose `type` is not in the OpenAPI enum (`apiKey`, `http`, `oauth2`, `openIdConnect`, plus `mutualTLS` in 3.1 documents) is a spec error rather than a missing feature: the parser rejects it with an `invalid_value` diagnostic at `components.securitySchemes.<name>.type`, so `oaspec validate` and library callers of `oaspec/openapi/parser` see it too.
 
 Parsed but not yet turned into code: callbacks, webhooks, `externalDocs`,
 tags, examples, links, and `encoding` metadata.

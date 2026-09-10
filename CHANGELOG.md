@@ -14,6 +14,10 @@ within `Changed` / `Fixed` and stay as-is.
 
 - `gleam.toml` of `oaspec`, `oaspec_httpc` and `oaspec_fetch` now declares `gleam = ">= 1.14.0"`, the oldest compiler that builds and tests the packages unchanged; `gleam_stdlib` 1.0 already requires it. CI runs the unit tests and the adapter builds on both that floor and the latest Gleam 1.x.
 
+### Fixed
+
+- The parser rejects a security scheme `type` outside the OpenAPI enum. `parse_string`, `parse_json_string`, `parse_file` and the other parse entry points accepted any string in `components.securitySchemes.<name>.type` (`invalidType`, `''`, `API_KEY`, `Bearer`, `cookie`, ...) as `UnsupportedScheme`, so the document was only rejected when `generate` or `validate` reached capability checking, and callers that use only the parser got `Ok`. The parser now returns an `invalid_value` diagnostic at `components.securitySchemes.<name>.type` that names the value and lists the allowed ones: `apiKey`, `http`, `oauth2` and `openIdConnect` for OpenAPI 3.0 (§4.7.27.1), plus `mutualTLS` for 3.1 (§4.8.27.1). A 3.1 `mutualTLS` scheme still parses and `generate` still reports it as unsupported; `mutualTLS` in a 3.0 document is now a parse error instead of a capability error. `$ref` entries are not checked, and when several schemes are invalid the first by name is reported. The kin-openapi `components.json` test now expects this parse error for its `"type": "cookie"` scheme. (#620)
+
 ## [0.69.1] - 2026-08-15
 
 ### Fixed

@@ -4112,6 +4112,140 @@ components:
   }
 }
 
+/// A document whose only security scheme `bad` has the given `type`.
+/// The value is quoted so `''` stays an empty string (not null) and
+/// trailing spaces survive. The `type:` value starts at line 7, column 13.
+fn security_scheme_type_spec(openapi: String, scheme_type: String) -> String {
+  "openapi: '"
+  <> openapi
+  <> "'\ninfo: {title: t, version: '1'}\npaths: {}\ncomponents:\n  securitySchemes:\n    bad:\n      type: '"
+  <> scheme_type
+  <> "'\n"
+}
+
+pub fn parse_rejects_security_scheme_type_outside_enum_case() {
+  // Security Scheme `type` values are case-sensitive and 3.0 has no
+  // `mutualTLS`; `cookie` / `Bearer` are `in` / `scheme` values that
+  // users put in the wrong field.
+  let oas30_types = [
+    "invalidType", "", "API_KEY", "apikey", "ApiKey", "HTTP", "Bearer", "JWT",
+    "cookie", "openidconnect", "OAuth2", "mutualTLS", "apiKey ",
+  ]
+  let oas31_types = ["invalidType", "", "mutualtls", "MutualTLS", "mTLS", "JWT"]
+  let cases =
+    list.flat_map(["3.0.3", "3.0"], fn(version) {
+      list.map(oas30_types, fn(scheme_type) { #(version, scheme_type) })
+    })
+    |> list.append(
+      list.flat_map(["3.1.0", "3.1"], fn(version) {
+        list.map(oas31_types, fn(scheme_type) { #(version, scheme_type) })
+      }),
+    )
+  list.each(cases, fn(pair) {
+    let #(version, scheme_type) = pair
+    let assert Error(Diagnostic(
+      code: "invalid_value",
+      pointer: "components.securitySchemes.bad.type",
+      message:,
+      ..,
+    )) = parser.parse_string(security_scheme_type_spec(version, scheme_type))
+    should.be_true(string.contains(message, "type '" <> scheme_type <> "'."))
+  })
+}
+
+pub fn parse_reports_security_scheme_type_location_and_allowed_values_case() {
+  let assert Error(Diagnostic(source_loc:, message:, ..)) =
+    parser.parse_string(security_scheme_type_spec("3.0.3", "invalidType"))
+  source_loc |> should.equal(SourceLoc(line: 7, column: 13))
+  message
+  |> should.equal(
+    "Invalid security scheme type 'invalidType'. OAS 3.0 §4.7.27.1 accepts one of 'apiKey', 'http', 'oauth2', 'openIdConnect'.",
+  )
+  let assert Error(Diagnostic(message:, ..)) =
+    parser.parse_string(security_scheme_type_spec("3.1.0", "invalidType"))
+  message
+  |> should.equal(
+    "Invalid security scheme type 'invalidType'. OAS 3.1 §4.8.27.1 accepts one of 'apiKey', 'http', 'mutualTLS', 'oauth2', 'openIdConnect'.",
+  )
+}
+
+pub fn parse_accepts_every_oas_security_scheme_type_case() {
+  let schemes =
+    "
+components:
+  securitySchemes:
+    key: {type: apiKey, name: X-Key, in: header}
+    basic: {type: http, scheme: basic}
+    oauth: {type: oauth2, flows: {}}
+    oidc: {type: openIdConnect, openIdConnectUrl: 'https://example.com/.well-known/openid-configuration'}
+"
+  let head = "info: {title: t, version: '1'}\npaths: {}"
+  let assert Ok(_) =
+    parser.parse_string("openapi: '3.0.3'\n" <> head <> schemes)
+  let assert Ok(parsed) =
+    parser.parse_string(
+      "openapi: '3.1.0'\n" <> head <> schemes <> "    mtls: {type: mutualTLS}\n",
+    )
+  let assert Some(components) = parsed.components
+  dict.get(components.security_schemes, "mtls")
+  |> should.equal(
+    Ok(spec.Value(spec.UnsupportedScheme(scheme_type: "mutualTLS"))),
+  )
+}
+
+pub fn parse_skips_ref_security_scheme_in_type_check_case() {
+  // A `$ref` entry is a reference; siblings such as `type` are ignored.
+  let yaml =
+    "
+openapi: '3.0.3'
+info: {title: t, version: '1'}
+paths: {}
+components:
+  securitySchemes:
+    alias: {$ref: '#/components/securitySchemes/real', type: bogus}
+    real: {type: http, scheme: bearer}
+"
+  let assert Ok(parsed) = parser.parse_string(yaml)
+  let assert Some(components) = parsed.components
+  dict.get(components.security_schemes, "alias")
+  |> should.equal(Ok(spec.Ref("#/components/securitySchemes/real")))
+}
+
+pub fn parse_reports_first_invalid_security_scheme_type_by_name_case() {
+  // Erlang iterates maps of 32 keys or fewer in key order, so more
+  // schemes are needed to show that the report does not depend on it.
+  let schemes =
+    range_zero_until(40)
+    |> list.reverse
+    |> list.map(fn(n) {
+      "    s"
+      <> string.pad_start(int.to_string(n), to: 2, with: "0")
+      <> ": {type: 'bad"
+      <> int.to_string(n)
+      <> "'}\n"
+    })
+    |> string.concat
+  let yaml =
+    "openapi: '3.0.3'\ninfo: {title: t, version: '1'}\npaths: {}\ncomponents:\n  securitySchemes:\n"
+    <> schemes
+  let assert Error(Diagnostic(pointer:, ..)) = parser.parse_string(yaml)
+  pointer |> should.equal("components.securitySchemes.s00.type")
+}
+
+pub fn parse_security_scheme_missing_type_stays_missing_field_case() {
+  let yaml =
+    "
+openapi: '3.0.3'
+info: {title: t, version: '1'}
+paths: {}
+components:
+  securitySchemes:
+    bad: {description: no type}
+"
+  let assert Error(Diagnostic(code:, ..)) = parser.parse_string(yaml)
+  code |> should.equal("missing_field")
+}
+
 // --- Feature: allOf with primitive sub-schemas (Phase 4-2) ---
 
 pub fn allof_with_primitive_sub_schema_case() {
@@ -13421,33 +13555,20 @@ pub fn oss_kin_openapi_minimal_json_parses_case() {
 }
 
 /// kin-openapi: components with $ref cross-references in JSON.
-/// The fixture contains an invalid security scheme type ("cookie") which is
-/// not part of the OpenAPI 3.x specification. The parser rejects it with a
-/// clear error message guiding the user to fix the security scheme type.
+/// The fixture declares a security scheme with `"type": "cookie"`, which
+/// is outside the OAS 3.0 Security Scheme `type` enum (`cookie` is an
+/// apiKey `in` location, not a scheme type). The parser rejects it with
+/// an `invalid_value` diagnostic at the offending field; JSON input has
+/// no source positions.
 pub fn oss_kin_openapi_components_json_rejects_invalid_scheme_case() {
-  // Parser preserves unsupported scheme types losslessly;
-  // capability_check rejects them during generate.
-  let assert Ok(spec) =
-    parser.parse_file("test/fixtures/oss_kin_openapi_components.json")
-  let cfg =
-    config.new(
-      input: "test.yaml",
-      output_server: "./test_output/api",
-      output_client: "./test_output_client/api",
-      package: "api",
-      mode: config.Both,
-      validate: False,
-    )
-  let result = generate.generate(spec, cfg)
-  case result {
-    Error(generate.ValidationErrors(errors:)) -> {
-      let error_details = list.map(errors, fn(e) { e.message })
-      let has_cookie =
-        list.any(error_details, fn(d) { string.contains(d, "cookie") })
-      should.be_true(has_cookie)
-    }
-    Ok(_) -> should.fail()
-  }
+  let assert Error(Diagnostic(
+    code: "invalid_value",
+    pointer: "components.securitySchemes.Name.type",
+    source_loc: NoSourceLoc,
+    message:,
+    ..,
+  )) = parser.parse_file("test/fixtures/oss_kin_openapi_components.json")
+  should.be_true(string.contains(message, "'cookie'"))
 }
 
 // ---------------------------------------------------------------------------
@@ -14149,10 +14270,16 @@ pub fn oss_swagger_parser_java_31_basic_rejects_multi_type_case() {
 }
 
 /// swagger-parser-java: OpenAPI 3.1 security scheme includes mutualTLS type.
-/// Parser preserves it losslessly; generate fails via capability_check.
+/// OpenAPI 3.1 allows `mutualTLS`, so the parser keeps it as
+/// `UnsupportedScheme`; generate fails via capability_check.
 pub fn oss_swagger_parser_java_31_security_rejects_mutualtls_case() {
-  let assert Ok(spec) =
+  let assert Ok(parsed) =
     parser.parse_file("test/fixtures/oss_swagger_parser_java_31_security.yaml")
+  let assert Some(components) = parsed.components
+  dict.get(components.security_schemes, "mutual_TLS")
+  |> should.equal(
+    Ok(spec.Value(spec.UnsupportedScheme(scheme_type: "mutualTLS"))),
+  )
   let cfg =
     config.new(
       input: "test.yaml",
@@ -14162,7 +14289,7 @@ pub fn oss_swagger_parser_java_31_security_rejects_mutualtls_case() {
       mode: config.Both,
       validate: False,
     )
-  let result = generate.generate(spec, cfg)
+  let result = generate.generate(parsed, cfg)
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
       let error_details = list.map(errors, fn(e) { e.message })

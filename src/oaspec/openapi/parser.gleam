@@ -593,6 +593,19 @@ fn parse_root(
     Some(c) -> validate_component_keys(c, index)
     None -> Ok(Nil)
   })
+  // The Security Scheme `type` enum depends on the document version
+  // (3.1 adds `mutualTLS`), and this is the only point that knows both
+  // the version and each scheme's name. Runs after the key check so the
+  // pointer is built from a name already known to be valid.
+  use _ <- result.try(case components {
+    Some(c) ->
+      validate_security_scheme_types(
+        c.security_schemes,
+        is_openapi_3_0(openapi),
+        index,
+      )
+    None -> Ok(Nil)
+  })
 
   use paths <- result.try(parse_paths(node, components, index))
   // OAS 3.0 §4.7.10.1: operationId MUST be unique across all operations
@@ -706,10 +719,9 @@ fn node_kind_name(node: yay.Node) -> String {
 }
 
 /// Whether the validated version string belongs to the OAS 3.0.x
-/// branch (where `paths` is required at the document root). Accepts
-/// both the three-segment `3.0.x` form and the two-segment `3.0`
-/// form that `is_supported_openapi_version` tolerates for
-/// yamerl-coerced floats.
+/// branch. Drives the rules that differ between 3.0 and 3.1: `paths` is
+/// required at the root, and the Security Scheme `type` enum has no
+/// `mutualTLS`. Accepts both `3.0.x` and the two-segment `3.0`.
 fn is_openapi_3_0(version: String) -> Bool {
   case string.split(version, ".") {
     ["3", "0", _] | ["3", "0"] -> True
@@ -803,6 +815,48 @@ fn check_component_keys(
     }
   })
   |> result.map(fn(_) { Nil })
+}
+
+/// OAS 3.0 §4.7.27.1 and OAS 3.1 §4.8.27.1: a Security Scheme's `type`
+/// MUST be one of a fixed set of values. `parse_security_scheme` keeps
+/// any other value as `UnsupportedScheme` because only `parse_root`
+/// knows the version: 3.1 adds `mutualTLS`, which is valid and stays an
+/// `UnsupportedScheme` for capability_check to report as a generator
+/// limitation. Every other `UnsupportedScheme` is a spec error. `$ref`
+/// entries are skipped; their target is checked under its own name.
+/// Names are visited in sorted order so the reported scheme does not
+/// depend on Dict iteration order.
+fn validate_security_scheme_types(
+  schemes: Dict(String, RefOr(spec.SecurityScheme)),
+  is_3_0: Bool,
+  index: LocationIndex,
+) -> Result(Nil, Diagnostic) {
+  let allowed = case is_3_0 {
+    True ->
+      "OAS 3.0 §4.7.27.1 accepts one of 'apiKey', 'http', 'oauth2', 'openIdConnect'."
+    False ->
+      "OAS 3.1 §4.8.27.1 accepts one of 'apiKey', 'http', 'mutualTLS', 'oauth2', 'openIdConnect'."
+  }
+  dict.to_list(schemes)
+  |> list.sort(by: fn(left, right) { string.compare(left.0, right.0) })
+  |> list.try_each(fn(entry) {
+    case entry {
+      #(_, Value(spec.UnsupportedScheme(scheme_type: "mutualTLS"))) if !is_3_0 ->
+        Ok(Nil)
+      #(name, Value(spec.UnsupportedScheme(scheme_type:))) -> {
+        let scheme_path = "components.securitySchemes." <> name
+        Error(diagnostic.invalid_value(
+          path: scheme_path <> ".type",
+          detail: "Invalid security scheme type '"
+            <> scheme_type
+            <> "'. "
+            <> allowed,
+          loc: location_index.lookup_field(index, scheme_path, "type"),
+        ))
+      }
+      #(_, Value(_)) | #(_, Ref(_)) -> Ok(Nil)
+    }
+  })
 }
 
 /// Collect every Value(PathItem) operationId across the paths Dict and
@@ -2618,8 +2672,10 @@ fn parse_security_scheme(
       Ok(spec.OpenIdConnectScheme(open_id_connect_url:, description:))
     }
     _ ->
-      // Preserve unsupported scheme types losslessly;
-      // capability_check will reject them.
+      // Keep the raw type so `validate_security_scheme_types` can tell
+      // OAS 3.1 `mutualTLS` (valid, reported by capability_check as a
+      // generator limitation) from a value outside the enum, which it
+      // rejects once the `openapi` version is known.
       Ok(spec.UnsupportedScheme(scheme_type: type_str))
   }
 }

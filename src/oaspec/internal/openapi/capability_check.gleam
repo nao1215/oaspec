@@ -242,7 +242,8 @@ fn check_schema(
   list.append(keyword_errors, child_errors)
 }
 
-/// Check security schemes for unsupported types (e.g. mutualTLS).
+/// Reject `UnsupportedScheme` entries: OAS 3.1 `mutualTLS` from the
+/// parser, or any type in a hand-built spec.
 fn check_security_schemes(
   spec: OpenApiSpec(Resolved),
   index: LocationIndex,
