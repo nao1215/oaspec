@@ -19,6 +19,27 @@ oaspec_require_tool gleam
 info() { echo "==> $*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
+# Each generated project below resolves its dependencies through the Hex API,
+# about 30 times per run. Hex rate limits unauthenticated clients per IP and
+# GitHub-hosted runners share IPs, so a run can be refused part-way through.
+# When that happens, wait for the limit window to pass and run the same
+# command again. Setting HEXPM_READ_API_KEY moves Gleam to the per-key limit.
+gleam() {
+  local attempt=1 output status
+  while true; do
+    status=0
+    output=$(command gleam "$@" 2>&1) || status=$?
+    printf '%s\n' "$output"
+    if [ "$status" -eq 0 ] || [ "$attempt" -gt 3 ] ||
+      ! grep -q "rate limit for the Hex API" <<< "$output"; then
+      return "$status"
+    fi
+    info "Hex API rate limit reached; retrying in 60s (retry $attempt of 3)"
+    sleep 60
+    attempt=$((attempt + 1))
+  done
+}
+
 # Format compliance check for generated code. `oaspec generate` runs
 # `gleam format` during emission, so the produced sources must already
 # pass a no-op format check; a regression in the formatter step (stray

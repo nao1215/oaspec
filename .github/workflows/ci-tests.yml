@@ -12,7 +12,8 @@ concurrency:
 
 # The integration tests resolve dependencies for freshly generated projects many
 # times per run. Unauthenticated Hex API calls share a per-IP rate limit, which
-# Gleam 1.18 runs into; a read-only key moves them to the per-user limit.
+# GitHub-hosted runners can exceed; integration_test/run.sh waits and retries
+# when that happens, and a read-only key moves the calls to the per-key limit.
 # An unset secret expands to an empty value, which Gleam treats as no key.
 env:
   HEXPM_READ_API_KEY: ${{ secrets.HEXPM_READ_API_KEY }}
