@@ -169,8 +169,10 @@ pub type SecurityScheme {
   HttpScheme(scheme: String, bearer_format: Option(String))
   OAuth2Scheme(description: Option(String), flows: Dict(String, OAuth2Flow))
   OpenIdConnectScheme(open_id_connect_url: String, description: Option(String))
-  /// Parsed but unsupported scheme type (e.g. mutualTLS).
-  /// Preserved losslessly; capability_check will reject it.
+  /// A scheme type the generator cannot handle. The parser only
+  /// produces it for OAS 3.1 `mutualTLS`; any other value outside the
+  /// OAS enum is rejected at parse time. capability_check rejects this
+  /// variant at generate time, including values in hand-built specs.
   UnsupportedScheme(scheme_type: String)
 }
 
