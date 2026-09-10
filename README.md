@@ -1,6 +1,7 @@
 # oaspec
 
 [![Hex package](https://img.shields.io/hexpm/v/oaspec)](https://hex.pm/packages/oaspec)
+[![Hex Downloads](https://img.shields.io/hexpm/dt/oaspec)](https://hex.pm/packages/oaspec)
 [![HexDocs](https://img.shields.io/badge/hexdocs-latest-blue)](https://hexdocs.pm/oaspec/)
 [![License](https://img.shields.io/github/license/nao1215/oaspec)](https://github.com/nao1215/oaspec/blob/main/LICENSE)
 [![Quick](https://github.com/nao1215/oaspec/actions/workflows/ci-quick.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci-quick.yml)
@@ -67,7 +68,7 @@ On Windows, download `oaspec` from the [latest release](https://github.com/nao12
 
 ### CLI (build from source)
 
-Requires Gleam 1.15+, Erlang/OTP 27+, and `rebar3`.
+Requires Gleam 1.14+, Erlang/OTP 27+, and `rebar3`.
 
 ```sh
 git clone https://github.com/nao1215/oaspec.git

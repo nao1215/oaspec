@@ -4,6 +4,7 @@ target = "javascript"
 description = "JavaScript fetch adapter for oaspec generated clients."
 licences = ["MIT"]
 repository = { type = "github", user = "nao1215", repo = "oaspec" }
+gleam = ">= 1.14.0"
 
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"

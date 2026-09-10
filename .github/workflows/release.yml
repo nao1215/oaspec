@@ -15,19 +15,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The escript attached to the GitHub Release is compiled here, so OTP
+      # stays on the documented minimum (27): BEAM files built by a newer OTP
+      # are not guaranteed to load on an older one. The compiler follows the
+      # latest 1.x lane in CI because `gleam format --check` runs below.
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "27"
-          gleam-version: "1.15"
-
-      - name: Install rebar3
-        run: |
-          wget -q https://s3.amazonaws.com/rebar3/rebar3 -O /usr/local/bin/rebar3
-          chmod +x /usr/local/bin/rebar3
+          gleam-version: "1.x"
+          rebar3-version: "3"
 
       - uses: nao1215/setup-atago@v0
         with:
-          version: v0.20.0
+          version: v0.21.0
 
       - name: Download dependencies
         run: gleam deps download
@@ -74,12 +74,8 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "27"
-          gleam-version: "1.15"
-
-      - name: Install rebar3
-        run: |
-          wget -q https://s3.amazonaws.com/rebar3/rebar3 -O /usr/local/bin/rebar3
-          chmod +x /usr/local/bin/rebar3
+          gleam-version: "1.x"
+          rebar3-version: "3"
 
       - run: gleam deps download
       - run: gleam build

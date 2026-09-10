@@ -112,15 +112,10 @@ let send =
   |> transport.with_base_url("https://petstore3.swagger.io/api/v3")
 ```
 
-`oaspec_httpc` is not yet on Hex; depend on it from a path or git
-dependency in your project's `gleam.toml` (see the
-[oaspec_fetch example layout](../petstore_client_fetch/gleam.toml) for
-the canonical pattern).
+`oaspec_httpc` is published on Hex; add it with `gleam add oaspec_httpc`.
 
-A self-contained runnable real-HTTP sibling example
-(`petstore_client_httpc`) can be added later once the `oaspec_httpc`
-adapter ships on Hex; the swap above is small enough that it doesn't
-need its own directory in the meantime.
+The swap above is small enough that a separate real-HTTP example
+(`petstore_client_httpc`) is not needed.
 
 ## Related examples
 

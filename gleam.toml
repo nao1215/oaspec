@@ -4,6 +4,7 @@ target = "erlang"
 description = "Generate Gleam code from OpenAPI 3.x specifications"
 licences = ["MIT"]
 repository = { type = "github", user = "nao1215", repo = "oaspec" }
+gleam = ">= 1.14.0"
 internal_modules = ["oaspec/internal/**"]
 
 [dependencies]
