@@ -17,10 +17,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Latest Gleam 1.x: formatter output changes between compiler releases,
+      # and .mise.toml pins the same line for local `just format`.
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: "27"
-          gleam-version: "1.15"
+          otp-version: "29"
+          gleam-version: "1.x"
           rebar3-version: "3"
 
       - name: Cache Gleam deps

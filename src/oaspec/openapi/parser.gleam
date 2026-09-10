@@ -1115,7 +1115,10 @@ fn parse_optional_components(
 }
 
 /// Parse the info object.
-fn parse_info(root: yay.Node, index: LocationIndex) -> Result(Info, Diagnostic) {
+fn parse_info(
+  root: yay.Node,
+  index: LocationIndex,
+) -> Result(Info, Diagnostic) {
   use info_node <- result.try(
     yay.select_sugar(from: root, selector: "info")
     |> result.map_error(parser_yay_error.missing_field_from_selector(
@@ -1403,7 +1406,10 @@ fn is_valid_placeholder_name(name: String) -> Bool {
   regexp.check(with: re, content: name)
 }
 
-fn has_duplicate_name(names: List(String), seen: List(String)) -> Option(String) {
+fn has_duplicate_name(
+  names: List(String),
+  seen: List(String),
+) -> Option(String) {
   case names {
     [] -> None
     [head, ..rest] ->

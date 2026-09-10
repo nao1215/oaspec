@@ -18,12 +18,8 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "27"
-          gleam-version: "1.15"
-
-      - name: Install rebar3
-        run: |
-          wget -q https://s3.amazonaws.com/rebar3/rebar3 -O /usr/local/bin/rebar3
-          chmod +x /usr/local/bin/rebar3
+          gleam-version: "1.x"
+          rebar3-version: "3"
 
       # The committed adapters/httpc/gleam.toml depends on the parent
       # oaspec via `path = "../.."` so monorepo development works

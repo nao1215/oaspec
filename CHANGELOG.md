@@ -10,6 +10,10 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Changed
+
+- `gleam.toml` of `oaspec`, `oaspec_httpc` and `oaspec_fetch` now declares `gleam = ">= 1.14.0"`, the oldest compiler that builds and tests the packages unchanged; `gleam_stdlib` 1.0 already requires it. CI runs the unit tests and the adapter builds on both that floor and the latest Gleam 1.x.
+
 ## [0.69.1] - 2026-08-15
 
 ### Fixed

@@ -86,7 +86,9 @@ pub fn generate_single_content_response(
         _ -> empty_body_branch(sb, status_code, variant_name, headers)
       }
 
-    content_type.TextPlain | content_type.ApplicationXml | content_type.TextXml ->
+    content_type.TextPlain
+    | content_type.ApplicationXml
+    | content_type.TextXml ->
       case media_type.schema {
         Some(_) ->
           body_branch(sb, status_code, variant_name, "text", headers, fn(sb) {

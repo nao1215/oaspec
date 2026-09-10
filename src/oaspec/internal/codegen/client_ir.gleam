@@ -692,7 +692,10 @@ fn param_uses_json_escape(
   array_with_non_primitive_items || deep_object_composite
 }
 
-fn items_resolve_primitive_local(items: schema.SchemaRef, ctx: Context) -> Bool {
+fn items_resolve_primitive_local(
+  items: schema.SchemaRef,
+  ctx: Context,
+) -> Bool {
   case items {
     Inline(schema.StringSchema(..))
     | Inline(schema.IntegerSchema(..))

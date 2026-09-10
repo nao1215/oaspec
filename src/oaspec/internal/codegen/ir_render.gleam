@@ -43,7 +43,10 @@ fn render_declaration(
 }
 
 /// Render a type definition to Gleam source.
-fn render_type_def(sb: se.StringBuilder, type_def: TypeDef) -> se.StringBuilder {
+fn render_type_def(
+  sb: se.StringBuilder,
+  type_def: TypeDef,
+) -> se.StringBuilder {
   case type_def {
     TypeAlias(name:, target:) ->
       sb

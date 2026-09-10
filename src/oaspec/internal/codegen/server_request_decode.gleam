@@ -784,7 +784,9 @@ fn deep_object_param_needs(
   list.any(deep_object_properties(param, ctx), predicate)
 }
 
-pub fn request_body_uses_form_urlencoded(rb: spec.RequestBody(Resolved)) -> Bool {
+pub fn request_body_uses_form_urlencoded(
+  rb: spec.RequestBody(Resolved),
+) -> Bool {
   dict.has_key(rb.content, "application/x-www-form-urlencoded")
 }
 

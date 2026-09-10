@@ -12,19 +12,24 @@ concurrency:
 
 jobs:
   adapter:
-    name: ${{ matrix.adapter }}
+    # Both adapters declare the same `gleam` floor as the root package
+    # (keep adapters/*/gleam.toml, gleam.toml and this matrix in sync).
+    name: ${{ matrix.adapter }} (Gleam ${{ matrix.lane.gleam }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         adapter: [httpc, fetch]
+        lane:
+          - { gleam: "1.14.0", otp: "27" }
+          - { gleam: "1.x", otp: "29" }
     steps:
       - uses: actions/checkout@v7
 
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: "27"
-          gleam-version: "1.15"
+          otp-version: ${{ matrix.lane.otp }}
+          gleam-version: ${{ matrix.lane.gleam }}
           rebar3-version: "3"
 
       - name: Cache Gleam build for adapter

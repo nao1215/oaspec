@@ -309,7 +309,10 @@ fn has_type_specific_constraints(schema_obj: SchemaObject) -> Bool {
   }
 }
 
-fn make_typed_schema(type_str: String, metadata: SchemaMetadata) -> SchemaObject {
+fn make_typed_schema(
+  type_str: String,
+  metadata: SchemaMetadata,
+) -> SchemaObject {
   case type_str {
     "string" ->
       StringSchema(

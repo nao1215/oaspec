@@ -351,7 +351,9 @@ pub fn user_decoder() -> decode.Decoder(types.User) {
   decode.success(types.User(id: id, name: name, type_: type_))
 }
 
-pub fn decode_user(json_string: String) -> Result(types.User, json.DecodeError) {
+pub fn decode_user(
+  json_string: String,
+) -> Result(types.User, json.DecodeError) {
   json.parse(json_string, user_decoder())
 }
 

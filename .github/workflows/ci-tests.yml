@@ -10,7 +10,39 @@ concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
 
+# The integration tests resolve dependencies for freshly generated projects many
+# times per run. Unauthenticated Hex API calls share a per-IP rate limit, which
+# GitHub-hosted runners can exceed; integration_test/run.sh waits and retries
+# when that happens, and a read-only key moves the calls to the per-key limit.
+# An unset secret expands to an empty value, which Gleam treats as no key.
+env:
+  HEXPM_READ_API_KEY: ${{ secrets.HEXPM_READ_API_KEY }}
+
 jobs:
+  unit-floor:
+    # Floor lane: the `gleam` requirement in gleam.toml (keep both in sync).
+    # It proves the declared minimum compiler still builds oaspec and passes
+    # the unit tests. Every other job runs on the latest Gleam 1.x.
+    name: Unit tests (Gleam 1.14.0, OTP 27)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          gleam-version: "1.14.0"
+          rebar3-version: "3"
+
+      - name: Download dependencies
+        run: gleam deps download
+
+      - name: Build
+        run: gleam build
+
+      - name: Unit tests
+        run: gleam test
+
   tests:
     name: Build / unit / atago e2e / integration / escript
     runs-on: ubuntu-latest
@@ -19,13 +51,13 @@ jobs:
 
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: "27"
-          gleam-version: "1.15"
+          otp-version: "29"
+          gleam-version: "1.x"
           rebar3-version: "3"
 
       - uses: nao1215/setup-atago@v0
         with:
-          version: v0.20.0
+          version: v0.21.0
 
       - name: Cache Gleam build
         uses: actions/cache@v6
@@ -81,8 +113,8 @@ jobs:
 
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: "27"
-          gleam-version: "1.15"
+          otp-version: "29"
+          gleam-version: "1.x"
           rebar3-version: "3"
 
       - name: Cache Gleam build
@@ -131,8 +163,8 @@ jobs:
 
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: "27"
-          gleam-version: "1.15"
+          otp-version: "29"
+          gleam-version: "1.x"
           rebar3-version: "3"
 
       - name: Cache Gleam build

@@ -17,7 +17,9 @@ import gleam/uri
 import oaspec/transport
 
 /// Convert a JavaScript promise into oaspec's cross-target async wrapper.
-pub fn from_promise(promise promise_: promise.Promise(a)) -> transport.Async(a) {
+pub fn from_promise(
+  promise promise_: promise.Promise(a),
+) -> transport.Async(a) {
   transport.from_callback(fn(done) {
     let _ = promise.tap(promise_, done)
     Nil

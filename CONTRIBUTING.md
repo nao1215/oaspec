@@ -8,7 +8,7 @@ Thank you for considering contributing to the oaspec project! This document expl
 
 ### Prerequisites
 
-- [Gleam](https://gleam.run/) 1.15 or later
+- [Gleam](https://gleam.run/) 1.14 or later (`.mise.toml` pins the version CI uses for formatting)
 - [Erlang/OTP](https://www.erlang.org/) 27 or later
 - [rebar3](https://rebar3.org/) (required for yamerl YAML parser)
 - [just](https://just.systems/) (task runner)
