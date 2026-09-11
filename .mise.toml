@@ -1,4 +1,4 @@
 [tools]
-erlang = "29.0"
+erlang = "29.0.6"
 gleam = "1.18.1"
 rebar = "latest"
