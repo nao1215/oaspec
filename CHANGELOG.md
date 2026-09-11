@@ -10,6 +10,10 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Fixed
+
+- `oaspec_httpc`: `with_timeout` had no effect. The adapter ignored its config and used gleam_httpc's default 30-second timeout, and a timeout came back as `ConnectionFailed("gleam_httpc send failed")`. The configured timeout is now applied and a timeout returns `transport.Timeout`; a TLS alert returns `transport.TlsFailure`, and other connection errors return `transport.ConnectionFailed` with the IPv4 and IPv6 error codes in the detail. The adapter now has tests, run in CI. (#639)
+
 ## [0.70.0] - 2026-09-11
 
 ### Changed
