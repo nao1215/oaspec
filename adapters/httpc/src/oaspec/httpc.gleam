@@ -41,6 +41,9 @@ pub fn config() -> Config {
   Config(timeout_ms: None)
 }
 
+/// Give up on a request that has not produced a response within
+/// `timeout_ms` milliseconds; the `Send` then returns
+/// `Error(transport.Timeout)`. Without it gleam_httpc waits 30 seconds.
 pub fn with_timeout(cfg cfg: Config, timeout_ms timeout_ms: Int) -> Config {
   let _ = cfg
   Config(timeout_ms: Some(timeout_ms))
@@ -67,13 +70,49 @@ pub fn send(
 
 fn do_send(
   req: transport.Request,
-  _cfg: Config,
+  cfg: Config,
 ) -> Result(transport.Response, transport.TransportError) {
   use http_req <- result.try(build_http_request(req))
-  case httpc.send_bits(http_req) {
-    Ok(resp) -> Ok(convert_response(resp))
-    Error(_) ->
-      Error(transport.ConnectionFailed(detail: "gleam_httpc send failed"))
+  let httpc_config = case cfg.timeout_ms {
+    Some(timeout_ms) -> httpc.configure() |> httpc.timeout(timeout_ms)
+    None -> httpc.configure()
+  }
+  httpc.dispatch_bits(httpc_config, http_req)
+  |> result.map(convert_response)
+  |> result.map_error(convert_error)
+}
+
+fn convert_error(error: httpc.HttpError) -> transport.TransportError {
+  case error {
+    httpc.ResponseTimeout -> transport.Timeout
+    httpc.FailedToConnect(ip4:, ip6:) ->
+      case tls_alert(ip4), tls_alert(ip6) {
+        Some(detail), _ | None, Some(detail) ->
+          transport.TlsFailure(detail: detail)
+        None, None ->
+          transport.ConnectionFailed(
+            detail: "ipv4: "
+            <> connect_error_detail(ip4)
+            <> ", ipv6: "
+            <> connect_error_detail(ip6),
+          )
+      }
+    httpc.InvalidUtf8Response ->
+      transport.ConnectionFailed(detail: "response body is not valid UTF-8")
+  }
+}
+
+fn tls_alert(error: httpc.ConnectError) -> option.Option(String) {
+  case error {
+    httpc.TlsAlert(code:, detail:) -> Some(code <> ": " <> detail)
+    httpc.Posix(_) -> None
+  }
+}
+
+fn connect_error_detail(error: httpc.ConnectError) -> String {
+  case error {
+    httpc.Posix(code:) -> code
+    httpc.TlsAlert(code:, detail:) -> code <> ": " <> detail
   }
 }
 

@@ -47,3 +47,10 @@ jobs:
         run: |
           gleam deps download
           gleam build --warnings-as-errors
+
+      # Only the httpc adapter has tests: they run against local TCP
+      # servers on the BEAM, while fetch needs a JavaScript runtime.
+      - name: Test adapter
+        if: matrix.adapter == 'httpc'
+        working-directory: adapters/httpc
+        run: gleam test
