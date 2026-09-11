@@ -1,12 +1,14 @@
 # OpenAPI support
 
 `oaspec` supports OpenAPI 3.0.x and a practical subset of OpenAPI 3.1.x in
-YAML or JSON. The parser also accepts the two-segment forms `3.0` / `3.1`,
-including YAML numeric values such as `openapi: 3.0` that arrive as the
-float `3.0`. Any other `openapi` value — for example `2.0`, `4.0.0`, a
-bare `3`, or a malformed `3.0.foo` — is rejected with an `invalid_value`
-diagnostic so unsupported versions fail fast instead of producing
-plausible-looking but meaningless output.
+YAML or JSON. The parser also accepts the two-segment forms `3.0` / `3.1`.
+The `openapi` field must be a string: YAML reads an unquoted `openapi: 3.0`
+as the number `3.0`, which is rejected with a `missing_field` diagnostic,
+so write `openapi: '3.0'` or a three-segment version such as `openapi: 3.0.3`
+(YAML reads that as a string). Any other `openapi` value — for example
+`2.0`, `4.0.0`, a bare `3`, or a malformed `3.0.foo` — is rejected with an
+`invalid_value` diagnostic so unsupported versions fail fast instead of
+producing plausible-looking but meaningless output.
 
 ## What is supported
 
