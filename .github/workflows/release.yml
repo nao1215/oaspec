@@ -26,7 +26,7 @@ jobs:
       # latest 1.x lane in CI because `gleam format --check` runs below.
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: "27"
+          otp-version: "29.1"
           gleam-version: "1.x"
           rebar3-version: "3"
 
@@ -78,7 +78,7 @@ jobs:
 
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: "27"
+          otp-version: "29.1"
           gleam-version: "1.x"
           rebar3-version: "3"
 
