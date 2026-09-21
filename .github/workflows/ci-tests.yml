@@ -55,9 +55,9 @@ jobs:
           gleam-version: "1.x"
           rebar3-version: "3"
 
-      - uses: nao1215/setup-atago@v0
+      - uses: nao1215/setup-atago@7cae89595fcbba334db0fe16fc9a24ed5b0a3fea # v0.1.2
         with:
-          version: v0.21.0
+          version: v0.22.0
 
       - name: Cache Gleam build
         uses: actions/cache@v6
