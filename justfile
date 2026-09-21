@@ -34,7 +34,12 @@ test:
 docs:
   gleam docs build
 
+# gleescript packs the BEAM files under build/, so oaspec itself is compiled
+# first; on a clean checkout `gleam run -m gleescript` alone compiles only the
+# dependencies and writes an escript that fails with `undefined function
+# oaspec:main/0`.
 escript:
+  gleam build
   gleam run -m gleescript
 
 smoke-escript: escript
