@@ -51,6 +51,14 @@ e2e: escript
 integration:
   bash integration_test/run.sh
 
+# Measure oaspec with the himorime suite in bench/ (requires himorime on PATH)
+bench:
+  himorime run bench
+
+# Compare main with the working tree on the himorime suite (BASE=main)
+bench-compare:
+  himorime compare --against ${BASE:-main} bench
+
 check: clean
   gleam format --check src/ test/
   gleam check

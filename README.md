@@ -7,6 +7,7 @@
 [![Quick](https://github.com/nao1215/oaspec/actions/workflows/ci-quick.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci-quick.yml)
 [![Tests](https://github.com/nao1215/oaspec/actions/workflows/ci-tests.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci-tests.yml)
 [![tested with atago](https://img.shields.io/badge/tested%20with-atago-7c3aed?logo=data:image/svg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTMuNiA0LjIgMTEuOSAxMmwtOC4zIDcuOC0xLjktMi4yTDcuOSAxMiAxLjcgNi40eiIvPjxyZWN0IGZpbGw9IiNmZmYiIHg9IjEyLjYiIHk9IjE3LjIiIHdpZHRoPSI5LjciIGhlaWdodD0iMi44IiByeD0iMS40Ii8%2BPC9zdmc%2B&logoColor=white)](https://github.com/nao1215/atago)
+[![measured with himorime](https://img.shields.io/badge/measured%20with-himorime-d9480f?logo=data:image/svg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjIuNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBkPSJNNC4yIDE4LjVBOSA5IDAgMSAxIDE5LjggMTguNSIvPjxwYXRoIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIyLjQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgZD0iTTEyIDE0LjUgMTYuNSA5Ii8%2BPGNpcmNsZSBmaWxsPSIjZmZmIiBjeD0iMTIiIGN5PSIxNC41IiByPSIyLjIiLz48L3N2Zz4=&logoColor=white)](https://github.com/nao1215/himorime)
 [![Examples](https://github.com/nao1215/oaspec/actions/workflows/ci-examples.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci-examples.yml)
 [![Adapters](https://github.com/nao1215/oaspec/actions/workflows/ci-adapters.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci-adapters.yml)
 
@@ -347,9 +348,11 @@ This project uses [mise](https://mise.jdx.dev/) for tool versions and
 ```sh
 mise install
 go install github.com/nao1215/atago@latest
+go install github.com/nao1215/himorime@latest
 just check
 just e2e
 just integration
+just bench
 ```
 
 | Command | Tool | What it tests |
@@ -357,6 +360,7 @@ just integration
 | `just test` | gleeunit | Parser, validator, naming, config, collision detection |
 | `just e2e` | atago | CLI behaviour, generated file trees, content snapshots, unsupported feature detection |
 | `just integration` | gleeunit | Generated code compiles and the generated modules work together |
+| `just bench` | himorime | Start-up, validate and generate on documents of 10 and 500 operations; pull requests are compared with their base ([bench/README.md](./bench/README.md)) |
 
 ## License
 
