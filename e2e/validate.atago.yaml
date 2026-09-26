@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/nao1215/atago/v0.22.0/schema/atago.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nao1215/atago/v0.25.0/schema/atago.schema.json
 version: "1"
 
 suite:
