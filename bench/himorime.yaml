@@ -24,19 +24,23 @@ version: "1"
 name: oaspec
 description: Start-up, validating and generating Gleam code from OpenAPI documents of 10 and 500 operations, the --check drift test and a failing validation.
 
-# The escript is what users download from the GitHub Release (release.yml
-# builds it the same way). gleescript packs the BEAM files under build/, so
-# oaspec itself is compiled first; `gleam run -m gleescript` alone compiles
-# only the dependency it runs.
+# The escript is what users download from the GitHub Release; release.yml
+# builds it with the same script. Each revision is built its own way, so a
+# compare against a revision older than scripts/build_escript.sh builds that
+# side with gleescript as it was released.
 build:
   command:
     - sh
     - -c
     - |
       set -e
-      gleam build
-      gleam run -m gleescript -- --out=build/himorime
-      cp build/himorime/oaspec "$1"
+      if [ -f scripts/build_escript.sh ]; then
+        sh scripts/build_escript.sh "$1"
+      else
+        gleam build
+        gleam run -m gleescript -- --out=build/himorime
+        cp build/himorime/oaspec "$1"
+      fi
     - sh
     - "${artifact}"
   cwd: ..

@@ -34,13 +34,10 @@ test:
 docs:
   gleam docs build
 
-# gleescript packs the BEAM files under build/, so oaspec itself is compiled
-# first; on a clean checkout `gleam run -m gleescript` alone compiles only the
-# dependencies and writes an escript that fails with `undefined function
-# oaspec:main/0`.
+# Packed from the production Erlang shipment, so the escript carries oaspec
+# and its runtime dependencies only (scripts/escript.erl).
 escript:
-  gleam build
-  gleam run -m gleescript
+  sh scripts/build_escript.sh oaspec
 
 smoke-escript: escript
   bash scripts/smoke_escript.sh ./oaspec
@@ -75,7 +72,7 @@ all: clean deps
   gleam run -m glinter -- --stats
   gleam build --warnings-as-errors
   gleam test
-  gleam run -m gleescript
+  sh scripts/build_escript.sh oaspec
   OASPEC_BIN="$PWD/oaspec" atago run --ci --parallel 1 ./e2e
   bash integration_test/run.sh
   bash scripts/smoke_escript.sh ./oaspec

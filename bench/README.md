@@ -1,6 +1,6 @@
 # Benchmarks
 
-oaspec is measured the way a user runs it, one escript process per call from start to exit, with [himorime](https://github.com/nao1215/himorime). himorime builds the escript (`gleam build` and `gleam run -m gleescript`, as release.yml does), runs each command in interleaved rounds, and reports latency, CPU time, peak RSS and, for the large documents, throughput in operations per second.
+oaspec is measured the way a user runs it, one escript process per call from start to exit, with [himorime](https://github.com/nao1215/himorime). himorime builds the escript with `scripts/build_escript.sh`, as release.yml does, runs each command in interleaved rounds, and reports latency, CPU time, peak RSS and, for the large documents, throughput in operations per second.
 
 ```console
 $ go install github.com/nao1215/himorime@latest

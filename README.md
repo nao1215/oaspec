@@ -74,8 +74,7 @@ Requires Gleam 1.14+, Erlang/OTP 27+, and `rebar3`.
 ```sh
 git clone https://github.com/nao1215/oaspec.git
 cd oaspec
-gleam deps download
-gleam run -m gleescript
+sh scripts/build_escript.sh oaspec
 sudo mv oaspec /usr/local/bin/   # or anywhere on PATH
 ```
 

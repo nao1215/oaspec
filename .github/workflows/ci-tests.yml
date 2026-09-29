@@ -81,7 +81,7 @@ jobs:
         run: gleam test
 
       - name: Build escript
-        run: gleam run -m gleescript
+        run: sh scripts/build_escript.sh oaspec
 
       - name: atago E2E tests
         run: atago run --ci --report gha --parallel 1 ./e2e
