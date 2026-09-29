@@ -1,0 +1,41 @@
+name: licenses
+
+# Keeps GPL, LGPL, AGPL and dependencies without a declared license out of
+# the oaspec escript users download. Licenses come from hex.pm
+# (meta.licenses) for each package inside the escript, at the version
+# manifest.toml locks. The job runs on changes only: manifest.toml pins every
+# version, so the verdict can only change when a pull request changes the
+# dependencies. release.yml bundles the license texts with each release.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  licenses:
+    name: dependency licenses
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: "29"
+          gleam-version: "1.x"
+          rebar3-version: "3"
+
+      # The same script release.yml uses.
+      - name: Build the escript
+        run: sh scripts/build_escript.sh build/licenses/oaspec
+
+      - name: Judge the licenses
+        run: python3 scripts/supply_chain.py licenses --manifest manifest.toml --escript build/licenses/oaspec

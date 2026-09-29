@@ -10,6 +10,7 @@
 [![measured with himorime](https://img.shields.io/badge/measured%20with-himorime-d9480f?logo=data:image/svg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjIuNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBkPSJNNC4yIDE4LjVBOSA5IDAgMSAxIDE5LjggMTguNSIvPjxwYXRoIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIyLjQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgZD0iTTEyIDE0LjUgMTYuNSA5Ii8%2BPGNpcmNsZSBmaWxsPSIjZmZmIiBjeD0iMTIiIGN5PSIxNC41IiByPSIyLjIiLz48L3N2Zz4=&logoColor=white)](https://github.com/nao1215/himorime)
 [![Examples](https://github.com/nao1215/oaspec/actions/workflows/ci-examples.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci-examples.yml)
 [![Adapters](https://github.com/nao1215/oaspec/actions/workflows/ci-adapters.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci-adapters.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/nao1215/oaspec/badge)](https://scorecard.dev/viewer/?uri=github.com/nao1215/oaspec)
 
 Generate Gleam client and server modules from OpenAPI 3.x specs.
 
@@ -76,6 +77,21 @@ git clone https://github.com/nao1215/oaspec.git
 cd oaspec
 sh scripts/build_escript.sh oaspec
 sudo mv oaspec /usr/local/bin/   # or anywhere on PATH
+```
+
+### Verifying release integrity
+
+From the next release, each release carries `SHA256SUMS` (the escript, its CycloneDX SBOM `oaspec.cdx.json` and the bundled third-party licenses), a cosign keyless signature of it, and SLSA provenance. With the release files in the current directory:
+
+```sh
+sha256sum -c SHA256SUMS
+cosign verify-blob --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/nao1215/oaspec/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS
+gh attestation verify oaspec --repo nao1215/oaspec
+slsa-verifier verify-artifact --provenance-path multiple.intoto.jsonl \
+  --source-uri github.com/nao1215/oaspec --source-tag <tag> oaspec
 ```
 
 ## Quickstart

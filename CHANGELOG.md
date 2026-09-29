@@ -10,6 +10,10 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Added
+
+- Each GitHub Release carries `SHA256SUMS` over the escript, a CycloneDX SBOM of its contents (`oaspec.cdx.json`) and the bundled licenses of its dependencies (`oaspec-third-party-licenses.tar.gz`), a cosign keyless signature of `SHA256SUMS`, SLSA provenance, and a GitHub attestation. The release fails before publishing if the escript holds test modules or a dependency has a license outside the allowed set. README's "Verifying release integrity" has the commands.
+
 ### Fixed
 
 - The `oaspec` escript attached to each GitHub Release also carried oaspec's 28 test modules and its dev-dependencies (gleeunit, glinter, metamon, gleescript and their own dependencies): 23 OTP applications where the CLI runs 13. It is now packed from the production build by `scripts/build_escript.sh`, so it holds oaspec and its runtime dependencies only and is half the size (3.8 MB to 1.9 MB). The commands behave the same.
