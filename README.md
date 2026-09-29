@@ -81,7 +81,7 @@ sudo mv oaspec /usr/local/bin/   # or anywhere on PATH
 
 ### Verifying release integrity
 
-From the next release, each release carries `SHA256SUMS` (the escript, its CycloneDX SBOM `oaspec.cdx.json` and the bundled third-party licenses), a cosign keyless signature of it, and SLSA provenance. With the release files in the current directory:
+From v0.71.0, each release carries `SHA256SUMS` (the escript, its CycloneDX SBOM `oaspec.cdx.json` and the bundled third-party licenses), a cosign keyless signature of it, and SLSA provenance. With the release files in the current directory:
 
 ```sh
 sha256sum -c SHA256SUMS

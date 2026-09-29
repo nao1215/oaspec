@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.71.0] - 2026-09-29
+
 ### Added
 
 - Each GitHub Release carries `SHA256SUMS` over the escript, a CycloneDX SBOM of its contents (`oaspec.cdx.json`) and the bundled licenses of its dependencies (`oaspec-third-party-licenses.tar.gz`), a cosign keyless signature of `SHA256SUMS`, SLSA provenance, and a GitHub attestation. The release fails before publishing if the escript holds test modules or a dependency has a license outside the allowed set. README's "Verifying release integrity" has the commands.
