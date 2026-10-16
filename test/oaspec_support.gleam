@@ -15928,7 +15928,8 @@ fn make_validate_ctx_from_yaml(yaml: String) -> context.Context {
 }
 
 /// Petstore spec YAML fragment with constrained request body.
-const guard_integration_spec = "
+const guard_integration_spec =
+  "
 openapi: 3.0.3
 info:
   title: Guard Integration Test
@@ -16668,7 +16669,8 @@ pub fn request_body_encoding_warning_is_surfaced_case() {
 /// Spec where the 200 response is a top-level array of primitive items.
 /// (Issue #266: previously emitted `json.string(data)` which fails to type-check
 /// against `List(String)`.)
-const top_level_array_spec = "
+const top_level_array_spec =
+  "
 openapi: 3.0.3
 info:
   title: Top Level Array
@@ -16696,7 +16698,8 @@ paths:
 /// same identifier. The codegen now auto-disambiguates — the
 /// synthetic decoder shifts to `decode_card_list_items` and the
 /// user's `CardList` keeps the natural `decode_card_list` name.
-const decode_list_collision_spec = "
+const decode_list_collision_spec =
+  "
 openapi: 3.0.3
 info:
   title: Decode List Collision
@@ -16740,7 +16743,8 @@ components:
 /// encodes `.` as a `Dot` word boundary so the two stay
 /// distinguishable (`PaymentIntentDotProcessing` vs
 /// `PaymentIntentProcessing`).
-const stripe_dotted_schema_collision_spec = "
+const stripe_dotted_schema_collision_spec =
+  "
 openapi: 3.0.3
 info:
   title: Stripe Dotted Schema Collision
@@ -16825,7 +16829,8 @@ pub fn validate_stripe_dotted_schema_no_longer_collides_case() {
 /// `CodeScanningVariantAnalysisStatus`, producing a `Duplicate type
 /// definition` at `gleam build`. The fixture below is a minimised
 /// reproduction.
-const inline_enum_component_collision_spec = "
+const inline_enum_component_collision_spec =
+  "
 openapi: 3.0.3
 info:
   title: Inline Enum Component Collision
