@@ -10,7 +10,8 @@ import oaspec/internal/openapi/hoist
 import oaspec/internal/openapi/resolve
 import oaspec/openapi/parser
 
-const guard_integration_spec = "
+const guard_integration_spec =
+  "
 openapi: 3.0.3
 info:
   title: Guard Integration Test
@@ -42,7 +43,8 @@ components:
           maxLength: 100
 "
 
-const duplicate_guard_spec = "
+const duplicate_guard_spec =
+  "
 openapi: 3.0.3
 info:
   title: Guard Dedup Test

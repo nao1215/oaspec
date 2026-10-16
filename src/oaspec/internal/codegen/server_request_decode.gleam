@@ -17,7 +17,8 @@ import oaspec/openapi/spec.{type Resolved, Value}
 /// Expression that case-insensitively parses a string to Bool.
 /// Accepts "true"/"True"/"TRUE" etc. as True, everything else as False.
 /// This is compatible with Gleam's bool.to_string which produces "True"/"False".
-const bool_parse_expr = "case string.lowercase(v) { \"true\" -> True _ -> False }"
+const bool_parse_expr =
+  "case string.lowercase(v) { \"true\" -> True _ -> False }"
 
 type DeepObjectProperty {
   DeepObjectProperty(

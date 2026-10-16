@@ -12,7 +12,8 @@
 
 /// Emitted when at least one optional `deepObject` query parameter exists
 /// and that parameter has no `additionalProperties` entry.
-pub const deep_object_present: String = "fn deep_object_present(query: Dict(String, List(String)), prefix: String, props: List(String)) -> Bool {
+pub const deep_object_present: String =
+  "fn deep_object_present(query: Dict(String, List(String)), prefix: String, props: List(String)) -> Bool {
   list.any(props, fn(prop) { dict.has_key(query, prefix <> \"[\" <> prop <> \"]\") })
 }
 
@@ -20,7 +21,8 @@ pub const deep_object_present: String = "fn deep_object_present(query: Dict(Stri
 
 /// Emitted when at least one `deepObject` parameter declares
 /// `additionalProperties` (typed or untyped).
-pub const deep_object_present_any: String = "fn deep_object_present_any(query: Dict(String, List(String)), prefix: String) -> Bool {
+pub const deep_object_present_any: String =
+  "fn deep_object_present_any(query: Dict(String, List(String)), prefix: String) -> Bool {
   let prefix_bracket = prefix <> \"[\"
   dict.fold(query, False, fn(found, k, _v) { found || string.starts_with(k, prefix_bracket) })
 }
@@ -43,13 +45,15 @@ fn deep_object_additional_properties(query: Dict(String, List(String)), prefix: 
 
 /// Type-safe identity coercion used when `deepObject` parameters have
 /// untyped `additionalProperties` (Dynamic value type).
-pub const coerce_dict: String = "@external(erlang, \"gleam_stdlib\", \"identity\")
+pub const coerce_dict: String =
+  "@external(erlang, \"gleam_stdlib\", \"identity\")
 fn coerce_dict(value: Dict(String, List(String))) -> Dict(String, dynamic.Dynamic)
 
 "
 
 /// Emitted when any `application/x-www-form-urlencoded` request body exists.
-pub const form_url_decode_and_parse_form_body: String = "fn form_url_decode(value: String) -> String {
+pub const form_url_decode_and_parse_form_body: String =
+  "fn form_url_decode(value: String) -> String {
   let value = string.replace(value, \"+\", \" \")
   case uri.percent_decode(value) { Ok(decoded) -> decoded Error(_) -> value }
 }
@@ -84,7 +88,8 @@ fn parse_form_body(body: String) -> Dict(String, List(String)) {
 "
 
 /// Emitted when any `multipart/form-data` request body exists.
-pub const multipart_helpers: String = "fn multipart_boundary(headers: Dict(String, String)) -> Result(String, Nil) {
+pub const multipart_helpers: String =
+  "fn multipart_boundary(headers: Dict(String, String)) -> Result(String, Nil) {
   case dict.get(headers, \"content-type\") {
     Ok(content_type) ->
       list.find_map(string.split(content_type, \";\"), fn(part) {
@@ -149,7 +154,8 @@ fn parse_multipart_body(body: String, headers: Dict(String, String)) -> Dict(Str
 
 /// Emitted when at least one nested form-urlencoded request body exists
 /// (a body schema with `style: deepObject` properties).
-pub const form_object_present: String = "fn form_object_present(form_body: Dict(String, List(String)), prefix: String, props: List(String)) -> Bool {
+pub const form_object_present: String =
+  "fn form_object_present(form_body: Dict(String, List(String)), prefix: String, props: List(String)) -> Bool {
   list.any(props, fn(prop) { dict.has_key(form_body, prefix <> \"[\" <> prop <> \"]\") })
 }
 
@@ -158,7 +164,8 @@ pub const form_object_present: String = "fn form_object_present(form_body: Dict(
 /// Cookie-parameter lookup helper. Wrapped in a `doc_comment(\"Extract a
 /// cookie value from the Cookie header.\")` by the caller before being
 /// spliced in.
-pub const cookie_lookup: String = "fn cookie_lookup(headers: Dict(String, String), key: String) -> Result(String, Nil) {
+pub const cookie_lookup: String =
+  "fn cookie_lookup(headers: Dict(String, String), key: String) -> Result(String, Nil) {
   case dict.get(headers, \"cookie\") {
     Ok(raw) ->
       list.find_map(string.split(raw, \";\"), fn(part) {
@@ -180,7 +187,8 @@ pub const cookie_lookup: String = "fn cookie_lookup(headers: Dict(String, String
 
 /// Encoder for untyped `additionalProperties: true` schemas — inspects the
 /// runtime type of each Dynamic value.
-pub const encode_dynamic: String = "fn encode_dynamic(value: dynamic.Dynamic) -> json.Json {
+pub const encode_dynamic: String =
+  "fn encode_dynamic(value: dynamic.Dynamic) -> json.Json {
   case dynamic.classify(value) {
     \"String\" ->
       case decode.run(value, decode.string) {
@@ -211,7 +219,8 @@ pub const encode_dynamic: String = "fn encode_dynamic(value: dynamic.Dynamic) ->
 
 /// Client-side helper that extracts a UTF-8 string from a `transport.Body`,
 /// surfacing `InvalidResponse` for non-text bodies.
-pub const text_body: String = "fn text_body(body: transport.Body) -> Result(String, ClientError) {
+pub const text_body: String =
+  "fn text_body(body: transport.Body) -> Result(String, ClientError) {
   case body {
     transport.TextBody(text) -> Ok(text)
     transport.BytesBody(_) -> Error(InvalidResponse(detail: \"expected text body, got bytes\"))
@@ -222,7 +231,8 @@ pub const text_body: String = "fn text_body(body: transport.Body) -> Result(Stri
 "
 
 /// Client-side helper for binary response bodies.
-pub const bytes_body: String = "fn bytes_body(body: transport.Body) -> Result(BitArray, ClientError) {
+pub const bytes_body: String =
+  "fn bytes_body(body: transport.Body) -> Result(BitArray, ClientError) {
   case body {
     transport.BytesBody(bytes) -> Ok(bytes)
     transport.TextBody(_) -> Error(InvalidResponse(detail: \"expected binary body, got text\"))
@@ -234,7 +244,8 @@ pub const bytes_body: String = "fn bytes_body(body: transport.Body) -> Result(Bi
 
 /// Client-side helper that maps an async transport result into the
 /// generated response type.
-pub const await_response: String = "fn await_response(
+pub const await_response: String =
+  "fn await_response(
   response_async: transport.Async(Result(transport.Response, transport.TransportError)),
   decode: fn(transport.Response) -> Result(a, ClientError),
 ) -> transport.Async(Result(a, ClientError)) {
