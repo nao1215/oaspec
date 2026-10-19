@@ -1005,3 +1005,46 @@ scenarios:
           exit_code: 1
           stderr:
             contains: "Invalid value for handlers: must be one of: single, per_operation (got: per_tag)"
+
+  - name: generate --fail-on-warnings stops on a handlers.gleam left from single-file mode
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            mode: server
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            mode: server
+            handlers: per_operation
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml --fail-on-warnings
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 1
+          stderr:
+            contains:
+              - defines handler functions
+              - --fail-on-warnings is set
+      - assert:
+          dir:
+            path: project/generated/api/handlers
+            exists: false

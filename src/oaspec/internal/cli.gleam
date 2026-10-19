@@ -376,7 +376,15 @@ fn run_generate(
     )
     io.println("Spec loaded: " <> summary.spec_title)
     print_warnings_for(shared_input, summary.warnings)
-    case fail_on_warnings && summary.warnings != [] {
+    // `--check` already reports orphaned stubs as errors.
+    let layout_warnings = case check_mode {
+      True -> []
+      False -> handler_layout_warnings(summary.files, cfg)
+    }
+    list.each(layout_warnings, fn(w) { io.println_error("Warning: " <> w) })
+    case
+      fail_on_warnings && { summary.warnings != [] || layout_warnings != [] }
+    {
       True -> {
         io.println_error("")
         io.println_error(
@@ -626,7 +634,6 @@ fn is_ascii_letter(value: String) -> Bool {
 
 /// Write generated files to disk, format them, and print summary.
 fn write_files(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
-  warn_single_file_handlers(files, cfg)
   io.println("Generating code...")
   use written <- require(
     writer.write_all(files, cfg, fn(path) {
@@ -643,7 +650,18 @@ fn write_files(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
     "Successfully generated " <> int.to_string(list.length(written)) <> " files",
   )
   print_dep_hints(files)
-  warn_orphaned_handlers(files, cfg)
+}
+
+/// Warnings about the user-owned handler stubs, computed before any
+/// file is written so `--fail-on-warnings` can stop the run.
+fn handler_layout_warnings(
+  files: List(context.GeneratedFile),
+  cfg: config.Config,
+) -> List(String) {
+  list.append(
+    single_file_handlers_warning(files, cfg),
+    orphaned_handlers_warnings(files, cfg),
+  )
 }
 
 /// Under `handlers: per_operation` the router calls
@@ -651,10 +669,10 @@ fn write_files(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
 /// a handler for one of the operations was written in single-file mode,
 /// and that implementation is no longer called, so say so before the
 /// new stubs take over.
-fn warn_single_file_handlers(
+fn single_file_handlers_warning(
   files: List(context.GeneratedFile),
   cfg: config.Config,
-) -> Nil {
+) -> List(String) {
   let server_output = case config.mode(cfg) {
     config.Server | config.Both -> True
     config.Client -> False
@@ -674,15 +692,13 @@ fn warn_single_file_handlers(
           string.contains(content, "pub fn " <> name <> "(")
         })
       {
-        True ->
-          io.println_error(
-            "Warning: "
-            <> path
-            <> " defines handler functions, but `handlers: per_operation` routes each operation to handlers/<operation>.gleam. Move each implementation into its file under handlers/; the functions in handlers.gleam are no longer called.",
-          )
-        False -> Nil
+        True -> [
+          path
+          <> " defines handler functions, but `handlers: per_operation` routes each operation to handlers/<operation>.gleam. Move each implementation into its file under handlers/; the functions in handlers.gleam are no longer called.",
+        ]
+        False -> []
       }
-    _, _, _ -> Nil
+    _, _, _ -> []
   }
 }
 
@@ -690,21 +706,18 @@ fn warn_single_file_handlers(
 /// (`handlers/` under `handlers: per_operation`) that match no
 /// operation, typically a stub left behind when an operation was
 /// removed from the spec or renamed.
-fn warn_orphaned_handlers(
+fn orphaned_handlers_warnings(
   files: List(context.GeneratedFile),
   cfg: config.Config,
-) -> Nil {
+) -> List(String) {
   let output_dirs = writer.output_dirs(cfg)
   let sub_dirs =
     writer.owned_dirs(files, cfg)
     |> list.filter(fn(dir) { !list.contains(output_dirs, dir) })
   find_orphans(sub_dirs, writer.expected_paths(files, cfg))
-  |> list.each(fn(path) {
-    io.println_error(
-      "Warning: "
-      <> path
-      <> " matches no operation in the spec. Delete it, or move its code if the operation was renamed.",
-    )
+  |> list.map(fn(path) {
+    path
+    <> " matches no operation in the spec. Delete it, or move its code if the operation was renamed."
   })
 }
 

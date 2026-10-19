@@ -12,7 +12,7 @@ within `Changed` / `Fixed` and stay as-is.
 
 ### Added
 
-- `handlers: per_operation` in `oaspec.yaml` writes the user-owned server handler stubs as one `handlers/<operation>.gleam` per operation, with `handlers.gleam` holding only `State`. A stub is written only when its file does not exist, so an operation added to the spec gets a stub on the next `oaspec generate`. The default `handlers: single` keeps every stub in `handlers.gleam` as before. Under `per_operation`, `generate --check` reports a missing stub and a stub in `handlers/` that matches no operation, and `generate` warns about the latter and about a `handlers.gleam` that still defines handlers for the operations. (#658)
+- `handlers: per_operation` in `oaspec.yaml` writes the user-owned server handler stubs as one `handlers/<operation>.gleam` per operation, with `handlers.gleam` holding only `State`. A stub is written only when its file does not exist, so an operation added to the spec gets a stub on the next `oaspec generate`. The default `handlers: single` keeps every stub in `handlers.gleam` as before. Under `per_operation`, `generate --check` reports a missing stub and a stub in `handlers/` that matches no operation, and `generate` warns about the latter and about a `handlers.gleam` that still defines handlers for the operations; `--fail-on-warnings` stops on these warnings before writing. (#658)
 
 ### Fixed
 

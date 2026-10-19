@@ -268,10 +268,12 @@ pub fn output_dirs(cfg: config.Config) -> List(String) {
 }
 
 /// The output directories plus every subdirectory the generator writes
-/// into (`<server>/handlers` under `handlers: per_operation`). `--check`
-/// scans these for orphaned `.gleam` files. Directories that hold no
-/// generated file are not listed, so a user's own subdirectory is never
-/// treated as generator-owned.
+/// into. `--check` scans these for orphaned `.gleam` files. Under
+/// `handlers: per_operation`, `<server>/handlers` is always listed, even
+/// when the spec has no operations left, so the stubs of removed
+/// operations are still found. Other directories that hold no generated
+/// file are not listed, so a user's own subdirectory is never treated as
+/// generator-owned.
 @internal
 pub fn owned_dirs(
   files: List(GeneratedFile),
@@ -283,11 +285,14 @@ pub fn owned_dirs(
     |> list.filter_map(fn(f) { parent_dir(f.path) })
     |> list.unique
   }
+  let server_sub_dirs = case config.handler_layout(cfg) {
+    config.PerOperation ->
+      list.unique(["handlers", ..sub_dirs(context.ServerTarget)])
+    config.SingleFile -> sub_dirs(context.ServerTarget)
+  }
   let server_dirs = case config.mode(cfg) {
     Server | Both ->
-      list.map(sub_dirs(context.ServerTarget), fn(d) {
-        config.output_server(cfg) <> "/" <> d
-      })
+      list.map(server_sub_dirs, fn(d) { config.output_server(cfg) <> "/" <> d })
     Client -> []
   }
   let client_dirs = case config.mode(cfg) {

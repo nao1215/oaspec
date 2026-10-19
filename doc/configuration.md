@@ -131,7 +131,8 @@ When you switch an existing project from `single` to `per_operation`,
 `generate` warns if `handlers.gleam` still defines handler functions:
 those are no longer called, and the new stubs panic until you move each
 implementation into its file under `handlers/`. Keep `State` in
-`handlers.gleam`.
+`handlers.gleam`. With `--fail-on-warnings`, these warnings stop the run
+before any file is written.
 
 The generator does not change a stub it has already written. If an
 operation later gains a parameter or request body, or its operationId

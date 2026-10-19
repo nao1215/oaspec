@@ -798,3 +798,13 @@ pub fn owned_dirs_lists_only_subdirectories_holding_generated_files_test() {
   writer.owned_dirs(nested_payload(), test_config(config.Client))
   |> should.equal(["./gen_client/api"])
 }
+
+pub fn owned_dirs_keeps_handlers_dir_under_per_operation_without_operations_test() {
+  // A spec that lost its last operation generates no handlers/ file,
+  // but the stubs left there must still be scanned for orphans.
+  writer.owned_dirs(
+    [],
+    config.with_handler_layout(test_config(config.Server), config.PerOperation),
+  )
+  |> should.equal(["./gen/api", "./gen/api/handlers"])
+}
