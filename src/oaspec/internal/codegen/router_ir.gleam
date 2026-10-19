@@ -1,6 +1,6 @@
 import gleam/dict
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{Some}
 import gleam/string
 import oaspec/config
 import oaspec/internal/codegen/context.{type Context}
@@ -288,30 +288,35 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
     })
     || operations_have_optional_response_header(operations)
 
-  let needs_json =
-    list.any(operations, fn(op) {
+  let json_response_schemas =
+    list.flat_map(operations, fn(op) {
       let #(_, operation, _, _) = op
-      list.any(dict.to_list(operation.responses), fn(entry) {
+      list.filter_map(dict.to_list(operation.responses), fn(entry) {
         let #(_, ref_or) = entry
         case ref_or {
-          Value(response) -> {
-            let content_entries = dict.to_list(response.content)
-            case content_entries {
+          Value(response) ->
+            case dict.to_list(response.content) {
               [#(media_type_name, media_type)] ->
                 case content_type.is_json_compatible(media_type_name) {
-                  True ->
-                    case media_type.schema {
-                      Some(_) -> True
-                      None -> False
-                    }
-                  False -> False
+                  True -> option.to_result(media_type.schema, Nil)
+                  False -> Error(Nil)
                 }
-              _ -> False
+              _ -> Error(Nil)
             }
-          }
-          _ -> False
+          _ -> Error(Nil)
         }
       })
+    })
+  let needs_json = !list.is_empty(json_response_schemas)
+  // The router calls `encode.*` only for a `$ref` response schema or an
+  // array of `$ref` items; primitive schemas use `json.*` directly.
+  let needs_encode =
+    list.any(json_response_schemas, fn(schema_ref) {
+      case schema_ref {
+        Reference(..) -> True
+        Inline(schema.ArraySchema(items: Reference(..), ..)) -> True
+        _ -> False
+      }
     })
 
   let needs_decode =
@@ -395,7 +400,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
     needs_json: needs_json,
     needs_json_for_guards: needs_json_for_guards,
     needs_decode: needs_decode,
-    needs_encode: needs_json,
+    needs_encode: needs_encode,
     uses_query: uses_query,
     uses_headers: uses_headers,
     uses_body: uses_body,
