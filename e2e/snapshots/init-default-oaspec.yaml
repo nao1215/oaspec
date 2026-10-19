@@ -21,6 +21,12 @@ package: api
 # override the mode-dependent default.
 # validate: true
 
+# Layout of the user-owned server handler stubs: single (default) keeps
+# them all in handlers.gleam; per_operation writes one
+# handlers/<operation>.gleam per operation, so an operation added to the
+# spec gets its own stub on the next run.
+# handlers: single
+
 # Output settings (optional). Defaults land inside ./src so a
 # freshly-generated project is buildable by `gleam build` without
 # any further config (#568):

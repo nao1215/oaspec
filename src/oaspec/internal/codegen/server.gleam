@@ -32,32 +32,69 @@ import oaspec/openapi/spec.{type Resolved, Value}
 ///   imports. Each operation forwards to `handlers.<op_name>(req)`. It
 ///   is always overwritten so the wiring stays in lock-step with the
 ///   spec.
+///
+/// With `handlers: per_operation` the user-owned side is split further:
+/// `handlers.gleam` carries only `State`, and each operation gets its
+/// own `handlers/<operation>.gleam` stub (also `SkipIfExists`), so an
+/// operation added to the spec gets a stub on the next run.
 pub fn generate(ctx: Context) -> List(GeneratedFile) {
   let operations = context.operations(ctx)
-  let handlers_content = generate_handlers(ctx, operations)
-  let handlers_generated_content = generate_handlers_generated(ctx, operations)
   let router_content = generate_router(ctx, operations)
 
-  [
-    GeneratedFile(
-      path: "handlers.gleam",
-      content: handlers_content,
-      target: context.ServerTarget,
-      write_mode: context.SkipIfExists,
-    ),
-    GeneratedFile(
-      path: "handlers_generated.gleam",
-      content: handlers_generated_content,
-      target: context.ServerTarget,
-      write_mode: context.Overwrite,
-    ),
+  let user_files = case config.handler_layout(context.config(ctx)) {
+    config.SingleFile -> [
+      GeneratedFile(
+        path: "handlers.gleam",
+        content: generate_handlers(ctx, operations),
+        target: context.ServerTarget,
+        write_mode: context.SkipIfExists,
+      ),
+      GeneratedFile(
+        path: "handlers_generated.gleam",
+        content: generate_handlers_generated(ctx, operations),
+        target: context.ServerTarget,
+        write_mode: context.Overwrite,
+      ),
+    ]
+    config.PerOperation -> [
+      GeneratedFile(
+        path: "handlers.gleam",
+        content: generate_state_only_handlers(),
+        target: context.ServerTarget,
+        write_mode: context.SkipIfExists,
+      ),
+      ..list.append(
+        list.map(operations, fn(op) {
+          let #(op_id, operation, _path, _method) = op
+          GeneratedFile(
+            path: "handlers/"
+              <> naming.operation_to_function_name(op_id)
+              <> ".gleam",
+            content: generate_operation_handler(ctx, op_id, operation),
+            target: context.ServerTarget,
+            write_mode: context.SkipIfExists,
+          )
+        }),
+        [
+          GeneratedFile(
+            path: "handlers_generated.gleam",
+            content: generate_per_operation_handlers_generated(ctx, operations),
+            target: context.ServerTarget,
+            write_mode: context.Overwrite,
+          ),
+        ],
+      )
+    ]
+  }
+
+  list.append(user_files, [
     GeneratedFile(
       path: "router.gleam",
       content: router_content,
       target: context.ServerTarget,
       write_mode: context.Overwrite,
     ),
-  ]
+  ])
 }
 
 /// Generate the user-owned `handlers.gleam`. Emitted only on first
@@ -83,14 +120,7 @@ fn generate_handlers(
       config.package(context.config(ctx)) <> "/request_types",
       config.package(context.config(ctx)) <> "/response_types",
     ])
-    |> se.doc_comment("Application state passed to every handler.")
-    |> se.doc_comment(
-      "Add fields here for DB connections, config, loggers, etc. Construct a value of this type in your `main` and pass it to `router.route` as the first argument.",
-    )
-    |> se.line("pub type State {")
-    |> se.indent(1, "State")
-    |> se.line("}")
-    |> se.blank_line()
+    |> state_type()
 
   let sb =
     list.fold(operations, sb, fn(sb, op) {
@@ -104,6 +134,96 @@ fn generate_handlers(
   // useful. Callback support is now documented as parsed-but-not-codegen
   // until a typed codegen story exists (see issue #117).
   se.to_string(sb)
+}
+
+/// Emit the user-owned `State` type shared by every handler.
+fn state_type(sb: se.StringBuilder) -> se.StringBuilder {
+  sb
+  |> se.doc_comment("Application state passed to every handler.")
+  |> se.doc_comment(
+    "Add fields here for DB connections, config, loggers, etc. Construct a value of this type in your `main` and pass it to `router.route` as the first argument.",
+  )
+  |> se.line("pub type State {")
+  |> se.indent(1, "State")
+  |> se.line("}")
+  |> se.blank_line()
+}
+
+/// Generate the user-owned `handlers.gleam` for `handlers: per_operation`.
+/// It holds only `State`; the stubs live in `handlers/<operation>.gleam`.
+fn generate_state_only_handlers() -> String {
+  se.new()
+  |> se.line("//// Application state shared by the handlers in `handlers/`.")
+  |> se.line("//// This file is emitted once by `oaspec generate` and skipped")
+  |> se.line("//// on subsequent runs, so your edits survive regeneration.")
+  |> se.blank_line()
+  |> state_type()
+  |> se.to_string()
+}
+
+/// Generate the user-owned `handlers/<operation>.gleam` stub for
+/// `handlers: per_operation`. Emitted only when the file does not exist.
+fn generate_operation_handler(
+  ctx: Context,
+  op_id: String,
+  operation: spec.Operation(Resolved),
+) -> String {
+  let pkg = config.package(context.config(ctx))
+  let request_import = case has_handler_params(operation) {
+    True -> [pkg <> "/request_types"]
+    False -> []
+  }
+  se.new()
+  |> se.line("//// Implement this handler. This file is emitted once by")
+  |> se.line("//// `oaspec generate` and skipped on subsequent runs, so your")
+  |> se.line("//// edits survive regeneration.")
+  |> se.blank_line()
+  |> se.imports(
+    list.flatten([
+      [pkg <> "/handlers.{type State}"],
+      request_import,
+      [pkg <> "/response_types"],
+    ]),
+  )
+  |> generate_handler(op_id, operation, ctx)
+  |> se.to_string()
+}
+
+/// Generate `handlers_generated.gleam` for `handlers: per_operation`.
+/// Each operation forwards to `handlers/<operation>.gleam`, imported
+/// under a `_handler` alias so an operation named like another
+/// generated module (`request_types`, `handlers`) does not collide.
+fn generate_per_operation_handlers_generated(
+  ctx: Context,
+  operations: List(context.AnalyzedOperation),
+) -> String {
+  let pkg = config.package(context.config(ctx))
+  let handler_imports =
+    list.map(operations, fn(op) {
+      let fn_name = naming.operation_to_function_name(op.0)
+      pkg <> "/handlers/" <> fn_name <> " as " <> fn_name <> "_handler"
+    })
+  let sb =
+    se.file_header(context.version)
+    |> se.imports(
+      list.flatten([
+        [pkg <> "/handlers"],
+        handler_imports,
+        [pkg <> "/request_types", pkg <> "/response_types"],
+      ]),
+    )
+
+  list.fold(operations, sb, fn(sb, op) {
+    let #(op_id, operation, _path, _method) = op
+    let fn_name = naming.operation_to_function_name(op_id)
+    generate_handler_delegator(sb, op_id, operation, fn_name <> "_handler")
+  })
+  |> se.to_string
+}
+
+/// True when the handler for `operation` takes a request argument.
+fn has_handler_params(operation: spec.Operation(Resolved)) -> Bool {
+  !list.is_empty(operation.parameters) || option.is_some(operation.request_body)
 }
 
 /// Generate `handlers_generated.gleam`, a sealed delegator that the
@@ -127,27 +247,25 @@ fn generate_handlers_generated(
   let sb =
     list.fold(operations, sb, fn(sb, op) {
       let #(op_id, operation, _path, _method) = op
-      generate_handler_delegator(sb, op_id, operation)
+      generate_handler_delegator(sb, op_id, operation, "handlers")
     })
 
   se.to_string(sb)
 }
 
-/// Generate a single delegator function in `handlers_generated.gleam`.
+/// Generate a single delegator function in `handlers_generated.gleam`
+/// that forwards to `<target_module>.<op_name>`.
 fn generate_handler_delegator(
   sb: se.StringBuilder,
   op_id: String,
   operation: spec.Operation(Resolved),
+  target_module: String,
 ) -> se.StringBuilder {
   let fn_name = naming.operation_to_function_name(op_id)
   let request_type = naming.schema_to_type_name(op_id) <> "Request"
   let response_type = naming.schema_to_type_name(op_id) <> "Response"
 
-  let has_params =
-    !list.is_empty(operation.parameters)
-    || option.is_some(operation.request_body)
-
-  case has_params {
+  case has_handler_params(operation) {
     True ->
       sb
       |> se.line(
@@ -159,7 +277,7 @@ fn generate_handler_delegator(
         <> response_type
         <> " {",
       )
-      |> se.indent(1, "handlers." <> fn_name <> "(state, req)")
+      |> se.indent(1, target_module <> "." <> fn_name <> "(state, req)")
       |> se.line("}")
       |> se.blank_line()
     False ->
@@ -171,7 +289,7 @@ fn generate_handler_delegator(
         <> response_type
         <> " {",
       )
-      |> se.indent(1, "handlers." <> fn_name <> "(state)")
+      |> se.indent(1, target_module <> "." <> fn_name <> "(state)")
       |> se.line("}")
       |> se.blank_line()
   }
@@ -197,9 +315,7 @@ fn generate_handler(
     _ -> sb
   }
 
-  let has_params =
-    !list.is_empty(operation.parameters)
-    || option.is_some(operation.request_body)
+  let has_params = has_handler_params(operation)
 
   let sb = case has_params {
     True ->

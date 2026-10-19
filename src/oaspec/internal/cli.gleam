@@ -220,6 +220,12 @@ package: api
 # override the mode-dependent default.
 # validate: true
 
+# Layout of the user-owned server handler stubs: single (default) keeps
+# them all in handlers.gleam; per_operation writes one
+# handlers/<operation>.gleam per operation, so an operation added to the
+# spec gets its own stub on the next run.
+# handlers: single
+
 # Output settings (optional). Defaults land inside ./src so a
 # freshly-generated project is buildable by `gleam build` without
 # any further config (#568):
@@ -370,7 +376,15 @@ fn run_generate(
     )
     io.println("Spec loaded: " <> summary.spec_title)
     print_warnings_for(shared_input, summary.warnings)
-    case fail_on_warnings && summary.warnings != [] {
+    // `--check` already reports orphaned stubs as errors.
+    let layout_warnings = case check_mode {
+      True -> []
+      False -> handler_layout_warnings(summary.files, cfg)
+    }
+    list.each(layout_warnings, fn(w) { io.println_error("Warning: " <> w) })
+    case
+      fail_on_warnings && { summary.warnings != [] || layout_warnings != [] }
+    {
       True -> {
         io.println_error("")
         io.println_error(
@@ -638,6 +652,90 @@ fn write_files(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
   print_dep_hints(files)
 }
 
+/// Warnings about the user-owned handler stubs, computed before any
+/// file is written so `--fail-on-warnings` can stop the run.
+fn handler_layout_warnings(
+  files: List(context.GeneratedFile),
+  cfg: config.Config,
+) -> List(String) {
+  list.append(
+    single_file_handlers_warning(files, cfg),
+    orphaned_handlers_warnings(files, cfg),
+  )
+}
+
+/// Under `handlers: per_operation` the router calls
+/// `handlers/<operation>.gleam`. A `handlers.gleam` that still defines
+/// a handler for one of the operations was written in single-file mode,
+/// and that implementation is no longer called, so say so before the
+/// new stubs take over.
+fn single_file_handlers_warning(
+  files: List(context.GeneratedFile),
+  cfg: config.Config,
+) -> List(String) {
+  let server_output = case config.mode(cfg) {
+    config.Server | config.Both -> True
+    config.Client -> False
+  }
+  let handler_names =
+    list.filter_map(files, fn(f) {
+      case string.split(f.path, "/") {
+        ["handlers", file] -> Ok(string.drop_end(file, string.length(".gleam")))
+        _ -> Error(Nil)
+      }
+    })
+  let path = config.output_server(cfg) <> "/handlers.gleam"
+  case config.handler_layout(cfg), server_output, simplifile.read(path) {
+    config.PerOperation, True, Ok(content) ->
+      case
+        list.any(handler_names, fn(name) {
+          string.contains(content, "pub fn " <> name <> "(")
+        })
+      {
+        True -> [
+          path
+          <> " defines handler functions, but `handlers: per_operation` routes each operation to handlers/<operation>.gleam. Move each implementation into its file under handlers/; the functions in handlers.gleam are no longer called.",
+        ]
+        False -> []
+      }
+    _, _, _ -> []
+  }
+}
+
+/// Warn about `.gleam` files in a generator-owned subdirectory
+/// (`handlers/` under `handlers: per_operation`) that match no
+/// operation, typically a stub left behind when an operation was
+/// removed from the spec or renamed.
+fn orphaned_handlers_warnings(
+  files: List(context.GeneratedFile),
+  cfg: config.Config,
+) -> List(String) {
+  let output_dirs = writer.output_dirs(cfg)
+  let sub_dirs =
+    writer.owned_dirs(files, cfg)
+    |> list.filter(fn(dir) { !list.contains(output_dirs, dir) })
+  find_orphans(sub_dirs, writer.expected_paths(files, cfg))
+  |> list.map(fn(path) {
+    path
+    <> " matches no operation in the spec. Delete it, or move its code if the operation was renamed."
+  })
+}
+
+/// `.gleam` files directly inside `dirs` that are not in `expected`.
+fn find_orphans(dirs: List(String), expected: List(String)) -> List(String) {
+  list.flat_map(dirs, fn(dir) {
+    case simplifile.read_directory(dir) {
+      // nolint: thrown_away_error -- unreadable output dir simply has no orphans to report
+      Error(_) -> []
+      Ok(entries) ->
+        entries
+        |> list.filter(fn(name) { string.ends_with(name, ".gleam") })
+        |> list.map(fn(name) { dir <> "/" <> name })
+        |> list.filter(fn(path) { !list.contains(expected, path) })
+    }
+  })
+}
+
 /// Issue #284: when the generated code imports a Gleam stdlib module
 /// whose package is not a direct dep of the consumer's project (today,
 /// only `gleam/regexp` for pattern validation), `gleam build` warns
@@ -669,7 +767,9 @@ fn print_dep_hints(files: List(context.GeneratedFile)) -> Nil {
 /// Issue #247: user-owned `handlers.gleam` (`SkipIfExists`) is dropped from
 /// the byte-comparison list (`resolve_paths` does that filtering) but kept in
 /// the expected-paths list so orphan detection still recognises it as a known
-/// generator output instead of flagging it as an orphan.
+/// generator output instead of flagging it as an orphan. A user-owned file
+/// that does not exist yet is reported as missing: the generated delegator
+/// calls it, so the project does not build until `oaspec generate` writes it.
 fn run_check(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
   io.println("Checking generated code against existing files...")
   let resolved = writer.resolve_paths(files, cfg)
@@ -693,30 +793,19 @@ fn run_check(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
       }
     })
 
-  // Check for orphaned files in output directories
-  let output_dirs = writer.output_dirs(cfg)
-  let orphans =
-    list.flat_map(output_dirs, fn(dir) {
-      case simplifile.read_directory(dir) {
-        // nolint: thrown_away_error -- unreadable output dir simply has no orphans to report
-        Error(_) -> []
-        Ok(entries) ->
-          list.filter_map(entries, fn(name) {
-            case string.ends_with(name, ".gleam") {
-              False -> Error(Nil)
-              True -> {
-                let full_path = dir <> "/" <> name
-                case list.contains(expected_paths, full_path) {
-                  True -> Error(Nil)
-                  False -> Ok(full_path <> " (orphaned)")
-                }
-              }
-            }
-          })
-      }
-    })
+  let missing_user_files =
+    files
+    |> list.filter(fn(f) { f.write_mode == context.SkipIfExists })
+    |> writer.expected_paths(cfg)
+    |> list.filter(fn(path) { simplifile.is_file(path) != Ok(True) })
+    |> list.map(fn(path) { path <> " (missing)" })
 
-  let all_issues = list.append(diffs, orphans)
+  // Check for orphaned files in output directories
+  let orphans =
+    find_orphans(writer.owned_dirs(files, cfg), expected_paths)
+    |> list.map(fn(path) { path <> " (orphaned)" })
+
+  let all_issues = list.flatten([diffs, missing_user_files, orphans])
   case all_issues {
     [] -> {
       io.println("")

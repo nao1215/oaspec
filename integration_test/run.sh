@@ -60,7 +60,9 @@ verify_generated_format() {
     return 0
   fi
   local files
-  files=$(find "$target_dir" -name '*.gleam' ! -name 'handlers.gleam')
+  # handlers.gleam and handlers/<operation>.gleam are user-owned stubs
+  # without the provenance header.
+  files=$(find "$target_dir" -name '*.gleam' ! -name 'handlers.gleam' ! -path '*/handlers/*')
   if [ -z "$files" ]; then
     return 0
   fi
@@ -1224,6 +1226,60 @@ fi
 rm -rf "$KW_CLIENT_DIR"
 
 info "Reserved-keyword integration tests passed."
+
+# -------------------------------------------------------
+# Step 14b: `handlers: per_operation` output compiles
+# -------------------------------------------------------
+# The fixture's operationIds collide with the other generated module
+# names and with reserved words, so the per-operation handler modules
+# and their aliased imports in handlers_generated.gleam must still
+# compile. The single-file layout is built from the same spec too.
+for layout in per_operation single; do
+  info "Testing handlers: $layout code generation..."
+  HL_DIR="$SCRIPT_DIR/handlers_${layout}_test"
+  rm -rf "$HL_DIR"
+  mkdir -p "$HL_DIR/src"
+
+  cat > "$HL_DIR/oaspec.yaml" << YAML_EOF
+input: test/fixtures/per_operation_handlers.yaml
+mode: server
+handlers: $layout
+output:
+  server: ./integration_test/handlers_${layout}_test/src/api
+package: api
+YAML_EOF
+
+  cd "$PROJECT_ROOT"
+  gleam run -- generate --config="$HL_DIR/oaspec.yaml"
+
+  cat > "$HL_DIR/gleam.toml" << TOML_EOF
+name = "handlers_${layout}_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+TOML_EOF
+
+  cat > "$HL_DIR/src/handlers_${layout}_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+  cd "$HL_DIR"
+  gleam deps download
+
+  verify_generated_format src/api
+  if gleam build --warnings-as-errors 2>&1; then
+    info "PASS: handlers: $layout server code compiles (warnings-as-errors)."
+  else
+    fail "handlers: $layout server code failed to compile."
+  fi
+
+  rm -rf "$HL_DIR"
+done
 
 # -------------------------------------------------------
 # Step 15: Exercise generated guards end-to-end against invalid input

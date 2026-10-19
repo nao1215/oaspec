@@ -14,8 +14,9 @@ pub fn main() {
 /// it here too — the whole-list assertions below depend on this being
 /// exhaustive, not hand-picked.
 const gleam_keywords: List(String) = [
-  "as", "assert", "auto", "case", "const", "external", "fn", "if", "import",
-  "let", "opaque", "panic", "pub", "test", "todo", "type", "use",
+  "as", "assert", "auto", "case", "const", "delegate", "derive", "echo", "else",
+  "external", "fn", "if", "implement", "import", "let", "macro", "opaque",
+  "panic", "pub", "test", "todo", "type", "use",
 ]
 
 // naming.to_snake_case tests

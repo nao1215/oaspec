@@ -182,6 +182,9 @@ elsewhere.
 `handlers.gleam` is the one user-owned file — the generator writes panic
 stubs on the first run and skips it afterwards, so your implementations
 survive regeneration. Everything else is regenerated as the spec changes.
+With `handlers: per_operation`, each operation gets its own user-owned
+`handlers/<operation>.gleam` instead, so an operation added to the spec
+gets a stub on the next run; see [Configuration](doc/configuration.md#one-handler-file-per-operation).
 
 ## Using the generated client
 

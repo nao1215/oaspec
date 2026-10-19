@@ -1,0 +1,10 @@
+input: petstore.yaml
+mode: server
+handlers: per_operation
+targets:
+  - package: petshop/listing
+    output:
+      dir: ./gen
+  - package: petshop/details
+    output:
+      dir: ./gen

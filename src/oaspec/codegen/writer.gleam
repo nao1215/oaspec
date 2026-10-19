@@ -103,10 +103,14 @@ fn ensure_directory(path: String) -> Result(Nil, WriteError) {
 
 /// Write a list of generated files to a directory.
 ///
-/// Issue #247: files marked `SkipIfExists` (currently `handlers.gleam`)
-/// are written only on first generation. If the file already exists on
-/// disk, it is left alone — the user owns the contents and the
-/// generator must not clobber their implementation.
+/// Issue #247: files marked `SkipIfExists` (`handlers.gleam`, and
+/// `handlers/<operation>.gleam` under `handlers: per_operation`) are
+/// written only on first generation. If the file already exists on disk,
+/// it is left alone — the user owns the contents and the generator must
+/// not clobber their implementation.
+///
+/// A file whose path has a directory part (`handlers/<operation>.gleam`)
+/// gets that directory created under `base_path` first.
 fn write_files(
   files: List(GeneratedFile),
   base_path: String,
@@ -123,6 +127,11 @@ fn write_files(
         Ok(acc)
       }
       _, _ -> {
+        use _ <- result.try(case parent_dir(file.path) {
+          Ok(dir) -> ensure_directory(base_path <> "/" <> dir)
+          // nolint: thrown_away_error -- a path without a directory part lives directly in base_path, which write_all already created
+          Error(_) -> Ok(Nil)
+        })
         use _ <- result.try(
           simplifile.write(full_path, file.content)
           |> result.map_error(fn(err) {
@@ -137,6 +146,16 @@ fn write_files(
       }
     }
   })
+}
+
+/// The directory part of a relative generated-file path, or `Error(Nil)`
+/// when the file sits directly in the output directory.
+fn parent_dir(path: String) -> Result(String, Nil) {
+  case list.reverse(string.split(path, "/")) {
+    [_file, first, ..rest] ->
+      Ok(string.join(list.reverse([first, ..rest]), "/"))
+    _ -> Error(Nil)
+  }
 }
 
 /// Resolve generated files to their full output paths and content.
@@ -246,6 +265,44 @@ pub fn output_dirs(cfg: config.Config) -> List(String) {
     Client -> [config.output_client(cfg)]
     Both -> [config.output_server(cfg), config.output_client(cfg)]
   }
+}
+
+/// The output directories plus every subdirectory the generator writes
+/// into. `--check` scans these for orphaned `.gleam` files. Under
+/// `handlers: per_operation`, `<server>/handlers` is always listed, even
+/// when the spec has no operations left, so the stubs of removed
+/// operations are still found. Other directories that hold no generated
+/// file are not listed, so a user's own subdirectory is never treated as
+/// generator-owned.
+@internal
+pub fn owned_dirs(
+  files: List(GeneratedFile),
+  cfg: config.Config,
+) -> List(String) {
+  let sub_dirs = fn(target) {
+    files
+    |> list.filter(fn(f) { f.target == target })
+    |> list.filter_map(fn(f) { parent_dir(f.path) })
+    |> list.unique
+  }
+  let server_sub_dirs = case config.handler_layout(cfg) {
+    config.PerOperation ->
+      list.unique(["handlers", ..sub_dirs(context.ServerTarget)])
+    config.SingleFile -> sub_dirs(context.ServerTarget)
+  }
+  let server_dirs = case config.mode(cfg) {
+    Server | Both ->
+      list.map(server_sub_dirs, fn(d) { config.output_server(cfg) <> "/" <> d })
+    Client -> []
+  }
+  let client_dirs = case config.mode(cfg) {
+    Client | Both ->
+      list.map(sub_dirs(context.ClientTarget), fn(d) {
+        config.output_client(cfg) <> "/" <> d
+      })
+    Server -> []
+  }
+  list.flatten([output_dirs(cfg), server_dirs, client_dirs])
 }
 
 /// Convert a write error to a human-readable string.

@@ -1,0 +1,6 @@
+input: test/fixtures/petstore.yaml
+output:
+  server: ./golden/per_operation_handlers/api
+package: api
+mode: server
+handlers: per_operation

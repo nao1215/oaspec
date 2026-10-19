@@ -20,9 +20,13 @@ gleam run -- generate --config=golden/petstore.oaspec.yaml
 rm -rf golden/complex_supported/api
 gleam run -- generate --config=golden/complex_supported.oaspec.yaml
 
+# Petstore server with one handler file per operation
+rm -rf golden/per_operation_handlers/api
+gleam run -- generate --config=golden/per_operation_handlers.oaspec.yaml
+
 # Verify formatting compliance
 echo "Verifying format compliance..."
-gleam format --check golden/petstore/api/ golden/complex_supported/api/
+gleam format --check golden/petstore/api/ golden/complex_supported/api/ golden/per_operation_handlers/api/
 
 echo "Done. Golden files updated."
 echo "Review changes with: git diff golden/"

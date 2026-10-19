@@ -11,8 +11,9 @@ import yay
 ///
 /// Opaque: external callers construct via `new/6` and read fields via
 /// the accessors below. Mutators (`with_mode`, `with_validate`,
-/// `with_output`, `with_include`) live in this module too, so every
-/// change to a `Config` value goes through an explicit function.
+/// `with_output`, `with_include`, `with_handler_layout`) live in this
+/// module too, so every change to a `Config` value goes through an
+/// explicit function.
 pub opaque type Config {
   Config(
     input: String,
@@ -22,7 +23,21 @@ pub opaque type Config {
     mode: GenerateMode,
     validate: Bool,
     include: Include,
+    handler_layout: HandlerLayout,
   )
+}
+
+/// How the user-owned server handler stubs are laid out on disk.
+///
+/// `SingleFile` (the default, `handlers: single`) writes every stub into
+/// `handlers.gleam`. `PerOperation` (`handlers: per_operation`) writes
+/// `handlers.gleam` with only the `State` type and one
+/// `handlers/<operation>.gleam` per operation, so an operation added to
+/// the spec gets its own stub on the next `oaspec generate` while the
+/// files already written are left alone.
+pub type HandlerLayout {
+  SingleFile
+  PerOperation
 }
 
 /// Issue #387: subset filter for codegen. When non-empty, only
@@ -56,8 +71,9 @@ pub fn include_is_empty(include: Include) -> Bool {
 /// Construct a new `Config` from its six required fields. Prefer
 /// `load/1` in production code; `new/6` is primarily for tests and
 /// ad-hoc tooling that assembles a config in memory. The include
-/// filter defaults to `empty_include()` (match everything); use
-/// `with_include/2` to override.
+/// filter defaults to `empty_include()` (match everything) and the
+/// handler layout to `SingleFile`; use `with_include/2` and
+/// `with_handler_layout/2` to override.
 pub fn new(
   input input: String,
   output_server output_server: String,
@@ -74,6 +90,7 @@ pub fn new(
     mode:,
     validate:,
     include: empty_include(),
+    handler_layout: SingleFile,
   )
 }
 
@@ -110,6 +127,11 @@ pub fn validate(cfg: Config) -> Bool {
 /// Operation include filter (tags / paths). Issue #387.
 pub fn include(cfg: Config) -> Include {
   cfg.include
+}
+
+/// Layout of the user-owned server handler stubs.
+pub fn handler_layout(cfg: Config) -> HandlerLayout {
+  cfg.handler_layout
 }
 
 /// Generation mode.
@@ -173,7 +195,8 @@ pub fn load(path: String) -> Result(Config, ConfigError) {
 /// `include:` keys (the legacy single-target shape). A config with
 /// a `targets:` sequence yields one `Config` per element, each
 /// carrying its own `package` / `output_*` / `include` while
-/// sharing the top-level `input:`, `mode:`, and `validate:` values.
+/// sharing the top-level `input:`, `mode:`, `validate:`, and
+/// `handlers:` values.
 pub fn load_all(path: String) -> Result(List(Config), ConfigError) {
   // Issue #524: yay's Erlang FFI for `parse_string` returns a raw
   // `{yaml_error, Message, {Line, Col}}` tuple in some failure
@@ -267,6 +290,18 @@ pub fn load_all(path: String) -> Result(List(Config), ConfigError) {
     },
   )
 
+  use handler_layout <- result.try(
+    case parser_value.optional_string(root, "handlers") {
+      None | Some("single") -> Ok(SingleFile)
+      Some("per_operation") -> Ok(PerOperation)
+      Some(other) ->
+        Error(InvalidValue(
+          field: "handlers",
+          detail: "must be one of: single, per_operation (got: " <> other <> ")",
+        ))
+    },
+  )
+
   // Issue #387: when `targets:` is present, walk the sequence and
   // build one `Config` per item, each inheriting the shared
   // input/mode/validate values from the root. When absent, the root
@@ -275,7 +310,13 @@ pub fn load_all(path: String) -> Result(List(Config), ConfigError) {
   case yay.select_sugar(from: root, selector: "targets") {
     // nolint: thrown_away_error -- absent `targets:` is the documented default for single-target configs.
     Error(_) -> {
-      use cfg <- result.try(parse_target_node(root, input, mode, validate))
+      use cfg <- result.try(parse_target_node(
+        root,
+        input,
+        mode,
+        validate,
+        handler_layout,
+      ))
       Ok([cfg])
     }
     Ok(yay.NodeSeq(items)) ->
@@ -288,7 +329,7 @@ pub fn load_all(path: String) -> Result(List(Config), ConfigError) {
         _ ->
           items
           |> list.index_map(fn(item, idx) {
-            parse_target_item(item, idx, input, mode, validate)
+            parse_target_item(item, idx, input, mode, validate, handler_layout)
           })
           |> result.all
       }
@@ -303,13 +344,14 @@ pub fn load_all(path: String) -> Result(List(Config), ConfigError) {
 /// Parse a single target node — either the YAML root (legacy
 /// single-target config) or one element of the `targets:` sequence
 /// — into a fully-formed `Config`. The shared `input` / `mode` /
-/// `validate` come from the top-level YAML and are baked into the
-/// returned value.
+/// `validate` / `handlers` come from the top-level YAML and are baked
+/// into the returned value.
 fn parse_target_node(
   node: yay.Node,
   input: String,
   mode: GenerateMode,
   validate: Bool,
+  handler_layout: HandlerLayout,
 ) -> Result(Config, ConfigError) {
   let package = parser_value.string_default(node, "package", "api")
 
@@ -363,6 +405,7 @@ fn parse_target_node(
     mode:,
     validate:,
     include:,
+    handler_layout:,
   ))
 }
 
@@ -372,6 +415,7 @@ fn parse_target_item(
   input: String,
   mode: GenerateMode,
   validate: Bool,
+  handler_layout: HandlerLayout,
 ) -> Result(Config, ConfigError) {
   // Each entry in `targets:` MUST declare its own `package:` —
   // unlike the single-target shape (which falls back to "api"),
@@ -384,7 +428,7 @@ fn parse_target_item(
         field: "targets[" <> int.to_string(idx) <> "].package",
         detail: "each target must declare a package name",
       ))
-    Some(_) -> parse_target_node(node, input, mode, validate)
+    Some(_) -> parse_target_node(node, input, mode, validate, handler_layout)
   }
 }
 
@@ -448,6 +492,15 @@ pub fn with_validate(config: Config, validate: Bool) -> Config {
 /// that build a `Config` in memory.
 pub fn with_include(config: Config, include: Include) -> Config {
   Config(..config, include:)
+}
+
+/// Apply handler-layout override. Useful for tests and tooling that
+/// build a `Config` in memory.
+pub fn with_handler_layout(
+  config: Config,
+  handler_layout: HandlerLayout,
+) -> Config {
+  Config(..config, handler_layout:)
 }
 
 /// Apply output base directory override.
