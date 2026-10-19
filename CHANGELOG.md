@@ -10,6 +10,10 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Fixed
+
+- An operationId, parameter, property or schema named `delegate`, `derive`, `echo`, `else`, `implement` or `macro` produced Gleam that did not compile, because these reserved words were not escaped. They now get the `_` suffix like the other keywords (`echo` becomes `echo_`).
+
 ## [0.71.0] - 2026-09-29
 
 ### Added

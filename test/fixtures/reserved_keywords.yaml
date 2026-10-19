@@ -63,6 +63,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/KeywordFields"
+  /echo:
+    get:
+      operationId: echo
+      summary: operationId and parameter use reserved keywords
+      parameters:
+        - name: else
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeywordFields"
   /fn:
     get:
       operationId: fn
