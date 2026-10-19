@@ -809,3 +809,199 @@ scenarios:
             contains:
               - "Response header 'X-Item-Kind' has an unsupported schema"
               - ref to component schema
+
+  - name: handlers per_operation writes a stub for an added operation and keeps edited ones
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            mode: server
+            handlers: per_operation
+            output:
+              dir: ./generated
+            include:
+              paths:
+                - "/pets"
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+      - assert:
+          file:
+            path: project/generated/api/handlers.gleam
+            contains: pub type State
+      - assert:
+          file:
+            path: project/generated/api/handlers.gleam
+            not_contains: pub fn
+      - assert:
+          file:
+            path: project/generated/api/handlers/list_pets.gleam
+            contains:
+              - import api/handlers.{type State}
+              - pub fn list_pets(
+      - assert:
+          file:
+            path: project/generated/api/handlers/get_pet.gleam
+            exists: false
+      - fixture:
+          file: project/generated/api/handlers/list_pets.gleam
+          content: |
+            // implemented by the user
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            mode: server
+            handlers: per_operation
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml --check
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 1
+          stderr:
+            contains: handlers/get_pet.gleam (missing)
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stdout:
+            contains: handlers/get_pet.gleam
+          stderr:
+            empty: true
+      - assert:
+          file:
+            path: project/generated/api/handlers/list_pets.gleam
+            equals: |
+              // implemented by the user
+      - assert:
+          file:
+            path: project/generated/api/handlers_generated.gleam
+            contains:
+              - import api/handlers/get_pet as get_pet_handler
+              - get_pet_handler.get_pet(state, req)
+
+  - name: handlers per_operation reports a stub whose operation was removed
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            mode: server
+            handlers: per_operation
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            mode: server
+            handlers: per_operation
+            output:
+              dir: ./generated
+            include:
+              paths:
+                - "/pets"
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml --check
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 1
+          stderr:
+            contains:
+              - handlers/get_pet.gleam (orphaned)
+              - handlers/delete_pet.gleam (orphaned)
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stderr:
+            contains: handlers/get_pet.gleam matches no operation in the spec
+
+  - name: handlers per_operation warns when handlers.gleam still holds single-file handlers
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            mode: server
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            mode: server
+            handlers: per_operation
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+          stderr:
+            contains: "defines handler functions, but `handlers: per_operation` routes each operation to handlers/<operation>.gleam"
+      - assert:
+          file:
+            path: project/generated/api/handlers/get_pet.gleam
+            contains: pub fn get_pet(
+
+  - name: generate rejects an unknown handlers layout
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            handlers: per_tag
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 1
+          stderr:
+            contains: "Invalid value for handlers: must be one of: single, per_operation (got: per_tag)"

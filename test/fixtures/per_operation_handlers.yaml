@@ -1,0 +1,88 @@
+openapi: "3.0.3"
+info:
+  title: Per-Operation Handlers API
+  description: |
+    Fixture for `handlers: per_operation`. Each operation becomes a
+    `handlers/<operation>.gleam` module, so the operationIds here are
+    chosen to collide with the other generated module names
+    (`handlers`, `request_types`, `response_types`) and with Gleam
+    reserved words. The generated server must still compile.
+  version: "1.0.0"
+paths:
+  /health:
+    get:
+      operationId: health
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: string
+  /handlers/{id}:
+    get:
+      operationId: handlers
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: string
+  /request-types:
+    post:
+      operationId: requestTypes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        "204":
+          description: no content
+  /response-types:
+    get:
+      operationId: responseTypes
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: string
+  /type:
+    get:
+      operationId: type
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: string
+  /echo:
+    get:
+      operationId: echo
+      parameters:
+        - name: else
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: string

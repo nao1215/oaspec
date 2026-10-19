@@ -182,7 +182,8 @@ pub type FileTarget {
 /// expected not to touch them and the generator clobbers any local
 /// changes on every run. `SkipIfExists` is for files the generator
 /// emits ONCE as a starting point, then leaves alone so the user can
-/// own the contents (Issue #247: `handlers.gleam` panic stubs).
+/// own the contents (Issue #247: the `handlers.gleam` and
+/// `handlers/<operation>.gleam` panic stubs).
 pub type WriteMode {
   Overwrite
   SkipIfExists

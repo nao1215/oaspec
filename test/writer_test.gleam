@@ -738,6 +738,63 @@ pub fn import_analysis_multiple_operations_any_match_test() {
   import_analysis.operations_need_typed_schemas([op_no_typed])
   |> should.equal(False)
 }
+
 // ===================================================================
 // Test helper: flexible parameter constructor
 // ===================================================================
+
+fn nested_payload() -> List(context.GeneratedFile) {
+  [
+    context.GeneratedFile(
+      path: "handlers.gleam",
+      content: "// state\n",
+      target: context.ServerTarget,
+      write_mode: context.SkipIfExists,
+    ),
+    context.GeneratedFile(
+      path: "handlers/get_pet.gleam",
+      content: "// get_pet stub\n",
+      target: context.ServerTarget,
+      write_mode: context.SkipIfExists,
+    ),
+    context.GeneratedFile(
+      path: "handlers/list_pets.gleam",
+      content: "// list_pets stub\n",
+      target: context.ServerTarget,
+      write_mode: context.SkipIfExists,
+    ),
+  ]
+}
+
+pub fn write_all_creates_subdirectory_for_nested_path_test() {
+  let scratch = writer_scratch("write_all_nested")
+  let cfg = writer_test_config(config.Server, scratch)
+  let assert Ok(written) =
+    writer.write_all(nested_payload(), cfg, fn(_) { Nil })
+  list.length(written) |> should.equal(3)
+  simplifile.read(scratch <> "/server/handlers/get_pet.gleam")
+  |> should.equal(Ok("// get_pet stub\n"))
+  writer_cleanup(scratch)
+}
+
+pub fn write_all_skip_if_exists_applies_to_nested_path_test() {
+  let scratch = writer_scratch("write_all_nested_skip")
+  let cfg = writer_test_config(config.Server, scratch)
+  let assert Ok(_) = writer.write_all(nested_payload(), cfg, fn(_) { Nil })
+  let user_path = scratch <> "/server/handlers/get_pet.gleam"
+  let assert Ok(Nil) = simplifile.write(user_path, "// implemented\n")
+  let assert Ok(written) =
+    writer.write_all(nested_payload(), cfg, fn(_) { Nil })
+  written |> should.equal([])
+  simplifile.read(user_path) |> should.equal(Ok("// implemented\n"))
+  writer_cleanup(scratch)
+}
+
+pub fn owned_dirs_lists_only_subdirectories_holding_generated_files_test() {
+  writer.owned_dirs(nested_payload(), test_config(config.Both))
+  |> should.equal(["./gen/api", "./gen_client/api", "./gen/api/handlers"])
+  writer.owned_dirs(test_files(), test_config(config.Server))
+  |> should.equal(["./gen/api"])
+  writer.owned_dirs(nested_payload(), test_config(config.Client))
+  |> should.equal(["./gen_client/api"])
+}

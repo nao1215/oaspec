@@ -17,6 +17,7 @@ projects, set `output.server` and/or `output.client` explicitly.
 | `package` | no | `api` | Gleam module namespace prefix |
 | `mode` | no | `both` | `server`, `client`, or `both` |
 | `validate` | no | mode-dependent (`true` for `server` / `both`, `false` for `client`) | Enable guard validation in generated server/client code |
+| `handlers` | no | `single` | `single` or `per_operation`: layout of the user-owned server handler stubs |
 | `output.dir` | no | `./src` | Base output directory (defaults inside `./src` so generated modules drop into the standard Gleam project layout — #568) |
 | `output.server` | no | `<dir>/<package>` | Server output path |
 | `output.client` | no | `<dir>/<package>_client` | Client output path |
@@ -56,8 +57,8 @@ equality.
 
 `targets:` is an array of per-target overrides. The same input spec is
 generated once per entry, each with its own `package`, `output`, and
-`include`. The top-level `input`, `mode`, and `validate` are shared
-across every target.
+`include`. The top-level `input`, `mode`, `validate`, and `handlers` are
+shared across every target.
 
 ```yaml
 input: github.yaml
@@ -86,6 +87,55 @@ to overlapping output directories before writing any file. The `--output`
 CLI flag is also rejected with multi-target configs because each target
 already declares its own per-package output directory; use per-target
 `output:` blocks instead.
+
+## One handler file per operation
+
+By default the server handler stubs live in one user-owned
+`handlers.gleam`, written on the first run and never overwritten. An
+operation added to the spec later is wired into `handlers_generated.gleam`
+but has no stub, so the build fails until you write the function by hand.
+
+`handlers: per_operation` writes one user-owned file per operation
+instead:
+
+```yaml
+input: openapi.yaml
+package: api
+mode: server
+handlers: per_operation
+```
+
+```text
+src/api/
+  handlers.gleam             # user-owned, holds only `State`
+  handlers/
+    list_pets.gleam          # user-owned stub, one per operation
+    get_pet.gleam
+  handlers_generated.gleam   # regenerated, calls handlers/<operation>.gleam
+  router.gleam
+```
+
+Each `handlers/<operation>.gleam` is written only when it does not exist,
+so after adding an operation to the spec, `oaspec generate` writes the
+stub for that operation and leaves the files you already implemented
+alone. The file name is the handler function name, with reserved words
+escaped the same way (`operationId: type` becomes `handlers/type_.gleam`).
+
+`<output>/handlers/` belongs to oaspec in this layout: `generate --check`
+reports a `.gleam` file there that matches no operation as orphaned, and
+`generate` prints a warning for it. Such a file is usually the stub of an
+operation that was removed from the spec or renamed; delete it or move its
+code. A missing stub is reported by `--check` as missing.
+
+When you switch an existing project from `single` to `per_operation`,
+`generate` warns if `handlers.gleam` still defines handler functions:
+those are no longer called, and the new stubs panic until you move each
+implementation into its file under `handlers/`. Keep `State` in
+`handlers.gleam`.
+
+The generator does not change a stub it has already written. If an
+operation later gains a parameter or request body, or its operationId
+changes, update the handler signature or file name yourself.
 
 ## Configuration paths
 
