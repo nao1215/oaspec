@@ -383,6 +383,19 @@ just bench
 | `just integration` | gleeunit | Generated code compiles and the generated modules work together |
 | `just bench` | himorime | Start-up, validate and generate on documents of 10 and 500 operations; pull requests are compared with their base ([bench/README.md](./bench/README.md)) |
 
+## Testing
+
+| Technique | Bug class caught here |
+|---|---|
+| Examples and unit tests | [Wrong parsing, validation and code generation per stage, on documents from other OpenAPI tools](doc/testing.md#examples-and-unit-tests) |
+| Generated properties | [Naming and argument helpers that break on unusual input](doc/testing.md#generated-properties) |
+| Metamorphic relations | [Generated code that depends on YAML vs JSON, key order or extension keys](doc/testing.md#metamorphic-relations) |
+| Golden files | [Unreviewed changes to the generated code](doc/testing.md#golden-files) |
+| End-to-end tests and output snapshots | [Wrong exit codes, messages and file trees of the shipped escript](doc/testing.md#end-to-end-tests-and-output-snapshots) |
+| Real documents | [Generated code that does not compile for large published documents](doc/testing.md#real-documents) |
+| Paired CI benchmarks | [Slower start-up, validate and generate](doc/testing.md#paired-ci-benchmarks) |
+| Mutation testing (local) | [Branches of the generator that no test pins down](doc/testing.md#mutation-testing) |
+
 ## License
 
 [MIT](LICENSE)
