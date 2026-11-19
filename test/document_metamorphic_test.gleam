@@ -133,26 +133,26 @@ fn to_json(node: yay.Node) -> json.Json {
   }
 }
 
+/// True when the rewritten document generates the same files. On a
+/// difference the assertion message names the fixture and the files.
 fn same_output(
   c: Case,
   rewritten: Result(List(#(String, String)), Nil),
 ) -> Bool {
-  case rewritten {
-    Ok(files) if files == c.files -> True
-    Ok(files) -> {
-      let before = dict.from_list(c.files)
-      let changed =
-        files
-        |> list.filter(fn(file) { dict.get(before, file.0) != Ok(file.1) })
-        |> list.map(fn(file) { file.0 })
-      panic as {
-        c.name
-        <> ": generated files differ after the rewrite: "
-        <> string.join(changed, ", ")
-      }
+  let assert Ok(files) = rewritten
+    as { c.name <> ": the rewritten document is rejected" }
+  let before = dict.from_list(c.files)
+  let changed =
+    files
+    |> list.filter(fn(file) { dict.get(before, file.0) != Ok(file.1) })
+    |> list.map(fn(file) { file.0 })
+  let assert [] = changed
+    as {
+      c.name
+      <> ": generated files differ after the rewrite: "
+      <> string.join(changed, ", ")
     }
-    Error(Nil) -> panic as { c.name <> ": the rewritten document is rejected" }
-  }
+  list.length(files) == list.length(c.files)
 }
 
 pub fn json_form_generates_the_same_code_test() -> Nil {
