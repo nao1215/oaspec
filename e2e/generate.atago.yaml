@@ -37,6 +37,35 @@ scenarios:
           stderr:
             contains: Error
 
+  # A schema whose allOf lists itself made generate nest the schema in
+  # itself without end until the machine ran out of memory.
+  - name: generate finishes on a schema whose allOf includes itself
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/oss_oapi_codegen_recursive_allof.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+          timeout: 15s
+      - assert:
+          exit_code: 0
+      - assert:
+          file:
+            path: project/generated/api/types.gleam
+            contains:
+              - pub type RecursiveObject
+              - field_in_non_recursive
+              - field_in_recursive
+
   - name: generate exits non-zero when the spec fails to parse
     steps:
       - fixture:

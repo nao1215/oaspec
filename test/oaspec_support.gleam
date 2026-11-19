@@ -12939,6 +12939,27 @@ pub fn oss_oapi_codegen_recursive_allof_parses_case() {
   dict.size(components.schemas) |> should.not_equal(0)
 }
 
+pub fn oss_oapi_codegen_recursive_allof_generates_case() {
+  // `RecursiveObject: allOf: [$ref NonRecursiveObject, $ref
+  // RecursiveObject, {properties: ...}]`. The self-reference adds
+  // nothing; generate used to nest the schema in itself without end
+  // and run out of memory in the types and encoders stages.
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/oss_oapi_codegen_recursive_allof.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let assert Ok(summary) = generate.generate(spec, context.config(ctx))
+  let assert Ok(types_file) =
+    list.find(summary.files, fn(file) {
+      string.ends_with(file.path, "types.gleam")
+    })
+  string.contains(types_file.content, "pub type RecursiveObject")
+  |> should.be_true()
+  string.contains(types_file.content, "field_in_non_recursive")
+  |> should.be_true()
+  string.contains(types_file.content, "field_in_recursive")
+  |> should.be_true()
+}
+
 pub fn oss_oapi_codegen_allof_additional_parses_case() {
   // allOf with additionalProperties: true
   let assert Ok(spec) =

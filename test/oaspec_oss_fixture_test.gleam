@@ -15,6 +15,7 @@ pub fn oss_oapi_codegen_cases_test() {
   let _ = support.oss_oapi_codegen_nullable_parses_case()
   let _ = support.oss_oapi_codegen_nullable_generates_case()
   let _ = support.oss_oapi_codegen_recursive_allof_parses_case()
+  let _ = support.oss_oapi_codegen_recursive_allof_generates_case()
   let _ = support.oss_oapi_codegen_allof_additional_parses_case()
   let _ = support.oss_oapi_codegen_allof_additional_generates_case()
   let _ = support.oss_oapi_codegen_security_parses_case()
