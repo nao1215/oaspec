@@ -35,6 +35,13 @@ jobs:
   bench:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # setup-himorime (v0.2.0 and later) comments regressions, budget
+    # violations and errors on same-repository pull requests from its post
+    # step, and fails the job when the token cannot comment. Fork pull
+    # requests never post.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,9 +53,9 @@ jobs:
           otp-version: "29"
           gleam-version: "1.x"
           rebar3-version: "3"
-      - uses: nao1215/setup-himorime@14aeeb3fe55ad42cf29ee0802d578820faac3897 # v0.1.2
+      - uses: nao1215/setup-himorime@cae68ae0fcf303571b53dde1a73582fbc596857a # v0.2.0
         with:
-          version: v0.5.3
+          version: v0.6.1
       - name: Compare the base with the head
         if: github.event_name == 'pull_request'
         run: himorime ci --output "$RUNNER_TEMP/himorime.json" --format json bench
