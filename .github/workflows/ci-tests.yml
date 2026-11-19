@@ -22,6 +22,39 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    # The two full-document jobs below take five to six minutes and only
+    # exercise the generator. A pull request that touches nothing the
+    # generator or those jobs read (documentation, examples, adapters,
+    # other workflows) skips them; pushes to main always run them. A
+    # skipped job counts as passed for required checks.
+    name: Detect generator changes
+    runs-on: ubuntu-latest
+    outputs:
+      generator: ${{ steps.diff.outputs.generator }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "generator=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          printf '%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -E -q '^(src/|integration_test/|doc/reference/oss/|gleam\.toml$|manifest\.toml$|\.github/workflows/ci-tests\.yml$)'; then
+            echo "generator=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "generator=false" >> "$GITHUB_OUTPUT"
+          fi
+
   unit-floor:
     # Floor lane: the `gleam` requirement in gleam.toml (keep both in sync).
     # It proves the declared minimum compiler still builds oaspec and passes
@@ -110,6 +143,8 @@ jobs:
     # multi-minute wall time without unique signal; the project's own
     # lint step already covers every rule it would surface.
     name: Full GitHub OpenAPI generate / format / build
+    needs: changes
+    if: needs.changes.outputs.generator == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -160,6 +195,8 @@ jobs:
     # as follow-ups). Self-contained and runs in parallel with the
     # other jobs.
     name: Full Stripe OpenAPI generate / format / build
+    needs: changes
+    if: needs.changes.outputs.generator == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
