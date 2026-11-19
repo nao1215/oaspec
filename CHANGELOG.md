@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.73.0] - 2026-11-19
+
 ### Fixed
 
 - `oaspec generate` never finished, and used memory until the machine ran out, on a schema whose `allOf` lists the schema itself (`RecursiveObject: allOf: [$ref: '#/components/schemas/RecursiveObject', ...]`, a case from oapi-codegen's test suite). The self-reference now adds nothing, and the generated `RecursiveObject` has the properties of its other members. A `$ref` member that points at another `allOf` schema is merged member by member instead of becoming a synthetic `value_N` field.
