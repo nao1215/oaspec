@@ -53,7 +53,7 @@ jobs:
           otp-version: "29"
           gleam-version: "1.x"
           rebar3-version: "3"
-      - uses: nao1215/setup-himorime@cae68ae0fcf303571b53dde1a73582fbc596857a # v0.2.0
+      - uses: nao1215/setup-himorime@05b4d293796e34a46c59f1363e15841a18e83e92 # v0.2.1
         with:
           version: v0.6.1
       - name: Compare the base with the head
