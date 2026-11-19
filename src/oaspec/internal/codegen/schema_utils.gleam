@@ -4,10 +4,57 @@
 import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/set
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/openapi/schema.{
   type SchemaObject, type SchemaRef, AllOfSchema, Forbidden, Inline,
   ObjectSchema, OneOfSchema, Reference, StringSchema, Typed, Untyped,
+}
+
+/// Whether `leaf` holds for the schema or for a schema it is built from:
+/// the `children` of an inline schema (allOf members, and for some
+/// checks oneOf members) and the target of a `$ref`. Each `$ref` is
+/// followed at most once, so a schema whose allOf includes itself
+/// (`RecursiveObject: allOf: [$ref: RecursiveObject, ...]`) terminates;
+/// following it again could only find what the first visit found.
+fn reaches(
+  schema_ref: SchemaRef,
+  ctx: Context,
+  visited: set.Set(String),
+  leaf: fn(SchemaObject) -> Bool,
+  children: fn(SchemaObject) -> List(SchemaRef),
+) -> Bool {
+  case schema_ref {
+    Inline(schema_obj) ->
+      leaf(schema_obj)
+      || list.any(children(schema_obj), fn(child) {
+        reaches(child, ctx, visited, leaf, children)
+      })
+    Reference(ref:, ..) ->
+      case set.contains(visited, ref) {
+        True -> False
+        False ->
+          case context.resolve_schema_ref(schema_ref, ctx) {
+            Ok(schema_obj) ->
+              reaches(
+                Inline(schema_obj),
+                ctx,
+                set.insert(visited, ref),
+                leaf,
+                children,
+              )
+            // nolint: thrown_away_error -- an unresolved ref contributes nothing here; the resolver reports the ref error separately
+            Error(_) -> False
+          }
+      }
+  }
+}
+
+fn allof_members(schema_obj: SchemaObject) -> List(SchemaRef) {
+  case schema_obj {
+    AllOfSchema(schemas:, ..) -> schemas
+    _ -> []
+  }
 }
 
 /// Check if a schema has typed or untyped additionalProperties that would need Dict.
@@ -15,20 +62,19 @@ pub fn schema_has_additional_properties(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case schema_ref {
-    Inline(ObjectSchema(additional_properties: Typed(_), ..)) -> True
-    Inline(ObjectSchema(additional_properties: Untyped, ..)) -> True
-    Inline(AllOfSchema(schemas:, ..)) ->
-      list.any(schemas, fn(s) { schema_has_additional_properties(s, ctx) })
-    Reference(..) ->
-      case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(schema_obj) ->
-          schema_has_additional_properties(Inline(schema_obj), ctx)
-        // nolint: thrown_away_error -- unresolved refs are treated as not having additionalProperties; the resolver reports the ref error separately
-        Error(_) -> False
+  reaches(
+    schema_ref,
+    ctx,
+    set.new(),
+    fn(schema_obj) {
+      case schema_obj {
+        ObjectSchema(additional_properties: Typed(_), ..) -> True
+        ObjectSchema(additional_properties: Untyped, ..) -> True
+        _ -> False
       }
-    _ -> False
-  }
+    },
+    allof_members,
+  )
 }
 
 /// Check if a schema has `additionalProperties: false` (needs Dict for the
@@ -38,21 +84,18 @@ pub fn schema_has_forbidden_additional_properties(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case schema_ref {
-    Inline(ObjectSchema(additional_properties: Forbidden, ..)) -> True
-    Inline(AllOfSchema(schemas:, ..)) ->
-      list.any(schemas, fn(s) {
-        schema_has_forbidden_additional_properties(s, ctx)
-      })
-    Reference(..) ->
-      case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(schema_obj) ->
-          schema_has_forbidden_additional_properties(Inline(schema_obj), ctx)
-        // nolint: thrown_away_error -- unresolved refs are treated as not having forbidden additionalProperties; the resolver reports the ref error separately
-        Error(_) -> False
+  reaches(
+    schema_ref,
+    ctx,
+    set.new(),
+    fn(schema_obj) {
+      case schema_obj {
+        ObjectSchema(additional_properties: Forbidden, ..) -> True
+        _ -> False
       }
-    _ -> False
-  }
+    },
+    allof_members,
+  )
 }
 
 /// Check if a schema is — or transitively contains — a `oneOf` with at least
@@ -64,27 +107,32 @@ pub fn schema_has_non_discriminator_oneof(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case schema_ref {
-    Inline(OneOfSchema(schemas:, discriminator: option.None, ..)) ->
-      list.any(schemas, fn(s) {
-        case s {
-          Reference(..) -> True
-          _ -> False
-        }
-      })
-    Inline(OneOfSchema(schemas:, ..)) ->
-      list.any(schemas, fn(s) { schema_has_non_discriminator_oneof(s, ctx) })
-    Inline(AllOfSchema(schemas:, ..)) ->
-      list.any(schemas, fn(s) { schema_has_non_discriminator_oneof(s, ctx) })
-    Reference(..) ->
-      case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(schema_obj) ->
-          schema_has_non_discriminator_oneof(Inline(schema_obj), ctx)
-        // nolint: thrown_away_error -- unresolved refs are treated as not having strict-oneOf needs; the resolver reports the ref error separately
-        Error(_) -> False
+  reaches(
+    schema_ref,
+    ctx,
+    set.new(),
+    fn(schema_obj) {
+      case schema_obj {
+        OneOfSchema(schemas:, discriminator: option.None, ..) ->
+          list.any(schemas, fn(s) {
+            case s {
+              Reference(..) -> True
+              _ -> False
+            }
+          })
+        _ -> False
       }
-    _ -> False
-  }
+    },
+    fn(schema_obj) {
+      case schema_obj {
+        // A oneOf without a discriminator is decided by its own variants.
+        OneOfSchema(discriminator: option.None, ..) -> []
+        OneOfSchema(schemas:, ..) -> schemas
+        AllOfSchema(schemas:, ..) -> schemas
+        _ -> []
+      }
+    },
+  )
 }
 
 /// Check if a schema has untyped additionalProperties (needs Dynamic import).
@@ -92,44 +140,40 @@ pub fn schema_has_untyped_additional_properties(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case schema_ref {
-    Inline(ObjectSchema(additional_properties: Untyped, ..)) -> True
-    Inline(AllOfSchema(schemas:, ..)) ->
-      list.any(schemas, fn(s) {
-        schema_has_untyped_additional_properties(s, ctx)
-      })
-    Reference(..) ->
-      case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(schema_obj) ->
-          schema_has_untyped_additional_properties(Inline(schema_obj), ctx)
-        // nolint: thrown_away_error -- unresolved refs are treated as not having untyped additionalProperties; the resolver reports the ref error separately
-        Error(_) -> False
+  reaches(
+    schema_ref,
+    ctx,
+    set.new(),
+    fn(schema_obj) {
+      case schema_obj {
+        ObjectSchema(additional_properties: Untyped, ..) -> True
+        _ -> False
       }
-    _ -> False
-  }
+    },
+    allof_members,
+  )
 }
 
 /// Check if a schema has any optional or nullable fields that would need Option.
 pub fn schema_has_optional_fields(schema_ref: SchemaRef, ctx: Context) -> Bool {
-  case schema_ref {
-    Inline(ObjectSchema(properties:, required:, ..)) -> {
-      dict.to_list(properties)
-      |> list.any(fn(entry) {
-        let #(prop_name, prop_ref) = entry
-        !list.contains(required, prop_name)
-        || schema_ref_is_nullable(prop_ref, ctx)
-      })
-    }
-    Inline(AllOfSchema(schemas:, ..)) ->
-      list.any(schemas, fn(s) { schema_has_optional_fields(s, ctx) })
-    Reference(..) ->
-      case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(schema_obj) -> schema_has_optional_fields(Inline(schema_obj), ctx)
-        // nolint: thrown_away_error -- unresolved refs are treated as not having optional fields; the resolver reports the ref error separately
-        Error(_) -> False
+  reaches(
+    schema_ref,
+    ctx,
+    set.new(),
+    fn(schema_obj) {
+      case schema_obj {
+        ObjectSchema(properties:, required:, ..) ->
+          dict.to_list(properties)
+          |> list.any(fn(entry) {
+            let #(prop_name, prop_ref) = entry
+            !list.contains(required, prop_name)
+            || schema_ref_is_nullable(prop_ref, ctx)
+          })
+        _ -> False
       }
-    _ -> False
-  }
+    },
+    allof_members,
+  )
 }
 
 /// Issue #309: detect a property that is fully determined by the
