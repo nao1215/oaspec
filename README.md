@@ -15,12 +15,7 @@
 [![License](https://img.shields.io/github/license/nao1215/oaspec)](./LICENSE)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/nao1215/oaspec/badge)](https://scorecard.dev/viewer/?uri=github.com/nao1215/oaspec)
 
-Generate Gleam client and server modules from OpenAPI 3.x specs.
-
-OpenAPI in → typed Gleam client and server out, with no per-operation glue
-code to write or maintain. The generator owns request and response types,
-encoders, decoders, validation guards, and the router; you wire credentials
-and a transport adapter, then call typed operation functions.
+Generate Gleam client and server modules from OpenAPI 3.x specs. The generator writes the request and response types, encoders, decoders, validation guards and the router. You supply credentials and a transport adapter, then call typed operation functions.
 
 ```gleam
 import api/client
@@ -38,30 +33,17 @@ API reference: <https://hexdocs.pm/oaspec/>
 
 ## Install
 
-`oaspec` ships in two flavors:
-
-- Library API (the runtime contract for generated clients, plus the
-  generator itself for in-process use) — install via `gleam add` from Hex.
-- CLI (the `oaspec` binary that drives `init` / `generate` / `validate`
-  on the command line) — install from a GitHub release or build from source.
-
-Most users want both: `gleam add oaspec gleam_json` in the project that
-consumes the generated code, and the CLI installed system-wide to run
-`oaspec generate`.
+Most projects need both parts: the library from Hex in the project that uses the generated code, and the `oaspec` CLI (`init`, `generate`, `validate`) to run the generator.
 
 ```sh
 gleam add oaspec gleam_json
 ```
 
-`gleam_json` is added in the same step because the generated `decode.gleam`,
-`encode.gleam`, `guards.gleam`, and `router.gleam` modules `import gleam/json`
-directly. Without it as a direct dependency, `gleam check` warns on every
-generated file.
+The generated `decode.gleam`, `encode.gleam`, `guards.gleam` and `router.gleam` import `gleam/json`, so without `gleam_json` as a direct dependency `gleam check` warns on every generated file.
 
 ### CLI (GitHub release)
 
-Requires Erlang/OTP 27+. The release artifact is an Erlang escript, so the
-same binary runs anywhere Erlang is available.
+The release artifact is an Erlang escript and needs Erlang/OTP 27+.
 
 ```sh
 curl -fSL -o oaspec https://github.com/nao1215/oaspec/releases/latest/download/oaspec
@@ -103,27 +85,18 @@ slsa-verifier verify-artifact --provenance-path multiple.intoto.jsonl \
 # 1. (Skip if you have your own.) Fetch a sample spec.
 curl -fSL -o openapi.yaml https://raw.githubusercontent.com/nao1215/oaspec/main/test/fixtures/petstore.yaml
 
-# 2. Create oaspec.yaml — uncomment `input:` and point it at your spec.
+# 2. Create oaspec.yaml (it reads openapi.yaml by default).
 oaspec init
 
 # 3. Generate.
 oaspec generate --config=oaspec.yaml
 ```
 
-`oaspec init` writes a fully-commented template; `package: api` is the
-only uncommented field. All path-valued config fields (`input`,
-`output.dir`, `output.server`, `output.client`) are resolved relative to
-the current working directory when `oaspec` runs, not the config file
-location. See [doc/configuration.md](./doc/configuration.md) for the
-full set of fields, CLI flags, multi-target codegen, and validate mode.
+`oaspec init` writes a commented template in which only `input: openapi.yaml` and `package: api` are set. Path fields (`input`, `output.dir`, `output.server`, `output.client`) are resolved against the working directory, not the config file's location. [doc/configuration.md](./doc/configuration.md) lists every field and CLI flag, multi-target codegen and validate mode.
 
 ### Using oaspec as a library (without the CLI)
 
-If you only want to load and inspect a spec — no codegen, no `oaspec.yaml`,
-no escript install — call `oaspec/openapi/parser.parse_string` directly
-from your Gleam code. The function returns
-`Result(OpenApiSpec(Unresolved), Diagnostic)`; render the diagnostic with
-`parser.parse_error_to_string` for human-readable output.
+To load and inspect a spec at run time, for example one uploaded to an HTTP endpoint, call `oaspec/openapi/parser.parse_string`. It returns `Result(OpenApiSpec(Unresolved), Diagnostic)`, and `parser.parse_error_to_string` renders the diagnostic.
 
 ```gleam
 import gleam/io
@@ -144,15 +117,11 @@ pub fn main() {
 }
 ```
 
-Use this path when you want a runtime validate / inspect step (for
-example, validating a spec uploaded via an HTTP endpoint). Reach for the
-CLI quick-start above when you want generated client / server / schema
-modules committed to your repository.
+[doc/library-api.md](./doc/library-api.md) covers the parse and generate pipeline.
 
 ## Generated files
 
-Given one OpenAPI spec, `oaspec` writes modules you can keep in your
-repository:
+For one spec, `oaspec` writes:
 
 ```text
 src/my_api/                  # server (mode: server | both)
@@ -176,31 +145,13 @@ src/my_api_client/           # client (mode: client | both)
   client.gleam
 ```
 
-The default base directory is `./src` so the generated modules drop
-straight into the standard Gleam project layout — `gleam build` picks
-them up immediately. Override via `output.dir` (or per-target
-`output.server` / `output.client`) in `oaspec.yaml` if you want them
-elsewhere.
+The base directory is `./src`, so `gleam build` picks the modules up. `output.dir`, or `output.server` and `output.client`, change it.
 
-`handlers.gleam` is the one user-owned file — the generator writes panic
-stubs on the first run and skips it afterwards, so your implementations
-survive regeneration. Everything else is regenerated as the spec changes.
-With `handlers: per_operation`, each operation gets its own user-owned
-`handlers/<operation>.gleam` instead, so an operation added to the spec
-gets a stub on the next run; see [Configuration](doc/configuration.md#one-handler-file-per-operation).
+`handlers.gleam` is yours: the generator writes panic stubs on the first run and never touches it again. Everything else is regenerated. With `handlers: per_operation`, each operation gets its own `handlers/<operation>.gleam`, so an operation added to the spec gets a stub on the next run; see [Configuration](doc/configuration.md#one-handler-file-per-operation).
 
 ## Using the generated client
 
-Generated clients depend on a tiny pure runtime (`oaspec/transport`)
-instead of any specific HTTP library. Operations expose both synchronous
-`transport.Send` entry points and asynchronous `transport.AsyncSend`
-variants, so the same generated code runs against real HTTP, fakes, or
-any future runtime.
-
-Adapters that bridge `transport.Send` / `transport.AsyncSend` to a real
-runtime live as sibling Gleam packages under [`adapters/`](./adapters),
-so the root `oaspec` package never depends on `gleam_httpc` or any
-specific HTTP runtime.
+Generated clients depend on the small pure runtime `oaspec/transport`, not on an HTTP library. Each operation has a synchronous `transport.Send` entry point and an asynchronous `transport.AsyncSend` variant. The adapters that connect them to a real HTTP runtime are separate packages under [`adapters/`](./adapters), so `oaspec` itself does not depend on `gleam_httpc`. They are published to Hex on `oaspec_httpc-v*` and `oaspec_fetch-v*` tags.
 
 ### BEAM (`oaspec_httpc`)
 
@@ -258,17 +209,11 @@ let send = mock.text(200, "[{\"id\": 1, \"name\": \"Fido\"}]")
 let assert Ok(_) = client.list_pets(send, limit: None, offset: None)
 ```
 
-`oaspec/mock` is a pure in-memory transport — no network, no FFI — so
-generated clients can be exercised in `gleam test` without any HTTP
-adapter. The petstore example above is built on it.
+`oaspec/mock` is an in-memory transport with no network or FFI, for running generated clients in `gleam test`. The petstore example uses it.
 
 ### Authenticated requests
 
-`oaspec/transport` ships middleware for base URL override, default
-headers, and OpenAPI security. `with_security` walks the request's
-declared OR-of-AND alternatives and applies the first one whose required
-schemes have credentials. The same `with_*` middleware works for both
-`transport.Send` and `transport.AsyncSend`.
+`oaspec/transport` has middleware for the base URL, default headers and OpenAPI security, for both `Send` and `AsyncSend`. `with_security` applies the first of the request's OR-of-AND security alternatives whose schemes all have credentials.
 
 ```gleam
 let send =
@@ -280,34 +225,11 @@ let send =
   )
 ```
 
-Each operation also exposes `build_<op>_request` and
-`decode_<op>_response` helpers, plus request-object wrappers for both
-sync and async call paths, so callers can drive the request and response
-halves independently — useful for retry middleware, logging, or testing
-decoding in isolation.
-
-### Adapter availability
-
-Both adapters are published to Hex from this repository on tag push:
-`oaspec_httpc-v*` for the BEAM adapter, `oaspec_fetch-v*` for the
-JavaScript one. If `gleam add oaspec_httpc` reports `package not found`,
-no adapter release has been cut yet — depend on the adapter via a path
-dependency to a local checkout of `oaspec` until the first tag push.
-Pure `git = "..."` dependencies do not work in that interim state because
-each adapter lives in a subdirectory of the repo and Gleam's `gleam.toml`
-parser does not support a `subpath` field on git dependencies as of
-Gleam 1.16. See
-[`examples/petstore_client_fetch/gleam.toml`](./examples/petstore_client_fetch/gleam.toml)
-for the canonical path-dependency layout.
+Each operation also has `build_<op>_request` and `decode_<op>_response` helpers and request-object wrappers for both call paths, so retry middleware, logging or a decoding test can handle the request and the response separately.
 
 ## Using the generated server
 
-The codegen emits a single pure router function, and adapters bridge it
-to a real HTTP framework. `api/router.route/6` takes the primitive pieces
-of a request — `state`, `method`, `path`, `query`, `headers`, `body` —
-and returns a `ServerResponse` whose `body` is a sum
-(`TextBody(String)`, `BytesBody(BitArray)`, `EmptyBody`), so binary
-endpoints carry real bytes through without a String round-trip:
+The generator writes one pure router function. `api/router.route/6` takes `state`, `method`, `path`, `query`, `headers` and `body`, and returns a `ServerResponse` whose `body` is `TextBody(String)`, `BytesBody(BitArray)` or `EmptyBody`, so binary endpoints keep their bytes:
 
 ```gleam
 import api/handlers
@@ -323,43 +245,18 @@ case response.body {
 }
 ```
 
-Because the router is pure and synchronous, it is also trivial to test
-in isolation without an HTTP server. Runnable framework-free example:
-[`examples/server_adapter`](./examples/server_adapter). Run it with
-`just example-server-adapter`.
+The router can be tested without an HTTP server. Runnable framework-free example: [`examples/server_adapter`](./examples/server_adapter), run with `just example-server-adapter`. [doc/server-adapters.md](./doc/server-adapters.md) has `mist` and `wisp` recipes.
 
-For `mist` and `wisp` recipes that decompose the framework's request
-into the six primitives and render the `ServerResponse` back, see
-[doc/server-adapters.md](./doc/server-adapters.md).
-
-The generated router parses but does not enforce `security:` declarations
-on operations — handlers must check `Authorization` / `X-Api-Key` /
-cookies themselves and return their own 401. See
-[doc/server-security.md](./doc/server-security.md) for the rationale and
-two enforcement patterns.
-
-## Best for
-
-- Generating typed Gleam clients from an OpenAPI contract
-- Keeping request and response types in sync with an external API spec
-- Bootstrapping server-side types, handlers, and router support from the
-  same source spec
-- Catching unsupported spec features early in CI instead of after code
-  generation
+The router parses `security:` declarations but does not enforce them. Handlers check `Authorization`, `X-Api-Key` or cookies and return their own 401; [doc/server-security.md](./doc/server-security.md) shows two patterns.
 
 ## Documentation
 
-- [doc/openapi-support.md](./doc/openapi-support.md) — what `oaspec`
-  supports, what it rejects, and mode-specific feature restrictions
-- [doc/configuration.md](./doc/configuration.md) — `oaspec.yaml` fields,
-  CLI flags, multi-target codegen, and the `validate` mode
-- [doc/server-adapters.md](./doc/server-adapters.md) — `mist` / `wisp`
-  adapter recipes for the generated router
-- [doc/server-security.md](./doc/server-security.md) — server-side auth
-  enforcement model and patterns
-- [doc/library-api.md](./doc/library-api.md) — using `oaspec` as a Gleam
-  library (parse → generate pipeline)
-- [examples/](./examples) — runnable examples covered by CI
+- [doc/openapi-support.md](./doc/openapi-support.md): what `oaspec` supports and rejects, and restrictions per mode
+- [doc/configuration.md](./doc/configuration.md): `oaspec.yaml` fields, CLI flags, multi-target codegen, `validate` mode
+- [doc/server-adapters.md](./doc/server-adapters.md): `mist` and `wisp` recipes for the generated router
+- [doc/server-security.md](./doc/server-security.md): enforcing auth on the server
+- [doc/library-api.md](./doc/library-api.md): the parse and generate pipeline as a library
+- [examples/](./examples): runnable examples covered by CI
 
 ## Development
 
