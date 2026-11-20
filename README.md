@@ -85,14 +85,14 @@ slsa-verifier verify-artifact --provenance-path multiple.intoto.jsonl \
 # 1. (Skip if you have your own.) Fetch a sample spec.
 curl -fSL -o openapi.yaml https://raw.githubusercontent.com/nao1215/oaspec/main/test/fixtures/petstore.yaml
 
-# 2. Create oaspec.yaml — uncomment `input:` and point it at your spec.
+# 2. Create oaspec.yaml (it reads openapi.yaml by default).
 oaspec init
 
 # 3. Generate.
 oaspec generate --config=oaspec.yaml
 ```
 
-`oaspec init` writes a commented template in which only `package: api` is set. Path fields (`input`, `output.dir`, `output.server`, `output.client`) are resolved against the working directory, not the config file's location. [doc/configuration.md](./doc/configuration.md) lists every field and CLI flag, multi-target codegen and validate mode.
+`oaspec init` writes a commented template in which only `input: openapi.yaml` and `package: api` are set. Path fields (`input`, `output.dir`, `output.server`, `output.client`) are resolved against the working directory, not the config file's location. [doc/configuration.md](./doc/configuration.md) lists every field and CLI flag, multi-target codegen and validate mode.
 
 ### Using oaspec as a library (without the CLI)
 
