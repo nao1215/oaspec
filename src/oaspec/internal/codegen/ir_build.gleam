@@ -145,13 +145,21 @@ fn request_param_field(
         Inline(NumberSchema(..)) -> "Float"
         Inline(BooleanSchema(..)) -> "Bool"
         Reference(name:, ..) -> naming.schema_to_type_name(name)
-        _ -> "String"
+        Inline(ArraySchema(..))
+        | Inline(ObjectSchema(..))
+        | Inline(AllOfSchema(..))
+        | Inline(OneOfSchema(..))
+        | Inline(AnyOfSchema(..)) -> "String"
       }
       "List(" <> item_type <> ")"
     }
     spec.ParameterSchema(Reference(name:, ..)) ->
       "types." <> naming.schema_to_type_name(name)
-    _ -> "String"
+    spec.ParameterSchema(Inline(ObjectSchema(..)))
+    | spec.ParameterSchema(Inline(AllOfSchema(..)))
+    | spec.ParameterSchema(Inline(OneOfSchema(..)))
+    | spec.ParameterSchema(Inline(AnyOfSchema(..)))
+    | spec.ParameterContent(_) -> "String"
   }
   let final_type = case param.required {
     True -> field_type
@@ -173,7 +181,7 @@ fn request_body_type(rb: spec.RequestBody(Resolved), op_id: String) -> String {
   let content_entries = sorted_entries(rb.content)
   case content_entries {
     [#(media_type_name, media_type), ..] ->
-      // Issue #485: an `application/octet-stream` request body is
+      // An `application/octet-stream` request body is
       // raw bytes — the README's mode-specific table promises
       // `BitArray`, the client wraps it in `transport.BytesBody`
       // (which expects `BitArray`), and forcing it through `String`
@@ -182,17 +190,20 @@ fn request_body_type(rb: spec.RequestBody(Resolved), op_id: String) -> String {
       // `response_inner_type` above; mirror that for the request.
       case content_type.from_string(media_type_name) {
         content_type.ApplicationOctetStream | content_type.Wildcard ->
-          case media_type.schema {
-            Some(_) -> "BitArray"
-            None -> "BitArray"
-          }
-        _ ->
+          "BitArray"
+        content_type.ApplicationJson
+        | content_type.TextPlain
+        | content_type.MultipartFormData
+        | content_type.FormUrlEncoded
+        | content_type.ApplicationXml
+        | content_type.TextXml
+        | content_type.UnsupportedContentType(_) ->
           case media_type.schema {
             Some(Reference(name:, ..)) ->
               "types." <> naming.schema_to_type_name(name)
             Some(Inline(schema_obj)) ->
               inline_request_body_type(schema_obj, op_id)
-            _ -> "String"
+            None -> "String"
           }
       }
     [] -> "String"
@@ -379,7 +390,7 @@ fn response_variant(
 ) -> Variant {
   let variant_name = type_name <> http.status_code_suffix(status_code)
   let content_entries = sorted_entries(response.content)
-  // Issue #306: when the response declares headers, the variant carries
+  // When the response declares headers, the variant carries
   // an additional typed headers record so handlers can supply values
   // and the router can serialise them onto the wire.
   let headers_type_opt = case sorted_entries(response.headers) {
@@ -387,7 +398,7 @@ fn response_variant(
     _ -> Some(variant_name <> "Headers")
   }
   let inner_type_opt = response_inner_type(content_entries, status_code, op_id)
-  // Issue #483: the OpenAPI `default` response is the catch-all for
+  // The OpenAPI `default` response is the catch-all for
   // status codes not declared explicitly. Until now its variant
   // looked like every other variant (`FooDefault(Body)`) and the
   // router pinned it to status 500, so a handler could not surface
@@ -417,7 +428,7 @@ fn response_variant(
 
 /// Resolve a response's `content` entries to the body type that the
 /// generated variant carries, or `None` for empty responses. Extracted
-/// from `response_variant` so the DefaultStatus dispatch (#483) can
+/// from `response_variant` so the DefaultStatus dispatch can
 /// reuse the same per-content-type logic.
 fn response_inner_type(
   content_entries: List(#(String, spec.MediaType)),
@@ -436,9 +447,9 @@ fn response_inner_type(
             Some(_) -> Some("String")
             None -> None
           }
-        // Issue #304: binary response payloads ride a BitArray variant
+        // Binary response payloads ride a BitArray variant
         // so handlers can produce real bytes instead of forcing the
-        // payload through `String`. Issue #504: */* shares the same
+        // payload through `String`. */* shares the same
         // path; wildcard responses are handed back as raw BitArray.
         content_type.ApplicationOctetStream | content_type.Wildcard ->
           case media_type.schema {
@@ -655,7 +666,7 @@ fn inline_enums_from_properties(
   let entries = sorted_entries(properties)
   list.filter_map(entries, fn(entry) {
     let #(prop_name, prop_ref) = entry
-    // Issue #309: a required property whose schema is an inline
+    // A required property whose schema is an inline
     // string-enum with exactly one allowed value is fully determined
     // — the dispatching union variant or the single legal wire value
     // already carries the choice. Skip emitting a tautological
@@ -723,7 +734,7 @@ fn schema_type_decls(
 ) -> List(Declaration) {
   case schema {
     ObjectSchema(metadata:, properties:, required:, additional_properties:, ..) -> {
-      // Issue #309: drop constant properties (required, inline,
+      // Drop constant properties (required, inline,
       // single-value string enums) from the generated record. The
       // value is fixed at codegen time, so encoder emits the literal
       // and decoder validates it — keeping the field would force
@@ -756,7 +767,7 @@ fn schema_type_decls(
           let is_required = list.contains(required, prop_name)
           let is_already_optional =
             schema_utils.schema_ref_is_nullable(prop_ref, ctx)
-          // Issue #321: for an inline nullable schema, `field_type`
+          // For an inline nullable schema, `field_type`
           // already includes the `Option(...)` wrapper (added inside
           // `schema_dispatch.schema_type`). For a $ref to a nullable
           // schema (which `hoist` produces for any non-trivial inline
@@ -784,7 +795,7 @@ fn schema_type_decls(
       // Add additional_properties field only when the spec opted in.
       // Forbidden (explicit false) and Unspecified (key absent) both
       // suppress the field; the latter avoids constructor-noise on
-      // closed-object schemas — see Issue #249.
+      // closed-object schemas.
       let fields = case additional_properties {
         Typed(ap_ref) -> {
           let inner_type = schema_ref_to_type(ap_ref)
@@ -1034,7 +1045,7 @@ fn schema_ref_to_type_with_inline_enum(
   ctx: Context,
 ) -> String {
   case ref {
-    // Issue #387: inline string-enum properties produce a per-property
+    // Inline string-enum properties produce a per-property
     // enum type and a bare type expression. When the spec also marks
     // the property `nullable: true`, the surrounding record wraps it
     // through `is_already_optional` — but that path assumes the type

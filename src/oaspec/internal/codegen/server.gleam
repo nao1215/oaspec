@@ -23,7 +23,7 @@ import oaspec/openapi/spec.{type Resolved, Value}
 
 /// Generate server stub files.
 ///
-/// Issue #247 splits the handler surface in two:
+/// The handler surface is split in two:
 ///
 /// - `handlers.gleam` carries user-editable panic stubs and is emitted
 ///   only on first generation (`SkipIfExists`). Re-running
@@ -130,10 +130,9 @@ fn generate_handlers(
     })
 
   // Callbacks are parsed and resolved but NOT emitted as handler stubs.
-  // The previous stubs had the shape `fn(...) -> String` with no request
-  // type, no response type, and no execution path — more misleading than
-  // useful. Callback support is now documented as parsed-but-not-codegen
-  // until a typed codegen story exists (see issue #117).
+  // A stub without request type, response type or execution path would
+  // mislead more than help, so callbacks are documented as
+  // parsed-but-not-codegen.
   se.to_string(sb)
 }
 
@@ -229,7 +228,7 @@ fn has_handler_params(operation: spec.Operation(Resolved)) -> Bool {
 
 /// Generate `handlers_generated.gleam`, a sealed delegator that the
 /// router imports. Each operation forwards to `handlers.<op_name>(req)`.
-/// Issue #247: this file carries the `// DO NOT EDIT` banner and is
+/// This file carries the `// DO NOT EDIT` banner and is
 /// always overwritten so router/handler wiring stays in sync with the
 /// spec without touching the user's `handlers.gleam`.
 fn generate_handlers_generated(
@@ -369,7 +368,7 @@ fn generate_router(
   // `ResponseBody` keeps text and binary payloads distinct end-to-end so a
   // spec that declares `application/octet-stream` or `image/*` responses
   // round-trips real bytes instead of being smuggled through `String`
-  // (issue #304). Framework adapters pattern-match on the variant to call
+  // . Framework adapters pattern-match on the variant to call
   // their text- or bytes-shaped response constructor.
   let sb =
     sb
@@ -429,7 +428,7 @@ String.",
     False -> sb
   }
 
-  // Generate route function. Issue #264 threads `app_state: handlers.State`
+  // Generate route function. It threads `app_state: handlers.State`
   // through to handler delegators. The argument is named `app_state` (not
   // `state`) because OpenAPI specs occasionally have a parameter named
   // `state` (e.g. OAuth2 flows), which would otherwise shadow the route
@@ -445,7 +444,7 @@ String.",
       <> ": Dict(String, String), "
       <> route_arg_name("body", requirements.uses_body)
       <> case requirements.has_binary_request_body {
-        // Issue #485: when any operation declares
+        // When any operation declares
         // `application/octet-stream` on its request body, the
         // router signature takes raw bytes instead of String so
         // arbitrary binary payloads round-trip without going
@@ -470,7 +469,7 @@ String.",
         !list.is_empty(operation.parameters)
         || option.is_some(operation.request_body)
 
-      // Issue #485: when the route signature is `body: BitArray`
+      // When the route signature is `body: BitArray`
       // (because some other operation in this spec declares
       // `application/octet-stream`), every non-binary arm needs to
       // shadow `body` with the String conversion at the top so the
@@ -646,8 +645,8 @@ fn generate_safe_request_and_dispatch(
     })
 
   // Open numeric-parse cases for required query params (scalar int/float
-  // and explode=true int/float arrays, plus `$ref` to string-enum schemas
-  // per issue #305). Bool / string don't need this.
+  // and explode=true int/float arrays, plus `$ref` to string-enum schemas).
+  // Bool / string don't need this.
   let sb =
     list.fold(required_query_params, sb, fn(sb, p) {
       query_required_open_parse_case(sb, p, ctx)
@@ -715,11 +714,10 @@ fn generate_safe_request_and_dispatch(
   }
 
   // Check if guard validation should be emitted for this body.
-  // Issue #292: guard validation currently only fires for $ref schemas
+  // Guard validation currently only fires for $ref schemas
   // because guards.gleam generates validators keyed by component name.
   // Inline request body schemas with constraints are decoded but NOT
-  // guard-validated; extending guards.gleam to synthesise validators for
-  // anonymous inline schemas is tracked as a follow-up.
+  // guard-validated.
   let needs_guard_validation =
     config.validate(context.config(ctx))
     && needs_body_guard
@@ -1001,7 +999,7 @@ fn query_required_open_parse_case(
       |> se.indent(4, "Ok(" <> raw_var <> "_parsed_list) -> {")
     }
     Some(ref) ->
-      // Issue #305: required `$ref` to a string-enum schema needs the
+      // Required `$ref` to a string-enum schema needs the
       // same Result-based open/close scaffolding as int / float so an
       // unknown enum value falls through to the `_ -> 400` arm in
       // `close_single_value_required_parse_case` below.
@@ -1084,7 +1082,7 @@ fn close_query_required_parse_case(
         ..,
       ))) -> close(sb)
     Some(ref) ->
-      // Issue #305: matches the open emitted in
+      // Matches the open emitted in
       // `query_required_open_parse_case` for required `$ref` to string
       // enum schemas.
       case decode_helpers.schema_ref_string_enum(ref, ctx) {
@@ -1096,9 +1094,8 @@ fn close_query_required_parse_case(
 }
 
 /// For headers / cookies, open a numeric parse case if the param schema is a
-/// scalar Integer/Number. (Header/cookie array parsing is currently a single
-/// inline `list.map(string.split(...))` expression and stays unsafe; that's
-/// out of scope for the Issue #263 fix and tracked separately.)
+/// scalar Integer/Number. Header/cookie arrays are parsed by a single inline
+/// `list.map(string.split(...))` expression and get no parse case.
 fn single_value_required_open_parse_case(
   sb: se.StringBuilder,
   p: spec.Parameter(Resolved),
@@ -1167,7 +1164,7 @@ fn close_single_value_required_parse_case(
         ..,
       ))) -> close(sb)
     Some(ref) ->
-      // Issue #305: matches the open emitted in
+      // Matches the open emitted in
       // `query_required_open_parse_case` for required `$ref` to string
       // enum schemas. Non-enum refs fall through unchanged.
       case decode_helpers.schema_ref_string_enum(ref, ctx) {
@@ -1183,7 +1180,7 @@ fn close_single_value_required_parse_case(
 /// router-side error-emit site so clients receive a structured JSON
 /// response instead of plain `Bad Request` / `Not Found` text — a
 /// schema-conformant default for specs that declare 4xx responses with
-/// `application/problem+json` content (issue #307).
+/// `application/problem+json` content.
 ///
 /// The body is emitted as a literal JSON string at codegen time —
 /// stable, allocation-free, and safe to embed because `detail` is a
@@ -1243,8 +1240,8 @@ fn generate_response_conversion(
             Value(response) -> {
               let variant_name =
                 response_type_name <> http.status_code_suffix(status_code)
-              let status_int = http.status_code_to_int(status_code)
-              // Issue #483: the OpenAPI `default` response is the only
+              let status_int = http.status_code_to_int_literal(status_code)
+              // The OpenAPI `default` response is the only
               // status whose generated variant carries a runtime status
               // code (`Foo(Int [, body] [, headers])`). The router
               // pattern grows a `status` binding and uses it as the
@@ -1347,12 +1344,12 @@ fn generate_response_conversion(
 
 /// Emit one arm of the response dispatch `case` block.
 ///
-/// Issue #306 introduces the headers plumbing: when `has_headers` is
+/// When `has_headers` is
 /// True the variant pattern grows an `hdrs` binding and the headers
 /// list is materialised via `list.flatten` so spec-declared response
 /// headers are appended to the implicit `content-type` tuple.
 ///
-/// Issue #483: when `is_default` is True the variant pattern grows a
+/// When `is_default` is True the variant pattern grows a
 /// leading `status` binding and the outgoing `ServerResponse.status`
 /// uses that bound value instead of the precomputed `status_int`. The
 /// `Foo(Int [, body] [, headers])` shape comes from `VariantDefault`
@@ -1504,20 +1501,26 @@ fn get_encode_function(schema_ref: option.Option(schema.SchemaRef)) -> String {
         Inline(schema.BooleanSchema(..)) ->
           "fn(items) { json.array(items, json.bool) }"
         // Inline non-primitive items (e.g. nested ArraySchema, anonymous
-        // ObjectSchema) at the top level of a response are not yet hoisted
-        // into reusable encoders. Falling back to the previous "json.string"
-        // shape would emit code that fails to compile against List(_); emit a
-        // homogeneous String array instead so the call still type-checks even
-        // when the items are not actually strings. Once such schemas get a
-        // hoist + per-item encoder, replace this branch.
-        _ -> "fn(items) { json.array(items, json.string) }"
+        // ObjectSchema) at the top level of a response have no reusable
+        // encoder. A homogeneous String array keeps the call type-checking
+        // against List(_), where a bare "json.string" would not compile.
+        Inline(schema.ArraySchema(..))
+        | Inline(schema.ObjectSchema(..))
+        | Inline(schema.AllOfSchema(..))
+        | Inline(schema.OneOfSchema(..))
+        | Inline(schema.AnyOfSchema(..)) ->
+          "fn(items) { json.array(items, json.string) }"
       }
     }
-    Some(Inline(schema.StringSchema(..))) -> "json.string"
     Some(Inline(schema.IntegerSchema(..))) -> "json.int"
     Some(Inline(schema.NumberSchema(..))) -> "json.float"
     Some(Inline(schema.BooleanSchema(..))) -> "json.bool"
-    _ -> "json.string"
+    Some(Inline(schema.StringSchema(..)))
+    | Some(Inline(schema.ObjectSchema(..)))
+    | Some(Inline(schema.AllOfSchema(..)))
+    | Some(Inline(schema.OneOfSchema(..)))
+    | Some(Inline(schema.AnyOfSchema(..)))
+    | None -> "json.string"
   }
 }
 

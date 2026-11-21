@@ -182,7 +182,7 @@ pub fn build_module(ctx: Context) -> GuardModule {
     False, _ -> imports
   }
 
-  // Issue #520: nested-composite and composite-list emissions use
+  // Nested-composite and composite-list emissions use
   // `list.append`/`list.reverse`/`list.fold` to merge inner failures
   // into the outer accumulator, so `gleam/list` becomes mandatory
   // whenever any schema has a Composite or CompositeList call —
@@ -560,7 +560,7 @@ fn maybe_one(value: Option(a)) -> List(a) {
 }
 
 // ---------------------------------------------------------------------------
-// #339: per-field validator de-duplication across allOf children.
+// Per-field validator de-duplication across allOf children.
 // ---------------------------------------------------------------------------
 
 /// Post-process a generated `guards.gleam` source string and collapse
@@ -600,7 +600,7 @@ fn collect_constraint_types(
 }
 
 /// Collect constraint types from a single schema ref.
-/// Issue #297: `seen` tracks visited $ref names to break circular references.
+/// `seen` tracks visited $ref names to break circular references.
 fn collect_schema_constraint_types(
   acc: ConstraintTypes,
   schema_ref: SchemaRef,
@@ -657,7 +657,7 @@ fn collect_schema_constraint_types_inner(
     | Ok(IntegerSchema(exclusive_maximum: Some(_), ..))
     | Ok(IntegerSchema(multiple_of: Some(_), ..)) ->
       ConstraintTypes(..acc, has_integer: True)
-    // Issue #521: a NumberSchema with both `minimum` and
+    // A NumberSchema with both `minimum` and
     // `multipleOf` declared was hitting the range arm first (because
     // pattern arms are tried top-down), which left
     // `has_float_multiple_of` False — the resulting `guards.gleam`
@@ -858,7 +858,7 @@ fn build_composite_guard_function(
               "    _ -> errors",
               "  }",
             ]
-            // Issue #520: nested-record validators return
+            // Nested-record validators return
             // `Result(_, List(ValidationFailure))`; merge their failure
             // list into the outer accumulator.
             Composite, True, _ -> [
@@ -885,7 +885,7 @@ fn build_composite_guard_function(
               "    _ -> errors",
               "  }",
             ]
-            // Issue #520: lists of validatable records are folded so
+            // Lists of validatable records are folded so
             // every element runs through the inner composite validator.
             CompositeList, True, _ -> [
               "  let errors = list.fold("
@@ -1008,7 +1008,7 @@ fn character_word(n: Int) -> String {
   }
 }
 
-// Issue #403: shared range-guard skeleton. The 7 build_*_guard_function
+// Shared range-guard skeleton. The 7 build_*_guard_function
 // helpers below differ only in: function-name suffix, docs phrase,
 // param / return type, the value-extraction prelude (e.g.
 // `let len = string.length(value)`), the variable that gets compared,
@@ -1384,7 +1384,7 @@ fn build_float_multiple_of_guard_function(
         ],
         param_decl: "value: Float",
         return_type: "Result(Float, ValidationFailure)",
-        // Issue #521: the prior expression
+        // The prior expression
         //   value -. float.truncate(value /. m |> int.to_float) *. m
         // was malformed — the `|> int.to_float` was applied to a
         // Float (the result of `value /. m`) instead of the Int
@@ -1939,7 +1939,7 @@ fn collect_field_guard_calls(
         ]
         False -> []
       }
-      // Issue #520: when the array's items are a `$ref` to a schema
+      // When the array's items are a `$ref` to a schema
       // that has its own composite validator, fold over the list and
       // run the inner validator on every element. Without this, an
       // out-of-range element in `Poll.options` (where each option has
@@ -1963,11 +1963,10 @@ fn collect_field_guard_calls(
       }
       list.flatten([length_calls, unique_calls, item_calls])
     }
-    // Issue #520: a property whose schema is a `$ref` to a record
+    // A property whose schema is a `$ref` to a record
     // type with its own composite validator should propagate that
-    // record's failures into the outer aggregator. Pre-fix,
-    // out-of-range nested fields slipped past `validate_<outer>`
-    // entirely.
+    // record's failures into the outer aggregator, so out-of-range
+    // nested fields do not slip past `validate_<outer>`.
     Ok(ObjectSchema(..)) ->
       case prop_ref {
         Reference(name: ref_name, ..) ->

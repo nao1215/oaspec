@@ -114,7 +114,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
       let context.AnalyzedOperation(_, operation, _, _) = op
       decode_helpers.operation_uses_multipart_body(operation)
     })
-  // Issue #485: when any operation declares
+  // When any operation declares
   // `application/octet-stream` on its request body, the route
   // function takes `body: BitArray` instead of `body: String` so
   // arbitrary binary payloads round-trip without being forced
@@ -453,7 +453,7 @@ pub fn imports(requirements: RouterRequirements, ctx: Context) -> List(String) {
     True -> list.append(std_imports, ["gleam/dynamic"])
     False -> std_imports
   }
-  // Issue #485: when the route signature is `body: BitArray`
+  // When the route signature is `body: BitArray`
   // and at least one non-binary arm exists, every non-binary
   // arm shadows `body` with
   // `bit_array.to_string(body) |> result.unwrap("")`, so both

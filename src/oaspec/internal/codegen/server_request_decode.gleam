@@ -281,7 +281,7 @@ fn query_required_expr_with_schema(
       "{ let v = " <> bound_var <> " " <> bool_parse_expr <> " }"
     Some(ref) ->
       case schema_ref_string_enum(ref, ctx) {
-        // Issue #305: required enum query params rely on the router-side
+        // Required enum query params rely on the router-side
         // open/close scaffolding (see `query_required_open_parse_case` /
         // `close_single_value_required_parse_case` in server.gleam) to
         // bind `<bound_var>_parsed` on a successful match and emit a 400
@@ -308,13 +308,12 @@ pub fn query_optional_expr(
   )
 }
 
-/// Issue #522: classify the underlying scalar kind of a SchemaRef,
+/// Classify the underlying scalar kind of a SchemaRef,
 /// resolving `$ref` to its target schema. Used by query / header /
 /// cookie parameter codegen so that ref-typed scalars get the same
 /// `int.parse` / `float.parse` / boolean parsing as their inline
-/// equivalents — not the raw-String fallback that pre-fix produced
-/// (resulting in `Expected Option(Int), Found Option(String)` build
-/// errors).
+/// equivalents instead of a raw String, which would not type-check
+/// against `Option(Int)`.
 type ScalarKind {
   IntegerScalar
   NumberScalar
@@ -336,7 +335,7 @@ fn schema_ref_scalar_kind(
 /// If `schema_ref` is a `$ref` to a string enum schema, return the
 /// generated Gleam type name and the list of enum values (in spec
 /// order). Used by query parameter codegen to emit a string→variant
-/// match for `$ref`-based enum query parameters (issue #305).
+/// match for `$ref`-based enum query parameters.
 pub fn schema_ref_string_enum(
   schema_ref: SchemaRef,
   ctx: Context,
@@ -358,7 +357,7 @@ pub fn schema_ref_string_enum(
 /// True iff any query / header / cookie parameter on any of the given
 /// operations has a `$ref` schema that resolves to a string-enum.
 ///
-/// Issue #318: the router emits `types.<EnumType><Variant>` references
+/// The router emits `types.<EnumType><Variant>` references
 /// for these parameters (see `enum_match_result_expr` and
 /// `enum_match_option_expr` below), but the import of the `types`
 /// module is gated on a separate set of features (deep object, form,
@@ -446,17 +445,12 @@ fn query_optional_expr_with_schema(
 ) -> String {
   let delim = operation_ir.delimiter_for_style(style)
   case schema_ref {
-    // Issue #526: for `style: pipeDelimited` / `style:
+    // For `style: pipeDelimited` / `style:
     // spaceDelimited` / `style: form, explode: false` (i.e. delim
-    // != ","), the previous codegen used `Ok([v, ..])` — taking
-    // only the FIRST occurrence — and `list.map(string.split(...))`
-    // — leaving empty splits as empty-string elements. Two
-    // edge-case bugs followed: `?tags=` (empty value) became
-    // `Some([""])` instead of `Some([])`, and `?tags=a&tags=b`
-    // (repeated keys) silently dropped `b`. The new shape uses
-    // `Ok(vs)` to accept ALL occurrences, flat_maps the splits
-    // across them, and filters out the empty strings produced by
-    // empty input or trailing delimiters (`?tags=foo|`).
+    // != ","), the codegen uses `Ok(vs)` to accept every occurrence
+    // (`?tags=a&tags=b` keeps `b`), flat_maps the splits across them,
+    // and filters out the empty strings produced by empty input or
+    // trailing delimiters, so `?tags=` is `Some([])`, not `Some([""])`.
     Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
       case explode {
         Some(False) ->
@@ -530,7 +524,7 @@ fn query_optional_expr_with_schema(
     Some(ref) ->
       case schema_ref_string_enum(ref, ctx) {
         Some(#(type_name, values)) -> {
-          // Issue #305: enum-typed query params need string→variant
+          // Enum-typed query params need string→variant
           // conversion. Unknown values fall through to None, matching
           // the permissive handling of malformed Int / Float optional
           // query params.
@@ -541,11 +535,10 @@ fn query_optional_expr_with_schema(
           <> " _ -> None }"
         }
         None ->
-          // Issue #522: when the `$ref` resolves to an integer /
+          // When the `$ref` resolves to an integer /
           // number / boolean schema, mirror the parse handling of
-          // the corresponding `Inline(...)` arms above. Pre-fix this
-          // path emitted `Some(v)` (a String) into a typed
-          // `Option(Int|Float|Bool)` slot, breaking `gleam build`.
+          // the corresponding `Inline(...)` arms above; a bare `Some(v)`
+          // (a String) would not fit the `Option(Int|Float|Bool)` slot.
           case schema_ref_scalar_kind(ref, ctx) {
             Some(IntegerScalar) ->
               "case dict.get(query, \""
@@ -751,7 +744,7 @@ fn deep_object_constructor_expr(
   }
   let fields = case ap_kind {
     // Forbidden and Unspecified both suppress the generated record's
-    // additional_properties field — see Issue #249.
+    // additional_properties field.
     Forbidden | Unspecified -> fields
     Untyped -> {
       let prop_names =
@@ -864,7 +857,7 @@ pub fn request_body_uses_multipart(rb: spec.RequestBody(Resolved)) -> Bool {
   dict.has_key(rb.content, "multipart/form-data")
 }
 
-/// Issue #485: an `application/octet-stream` request body is raw
+/// An `application/octet-stream` request body is raw
 /// bytes, so the router takes `body: BitArray` instead of
 /// `body: String`. The single-arm dispatch (no other content types
 /// allowed alongside binary) is enforced by the validator.
@@ -992,7 +985,7 @@ fn body_additional_properties(
 fn form_urlencoded_schema_ref_type_name(schema_ref: SchemaRef) -> String {
   case schema_ref {
     Reference(name:, ..) -> "types." <> naming.schema_to_type_name(name)
-    _ -> "String"
+    Inline(_) -> "String"
   }
 }
 
@@ -1007,7 +1000,15 @@ fn form_urlencoded_body_type_name(
           "types." <> naming.schema_to_type_name(name)
         Some(Inline(ObjectSchema(..))) ->
           "types." <> naming.schema_to_type_name(op_id) <> "Request"
-        _ -> "String"
+        Some(Inline(schema.StringSchema(..)))
+        | Some(Inline(schema.IntegerSchema(..)))
+        | Some(Inline(schema.NumberSchema(..)))
+        | Some(Inline(schema.BooleanSchema(..)))
+        | Some(Inline(schema.ArraySchema(..)))
+        | Some(Inline(schema.AllOfSchema(..)))
+        | Some(Inline(schema.OneOfSchema(..)))
+        | Some(Inline(schema.AnyOfSchema(..)))
+        | None -> "String"
       }
     // nolint: thrown_away_error -- absence of the content type falls back to the raw body type
     Error(_) -> "String"
@@ -1025,7 +1026,15 @@ fn multipart_body_type_name(
           "types." <> naming.schema_to_type_name(name)
         Some(Inline(ObjectSchema(..))) ->
           "types." <> naming.schema_to_type_name(op_id) <> "Request"
-        _ -> "String"
+        Some(Inline(schema.StringSchema(..)))
+        | Some(Inline(schema.IntegerSchema(..)))
+        | Some(Inline(schema.NumberSchema(..)))
+        | Some(Inline(schema.BooleanSchema(..)))
+        | Some(Inline(schema.ArraySchema(..)))
+        | Some(Inline(schema.AllOfSchema(..)))
+        | Some(Inline(schema.OneOfSchema(..)))
+        | Some(Inline(schema.AnyOfSchema(..)))
+        | None -> "String"
       }
     // nolint: thrown_away_error -- absence of the content type falls back to the raw body type
     Error(_) -> "String"
@@ -1079,7 +1088,7 @@ fn form_urlencoded_object_constructor_expr(
     |> string.join(", ")
   let additional_props_suffix = case additional_properties {
     // Forbidden and Unspecified both mean the generated record has no
-    // additional_properties field — Issue #249.
+    // additional_properties field.
     Forbidden | Unspecified -> ""
     Typed(_) | Untyped -> ", additional_properties: dict.new()"
   }
@@ -1226,7 +1235,7 @@ fn multipart_body_constructor_expr(
     body_additional_properties(rb, "multipart/form-data", ctx)
   {
     // Forbidden and Unspecified both mean the generated record has no
-    // additional_properties field — Issue #249.
+    // additional_properties field.
     Forbidden | Unspecified -> ""
     Typed(_) | Untyped -> ", additional_properties: dict.new()"
   }
@@ -1366,9 +1375,9 @@ pub fn query_schema_needs_int(
     Some(Inline(schema.IntegerSchema(..))) -> True
     Some(Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..))) ->
       True
-    // Issue #522: a `$ref` whose target is `type: integer` triggers
+    // A `$ref` whose target is `type: integer` triggers
     // `int.parse` emission downstream, so the router needs the
-    // `gleam/int` import. Pre-fix, only inline scalars were detected.
+    // `gleam/int` import too.
     Some(Reference(..) as ref) ->
       case schema_ref_scalar_kind(ref, ctx) {
         Some(IntegerScalar) -> True
@@ -1428,10 +1437,10 @@ fn multipart_body_optional_expr_with_schema(
 }
 
 /// Inline string-enum dispatch for a required form/multipart body
-/// field (issue #482). When the dict is missing the key, or the value
+/// field. When the dict is missing the key, or the value
 /// is outside the spec's enum set, falls back to the first variant —
 /// mirroring the type-zero fallback used for primitive required body
-/// fields (#327). The handler is responsible for any stricter
+/// fields. The handler is responsible for any stricter
 /// validation.
 fn body_required_enum_expr(
   lookup: String,
@@ -1460,9 +1469,9 @@ fn body_required_enum_expr(
 }
 
 /// Inline string-enum dispatch for an optional form/multipart body
-/// field (issue #482). Unknown values map to `None`, matching the
+/// field. Unknown values map to `None`, matching the
 /// permissive behaviour already used for `$ref`-typed enum query
-/// parameters (#305).
+/// parameters.
 fn body_optional_enum_expr(
   lookup: String,
   miss: String,
@@ -1484,12 +1493,10 @@ fn body_optional_enum_expr(
 /// used raw (multipart).
 ///
 /// The emitted snippet falls back to a per-type default when the body
-/// dict is missing the key or the inner parse fails. The previous
-/// `let assert Ok(...)` shape would crash the BEAM process on a malformed
-/// request body; the safe-default shape returns the type-zero
-/// (empty string / 0 / 0.0 / False / empty list) so the handler can
-/// still answer rather than aborting. Validation of those defaults is
-/// the application's job. (#327)
+/// dict is missing the key or the inner parse fails: the type-zero
+/// (empty string / 0 / 0.0 / False / empty list), so the handler can
+/// still answer rather than the process crashing. Validation of those defaults is
+/// the application's job.
 fn body_required_expr(
   key: String,
   source: String,
@@ -1499,7 +1506,7 @@ fn body_required_expr(
 ) -> String {
   let lookup = "dict.get(" <> source <> ", \"" <> key <> "\")"
   let base = "case " <> lookup <> " { Ok([v, ..]) -> v _ -> \"\" }"
-  // Issue #482: a `$ref`-typed string-enum field must dispatch to the
+  // A `$ref`-typed string-enum field must dispatch to the
   // generated sum-type variant. Without this branch the codegen falls
   // through to `base` (raw String), which fails `gleam check` because
   // the field's compile-time type is `types.<EnumName>`.
@@ -1578,7 +1585,7 @@ fn body_optional_expr(
   ctx: Context,
 ) -> String {
   let lookup = "dict.get(" <> source <> ", \"" <> key <> "\")"
-  // Issue #482: as in `body_required_expr`, a `$ref`-typed string-enum
+  // As in `body_required_expr`, a `$ref`-typed string-enum
   // field needs string→variant dispatch. Without this branch the field
   // ends up as `Some(v)` where `v: String` clashes with the
   // `Option(types.<EnumName>)` slot.
@@ -1664,7 +1671,7 @@ fn body_optional_expr_kind(
 
 /// Parse expression for array items: int, with optional trimming.
 /// Uses a case expression instead of `let assert` to avoid panicking on
-/// malformed input — bad values fall back to 0 (#291).
+/// malformed input — bad values fall back to 0.
 fn array_item_int_parse(trim: Bool) -> String {
   use <- bool.guard(!trim, "case int.parse(item) { Ok(n) -> n _ -> 0 }")
   "let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 }"
@@ -1672,7 +1679,7 @@ fn array_item_int_parse(trim: Bool) -> String {
 
 /// Parse expression for array items: float, with optional trimming.
 /// Uses a case expression instead of `let assert` to avoid panicking on
-/// malformed input — bad values fall back to 0.0 (#291).
+/// malformed input — bad values fall back to 0.0.
 fn array_item_float_parse(trim: Bool) -> String {
   use <- bool.guard(!trim, "case float.parse(item) { Ok(n) -> n _ -> 0.0 }")
   "let trimmed = string.trim(item) case float.parse(trimmed) { Ok(n) -> n _ -> 0.0 }"

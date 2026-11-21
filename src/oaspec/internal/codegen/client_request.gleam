@@ -218,7 +218,7 @@ pub fn to_str_for_optional_value(
 
 /// Get the Gleam type for a request body parameter.
 ///
-/// Issue #485: an `application/octet-stream` request body is raw
+/// An `application/octet-stream` request body is raw
 /// bytes — the README's mode-specific table promises `BitArray`,
 /// the client wraps it in `transport.BytesBody` (which expects
 /// `BitArray`), and forcing it through `String` means arbitrary
@@ -382,7 +382,7 @@ pub fn multipart_field_is_binary(
   }
 }
 
-/// Issue #503: dispatch each multipart field by its high-level shape so
+/// Dispatch each multipart field by its high-level shape so
 /// the generator can emit per-element parts for arrays and a single
 /// JSON-encoded part for objects, while keeping the existing scalar /
 /// binary paths unchanged.
@@ -478,7 +478,7 @@ fn emit_multipart_simple_field(
   }
 }
 
-/// Issue #503: emit one multipart part per element of an array field,
+/// Emit one multipart part per element of an array field,
 /// folding the input list into the running `parts` accumulator. Each
 /// element shares the field name (`name="expand"` repeated) so the
 /// receiver assembles the array from the repeated parts. Optional
@@ -519,7 +519,7 @@ fn emit_multipart_array_field(
   }
 }
 
-/// Issue #503: emit a multipart part for an object field. Per OAS 3
+/// Emit a multipart part for an object field. Per OAS 3
 /// the default serialization is a single part with
 /// `Content-Type: application/json` carrying the JSON-encoded value.
 /// The encoder name is derived from the post-hoist schema reference;
@@ -862,7 +862,7 @@ fn emit_form_object_recurse(
         let sub_key_quoted =
           key_prefix_quoted <> " <> \"[" <> prop_name <> "]\""
         let nested_parent = parent_path <> "_" <> prop_field
-        // Issue #309: a required inline single-value string-enum is
+        // A required inline single-value string-enum is
         // dropped from the record but still has to land on the wire,
         // so emit a literal `<key>=<value>` form part instead of
         // accessing `record.<prop>` (which no longer exists).
@@ -1314,7 +1314,7 @@ fn emit_bracket_props(
           _ -> False
         }
         let nested_parent = parent_path <> "_" <> prop_field
-        // Issue #309: a required inline single-value string-enum is
+        // A required inline single-value string-enum is
         // dropped from the record but still has to land on the wire.
         // Recurse the constant-property emission here so the bracket
         // path still produces `<key>[<prop>]=<constant>`.
@@ -1561,7 +1561,7 @@ pub fn generate_form_urlencoded_body(
       let #(field_name, field_schema) = prop
       let gleam_field = naming.to_snake_case(field_name)
       let is_required = list.contains(required_fields, field_name)
-      // Issue #309: a required inline single-value string-enum is
+      // A required inline single-value string-enum is
       // dropped from the generated record but still has to land on
       // the wire. Emit it as a literal `<field>=<value>` form part
       // so the field is sent without trying to read a body field
@@ -1948,7 +1948,7 @@ pub fn generate_exploded_array_query_param(
 /// primitive (object / array / composite) shape via the JSON escape
 /// hatch — the entire list is JSON-encoded into a single value
 /// (`<param>=<JSON array string>`). This matches the form-urlencoded
-/// composite path (PR #542) and keeps the generator from panicking
+/// composite path and keeps the generator from panicking
 /// in `to_string_fn` on non-primitive items.
 fn emit_json_array_query_param(
   sb: se.StringBuilder,

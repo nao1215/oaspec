@@ -25,10 +25,10 @@ import oaspec/openapi/spec.{
 /// Returns errors for unsupported features and warnings for parsed-but-unused features.
 ///
 /// The `index` carries YAML line/column information used to attach
-/// `SourceLoc` to each diagnostic (Issue #411). Callers that genuinely
+/// `SourceLoc` to each diagnostic. Callers that genuinely
 /// have no source-location data (e.g. tests that synthesise a
 /// `OpenApiSpec` directly) can pass `location_index.empty()`; every
-/// diagnostic will then carry `NoSourceLoc`, matching pre-#411 behaviour.
+/// diagnostic will then carry `NoSourceLoc`.
 pub fn check(
   spec: OpenApiSpec(Resolved),
   index: LocationIndex,
@@ -497,9 +497,8 @@ pub fn check_preserved(ctx: Context, index: LocationIndex) -> List(Diagnostic) {
             severity: SeverityWarning,
             target: TargetBoth,
             path: "components.headers",
-            // Issue #306 wired response headers through to the
-            // generated router, so component headers `$ref`'d from a
-            // response.headers entry now reach the wire. Standalone
+            // Component headers `$ref`'d from a response.headers entry
+            // reach the wire through the generated router. Standalone
             // component header definitions that aren't referenced by
             // any response are still dropped on the floor.
             detail: "Component headers are wired into generated code only when referenced from a response.headers entry; standalone definitions are not surfaced.",

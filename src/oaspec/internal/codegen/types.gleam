@@ -1,11 +1,6 @@
-//// Type-module generation entry point.
-////
-//// Issue #419: previously this module also re-exported a dozen
-//// `schema_utils` / `schema_dispatch` / `allof_merge` helpers as
-//// passthrough wrappers, which made "where does this helper live?" a
-//// guessing game (`schema_ref_is_read_only` was exported from both
-//// `schema_utils` and `types`, etc.). Callers now import the
-//// underlying modules directly; only `generate/1` lives here.
+//// Type-module generation entry point. Only `generate/1` lives here;
+//// the schema helpers live in `schema_utils`, `schema_dispatch` and
+//// `allof_merge`.
 
 import oaspec/internal/codegen/context.{
   type Context, type GeneratedFile, GeneratedFile,

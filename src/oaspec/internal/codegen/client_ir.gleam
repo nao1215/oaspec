@@ -113,7 +113,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
       }
     })
 
-  // Issue #503: a multipart body with `array` properties uses
+  // A multipart body with `array` properties uses
   // `list.fold(...)` to expand into per-element parts, and `object`
   // properties use `json.to_string(encode.encode_<schema>_json(...))`
   // to emit a JSON-bodied part. Surface those needs to the import
@@ -135,7 +135,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
   let has_multipart_optional_complex_field =
     multipart_has_optional_complex_field(operations, ctx)
 
-  // Issue #502: deepObject parameters expand each property into a
+  // DeepObject parameters expand each property into a
   // bracketed-bracketed query entry; optional outer or inner
   // properties wrap the emission in `Some(_) -> ... None -> query`
   // arms so the import set must carry the option constructors.
@@ -150,7 +150,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
       })
     })
 
-  // Issue #387: when any response declares `headers:`, the client
+  // When any response declares `headers:`, the client
   // assembles a typed headers record by calling `list.key_find` on
   // `resp.headers`. That makes `gleam/list` mandatory and (for any
   // optional header field) brings `Some`/`None` into the body of the
@@ -187,7 +187,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     has_form_urlencoded
     || has_multi_content_response
     || has_response_headers
-    // Issue #503: array fields fold the input via list.fold; object
+    // Array fields fold the input via list.fold; object
     // fields don't need list directly but other multipart paths might.
     || has_multipart_array_field
     || list.any(all_params, fn(p) { p.in_ == spec.InQuery })
@@ -208,7 +208,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
           Value(response) ->
             list.any(dict.to_list(response.content), fn(ce) {
               let #(media_type_name, mt) = ce
-              // Issue #504: */* and application/octet-stream responses
+              // */* and application/octet-stream responses
               // decode through `bytes_body`, not `dyn_decode`, so they
               // must not pull the dynamic-decode import in even when
               // their inline schema is a primitive.
@@ -217,14 +217,9 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
                 ct_util.ApplicationOctetStream | ct_util.Wildcard -> False
                 _ ->
                   case mt.schema {
-                    // Issue #493 / CodeRabbit follow-up: array
-                    // responses keyed by `$ref` items also go
-                    // through `dyn_decode.list(...)` now (instead
-                    // of the synthetic `decode_<name>_list`
-                    // wrapper), so the import must fire for them
-                    // too. Without this, generated client code
-                    // references `dyn_decode.list` without
-                    // importing the module.
+                    // Array responses keyed by `$ref` items also go
+                    // through `dyn_decode.list(...)`, so the import
+                    // must fire for them too.
                     Some(Inline(schema.ArraySchema(items: _, ..))) -> True
                     Some(Inline(schema.StringSchema(..))) -> True
                     Some(Inline(schema.IntegerSchema(..))) -> True
@@ -257,13 +252,13 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
 
   // Query / header / cookie array params with non-primitive items
   // and deepObject params with composite sub-properties both emit
-  // `json.to_string(...)` from PR #543's residual-shapes fixes.
+  // `json.to_string(...)`.
   let has_param_json_escape =
     list.any(all_params, fn(p) { param_uses_json_escape(p, ctx) })
 
   let needs_json =
     needs_dyn_decode
-    // Issue #503: object multipart fields are JSON-encoded into one part,
+    // Object multipart fields are JSON-encoded into one part,
     // pulling in json.to_string + the per-schema encoder.
     || has_multipart_object_field
     || has_form_urlencoded_json_escape
@@ -274,7 +269,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
         Some(Value(rb)) ->
           list.any(dict.to_list(rb.content), fn(ce) {
             let #(ct_name, mt) = ce
-            // Issue #485: an `application/octet-stream` body is
+            // An `application/octet-stream` body is
             // wrapped via `transport.BytesBody`, not
             // `json.to_string`, so a `type: string, format: binary`
             // request body must not pull in `gleam/json`.
@@ -308,7 +303,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
   // appearing in client function SIGNATURES. Optional response
   // headers do not surface in signatures (only as `Some`/`None`
   // constructors inside function bodies), so they are not added
-  // here — Issue #387.
+  // here.
   let needs_option_type =
     import_analysis.operations_have_optional_params(operations)
     || import_analysis.operations_have_optional_body(operations)
@@ -316,10 +311,10 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     needs_option_type
     || has_optional_response_headers
     || any_operation_has_server(ctx)
-    // Issue #503: optional multipart object/array fields wrap the
+    // Optional multipart object/array fields wrap the
     // per-field emission in a `Some(v) -> ... None -> parts` arm.
     || has_multipart_optional_complex_field
-    // Issue #502: deepObject params unwrap optional outer / inner
+    // DeepObject params unwrap optional outer / inner
     // properties through `Some(...) -> ... None -> query`.
     || has_deep_object_param
   let needs_none_ctor =
@@ -329,7 +324,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     || has_multipart_optional_complex_field
     || has_deep_object_param
 
-  // Issue #387: typed response headers (`type: integer`, `type: number`)
+  // Typed response headers (`type: integer`, `type: number`)
   // are extracted via `int.parse` / `float.parse`, so we must import
   // those modules whenever any operation declares such a header.
   let has_int_response_header =
@@ -518,7 +513,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
   )
 }
 
-/// Issue #503: predicate helpers for multipart object/array fields.
+/// Predicate helpers for multipart object/array fields.
 /// Detects whether any operation has a multipart/form-data body
 /// containing a property whose resolved schema matches `pred`.
 fn multipart_has_field(
@@ -757,7 +752,7 @@ fn ref_contains_composite(ref: schema.SchemaRef, ctx: Context) -> Bool {
   }
 }
 
-/// Issue #519: predicate helper for deepObject query parameter
+/// Predicate helper for deepObject query parameter
 /// sub-properties. Detects whether any deepObject query parameter has
 /// a (recursively-nested) property whose resolved schema matches
 /// `pred`. The deepObject codegen path emits `int.to_string` /

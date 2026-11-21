@@ -1,6 +1,5 @@
-/// Shared schema analysis utilities used by types.gleam and ir_build.gleam.
-/// Extracted to break the import-cycle that previously forced ir_build.gleam
-/// to mirror these helpers from types.gleam.
+/// Shared schema analysis utilities used by types.gleam, ir_build.gleam
+/// and the other codegen modules.
 import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -177,7 +176,7 @@ pub fn schema_has_optional_fields(schema_ref: SchemaRef, ctx: Context) -> Bool {
   )
 }
 
-/// Issue #309: detect a property that is fully determined by the
+/// Detect a property that is fully determined by the
 /// schema — an inline string-enum with exactly one allowed value that
 /// the parent schema lists as required. Such a property is a constant
 /// marker on the wire (e.g. a `kind: type: string, enum: [text]`

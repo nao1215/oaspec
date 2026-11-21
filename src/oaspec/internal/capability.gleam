@@ -293,9 +293,9 @@ pub fn registry() -> List(Capability) {
       "Operation-level and components.callbacks are parsed and preserved (including `$ref` to `#/components/callbacks/...`) but no code is generated for callback endpoints",
     ),
     Capability("xml", "scope", NotHandled, "XML annotations ignored"),
-    // operation-level and path-level server overrides are supported as of #96
-    // (generated clients resolve operation > path > top-level). They are no
-    // longer listed here — absence from the registry means Supported.
+    // Operation-level and path-level server overrides are supported
+    // (generated clients resolve operation > path > top-level); absence
+    // from the registry means Supported.
     Capability(
       "response headers",
       "scope",

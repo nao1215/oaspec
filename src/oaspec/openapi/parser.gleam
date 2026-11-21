@@ -49,8 +49,8 @@ pub fn parse_file(path: String) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
 }
 
 /// Combined `parse_file` entry point that accepts a `Reporter` and
-/// also returns the top-level YAML `LocationIndex`. Issue #411 +
-/// #352. The CLI uses this so capability-check diagnostics surface
+/// also returns the top-level YAML `LocationIndex`.
+/// The CLI uses this so capability-check diagnostics surface
 /// `path:line:column:` and progress lines on big specs at the same
 /// time. Library callers that don't need progress should pass
 /// `progress.noop()`; callers that don't need locations can discard
@@ -203,13 +203,12 @@ fn cyclic_external_ref_diagnostic(
 ///   before any parser work begins, so a 100 MB pathological input
 ///   is rejected before yamerl or `json:decode/3` allocates a tree.
 ///
-/// Documented but **not yet enforced** (future work — issue #553
+/// Documented but **not yet enforced** (future work
 /// tracks the rest):
 ///
 /// - `max_schema_depth`, `max_allof_chain`, `max_external_ref_hops`,
-///   `max_paths`, `max_parameters_per_op`. Constructing these limits
-///   in the type today lets callers pin the contract; the parser
-///   will start enforcing them in follow-up PRs.
+///   `max_paths`, `max_parameters_per_op`. These are carried in the
+///   type but not enforced.
 pub type ParseLimits {
   ParseLimits(
     max_input_bytes: Int,
@@ -246,15 +245,14 @@ pub fn default_limits() -> ParseLimits {
 /// Parse an OpenAPI spec from a YAML/JSON string. The default path
 /// runs the input through yamerl, which preserves YAML semantics and
 /// source locations but is too slow on large JSON specs (the GitHub
-/// REST OpenAPI is ~12 MB and yamerl effectively hangs — see issue
-/// #352). Use `parse_json_string` directly when the content is known
+/// REST OpenAPI is ~12 MB and yamerl effectively hangs). Use `parse_json_string` directly when the content is known
 /// to be JSON.
 ///
 /// `parse_string` does **not** apply the DoS limits documented in
 /// `ParseLimits`. Reach for `parse_string_with_limits` when the input
 /// is attacker-controlled or sourced from an untrusted file system
 /// (admin-uploaded specs, contract-validation pipelines, CI runners
-/// over user-supplied specs) — see issue #553.
+/// over user-supplied specs).
 ///
 /// **YAML 1.1 type coercion: parse_string vs parse_json_string.**
 /// yamerl applies YAML 1.1 implicit-type rules to scalars before they
@@ -281,7 +279,7 @@ pub fn default_limits() -> ParseLimits {
 /// `OpenApiSpec(Unresolved)` and does not verify that every `$ref`
 /// points at an existing component or that schema-level reference
 /// chains terminate. Reach for `parse_string_resolved` when the caller
-/// also wants missing-target and circular-reference detection. (#616)
+/// also wants missing-target and circular-reference detection.
 pub fn parse_string(
   content: String,
 ) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
@@ -291,7 +289,7 @@ pub fn parse_string(
 
 /// Same as `parse_string` but also returns the YAML `LocationIndex`
 /// built from the input. Caller-side companion to
-/// `parse_file_with_locations` (Issue #411).
+/// `parse_file_with_locations`.
 pub fn parse_string_with_locations(
   content: String,
 ) -> Result(#(OpenApiSpec(Unresolved), LocationIndex), Diagnostic) {
@@ -325,7 +323,7 @@ pub fn parse_string_with_locations(
 /// spec for downstream traversal (validators, doc generators, ad-hoc
 /// inspection). Reach for plain `parse_string` only when the structural
 /// shape is enough — for example, when the caller intends to mutate
-/// the spec before resolving it. (#616)
+/// the spec before resolving it.
 pub fn parse_string_resolved(
   content: String,
 ) -> Result(OpenApiSpec(Resolved), Diagnostic) {
@@ -361,8 +359,7 @@ fn first_diagnostic(errors: List(Diagnostic)) -> Diagnostic {
 
 /// Parse an OpenAPI spec with DoS-aware resource limits. Currently
 /// enforces `limits.max_input_bytes` before parsing begins; the other
-/// fields on `ParseLimits` are reserved for future enforcement (see
-/// issue #553).
+/// fields on `ParseLimits` are not enforced.
 ///
 /// The byte cap is checked via `string.byte_size` so the function
 /// returns immediately on oversized input rather than handing it to
@@ -401,7 +398,7 @@ fn enforce_input_byte_limit(
 /// Parse an OpenAPI spec from a JSON string using OTP's native JSON
 /// decoder instead of yamerl. Roughly two orders of magnitude faster
 /// than `parse_string` on large specs because the YAML pre-processing
-/// and constructor passes are skipped (issue #352). Behaves like
+/// and constructor passes are skipped. Behaves like
 /// `parse_string` once the tree is built — same `OpenApiSpec` shape,
 /// same downstream pipeline. Diagnostics from this path do not carry
 /// source line/column info because OTP `json:decode/3` does not
@@ -488,7 +485,7 @@ fn parse_to_node(
     // encoding `yay.YamlError` is documented to carry. Calling
     // `yay.parse_string` directly here would crash the BEAM with a
     // `case_clause` for any input that triggers the alias /
-    // anchor resolution path (Issue #576) — a one-line malformed
+    // anchor resolution path — a one-line malformed
     // YAML payload can DoS a server-side spec validator. The
     // adapter is local to this module; the rest of the parser
     // keeps consuming the documented `yay.YamlError` surface.
@@ -577,7 +574,7 @@ fn parse_root(
   // `validate` subcommand and downstream codegen do not silently
   // accept a 3.0 document with no operations. Run after `parse_info`
   // so a spec missing both reports the info-missing error first
-  // (matches existing diagnostic priority). (#580 case A)
+  // (matches existing diagnostic priority).
   use _ <- result.try(case is_openapi_3_0(openapi) {
     True -> require_paths_present(node, index)
     False -> Ok(Nil)
@@ -589,7 +586,7 @@ fn parse_root(
   // OAS 3.0 §4.7.7.1: component map keys MUST match `^[a-zA-Z0-9._-]+$`.
   // Walking the parsed Components dicts is enough — invalid keys would
   // already be there. Validate-after-parse keeps the per-map parsers
-  // unchanged and centralises the diagnostic. (#591)
+  // unchanged and centralises the diagnostic.
   use _ <- result.try(case components {
     Some(c) -> validate_component_keys(c, index)
     None -> Ok(Nil)
@@ -611,18 +608,18 @@ fn parse_root(
   use paths <- result.try(parse_paths(node, components, index))
   // OAS 3.0 §4.7.10.1: operationId MUST be unique across all operations
   // in the API. Collect from every Value(PathItem) — Ref entries skipped
-  // since the resolved operationId is not visible at parse time. (#591)
+  // since the resolved operationId is not visible at parse time.
   use _ <- result.try(validate_unique_operation_ids(paths, index))
   // OAS 3.0 §4.7.12.1: every templated path variable MUST correspond to
   // a parameter included in the parameters list, and conversely every
   // `in: path` parameter MUST reference a variable that exists in the
   // path template. Path-level and operation-level parameters are merged
-  // per operation before the cross-check. (#594)
+  // per operation before the cross-check.
   use _ <- result.try(validate_path_template_params(paths, index))
   // OAS 3.0 §4.7.9.1: templated paths with the same hierarchy but
   // different placeholder names are identical — `/users/{id}` and
   // `/users/{name}` collide on the same routing template. Reject the
-  // collision so codegen does not emit two handlers for one route. (#593)
+  // collision so codegen does not emit two handlers for one route.
   use _ <- result.try(validate_unique_path_templates(paths, index))
   use servers <- result.try(parse_servers(node, index))
   use security <- result.try(parse_security_requirements(node, "", index))
@@ -675,8 +672,8 @@ fn is_supported_openapi_version(version: String) -> Bool {
         _ -> False
       }
     // Two-segment "3.0" / "3.1" is tolerated for authors who quote the
-    // short form intentionally (`openapi: '3.0'`). The unquoted YAML
-    // float path that this branch originally served was removed in #583.
+    // short form intentionally (`openapi: '3.0'`). An unquoted `3.0` is
+    // a YAML float and is rejected before this check.
     ["3", "0"] | ["3", "1"] -> True
     _ -> False
   }
@@ -684,11 +681,8 @@ fn is_supported_openapi_version(version: String) -> Bool {
 
 /// Extract the root `openapi` field. The OAS 3.0 / 3.1 schema requires
 /// this field to be a string, and both parsers enforce that contract
-/// uniformly. The YAML caller used to fall back to `extract_float` so
-/// an unquoted `openapi: 3.0` (which yamerl resolves as a float) would
-/// coerce back to `"3.0"`; that lenient path was the YAML-side of the
-/// #580 asymmetry and #583 closes it. Authors who relied on unquoted
-/// version numbers must quote them (`openapi: '3.0'`).
+/// uniformly. An unquoted `openapi: 3.0` is a YAML float and is
+/// rejected, so version numbers must be quoted (`openapi: '3.0'`).
 fn extract_openapi_field(
   node: yay.Node,
   index: LocationIndex,
@@ -699,7 +693,7 @@ fn extract_openapi_field(
     _,
     path: "",
     field: "openapi",
-    loc: loc,
+    location: loc,
   ))
 }
 
@@ -749,11 +743,10 @@ fn require_paths_present(
 }
 
 /// OAS 3.0 §4.7.7.1: keys of the maps inside `components` MUST match
-/// `^[a-zA-Z0-9._-]+$`. Pre-fix, arbitrary strings (empty, whitespace,
-/// `/`, `@`, non-ASCII) flowed into the codegen and produced Gleam
-/// identifiers the type system would reject. The check runs after the
+/// `^[a-zA-Z0-9._-]+$`. Other strings (empty, whitespace, `/`, `@`,
+/// non-ASCII) would become Gleam identifiers the compiler rejects. The check runs after the
 /// per-map parsers populate the Dicts and rejects the first
-/// non-conforming key. (#591)
+/// non-conforming key.
 fn validate_component_keys(
   components: Components(Unresolved),
   index: LocationIndex,
@@ -801,6 +794,7 @@ fn check_component_keys(
 ) -> Result(Nil, Diagnostic) {
   // nolint: assert_ok_pattern -- the component-key regex is a fixed, known-valid literal
   let assert Ok(re) = regexp.from_string("^[a-zA-Z0-9._-]+$")
+    as "the component key regex literal compiles"
   dict.keys(m)
   |> list.try_fold(Nil, fn(_, key) {
     case regexp.check(with: re, content: key) {
@@ -862,7 +856,7 @@ fn validate_security_scheme_types(
 
 /// Collect every Value(PathItem) operationId across the paths Dict and
 /// reject the first duplicate. Ref entries are skipped because the
-/// resolved operationId is not visible at parse time. (#591)
+/// resolved operationId is not visible at parse time.
 fn validate_unique_operation_ids(
   paths: Dict(String, RefOr(PathItem(Unresolved))),
   index: LocationIndex,
@@ -899,7 +893,7 @@ fn validate_unique_operation_ids(
 /// effective parameter set per operation is the path-level list plus
 /// the operation's own list. Inline parameters only; `Ref` entries
 /// are skipped because the resolved (name, in) is invisible here.
-/// (#594)
+///
 fn validate_path_template_params(
   paths: Dict(String, RefOr(PathItem(Unresolved))),
   index: LocationIndex,
@@ -910,12 +904,12 @@ fn validate_path_template_params(
     case ref_or_pi {
       Ref(_) -> Ok(Nil)
       Value(pi) ->
-        // The path-template walker (#588) rejected malformed paths
+        // The path-template walker rejected malformed paths
         // already, so reaching this point implies the path parses;
         // any extractor error is treated as "no placeholders" rather
         // than re-emitted.
         case extract_placeholder_names(path, "", False, []) {
-          // nolint: thrown_away_error -- the path-template walker (#588) already surfaced any extractor error upstream
+          // nolint: thrown_away_error -- the path-template walker already surfaced any extractor error upstream
           Error(_) -> Ok(Nil)
           Ok(path_vars) -> validate_path_item_params(path, path_vars, pi, index)
         }
@@ -1045,7 +1039,7 @@ fn cross_check_path_vs_params(
 /// Reject `paths:` entries that share the same routing template after
 /// the placeholder names are erased. `/users/{id}` and `/users/{name}`
 /// produce the same `/users/{}` signature and therefore collapse onto
-/// one HTTP route. (#593)
+/// one HTTP route.
 fn validate_unique_path_templates(
   paths: Dict(String, RefOr(PathItem(Unresolved))),
   index: LocationIndex,
@@ -1073,7 +1067,7 @@ fn validate_unique_path_templates(
 fn normalise_path_template(path: String) -> String {
   case normalise_path_template_loop(path, "", False) {
     Ok(s) -> s
-    // The placeholder walker (#588) already rejected malformed paths,
+    // The placeholder walker already rejected malformed paths,
     // so reaching this branch means the input was either well-formed
     // (handled above) or already-unparseable (in which case returning
     // the raw path is enough — it cannot collide with another well-
@@ -1155,7 +1149,7 @@ fn parse_info(
       _,
       path: "",
       field: "info",
-      loc: location_index.lookup_field(index, "", "info"),
+      location: location_index.lookup_field(index, "", "info"),
     )),
   )
 
@@ -1165,7 +1159,7 @@ fn parse_info(
       _,
       path: "info",
       field: "title",
-      loc: location_index.lookup_field(index, "info", "title"),
+      location: location_index.lookup_field(index, "info", "title"),
     )),
   )
 
@@ -1175,7 +1169,7 @@ fn parse_info(
       _,
       path: "info",
       field: "version",
-      loc: location_index.lookup_field(index, "info", "version"),
+      location: location_index.lookup_field(index, "info", "version"),
     )),
   )
 
@@ -1223,7 +1217,7 @@ fn parse_server(
       _,
       path: "servers",
       field: "url",
-      loc: location_index.lookup_field(index, "servers", "url"),
+      location: location_index.lookup_field(index, "servers", "url"),
     )),
   )
 
@@ -1245,8 +1239,7 @@ fn parse_paths(
       // Path keys are URL templates that MUST be unique per OAS.
       // yamerl silently keeps the last duplicate, so without this check
       // the user's earlier definition disappears into undefined
-      // behaviour. Mirror of the #573 duplicate-key guard on the
-      // responses surface. (#584)
+      // behaviour. Same duplicate-key guard as on responses.
       use _ <- result.try(check_unique_yaml_keys(
         entries: entries,
         path: "paths",
@@ -1286,7 +1279,7 @@ fn parse_paths(
     // marks Paths Object as `"type": "object"`, so a list / scalar /
     // null value here is a spec violation. Reject loudly so the
     // `validate` subcommand and downstream codegen do not silently
-    // produce empty output. (#580 case C)
+    // produce empty output.
     Ok(other) ->
       Error(diagnostic.invalid_value(
         path: "paths",
@@ -1302,11 +1295,8 @@ fn parse_paths(
 }
 
 /// Validate that a `paths:` key conforms to the OAS 3.0 §4.7.9.1 path
-/// templating grammar. The parser used to forward any string to the
-/// codegen pipeline, which then emitted routes the HTTP layer cannot
-/// serve (no leading slash, embedded `?` / `#`, whitespace, malformed
-/// `{var}` placeholders, ...). The checks here cover the deviations
-/// listed in #588:
+/// templating grammar, so codegen never emits a route the HTTP layer
+/// cannot serve. The checks:
 ///
 /// - non-empty,
 /// - starts with `/`,
@@ -1430,10 +1420,19 @@ fn extract_placeholder_names(
   }
 }
 
+/// A placeholder name is one or more ASCII letters, digits, `_` or `-`.
 fn is_valid_placeholder_name(name: String) -> Bool {
-  // nolint: assert_ok_pattern -- the placeholder grammar regex is a fixed, known-valid literal
-  let assert Ok(re) = regexp.from_string("^[A-Za-z0-9_-]+$")
-  regexp.check(with: re, content: name)
+  name != ""
+  && string.to_utf_codepoints(name)
+  |> list.all(fn(codepoint) {
+    case string.utf_codepoint_to_int(codepoint) {
+      c if c >= 0x30 && c <= 0x39 -> True
+      c if c >= 0x41 && c <= 0x5A -> True
+      c if c >= 0x61 && c <= 0x7A -> True
+      0x5F | 0x2D -> True
+      _ -> False
+    }
+  })
 }
 
 fn has_duplicate_name(
@@ -1573,7 +1572,7 @@ fn parse_operation_at(
       _,
       path:,
       field: method_key,
-      loc: location_index.lookup_field(index, path, method_key),
+      location: location_index.lookup_field(index, path, method_key),
     )),
   )
 
@@ -1679,7 +1678,7 @@ fn parse_parameters_list(
       // parameters. A unique parameter is defined by a combination
       // of a name and location." Inline parameters are checked here;
       // `Ref` entries are skipped because the resolved (name, in)
-      // pair is not visible at parse time. (#592)
+      // pair is not visible at parse time.
       use _ <- result.try(check_unique_parameters(parsed, index))
       Ok(parsed)
     }
@@ -1691,7 +1690,7 @@ fn parse_parameters_list(
 /// URL query/header word grammar both refuse — empty strings,
 /// strings made entirely of whitespace, strings containing a space
 /// or tab. Lets through the conservative `[A-Za-z0-9_.-]+` set the
-/// HTTP grammars share. (#590)
+/// HTTP grammars share.
 fn validate_parameter_name(
   name: String,
   index: LocationIndex,
@@ -1789,14 +1788,14 @@ fn parse_parameter(
           _,
           path: "parameter",
           field: "name",
-          loc: location_index.lookup_field(index, "parameter", "name"),
+          location: location_index.lookup_field(index, "parameter", "name"),
         )),
       )
 
       // OAS does not document an empty parameter name. Whitespace-laden
       // names break the `[A-Za-z0-9_-]+` path-template grammar and the
       // URL query/header word grammar alike. Reject both early so the
-      // codegen does not produce empty-keyed bindings. (#590)
+      // codegen does not produce empty-keyed bindings.
       use _ <- result.try(validate_parameter_name(name, index))
 
       use in_str <- result.try(
@@ -1805,7 +1804,11 @@ fn parse_parameter(
           _,
           path: "parameter." <> name,
           field: "in",
-          loc: location_index.lookup_field(index, "parameter." <> name, "in"),
+          location: location_index.lookup_field(
+            index,
+            "parameter." <> name,
+            "in",
+          ),
         )),
       )
 
@@ -1817,7 +1820,7 @@ fn parse_parameter(
 
       // OAS 3.0 §4.7.12.1: "If the parameter location is 'path', this
       // property is REQUIRED and its value MUST be true." Both the
-      // missing-`required` case (#590) and the explicit
+      // missing-`required` case and the explicit
       // `required: false` case must reject.
       use required <- result.try(case in_, explicit_required {
         spec.InPath, Some(True) -> Ok(True)
@@ -1964,7 +1967,7 @@ fn parse_request_body_at(
       _,
       path: context,
       field: "requestBody",
-      loc: location_index.lookup_field(index, context, "requestBody"),
+      location: location_index.lookup_field(index, context, "requestBody"),
     )),
   )
 
@@ -2061,7 +2064,7 @@ fn parse_responses(
 ) -> Result(Dict(http.HttpStatusCode, RefOr(Response(Unresolved))), Diagnostic) {
   case yay.select_sugar(from: node, selector: "responses") {
     Ok(yay.NodeMap(entries)) -> {
-      // Issue #573: yamerl tolerates duplicate mapping keys, so two
+      // Yamerl tolerates duplicate mapping keys, so two
       // `'200':` entries on the same operation would silently overwrite
       // (later wins). Reject duplicates explicitly before the
       // dict.insert loop so users see a parse-time error.
@@ -2107,7 +2110,7 @@ fn parse_responses(
 }
 
 /// Build the parse-time diagnostic for a response status-code key that
-/// is outside the OAS-allowed grammar (#587). Listed at module scope so
+/// is outside the OAS-allowed grammar. Listed at module scope so
 /// the YAML-string path and the YAML-int path emit the same message.
 fn invalid_response_status_diagnostic(
   key: String,
@@ -2123,7 +2126,7 @@ fn invalid_response_status_diagnostic(
   )
 }
 
-/// Issue #573: detect duplicate keys in a YAML mapping before consuming
+/// Detect duplicate keys in a YAML mapping before consuming
 /// it into a `Dict`. yamerl preserves the original `entries` list with
 /// both occurrences of a duplicate key, but `dict.insert` silently
 /// overwrites — so without this check, duplicates disappear into
@@ -2191,7 +2194,11 @@ fn parse_response(
           _,
           path: "response",
           field: "description",
-          loc: location_index.lookup_field(index, "response", "description"),
+          location: location_index.lookup_field(
+            index,
+            "response",
+            "description",
+          ),
         )),
       )
 
@@ -2215,7 +2222,7 @@ fn parse_components(
       _,
       path: "",
       field: "components",
-      loc: location_index.lookup_field(index, "", "components"),
+      location: location_index.lookup_field(index, "", "components"),
     )),
   )
 
@@ -2442,7 +2449,7 @@ fn parse_security_scheme(
       _,
       path: "securityScheme",
       field: "type",
-      loc: location_index.lookup_field(index, "securityScheme", "type"),
+      location: location_index.lookup_field(index, "securityScheme", "type"),
     )),
   )
 
@@ -2454,7 +2461,7 @@ fn parse_security_scheme(
           _,
           path: "securityScheme.apiKey",
           field: "name",
-          loc: location_index.lookup_field(
+          location: location_index.lookup_field(
             index,
             "securityScheme.apiKey",
             "name",
@@ -2467,7 +2474,11 @@ fn parse_security_scheme(
           _,
           path: "securityScheme.apiKey",
           field: "in",
-          loc: location_index.lookup_field(index, "securityScheme.apiKey", "in"),
+          location: location_index.lookup_field(
+            index,
+            "securityScheme.apiKey",
+            "in",
+          ),
         )),
       )
       case parse_security_scheme_in(in_str, index) {
@@ -2489,7 +2500,7 @@ fn parse_security_scheme(
           _,
           path: "securityScheme.http",
           field: "scheme",
-          loc: location_index.lookup_field(
+          location: location_index.lookup_field(
             index,
             "securityScheme.http",
             "scheme",
@@ -2512,7 +2523,7 @@ fn parse_security_scheme(
           _,
           path: "securityScheme.openIdConnect",
           field: "openIdConnectUrl",
-          loc: location_index.lookup_field(
+          location: location_index.lookup_field(
             index,
             "securityScheme.openIdConnect",
             "openIdConnectUrl",

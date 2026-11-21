@@ -5,8 +5,7 @@
 /// - Decoder function names
 /// - Encoder function names/expressions
 ///
-/// Previously this logic was duplicated across types.gleam, decoders.gleam,
-/// client.gleam, and guards.gleam (14+ functions with the same dispatch).
+/// types.gleam, decoders.gleam, client.gleam and guards.gleam share it.
 import gleam/option.{type Option, None, Some}
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/util/naming
@@ -88,8 +87,12 @@ pub fn to_string_expr(schema: SchemaObject, value: String) -> String {
     IntegerSchema(..) -> "int.to_string(" <> value <> ")"
     NumberSchema(..) -> "float.to_string(" <> value <> ")"
     BooleanSchema(..) -> "bool.to_string(" <> value <> ")"
-    StringSchema(..) -> value
-    _ -> value
+    StringSchema(..)
+    | ArraySchema(..)
+    | ObjectSchema(..)
+    | AllOfSchema(..)
+    | OneOfSchema(..)
+    | AnyOfSchema(..) -> value
   }
 }
 
@@ -146,7 +149,7 @@ pub fn schema_ref_to_string_expr(
 /// pass through the hoist pass (oaspec/internal/openapi/hoist) and
 /// arrive here as a `$ref`. If hoist misses a shape — or a new spec
 /// shape lands that hoist does not yet recognise — this dispatch
-/// previously panicked. As of PR #543 it falls back to a permissive
+/// falls back to a permissive
 /// `dyn_decode.dynamic` decoder so the generator finishes and the
 /// failure surfaces at runtime (with the field path) instead of
 /// crashing the build. The hoist contract is still enforced by the

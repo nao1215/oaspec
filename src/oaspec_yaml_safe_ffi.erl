@@ -4,7 +4,7 @@
 %% the FFI's raw `{yaml_error, ...}` tuple shape into the Gleam
 %% encoding the upstream `yay.YamlError` Gleam type expects.
 %%
-%% Issue #576: yay's `yaml_ffi.erl` returns
+%% Yay's `yaml_ffi.erl` returns
 %% `{error, {yaml_error, Msg, {Line, Col}}}` for yamerl errors that
 %% surface a structured message + line/col (the alias-without-anchor
 %% case being the obvious example). Gleam's runtime pattern match on
@@ -61,7 +61,7 @@ normalise_error({yaml_error, unexpected_parsing_error}) ->
     unexpected_parsing_error;
 normalise_error({yaml_error, Msg, {Line, Col}})
         when is_binary(Msg), is_integer(Line), is_integer(Col) ->
-    %% The shape that triggers #576.
+    %% The raw tuple shape that does not match `yay.YamlError`.
     {parsing_error, Msg, {yaml_error_loc, Line, Col}};
 normalise_error({parsing_error, _, _} = Already) ->
     %% Already in the documented Gleam shape — pass through.

@@ -51,7 +51,7 @@ pub opaque type Context {
 /// effective servers, and synthesized operationIds) plus the component
 /// schema-resolution cache are computed once here so every codegen pass can
 /// read them via `operations/1` / `resolve_schema_ref/2` instead of
-/// rebuilding the same analysis at unrelated call sites (issue #371).
+/// rebuilding the same analysis at unrelated call sites.
 pub fn new(spec: OpenApiSpec(Resolved), config: Config) -> Context {
   let analyzed =
     operations.collect_operations(spec)
@@ -211,7 +211,7 @@ pub type FileTarget {
 /// expected not to touch them and the generator clobbers any local
 /// changes on every run. `SkipIfExists` is for files the generator
 /// emits ONCE as a starting point, then leaves alone so the user can
-/// own the contents (Issue #247: the `handlers.gleam` and
+/// own the contents (the `handlers.gleam` and
 /// `handlers/<operation>.gleam` panic stubs).
 pub type WriteMode {
   Overwrite

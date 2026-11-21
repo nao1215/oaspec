@@ -1,4 +1,4 @@
-//// Subset filter for the OpenAPI generation pipeline (Issue #387).
+//// Subset filter for the OpenAPI generation pipeline.
 ////
 //// Applies the user's `include:` config (`tags` and / or `paths`)
 //// to a Resolved OpenApiSpec by keeping only operations whose tag

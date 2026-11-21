@@ -90,7 +90,7 @@ fn ensure_directory(path: String) -> Result(Nil, WriteError) {
 
 /// Write a list of generated files to a directory.
 ///
-/// Issue #247: files marked `SkipIfExists` (`handlers.gleam`, and
+/// Files marked `SkipIfExists` (`handlers.gleam`, and
 /// `handlers/<operation>.gleam` under `handlers: per_operation`) are
 /// written only on first generation. If the file already exists on disk,
 /// it is left alone — the user owns the contents and the generator must
@@ -148,12 +148,12 @@ fn parent_dir(path: String) -> Result(String, Nil) {
 /// Resolve generated files to their full output paths and content.
 /// Used by --check to compare against existing files without writing.
 ///
-/// Issue #247: `SkipIfExists` files (e.g. user-owned `handlers.gleam`)
+/// `SkipIfExists` files (e.g. user-owned `handlers.gleam`)
 /// are dropped from the result. `--check` is meant to flag drift in
 /// generator-owned files; user-edited files are expected to differ
 /// from the bootstrap stub and should not be reported as out-of-date.
 ///
-/// Issue #548: when `mode = Both` and `output_server` resolves to the
+/// When `mode = Both` and `output_server` resolves to the
 /// same directory as `output_client`, shared files appear once in
 /// the result, not twice — `--check` would otherwise compare the
 /// same file twice and double-count any drift.
@@ -175,7 +175,7 @@ pub fn resolve_paths(
 /// off the orphan list while still excluding it from byte-comparison drift
 /// reports (`resolve_paths` drops `SkipIfExists` entries).
 ///
-/// Same path-overlap dedup as `resolve_paths` (#548): shared files
+/// Same path-overlap dedup as `resolve_paths`: shared files
 /// appear once when the two output directories coincide.
 pub fn expected_paths(
   files: List(GeneratedFile),

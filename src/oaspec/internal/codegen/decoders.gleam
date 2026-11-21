@@ -51,11 +51,9 @@ fn generate_decoders(
   ctx: Context,
   operations: List(context.AnalyzedOperation),
 ) -> String {
-  // Issue #435: compute the sorted+filtered schema list once and share it
-  // across the import-detection `list.any` passes and the emission folds.
-  // The previous shape sorted the dict twice and filtered separately at
-  // the second site, which both wasted work and risked the import header
-  // disagreeing with what the second pass actually emits.
+  // Compute the sorted+filtered schema list once and share it
+  // across the import-detection `list.any` passes and the emission folds,
+  // so the import header always agrees with what is emitted.
   let schemas = context.component_schemas(ctx)
 
   // Check if option module is needed (any schema with optional fields)
@@ -95,7 +93,7 @@ fn generate_decoders(
 
   // Strict non-discriminator `oneOf` decoders use `list.filter_map` and
   // `result.map` to count matches across branches per JSON Schema 2020-12
-  // §10.2.1.3 — they must reject when 2+ branches match (Issue #337).
+  // §10.2.1.3 — they must reject when 2+ branches match.
   let needs_strict_oneof_runtime =
     list.any(schemas, fn(entry) {
       let #(_, schema_ref) = entry
@@ -123,7 +121,7 @@ fn generate_decoders(
       ])
     False -> base_imports
   }
-  // Issue #387: when any top-level component schema is a `nullable: true`
+  // When any top-level component schema is a `nullable: true`
   // primitive or array (or anyOf/oneOf hoists one), the generated decoder
   // emits a bare `decode.Decoder(Option(<inner>))` type expression. The
   // bare `Option` only resolves if `type Option` is brought into scope
@@ -315,7 +313,7 @@ fn generate_inline_enum_decoders(
   let #(props, required) = codec_helpers.object_properties(schema_ref, ctx)
   list.fold(props, sb, fn(sb, entry) {
     let #(prop_name, prop_ref) = entry
-    // Issue #309: a required inline single-value string-enum has no
+    // A required inline single-value string-enum has no
     // corresponding type in `types.gleam` (the IR pass elided it), so
     // emitting a decoder for it would produce orphan code that
     // references a missing type. Skip it; the constant value is
@@ -511,14 +509,9 @@ fn generate_object_decoder(
   let props = ir_build.sorted_entries(properties)
   let deduped_names = dedup.dedup_property_names(list.map(props, fn(e) { e.0 }))
   let sb =
-    list.index_fold(props, sb, fn(sb, entry, idx) {
+    list.fold(list.zip(props, deduped_names), sb, fn(sb, pair) {
+      let #(entry, field_name) = pair
       let #(prop_name, prop_ref) = entry
-      let field_name =
-        codec_helpers.list_at_or(
-          deduped_names,
-          idx,
-          naming.to_snake_case(prop_name),
-        )
       // writeOnly fields may not appear in responses, so treat them
       // as optional even if listed in required
       let is_write_only = schema_utils.schema_ref_is_write_only(prop_ref, ctx)
@@ -534,7 +527,7 @@ fn generate_object_decoder(
         False -> field_decoder
       }
 
-      // Issue #309: a required, inline single-value string-enum
+      // A required, inline single-value string-enum
       // property is elided from the generated record. The decoder
       // must still observe the wire value and reject mismatches —
       // otherwise a spec violation would silently slip through. The
@@ -682,17 +675,11 @@ fn generate_object_decoder(
   }
 
   let param_names =
-    list.index_map(props, fn(entry, idx) {
+    list.map2(props, deduped_names, fn(entry, field_name) {
       let #(prop_name, prop_ref) = entry
-      let field_name =
-        codec_helpers.list_at_or(
-          deduped_names,
-          idx,
-          naming.to_snake_case(prop_name),
-        )
       #(prop_name, prop_ref, field_name)
     })
-    // Issue #309: constant properties are elided from the record, so
+    // Constant properties are elided from the record, so
     // their decoder consumed-and-discarded the wire value above. They
     // must NOT appear in the success constructor's argument list.
     |> list.filter(fn(entry) {
@@ -710,7 +697,7 @@ fn generate_object_decoder(
 
   // Add additional_properties to param names only when the generated record
   // surfaces the field (Typed or Untyped). Forbidden / Unspecified suppress
-  // it — see Issue #249.
+  // it.
   let param_names = case additional_properties {
     Typed(_) | Untyped ->
       list.append(param_names, [
@@ -719,7 +706,7 @@ fn generate_object_decoder(
     Forbidden | Unspecified -> param_names
   }
 
-  // Issue #474: schemas with no constructor params (e.g. an empty
+  // Schemas with no constructor params (e.g. an empty
   // object `type: object, properties: {}, additionalProperties: false`)
   // surface in the type module as a no-arg variant — `pub type
   // EmptyObject { EmptyObject }`. Calling such a constructor with `()`
@@ -753,7 +740,7 @@ fn generate_object_decoder(
     |> se.line("}")
     |> se.blank_line()
 
-  // List decoder for typed client array responses. Issue #493: when
+  // List decoder for typed client array responses. when
   // the spec also declares `<Schema>List` as a component (Kubernetes
   // / Stripe pattern), the synthetic name `decode_<schema>_list`
   // would collide with the user-declared decoder. Suffix shifts to
@@ -811,13 +798,8 @@ fn generate_enum_decoder(
   let deduped_variants = dedup.dedup_enum_variants(enum_values)
   let component_type_names = context.component_type_names(ctx)
   let sb =
-    list.index_fold(enum_values, sb, fn(sb, value, idx) {
-      let variant_suffix =
-        codec_helpers.list_at_or(
-          deduped_variants,
-          idx,
-          naming.to_pascal_case(value),
-        )
+    list.fold(list.zip(enum_values, deduped_variants), sb, fn(sb, pair) {
+      let #(value, variant_suffix) = pair
       let variant =
         naming.dedup_enum_variant_name(
           naming.schema_to_type_name(type_name) <> variant_suffix,
@@ -831,11 +813,10 @@ fn generate_enum_decoder(
     })
 
   // Unknown enum values → decode failure, not silent fallback
-  let first_variant_suffix =
-    codec_helpers.list_at_or(deduped_variants, 0, case enum_values {
-      [first, ..] -> naming.to_pascal_case(first)
-      [] -> "Unknown"
-    })
+  let first_variant_suffix = case deduped_variants {
+    [first, ..] -> first
+    [] -> "Unknown"
+  }
   let first_variant_full =
     naming.dedup_enum_variant_name(
       naming.schema_to_type_name(type_name) <> first_variant_suffix,
@@ -879,9 +860,7 @@ fn generate_anyof_decoder(
 
   // Generate field decoders that try each variant. The decoder
   // function for a top-level component schema named `Foo` is emitted
-  // as `foo_decoder()`; the previous `decode_<snake>_decoder` form
-  // referenced a function that never exists and broke compilation
-  // for every anyOf union that survives hoisting (Issue #387).
+  // as `foo_decoder()`.
   let variant_fields =
     list.map(schemas, fn(s_ref) {
       case s_ref {
@@ -983,7 +962,7 @@ fn generate_primitive_decoder(
   |> se.blank_line()
 }
 
-/// Generate decoder for an ArraySchema. Issue #387: when the array
+/// Generate decoder for an ArraySchema. when the array
 /// schema itself carries `nullable: true`, the type generator wraps
 /// the resulting type alias in `Option(List(T))` (via
 /// `schema_dispatch.schema_type`), so the decoder must wrap its
@@ -1106,7 +1085,7 @@ fn generate_oneof_decoder(
           // branch the right Decoder(types.<TypeName>) type. Without this
           // structure, an unknown discriminator whose body also fails to
           // match the first variant would surface the *first variant's*
-          // decode error instead of the discriminator error (issue #308).
+          // decode error instead of the discriminator error.
           let first_ref_decoder = case schemas {
             [Reference(name:, ..), ..] -> {
               let ref_name = name
@@ -1205,9 +1184,9 @@ fn generate_oneof_decoder(
               <> ") {",
             )
 
-          // Issue #337: emit a strict-oneOf body. The previous
-          // `decode.one_of(first, [rest..])` chain was first-match
-          // (anyOf semantics); JSON Schema 2020-12 §10.2.1.3 demands
+          // Emit a strict-oneOf body. A `decode.one_of(first, [rest..])`
+          // chain is first-match (anyOf semantics); JSON Schema 2020-12
+          // §10.2.1.3 demands
           // exactly-one-match for `oneOf`. Run each branch
           // independently against the raw Dynamic, count successful
           // matches, succeed iff exactly one matched, and emit a
@@ -1346,7 +1325,7 @@ fn get_discriminator_value(
 /// Convert a SchemaRef to a decoder expression string.
 /// parent_name is used to resolve inline enum decoder names; `ctx` is
 /// threaded so inline-enum names can be disambiguated against
-/// existing component schema names (Issue #492).
+/// existing component schema names.
 fn schema_ref_to_decoder(
   ref: SchemaRef,
   parent_name: String,
@@ -1411,7 +1390,7 @@ fn maybe_doc_comment(
   }
 }
 
-/// Emit the decoder snippet for a constant (issue #309) field.
+/// Emit the decoder snippet for a constant field.
 ///
 /// The wire value is required and fully determined at codegen time
 /// (an inline `enum: [<single>]`). The decoder reads it as a string

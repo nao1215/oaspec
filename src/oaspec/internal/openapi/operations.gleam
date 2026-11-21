@@ -14,7 +14,7 @@ import oaspec/openapi/spec.{
 /// Pure: depends only on the resolved spec, not on the codegen Context.
 /// The Context now precomputes this list once at construction time and
 /// every codegen pass reads it through `context.operations/1` instead of
-/// re-running this traversal (issue #371).
+/// re-running this traversal.
 pub fn collect_operations(
   resolved_spec: OpenApiSpec(Resolved),
 ) -> List(#(String, Operation(Resolved), String, HttpMethod)) {

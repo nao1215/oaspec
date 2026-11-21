@@ -52,7 +52,7 @@ type PreparedContext {
 /// Each stage is wrapped with `progress.timed` so `reporter` sees a
 /// "stage: X took Yms" line per phase. The GitHub REST OpenAPI is
 /// large enough that without these lines callers can't tell whether
-/// the process is hung or working — see issue #352.
+/// the process is hung or working.
 fn prepare_context(
   spec: OpenApiSpec(Unresolved),
   cfg: Config,
@@ -83,7 +83,7 @@ fn prepare_context(
     |> result.map_error(fn(errors) { ValidationErrors(errors:) }),
   )
 
-  // Issue #387: apply the include filter (if any) before capability
+  // Apply the include filter (if any) before capability
   // check / hoist / validate so every downstream stage sees only the
   // operations the user asked for. Empty filter is a no-op.
   let #(elapsed, spec) =
@@ -117,7 +117,7 @@ fn prepare_context(
     "hoist inline complex schemas (took " <> progress.format_ms(elapsed) <> ")",
   )
 
-  // Issue #501: when an include filter is active, drop component
+  // When an include filter is active, drop component
   // schemas no surviving operation transitively references. Runs
   // after hoist (so synthetic schemas hoisting introduces are still
   // considered) and before dedup (so dedup operates on the smaller
@@ -192,7 +192,7 @@ fn prepare_context(
 /// location information. Callers that already have a YAML
 /// `LocationIndex` (e.g. via `parser.parse_file_with_locations`)
 /// should prefer `generate_with_locations` so capability-check errors
-/// surface line/column for the offending spec node (Issue #411).
+/// surface line/column for the offending spec node.
 pub fn generate(
   spec: OpenApiSpec(Unresolved),
   cfg: Config,
@@ -206,7 +206,7 @@ pub fn generate(
 }
 
 /// Combined entry point that accepts both a `LocationIndex` and a
-/// `Reporter`. Issue #411 + #352. The CLI uses this so it can show
+/// `Reporter`. The CLI uses this so it can show
 /// per-stage progress AND surface `path:line:column:` in capability
 /// errors at the same time. Library callers that need only one of the
 /// two can pass `location_index.empty()` or `progress.noop()`.
@@ -240,7 +240,7 @@ pub fn validate_only(
 }
 
 /// Combined `validate_only` entry point that accepts both a
-/// `LocationIndex` and a `Reporter`. Issue #411 + #352.
+/// `LocationIndex` and a `Reporter`.
 pub fn validate_only_with_progress_and_locations(
   spec: OpenApiSpec(Unresolved),
   index: LocationIndex,
@@ -270,11 +270,10 @@ pub fn generate_all_files(ctx: Context) -> List(GeneratedFile) {
 /// `progress.timed_stage` so a slow phase surfaces against a specific
 /// stage rather than the opaque outer render wrapper.
 ///
-/// `middleware.gleam` used to be emitted here too, but its `Handler`
-/// shape did not actually compose with the generated client or server
-/// APIs. The internal `middleware` module is kept only as a
-/// library-level helper for consumers who want to assemble their own
-/// middleware chain.
+/// No `middleware.gleam` is emitted: its `Handler` shape does not compose
+/// with the generated client or server APIs. The internal `middleware`
+/// module is a library-level helper for consumers who want to assemble
+/// their own middleware chain.
 fn generate_all_files_with_progress(
   ctx: Context,
   reporter: Reporter,

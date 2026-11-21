@@ -166,7 +166,7 @@ fn generate_async_response_helper(sb: se.StringBuilder) -> se.StringBuilder {
   se.raw(sb, runtime_snippets.await_response)
 }
 
-/// Issue #502: emit one query entry per property of a deepObject
+/// Emit one query entry per property of a deepObject
 /// parameter. Primitive properties become `name[prop]=value`; nested
 /// object properties recurse one level into `name[outer][inner]=value`
 /// for each inner field. Required vs optional wrapping mirrors the
@@ -288,7 +288,7 @@ fn emit_deep_object_property(
     // Composite (`oneOf` / `anyOf` / `allOf`) properties don't fit
     // the bracketed-string wire format; emit them via the JSON
     // escape hatch (`parent[<prop>]=<JSON string>`), the same shape
-    // PR #542 introduced for form-urlencoded bodies. Arrays of
+    // used for form-urlencoded bodies. Arrays of
     // non-primitive items take the same path — there's no string
     // representation for `List(<RecordType>)` either.
     Some(schema.OneOfSchema(..))
@@ -382,8 +382,8 @@ fn emit_deep_object_primitive(
   // Array-of-non-primitive properties surfaced this deep (Stripe
   // exposes `filter.applicability_scope.prices: [...]` as a
   // deepObject inner-inner field) cannot be stringified, so they
-  // take the JSON escape hatch — the same shape PR #543 / #544
-  // installs everywhere else. The classification has to resolve
+  // take the JSON escape hatch used for the other non-stringifiable
+  // shapes. The classification has to resolve
   // `$ref` items, since a `Reference(_)` to a primitive enum is
   // still safe to stringify with `encode.encode_<...>_to_string`.
   let array_with_complex_items = case
@@ -752,7 +752,7 @@ fn generate_client_function(
             <> "Response"
             <> http.status_code_suffix(status_code)
           let content_entries = ir_build.sorted_entries(response.content)
-          // Issue #387: when the response declares headers, the
+          // When the response declares headers, the
           // response variant constructor takes an extra typed headers
           // record. Build the headers descriptor here and thread it
           // through to every variant-emitting branch so each branch
@@ -1052,7 +1052,7 @@ fn generate_build_body(
       let sb =
         list.fold(query_params, sb, fn(sb, p) {
           let param_name = client_request.field_name_for(field_names, p)
-          // Issue #502: deepObject params expand each property into a
+          // DeepObject params expand each property into a
           // bracketed-key query entry (`filter[name]=value` …) instead
           // of trying to stringify the typed record into a single
           // tuple. Nested-object properties recurse one more level
@@ -1287,7 +1287,7 @@ fn generate_body_emission(
     }
     [#(content_type_key, _)] ->
       case content_type_key {
-        // Issue #504: `*/*` is treated as a synonym for
+        // `*/*` is treated as a synonym for
         // application/octet-stream — body is `BitArray`, wrapped in
         // `BytesBody` instead of being run through the JSON encoder.
         "application/octet-stream" | "*/*" ->

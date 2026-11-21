@@ -8,7 +8,7 @@
 //// here. Splitting these responsibilities lets every diagnostic — local
 //// collision, cross-file collision, missing component, alias chain,
 //// chained external ref — be unit tested without staging fixture files
-//// on disk (issue #372).
+//// on disk.
 
 import filepath
 import gleam/bool

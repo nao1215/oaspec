@@ -230,7 +230,7 @@ package: api
 
 # Output settings (optional). Defaults land inside ./src so a
 # freshly-generated project is buildable by `gleam build` without
-# any further config (#568):
+# any further config:
 #   server -> ./src/<package>
 #   client -> ./src/<package>_client (Both mode) or ./src/<package> (Client mode)
 # Override individual targets via output.server / output.client, or
@@ -242,7 +242,7 @@ package: api
 #   server: ./src/api             # Override server output path
 #   client: ./src/api_client      # Override client output path
 
-# Operation filter (optional, Issue #387). When set, codegen only
+# Operation filter (optional). When set, codegen only
 # emits operations whose tag list intersects `tags` OR whose path
 # matches one of `paths` (the two lists are unioned, not
 # intersected). Path patterns ending in `/**` match any path that
@@ -255,10 +255,11 @@ package: api
 #     - \"/users/{username}\"
 #     - \"/repos/**\"
 
-# Multi-target codegen (optional, Issue #387). When `targets:` is
+# Multi-target codegen (optional). When `targets:` is
 # set, the same input spec is generated once per entry, each with
 # its own `package`, `output`, and `include`. The top-level
-# `input`, `mode`, and `validate` are shared across every target.
+# `input`, `mode`, `validate`, and `handlers` are shared across every
+# target.
 # Targets whose output paths overlap are rejected at config-load
 # time. `--output` cannot be used with multi-target configs.
 # targets:
@@ -478,7 +479,7 @@ fn print_target_outputs(
   }
 }
 
-/// Issue #387: every active output path across every target must be
+/// Every active output path across every target must be
 /// unique. Two targets writing to the same directory would clobber
 /// each other on disk and surface random "wrong package" errors at
 /// the Gleam compiler level depending on which generate ran second.
@@ -488,16 +489,16 @@ fn validate_no_target_overlap(
   let paths =
     cfgs
     |> list.flat_map(fn(cfg) { active_output_paths(cfg) })
-  find_duplicate_path(paths, [])
-  |> result.map_error(fn(err) {
-    let DuplicateOutputPath(path) = err
-    config.InvalidValue(
-      field: "targets",
-      detail: "two targets resolve to the same output directory '"
-        <> path
-        <> "' — give them distinct package or output paths so generated files do not clobber each other",
-    )
-  })
+  case first_duplicate(paths, []) {
+    None -> Ok(Nil)
+    Some(path) ->
+      Error(config.InvalidValue(
+        field: "targets",
+        detail: "two targets resolve to the same output directory '"
+          <> path
+          <> "' — give them distinct package or output paths so generated files do not clobber each other",
+      ))
+  }
 }
 
 fn active_output_paths(cfg: config.Config) -> List(String) {
@@ -513,7 +514,7 @@ fn active_output_paths(cfg: config.Config) -> List(String) {
     // so a shared output directory does not clobber anything. Dedupe
     // intra-config to allow this case while still letting
     // `validate_no_target_overlap` reject cross-config (multi-target)
-    // collisions, which are the real footgun #387 was tracking.
+    // collisions.
     config.Both -> {
       let server_path = config.output_server(cfg)
       let client_path = config.output_client(cfg)
@@ -525,24 +526,17 @@ fn active_output_paths(cfg: config.Config) -> List(String) {
   }
 }
 
-/// Internal error from `find_duplicate_path/2`. Wrapping the offending
-/// path in a named record (rather than a bare String) keeps the
-/// linter happy and makes the failure mode explicit for any future
-/// caller that wants the path on its own.
-type DuplicateOutputPathError {
-  DuplicateOutputPath(path: String)
-}
-
-fn find_duplicate_path(
+/// The first path that appears twice, if any.
+fn first_duplicate(
   remaining: List(String),
   seen: List(String),
-) -> Result(Nil, DuplicateOutputPathError) {
+) -> Option(String) {
   case remaining {
-    [] -> Ok(Nil)
+    [] -> None
     [path, ..rest] ->
       case list.contains(seen, path) {
-        True -> Error(DuplicateOutputPath(path: path))
-        False -> find_duplicate_path(rest, [path, ..seen])
+        True -> Some(path)
+        False -> first_duplicate(rest, [path, ..seen])
       }
   }
 }
@@ -746,7 +740,7 @@ fn find_orphans(dirs: List(String), expected: List(String)) -> List(String) {
   })
 }
 
-/// Issue #284: when the generated code imports a Gleam stdlib module
+/// When the generated code imports a Gleam stdlib module
 /// whose package is not a direct dep of the consumer's project (today,
 /// only `gleam/regexp` for pattern validation), `gleam build` warns
 /// about the transitive import and a future Gleam release turns this
@@ -774,7 +768,7 @@ fn print_dep_hints(files: List(context.GeneratedFile)) -> Nil {
 /// Check that generated code matches existing files on disk.
 /// Exits 0 if all files match, exits 1 if any differ, missing, or orphaned.
 ///
-/// Issue #247: user-owned `handlers.gleam` (`SkipIfExists`) is dropped from
+/// User-owned `handlers.gleam` (`SkipIfExists`) is dropped from
 /// the byte-comparison list (`resolve_paths` does that filtering) but kept in
 /// the expected-paths list so orphan detection still recognises it as a known
 /// generator output instead of flagging it as an orphan. A user-owned file
@@ -846,7 +840,7 @@ fn format_resolved_content(
   let temp_dir = filepath.join(temp_dir(), "oaspec_check_" <> unique_id())
   use _ <- result.try(
     simplifile.create_directory_all(temp_dir)
-    |> result.map_error(ScratchFileError(
+    |> result.map_error(ScratchFileFailed(
       action: "create",
       path: temp_dir,
       error: _,
@@ -855,7 +849,7 @@ fn format_resolved_content(
   let formatted = format_in_dir(resolved, temp_dir)
   let deleted =
     simplifile.delete(temp_dir)
-    |> result.map_error(ScratchFileError(
+    |> result.map_error(ScratchFileFailed(
       action: "delete",
       path: temp_dir,
       error: _,
@@ -877,7 +871,7 @@ fn format_in_dir(
       let #(#(original_path, content), temp_path) = pair
       simplifile.write(temp_path, content)
       |> result.replace(#(original_path, temp_path))
-      |> result.map_error(ScratchFileError(
+      |> result.map_error(ScratchFileFailed(
         action: "write",
         path: temp_path,
         error: _,
@@ -886,13 +880,13 @@ fn format_in_dir(
   )
   use _ <- result.try(
     formatter.format_files(list.map(temp_entries, fn(entry) { entry.1 }))
-    |> result.map_error(ScratchFormatError),
+    |> result.map_error(FormatterFailed),
   )
   list.try_map(temp_entries, fn(entry) {
     let #(original_path, temp_path) = entry
     simplifile.read(temp_path)
     |> result.map(fn(formatted) { #(original_path, formatted) })
-    |> result.map_error(ScratchFileError(
+    |> result.map_error(ScratchFileFailed(
       action: "read",
       path: temp_path,
       error: _,
@@ -902,20 +896,20 @@ fn format_in_dir(
 
 /// Why `--check` could not format the generated code for comparison.
 type CheckFormatError {
-  ScratchFileError(action: String, path: String, error: simplifile.FileError)
-  ScratchFormatError(formatter.FormatError)
+  ScratchFileFailed(action: String, path: String, error: simplifile.FileError)
+  FormatterFailed(formatter.FormatError)
 }
 
 fn check_format_error_to_string(error: CheckFormatError) -> String {
   case error {
-    ScratchFileError(action:, path:, error:) ->
+    ScratchFileFailed(action:, path:, error:) ->
       "cannot "
       <> action
       <> " "
       <> path
       <> ": "
       <> simplifile.describe_error(error)
-    ScratchFormatError(error) -> formatter.error_to_string(error)
+    FormatterFailed(error) -> formatter.error_to_string(error)
   }
 }
 
@@ -1039,10 +1033,10 @@ fn require(
 
 /// Format a GenerateError into a printable error message.
 ///
-/// Issue #411: each diagnostic is rendered with an editor-clickable
+/// Each diagnostic is rendered with an editor-clickable
 /// `path:line:column:` prefix when the spec file path and a `SourceLoc`
-/// are both known. Diagnostics without a `SourceLoc` keep the legacy
-/// short-string format so existing CLI output stays familiar.
+/// are both known. Diagnostics without a `SourceLoc` use the short-string
+/// format.
 fn format_generate_error_for(
   file_path: String,
 ) -> fn(generate.GenerateError) -> String {
@@ -1068,7 +1062,7 @@ fn format_generate_error_for(
 }
 
 /// Print warnings if any exist. Warnings are diagnostics, so they go to stderr
-/// to keep stdout reserved for requested output. Issue #411: see
+/// to keep stdout reserved for requested output. See
 /// `format_generate_error_for` for the rendering contract.
 fn print_warnings_for(
   file_path: String,

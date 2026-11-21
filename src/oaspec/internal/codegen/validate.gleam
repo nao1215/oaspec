@@ -20,7 +20,7 @@ import oaspec/openapi/spec.{type Resolved}
 /// Validate the parsed spec for unsupported patterns.
 /// Returns a list of errors; empty list means validation passed.
 ///
-/// operationId uniqueness is enforced here with a hard error (issue #237):
+/// operationId uniqueness is enforced here with a hard error:
 /// silently renaming duplicates would mutate the generated public API
 /// surface without telling the user, which is worse than failing the spec.
 pub fn validate(ctx: Context) -> List(Diagnostic) {
@@ -30,16 +30,10 @@ pub fn validate(ctx: Context) -> List(Diagnostic) {
   let schema_errors = validate_component_schemas(ctx)
   let schema_collision_errors = validate_unique_schema_names(ctx)
   let security_errors = validate_security_schemes(ctx, operations)
-  // Issue #493: the previous `validate_decode_list_collisions` check
-  // hard-rejected any spec that declared both `Foo` and `FooList` as
-  // component schemas, because the codegen would emit two
-  // `decode_foo_list` functions (a synthetic one for `List(Foo)` and
-  // the user's `FooList` decoder). Real-world specs (Kubernetes,
-  // Stripe) routinely use this naming, and the user does not own the
-  // upstream definitions. The codegen now disambiguates the synthetic
-  // name to `decode_foo_list_items` whenever `FooList` is also
-  // declared (see `naming.synthetic_list_suffix`), so this validator
-  // pass is no longer needed.
+  // A spec may declare both `Foo` and `FooList` (Kubernetes and Stripe
+  // do); the codegen names the synthetic `List(Foo)` decoder
+  // `decode_foo_list_items` in that case (see
+  // `naming.synthetic_list_suffix`), so no collision check is needed.
   list.flatten([
     op_errors,
     opid_errors,
@@ -98,10 +92,8 @@ fn group_operations_by_id(
   key_fn: fn(String) -> String,
 ) -> Dict(String, List(String)) {
   // Accumulate site lists in reverse (prepend is O(1)) then reverse each
-  // value once at the end. The previous `list.append(existing, [site])`
-  // shape was O(N²) on the number of duplicates per key, which matters
-  // when a large spec accidentally collides many operationIds under the
-  // same case-folded form.
+  // value once at the end, so a large spec that collides many
+  // operationIds under the same case-folded form stays O(N).
   let reversed =
     list.fold(operations, dict.new(), fn(acc, entry) {
       let context.AnalyzedOperation(op_id, _operation, path, method) = entry
@@ -241,6 +233,7 @@ fn validate_path_template_params(
 fn extract_path_template_names(path: String) -> List(String) {
   // nolint: assert_ok_pattern -- compile-time constant regex literal cannot fail to parse
   let assert Ok(re) = regexp.from_string("\\{([^}]+)\\}")
+    as "the path template placeholder regex literal compiles"
   regexp.scan(re, path)
   |> list.filter_map(fn(match) {
     case match.submatches {
@@ -358,7 +351,7 @@ fn validate_server_structured_param(
     option.then(spec.parameter_schema(param), fn(r) {
       context.resolve_schema_ref(r, ctx) |> option.from_result
     })
-  // Bug fix: array parameters with non-primitive items panic in
+  // Array parameters with non-primitive items would panic in
   // both client and server codegen with "inline composite schema
   // reached to_string_fn after hoist" because `to_string_fn` has no
   // path for composite item types — even after hoist promotes the
@@ -368,7 +361,7 @@ fn validate_server_structured_param(
   let array_errors = case param.in_, schema_obj {
     // Query array parameters with non-primitive items take the JSON
     // escape hatch on the client side (`<param>=<JSON array string>`,
-    // the same shape PR #542 introduced for form-urlencoded
+    // the same shape used for form-urlencoded
     // composite fields). The server decoder still requires primitive
     // items, so the diagnostic remains gated to server mode.
     spec.InQuery, Some(ArraySchema(items:, ..)) ->
@@ -401,7 +394,7 @@ fn validate_server_structured_param(
           ),
         ]
       }
-    // CodeRabbit follow-up: cookie array params take the same
+    // Cookie array params take the same
     // exploded-array codegen path as query/header (see
     // `client_request.generate_exploded_array_query_param`-style
     // emission), so a non-primitive item schema would panic in
@@ -423,7 +416,7 @@ fn validate_server_structured_param(
   }
   // The deepObject server-only constraint (primitive scalars /
   // primitive arrays only) stays gated to server mode — the client
-  // emitter handles nested objects post-#502.
+  // emitter handles nested objects.
   let deep_object_errors = case config.mode(context.config(ctx)) {
     config.Client -> []
     _ -> validate_server_deep_object_param(path, param, ctx)
@@ -471,11 +464,9 @@ fn deep_object_server_leaf_supported(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> Bool {
-  // Issue #502: client-mode codegen now expands nested object
-  // properties into bracketed-bracketed query keys, but server-mode
-  // decoding still requires primitive scalars / primitive arrays.
-  // Lifting the server constraint requires a router decoder rewrite
-  // and is tracked as a separate follow-up.
+  // Client-mode codegen expands nested object properties into
+  // bracketed-bracketed query keys, but server-mode decoding requires
+  // primitive scalars / primitive arrays.
   case schema_ref {
     Inline(StringSchema(..))
     | Inline(IntegerSchema(..))
@@ -521,7 +512,7 @@ fn deep_object_server_leaf_supported(
 /// primitives and for shallow `object` schemas with primitive
 /// properties — the two shapes that show up in practice. Spec
 /// authors who need true deepObject serialization should still
-/// declare `style: deepObject` explicitly. (issue #352)
+/// declare `style: deepObject` explicitly.
 fn validate_complex_param_schema(
   path: String,
   param: spec.Parameter(Resolved),
@@ -573,11 +564,11 @@ fn validate_complex_param_schema(
 }
 
 /// Validate that a deepObject parameter has no unsupported property
-/// shapes. Issue #502: an object-typed property is allowed (encoded
+/// shapes. an object-typed property is allowed (encoded
 /// as `parent[outer][inner]=value` and modeled as `Dict(String, String)`
 /// in the generated client). Composite properties (`oneOf` / `anyOf` /
 /// `allOf`) take the JSON escape hatch — `parent[<prop>]=<JSON
-/// string>` — the same shape PR #542 introduced for form-urlencoded
+/// string>` — the same shape used for form-urlencoded
 /// composite fields, on the client side. The server decoder does
 /// not yet handle the JSON-escaped form, so the diagnostic stays
 /// gated to server mode.
@@ -786,8 +777,8 @@ fn validate_server_form_urlencoded_request_body(
   content_keys: List(String),
   ctx: Context,
 ) -> List(Diagnostic) {
-  // Bug fix: nested arrays inside a form-urlencoded body's nested
-  // objects panic the client codegen too — `generate_form_nested_object`
+  // Nested arrays inside a form-urlencoded body's nested
+  // objects would panic the client codegen too — `generate_form_nested_object`
   // routes them through `multipart_field_to_string_fn`, which calls
   // `to_string_fn` on an Inline ArraySchema and hits the
   // "inline schema reached to_string_fn after hoist" panic. Reject
@@ -831,11 +822,10 @@ fn validate_server_form_urlencoded_request_body(
             // Client codegen accepts every shape this predicate
             // green-lights — primitives, primitive arrays at any
             // depth, nested objects at any depth, arrays of objects.
-            // The server decoder is more constrained: it still
-            // requires shallow primitive-leaf shapes. Until the
-            // server-side helpers catch up, surface a server-only
-            // diagnostic for the shapes the client now handles but
-            // the server doesn't.
+            // The server decoder is more constrained: it requires
+            // shallow primitive-leaf shapes, so surface a server-only
+            // diagnostic for the shapes the client handles but the
+            // server doesn't.
             let client_safe =
               form_urlencoded_field_codegen_safe(field_schema, ctx)
             let server_safe =
@@ -995,7 +985,7 @@ fn validate_server_request_body_content_types(
           && key != "multipart/form-data"
           && key != "application/octet-stream"
           && key != "text/plain"
-          // Issue #504: */* lands in the same lane as
+          // */* lands in the same lane as
           // application/octet-stream — raw bytes through the server's
           // body parameter — so server codegen accepts it too.
           && key != "*/*"
@@ -1108,7 +1098,7 @@ fn multipart_field_is_stringifiable(
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
     | Some(BooleanSchema(..)) -> True
-    // Issue #503: arrays of primitives are emitted as repeated parts
+    // Arrays of primitives are emitted as repeated parts
     // (`name=v1`, `name=v2`, ...) per the OAS 3 multipart serialization
     // rules, and objects are emitted as a single part with
     // `Content-Type: application/json` carrying the JSON-encoded value.
@@ -1181,13 +1171,12 @@ fn validate_responses(
   })
 }
 
-// Issue #552: codegen's response-header extractor (`classify_header_schema`
+// Codegen's response-header extractor (`classify_header_schema`
 // in `client_response.gleam`) only knows how to emit code for inline
 // String / Int / Float / Bool. Composite shapes ($ref, object, array,
-// allOf, oneOf, anyOf) used to panic in codegen, taking the whole
-// process down on a syntactically valid spec. Catch those shapes here
-// at validate time and surface a Diagnostic instead — the codegen
-// path now defensively panics with an "unreachable" message that
+// allOf, oneOf, anyOf) would panic in codegen on a syntactically valid
+// spec. Catch those shapes here at validate time and surface a
+// Diagnostic instead — the codegen path defensively panics with an "unreachable" message that
 // should never actually fire if validation ran.
 fn validate_response_headers(
   response_path: String,
@@ -1208,7 +1197,7 @@ fn validate_response_headers(
             <> kind
             <> ". oaspec can only emit typed extraction for inline String, Integer, Number, and Boolean schemas today.",
           hint: Some(
-            "Replace the header schema with an inline { type: string }, { type: integer }, { type: number }, or { type: boolean }, or remove the header from the spec if it is not part of the typed contract. Track issue #387 if you need typed extraction for this shape.",
+            "Replace the header schema with an inline { type: string }, { type: integer }, { type: number }, or { type: boolean }, or remove the header from the spec if it is not part of the typed contract.",
           ),
         ),
       ]
@@ -1237,7 +1226,7 @@ fn unsupported_header_schema_kind(
 
 /// Validate component schemas recursively.
 /// Detect schema names that differ only in case and would collide when
-/// mapped to the same Gleam type name via `schema_to_type_name` (#293).
+/// mapped to the same Gleam type name via `schema_to_type_name`.
 fn validate_unique_schema_names(ctx: Context) -> List(Diagnostic) {
   let schemas = case context.spec(ctx).components {
     Some(components) -> dict.keys(components.schemas)

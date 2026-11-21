@@ -8,7 +8,7 @@
 //// passes `resolve.resolve` unchanged. This module fills that gap so the
 //// new `parser.parse_string_resolved` entry point can surface the same
 //// diagnostics that codegen-side validation would, without dragging in
-//// a `Config` / `Context`. (#616)
+//// a `Config` / `Context`.
 
 import gleam/dict
 import gleam/list
@@ -264,7 +264,7 @@ fn validate_media_type_map(
 /// catches `A.properties.next.$ref: A`–style loops that the pure
 /// `resolver.resolve_schema_ref` chain walker misses (it only follows
 /// `Reference -> Reference` aliases, not references that travel through
-/// inline composite schemas). (#616)
+/// inline composite schemas).
 fn validate_schema_ref(
   path: String,
   schema_ref: SchemaRef,
