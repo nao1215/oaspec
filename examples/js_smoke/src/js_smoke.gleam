@@ -8,7 +8,7 @@
 //// code (yay, simplifile, glint, BEAM-only FFI) will fail this build.
 ////
 //// Today the demonstrably JS-runnable surface is the public client
-//// runtime: `oaspec/transport` and `oaspec/mock`. Other modules
+//// runtime: `oaspec/transport`. Other modules
 //// nominally listed as "Pure" still pull in BEAM-only transitive
 //// imports (`oaspec/openapi/diagnostic` → `oaspec/config` → `yay`),
 //// which runs but fails at module-load time because `yay`'s JS FFI
@@ -16,7 +16,6 @@
 //// work tracked in #344's parser-layer cleanup.
 
 import gleam/io
-import oaspec/mock
 import oaspec/transport
 
 pub fn main() -> Nil {
@@ -24,7 +23,13 @@ pub fn main() -> Nil {
   // `transport.Send`. These are the public types JS-side users of
   // generated clients would reach for first.
   let _credentials = [transport.BearerToken("BearerAuth", "test-token")]
-  let _send = mock.text(200, "{}")
+  let _send = fn(_request) {
+    Ok(transport.Response(
+      status: 200,
+      headers: [],
+      body: transport.TextBody("{}"),
+    ))
+  }
 
   io.println("oaspec js_smoke: ok")
 }

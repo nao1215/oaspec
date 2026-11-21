@@ -108,7 +108,9 @@ unwrap_used = "error"
 # poison value to the wire — a Result-returning signature would force
 # every caller to handle a never-error case for a literal-string call
 # site.
-"src/oaspec/transport.gleam" = ["avoid_panic"]
+# Send and AsyncSend are used by generated clients and the adapters, which
+# live outside this package, so nothing inside it refers to them.
+"src/oaspec/transport.gleam" = ["avoid_panic", "unused_exports"]
 "src/oaspec/internal/openapi/*.gleam" = ["label_possible", "deep_nesting"]
 "src/oaspec/openapi/parser.gleam" = ["label_possible", "deep_nesting"]
 "src/oaspec/openapi/diagnostic.gleam" = ["label_possible"]

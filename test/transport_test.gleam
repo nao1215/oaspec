@@ -3,10 +3,9 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
-import oaspec/mock
 import oaspec/transport.{
   type Request, type Response, type TransportError, ApiKeyCookie, ApiKeyHeader,
-  ApiKeyQuery, BytesBody, EmptyBody, HttpAuthorization, Request, Response,
+  ApiKeyQuery, EmptyBody, HttpAuthorization, Request, Response,
   SecurityAlternative, TextBody,
 }
 
@@ -486,120 +485,6 @@ pub fn async_map_try_test() {
   transport.resolve(Ok(1))
   |> transport.map_try(fn(value) { Ok(value + 1) })
   |> transport.run(fn(result) { result |> should.equal(Ok(2)) })
-}
-
-// ---------------------------------------------------------------------------
-// mock module
-// ---------------------------------------------------------------------------
-
-pub fn mock_text_test() {
-  let send = mock.text(200, "hello")
-  let assert Ok(resp) = send(empty_request())
-  resp.status |> should.equal(200)
-  resp.body |> should.equal(TextBody("hello"))
-}
-
-pub fn mock_text_async_test() {
-  let send = mock.text_async(200, "hello")
-  transport.run(send(empty_request()), fn(result) {
-    let assert Ok(resp) = result
-    resp.status |> should.equal(200)
-    resp.body |> should.equal(TextBody("hello"))
-  })
-}
-
-pub fn mock_bytes_async_test() {
-  let send = mock.bytes_async(201, <<1, 2, 3>>)
-  transport.run(send(empty_request()), fn(result) {
-    let assert Ok(resp) = result
-    resp.status |> should.equal(201)
-    resp.body |> should.equal(BytesBody(<<1, 2, 3>>))
-  })
-}
-
-pub fn mock_bytes_test() {
-  let send = mock.bytes(201, <<1, 2, 3>>)
-  let assert Ok(resp) = send(empty_request())
-  resp.status |> should.equal(201)
-  resp.body |> should.equal(BytesBody(<<1, 2, 3>>))
-}
-
-pub fn mock_empty_test() {
-  let send = mock.empty(204)
-  let assert Ok(resp) = send(empty_request())
-  resp.status |> should.equal(204)
-  resp.body |> should.equal(EmptyBody)
-}
-
-pub fn mock_empty_async_test() {
-  let send = mock.empty_async(204)
-  transport.run(send(empty_request()), fn(result) {
-    let assert Ok(resp) = result
-    resp.status |> should.equal(204)
-    resp.body |> should.equal(EmptyBody)
-  })
-}
-
-pub fn mock_timeout_test() {
-  let send = mock.timeout()
-  let assert Error(e) = send(empty_request())
-  e |> should.equal(transport.Timeout)
-}
-
-pub fn mock_timeout_async_test() {
-  let send = mock.timeout_async()
-  transport.run(send(empty_request()), fn(result) {
-    result |> should.equal(Error(transport.Timeout))
-  })
-}
-
-pub fn mock_fail_test() {
-  let send = mock.fail(transport.ConnectionFailed("boom"))
-  let assert Error(e) = send(empty_request())
-  e |> should.equal(transport.ConnectionFailed("boom"))
-}
-
-pub fn mock_fail_async_test() {
-  let send = mock.fail_async(transport.ConnectionFailed("boom"))
-  transport.run(send(empty_request()), fn(result) {
-    result |> should.equal(Error(transport.ConnectionFailed("boom")))
-  })
-}
-
-pub fn mock_from_inspects_request_test() {
-  let send =
-    mock.from(fn(req) {
-      Ok(Response(
-        status: 200,
-        headers: [#("x-method", http.method_to_string(req.method))],
-        body: TextBody(req.path),
-      ))
-    })
-  let assert Ok(resp) = send(empty_request())
-  resp.body |> should.equal(TextBody("/pets"))
-  resp.headers
-  |> list.key_find("x-method")
-  |> should.equal(Ok("GET"))
-}
-
-pub fn mock_from_async_inspects_request_test() {
-  let send =
-    mock.from_async(fn(req) {
-      transport.resolve(
-        Ok(Response(
-          status: 200,
-          headers: [#("x-method", http.method_to_string(req.method))],
-          body: TextBody(req.path),
-        )),
-      )
-    })
-  transport.run(send(empty_request()), fn(result) {
-    let assert Ok(resp) = result
-    resp.body |> should.equal(TextBody("/pets"))
-    resp.headers
-    |> list.key_find("x-method")
-    |> should.equal(Ok("GET"))
-  })
 }
 
 pub fn async_try_await_short_circuits_error_test() {
