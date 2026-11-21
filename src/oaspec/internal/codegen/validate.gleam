@@ -6,16 +6,17 @@ import gleam/string
 import oaspec/config
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/schema_utils
+import oaspec/internal/openapi/diagnostic
+import oaspec/internal/openapi/spec
 import oaspec/internal/util/content_type
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
-import oaspec/openapi/diagnostic.{type Diagnostic}
-import oaspec/openapi/schema.{
-  type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
-  BooleanSchema, Forbidden, Inline, IntegerSchema, NumberSchema, ObjectSchema,
-  OneOfSchema, Reference, StringSchema, Typed, Unspecified, Untyped,
+import oaspec/openapi.{
+  type Diagnostic, type Resolved, type SchemaObject, type SchemaRef, AllOfSchema,
+  AnyOfSchema, ArraySchema, BooleanSchema, Forbidden, Inline, IntegerSchema,
+  NumberSchema, ObjectSchema, OneOfSchema, Reference, StringSchema, Typed,
+  Unspecified, Untyped,
 }
-import oaspec/openapi/spec.{type Resolved}
 
 /// Validate the parsed spec for unsupported patterns.
 /// Returns a list of errors; empty list means validation passed.
@@ -120,7 +121,7 @@ fn duplicate_operation_id_diagnostic(
       <> string.join(sites, ", ")
       <> ". operationId must be unique across the entire spec; "
       <> "rename one of the operations to keep the generated API stable.",
-    loc: diagnostic.NoSourceLoc,
+    loc: openapi.NoSourceLoc,
   )
 }
 
@@ -136,7 +137,7 @@ fn duplicate_function_name_diagnostic(
       <> string.join(sites, ", ")
       <> ". oaspec converts operationIds to snake_case, so values like "
       <> "'listItems' and 'list_items' collide; rename one of them.",
-    loc: diagnostic.NoSourceLoc,
+    loc: openapi.NoSourceLoc,
   )
 }
 
@@ -193,13 +194,13 @@ fn validate_operations(
 fn validate_path_template_params(
   op_id: String,
   path: String,
-  params: List(spec.Parameter(Resolved)),
+  params: List(openapi.Parameter(Resolved)),
 ) -> List(Diagnostic) {
   let template_names = extract_path_template_names(path)
   let path_param_names =
     list.filter_map(params, fn(p) {
       case p.in_ {
-        spec.InPath -> Ok(p.name)
+        openapi.InPath -> Ok(p.name)
         _ -> Error(Nil)
       }
     })
@@ -249,13 +250,13 @@ fn extract_path_template_names(path: String) -> List(String) {
 /// Unsupported: matrix, label.
 fn validate_parameters(
   op_id: String,
-  params: List(spec.Parameter(Resolved)),
+  params: List(openapi.Parameter(Resolved)),
   ctx: Context,
 ) -> List(Diagnostic) {
   list.flat_map(params, fn(p) {
     let path = op_id <> ".parameters." <> p.name
     let style_errors = case p.style {
-      Some(spec.MatrixStyle) | Some(spec.LabelStyle) -> [
+      Some(openapi.MatrixStyle) | Some(openapi.LabelStyle) -> [
         diagnostic.validation_error_both(
           path: path,
           detail: "Parameter style is not supported. Supported styles: form, simple, deepObject, pipeDelimited, spaceDelimited.",
@@ -264,16 +265,16 @@ fn validate_parameters(
           ),
         ),
       ]
-      Some(spec.PipeDelimitedStyle) ->
+      Some(openapi.PipeDelimitedStyle) ->
         validate_delimited_style(path, p, "pipeDelimited", ctx)
-      Some(spec.SpaceDelimitedStyle) ->
+      Some(openapi.SpaceDelimitedStyle) ->
         validate_delimited_style(path, p, "spaceDelimited", ctx)
       _ -> []
     }
     // Parameter.payload is ParameterContent when Parameter.content is used instead of schema.
     // We don't support the content-based parameter serialization.
     let content_errors = case p.payload {
-      spec.ParameterContent(_) -> [
+      openapi.ParameterContent(_) -> [
         diagnostic.validation_error_both(
           path: path,
           detail: "Parameters using 'content' instead of 'schema' are not supported.",
@@ -282,7 +283,7 @@ fn validate_parameters(
           ),
         ),
       ]
-      spec.ParameterSchema(_) -> []
+      openapi.ParameterSchema(_) -> []
     }
     // Object/complex schemas in query/header/cookie params require deepObject
     // style. Without it, codegen cannot stringify the value and falls through
@@ -303,12 +304,12 @@ fn validate_parameters(
 /// Both are only meaningful for array-typed query parameters; reject elsewhere.
 fn validate_delimited_style(
   path: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   style_name: String,
   ctx: Context,
 ) -> List(Diagnostic) {
   let location_errors = case param.in_ {
-    spec.InQuery -> []
+    openapi.InQuery -> []
     _ -> [
       diagnostic.validation_error_both(
         path: path,
@@ -344,7 +345,7 @@ fn validate_delimited_style(
 
 fn validate_server_structured_param(
   path: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> List(Diagnostic) {
   let schema_obj =
@@ -364,7 +365,7 @@ fn validate_server_structured_param(
     // the same shape used for form-urlencoded
     // composite fields). The server decoder still requires primitive
     // items, so the diagnostic remains gated to server mode.
-    spec.InQuery, Some(ArraySchema(items:, ..)) ->
+    openapi.InQuery, Some(ArraySchema(items:, ..)) ->
       case schema_utils.resolves_to_primitive(items, ctx) {
         True -> []
         False ->
@@ -381,7 +382,7 @@ fn validate_server_structured_param(
             ]
           }
       }
-    spec.InHeader, Some(ArraySchema(items:, ..)) ->
+    openapi.InHeader, Some(ArraySchema(items:, ..)) ->
       case schema_utils.resolves_to_primitive(items, ctx) {
         True -> []
         False -> [
@@ -399,7 +400,7 @@ fn validate_server_structured_param(
     // `client_request.generate_exploded_array_query_param`-style
     // emission), so a non-primitive item schema would panic in
     // `to_string_fn` for them too. Reject in both modes.
-    spec.InCookie, Some(ArraySchema(items:, ..)) ->
+    openapi.InCookie, Some(ArraySchema(items:, ..)) ->
       case schema_utils.resolves_to_primitive(items, ctx) {
         True -> []
         False -> [
@@ -426,7 +427,7 @@ fn validate_server_structured_param(
 
 fn validate_server_deep_object_param(
   path: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> List(Diagnostic) {
   case
@@ -436,8 +437,8 @@ fn validate_server_deep_object_param(
       context.resolve_schema_ref(r, ctx) |> option.from_result
     })
   {
-    spec.InQuery,
-      Some(spec.DeepObjectStyle),
+    openapi.InQuery,
+      Some(openapi.DeepObjectStyle),
       Some(ObjectSchema(properties:, ..))
     ->
       dict.to_list(properties)
@@ -515,11 +516,11 @@ fn deep_object_server_leaf_supported(
 /// declare `style: deepObject` explicitly.
 fn validate_complex_param_schema(
   path: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> List(Diagnostic) {
   case param.style {
-    Some(spec.DeepObjectStyle) ->
+    Some(openapi.DeepObjectStyle) ->
       // deepObject supports one level of object nesting only.
       // Reject nested object properties since codegen produces
       // invalid code (e.g., uri.percent_encode(filter.meta)).
@@ -535,7 +536,7 @@ fn validate_complex_param_schema(
         | Some(OneOfSchema(..))
         | Some(AnyOfSchema(..)) ->
           case param.in_ {
-            spec.InPath ->
+            openapi.InPath ->
               case config.mode(context.config(ctx)) {
                 config.Client -> []
                 _ -> [
@@ -574,7 +575,7 @@ fn validate_complex_param_schema(
 /// gated to server mode.
 fn validate_deep_object_no_nested_objects(
   path: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> List(Diagnostic) {
   case config.mode(context.config(ctx)) {
@@ -613,7 +614,7 @@ fn validate_deep_object_no_nested_objects(
 /// Validate request body for unsupported patterns.
 fn validate_request_body(
   op_id: String,
-  request_body: Option(spec.RequestBody(Resolved)),
+  request_body: Option(openapi.RequestBody(Resolved)),
   ctx: Context,
 ) -> List(Diagnostic) {
   case request_body {
@@ -692,7 +693,7 @@ fn validate_request_body(
 
 fn validate_multipart_request_body_fields(
   op_id: String,
-  content: dict.Dict(String, spec.MediaType),
+  content: dict.Dict(String, openapi.MediaType),
   ctx: Context,
 ) -> List(Diagnostic) {
   case dict.get(content, "multipart/form-data") {
@@ -739,7 +740,7 @@ fn validate_multipart_request_body_fields(
 /// Non-object schemas produce empty form bodies in the generated code.
 fn validate_form_urlencoded_schema(
   op_id: String,
-  content: dict.Dict(String, spec.MediaType),
+  content: dict.Dict(String, openapi.MediaType),
   ctx: Context,
 ) -> List(Diagnostic) {
   case dict.get(content, "application/x-www-form-urlencoded") {
@@ -773,7 +774,7 @@ fn validate_form_urlencoded_schema(
 /// the typed body contract.
 fn validate_server_form_urlencoded_request_body(
   op_id: String,
-  content: dict.Dict(String, spec.MediaType),
+  content: dict.Dict(String, openapi.MediaType),
   content_keys: List(String),
   ctx: Context,
 ) -> List(Diagnostic) {
@@ -1008,7 +1009,7 @@ fn validate_server_request_body_content_types(
 
 fn validate_server_multipart_request_body(
   op_id: String,
-  content: dict.Dict(String, spec.MediaType),
+  content: dict.Dict(String, openapi.MediaType),
   content_keys: List(String),
   ctx: Context,
 ) -> List(Diagnostic) {
@@ -1128,7 +1129,7 @@ fn multipart_field_array_item_supported(
 /// Validate response schemas and content types.
 fn validate_responses(
   op_id: String,
-  responses: dict.Dict(http.HttpStatusCode, spec.Response(Resolved)),
+  responses: dict.Dict(openapi.HttpStatusCode, openapi.Response(Resolved)),
   ctx: Context,
 ) -> List(Diagnostic) {
   let entries = dict.to_list(responses)
@@ -1180,7 +1181,7 @@ fn validate_responses(
 // should never actually fire if validation ran.
 fn validate_response_headers(
   response_path: String,
-  response: spec.Response(Resolved),
+  response: openapi.Response(Resolved),
 ) -> List(Diagnostic) {
   dict.to_list(response.headers)
   |> list.flat_map(fn(entry) {
@@ -1254,7 +1255,7 @@ fn validate_unique_schema_names(ctx: Context) -> List(Diagnostic) {
             <> " all map to Gleam type `"
             <> type_name
             <> "` — rename one to avoid the collision",
-          loc: diagnostic.NoSourceLoc,
+          loc: openapi.NoSourceLoc,
         ))
       _ -> Error(Nil)
     }

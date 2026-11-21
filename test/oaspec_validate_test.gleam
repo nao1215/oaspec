@@ -4,7 +4,7 @@ import gleeunit/should
 import oaspec/config
 import oaspec/generate
 import oaspec/internal/codegen/validate
-import oaspec/openapi/diagnostic
+import oaspec/openapi
 import oaspec/openapi/parser
 import oaspec_support as support
 import test_helpers
@@ -137,7 +137,7 @@ pub fn validate_warns_about_invalid_pattern_test() {
   string.contains(d.pointer, "components.schemas.Code.value")
   |> should.be_true()
   string.contains(d.message, "[a-") |> should.be_true()
-  d.severity |> should.equal(diagnostic.SeverityWarning)
+  d.severity |> should.equal(openapi.SeverityWarning)
 }
 
 /// `\u` escapes are valid ECMA-262, the dialect OpenAPI patterns use, but

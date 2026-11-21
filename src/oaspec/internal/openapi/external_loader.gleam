@@ -54,11 +54,9 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import oaspec/internal/openapi/external_loader_planner as planner
-import oaspec/internal/util/http
-import oaspec/openapi/diagnostic.{type Diagnostic}
-import oaspec/openapi/schema.{type SchemaRef, Inline, Reference}
-import oaspec/openapi/spec.{
-  type Components, type OpenApiSpec, type Unresolved, Components, OpenApiSpec,
+import oaspec/openapi.{
+  type Components, type Diagnostic, type OpenApiSpec, type SchemaRef,
+  type Unresolved, Components, Inline, OpenApiSpec, Reference,
 }
 
 /// Load every `components.schemas` entry whose value is an external
@@ -271,28 +269,28 @@ fn process_whole_object_refs(
 /// `Ref(ref_str)` whose fragment matches `target_prefix` by loading the
 /// external file and looking up the named object via `finder`.
 fn resolve_ref_or_dict(
-  entries: dict.Dict(String, spec.RefOr(a)),
+  entries: dict.Dict(String, openapi.RefOr(a)),
   base_dir: String,
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   target_prefix: String,
   finder: fn(OpenApiSpec(Unresolved), String, String) -> Result(a, Diagnostic),
-) -> Result(dict.Dict(String, spec.RefOr(a)), Diagnostic) {
+) -> Result(dict.Dict(String, openapi.RefOr(a)), Diagnostic) {
   let pairs = dict.to_list(entries)
   use new_pairs <- result.try(
     list.try_fold(pairs, [], fn(acc, entry) {
       let #(name, ref_or_val) = entry
       case ref_or_val {
-        spec.Ref(ref_str) ->
+        openapi.Ref(ref_str) ->
           case planner.extract_external_component_ref(ref_str) {
             Some(#(file_path, prefix, obj_name)) if prefix == target_prefix -> {
               let resolved_path = filepath.join(base_dir, file_path)
               use loaded <- result.try(parse_file(resolved_path))
               use target <- result.try(finder(loaded, obj_name, resolved_path))
-              Ok([#(name, spec.Value(target)), ..acc])
+              Ok([#(name, openapi.Value(target)), ..acc])
             }
             _ -> Ok([#(name, ref_or_val), ..acc])
           }
-        spec.Value(_) -> Ok([#(name, ref_or_val), ..acc])
+        openapi.Value(_) -> Ok([#(name, ref_or_val), ..acc])
       }
     }),
   )
@@ -338,7 +336,7 @@ fn process_nested_property_refs(
       let #(rewritten_acc, imports) = acc
       let #(name, schema_ref) = entry
       case schema_ref {
-        Inline(schema.ObjectSchema(
+        Inline(openapi.ObjectSchema(
           metadata:,
           properties:,
           required:,
@@ -365,7 +363,7 @@ fn process_nested_property_refs(
             ),
           )
           let new_obj =
-            schema.ObjectSchema(
+            openapi.ObjectSchema(
               metadata:,
               properties: new_properties,
               required:,
@@ -375,7 +373,7 @@ fn process_nested_property_refs(
             )
           Ok(#([#(name, Inline(new_obj)), ..rewritten_acc], new_imports))
         }
-        Inline(schema.ArraySchema(
+        Inline(openapi.ArraySchema(
           metadata:,
           items:,
           min_items:,
@@ -390,7 +388,7 @@ fn process_nested_property_refs(
             original_local_names,
           ))
           let new_arr =
-            schema.ArraySchema(
+            openapi.ArraySchema(
               metadata:,
               items: new_items,
               min_items:,
@@ -399,7 +397,7 @@ fn process_nested_property_refs(
             )
           Ok(#([#(name, Inline(new_arr)), ..rewritten_acc], new_imports))
         }
-        Inline(schema.AllOfSchema(metadata:, schemas: branches)) -> {
+        Inline(openapi.AllOfSchema(metadata:, schemas: branches)) -> {
           use #(new_branches, new_imports) <- result.try(rewrite_schema_list(
             branches,
             base_dir,
@@ -407,10 +405,10 @@ fn process_nested_property_refs(
             imports,
             original_local_names,
           ))
-          let new_all = schema.AllOfSchema(metadata:, schemas: new_branches)
+          let new_all = openapi.AllOfSchema(metadata:, schemas: new_branches)
           Ok(#([#(name, Inline(new_all)), ..rewritten_acc], new_imports))
         }
-        Inline(schema.OneOfSchema(metadata:, schemas: branches, discriminator:)) -> {
+        Inline(openapi.OneOfSchema(metadata:, schemas: branches, discriminator:)) -> {
           use #(new_branches, new_imports) <- result.try(rewrite_schema_list(
             branches,
             base_dir,
@@ -419,10 +417,14 @@ fn process_nested_property_refs(
             original_local_names,
           ))
           let new_one =
-            schema.OneOfSchema(metadata:, schemas: new_branches, discriminator:)
+            openapi.OneOfSchema(
+              metadata:,
+              schemas: new_branches,
+              discriminator:,
+            )
           Ok(#([#(name, Inline(new_one)), ..rewritten_acc], new_imports))
         }
-        Inline(schema.AnyOfSchema(metadata:, schemas: branches, discriminator:)) -> {
+        Inline(openapi.AnyOfSchema(metadata:, schemas: branches, discriminator:)) -> {
           use #(new_branches, new_imports) <- result.try(rewrite_schema_list(
             branches,
             base_dir,
@@ -431,7 +433,11 @@ fn process_nested_property_refs(
             original_local_names,
           ))
           let new_any =
-            schema.AnyOfSchema(metadata:, schemas: new_branches, discriminator:)
+            openapi.AnyOfSchema(
+              metadata:,
+              schemas: new_branches,
+              discriminator:,
+            )
           Ok(#([#(name, Inline(new_any)), ..rewritten_acc], new_imports))
         }
         _ -> Ok(#([#(name, schema_ref), ..rewritten_acc], imports))
@@ -472,7 +478,7 @@ fn no_target() -> SchemaRef {
 /// `components.schemas`. `RefOr.Ref` path items passing pointers to
 /// external files are left untouched.
 fn process_operation_schemas(
-  paths: dict.Dict(String, spec.RefOr(spec.PathItem(Unresolved))),
+  paths: dict.Dict(String, openapi.RefOr(openapi.PathItem(Unresolved))),
   components: Components(Unresolved),
   base_dir: String,
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
@@ -480,7 +486,7 @@ fn process_operation_schemas(
   seeded_imports: dict.Dict(String, #(String, SchemaRef)),
 ) -> Result(
   #(
-    dict.Dict(String, spec.RefOr(spec.PathItem(Unresolved))),
+    dict.Dict(String, openapi.RefOr(openapi.PathItem(Unresolved))),
     Components(Unresolved),
   ),
   Diagnostic,
@@ -491,7 +497,7 @@ fn process_operation_schemas(
       let #(collected, imports) = acc
       let #(path_key, ref_or_item) = entry
       case ref_or_item {
-        spec.Value(path_item) -> {
+        openapi.Value(path_item) -> {
           use #(new_path_item, new_imports) <- result.try(rewrite_path_item(
             path_item,
             base_dir,
@@ -500,11 +506,12 @@ fn process_operation_schemas(
             original_local_names,
           ))
           Ok(#(
-            [#(path_key, spec.Value(new_path_item)), ..collected],
+            [#(path_key, openapi.Value(new_path_item)), ..collected],
             new_imports,
           ))
         }
-        spec.Ref(_) -> Ok(#([#(path_key, ref_or_item), ..collected], imports))
+        openapi.Ref(_) ->
+          Ok(#([#(path_key, ref_or_item), ..collected], imports))
       }
     }),
   )
@@ -528,14 +535,14 @@ fn process_operation_schemas(
 /// imports tracker so collisions across operation-level and components
 /// refs remain visible.
 fn rewrite_parameter_list(
-  parameters: List(spec.RefOr(spec.Parameter(Unresolved))),
+  parameters: List(openapi.RefOr(openapi.Parameter(Unresolved))),
   base_dir: String,
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   imports: dict.Dict(String, #(String, SchemaRef)),
   original_local_names: List(String),
 ) -> Result(
   #(
-    List(spec.RefOr(spec.Parameter(Unresolved))),
+    List(openapi.RefOr(openapi.Parameter(Unresolved))),
     dict.Dict(String, #(String, SchemaRef)),
   ),
   Diagnostic,
@@ -560,13 +567,13 @@ fn rewrite_parameter_list(
 /// method slot on a `PathItem`. Shared by the top-level paths walker
 /// and the callback walker so callbacks recurse into the same helper.
 fn rewrite_path_item(
-  path_item: spec.PathItem(Unresolved),
+  path_item: openapi.PathItem(Unresolved),
   base_dir: String,
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   imports: dict.Dict(String, #(String, SchemaRef)),
   original_local_names: List(String),
 ) -> Result(
-  #(spec.PathItem(Unresolved), dict.Dict(String, #(String, SchemaRef))),
+  #(openapi.PathItem(Unresolved), dict.Dict(String, #(String, SchemaRef))),
   Diagnostic,
 ) {
   use #(new_parameters, imports_after_params) <- result.try(
@@ -579,7 +586,7 @@ fn rewrite_path_item(
     ),
   )
   rewrite_path_item_methods(
-    spec.PathItem(..path_item, parameters: new_parameters),
+    openapi.PathItem(..path_item, parameters: new_parameters),
     base_dir,
     parse_file,
     imports_after_params,
@@ -591,13 +598,13 @@ fn rewrite_path_item(
 /// `Operation` has its own `parameters`, `request_body`, and `responses`
 /// dicts rewritten.
 fn rewrite_path_item_methods(
-  path_item: spec.PathItem(Unresolved),
+  path_item: openapi.PathItem(Unresolved),
   base_dir: String,
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   imports: dict.Dict(String, #(String, SchemaRef)),
   original_local_names: List(String),
 ) -> Result(
-  #(spec.PathItem(Unresolved), dict.Dict(String, #(String, SchemaRef))),
+  #(openapi.PathItem(Unresolved), dict.Dict(String, #(String, SchemaRef))),
   Diagnostic,
 ) {
   use #(get_op, imports1) <- result.try(rewrite_optional_operation(
@@ -657,7 +664,7 @@ fn rewrite_path_item_methods(
     original_local_names,
   ))
   Ok(#(
-    spec.PathItem(
+    openapi.PathItem(
       ..path_item,
       get: get_op,
       post: post_op,
@@ -673,14 +680,14 @@ fn rewrite_path_item_methods(
 }
 
 fn rewrite_optional_operation(
-  op: option.Option(spec.Operation(Unresolved)),
+  op: option.Option(openapi.Operation(Unresolved)),
   base_dir: String,
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   imports: dict.Dict(String, #(String, SchemaRef)),
   original_local_names: List(String),
 ) -> Result(
   #(
-    option.Option(spec.Operation(Unresolved)),
+    option.Option(openapi.Operation(Unresolved)),
     dict.Dict(String, #(String, SchemaRef)),
   ),
   Diagnostic,
@@ -701,13 +708,13 @@ fn rewrite_optional_operation(
 }
 
 fn rewrite_operation(
-  operation: spec.Operation(Unresolved),
+  operation: openapi.Operation(Unresolved),
   base_dir: String,
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   imports: dict.Dict(String, #(String, SchemaRef)),
   original_local_names: List(String),
 ) -> Result(
-  #(spec.Operation(Unresolved), dict.Dict(String, #(String, SchemaRef))),
+  #(openapi.Operation(Unresolved), dict.Dict(String, #(String, SchemaRef))),
   Diagnostic,
 ) {
   use #(new_params, imports_after_params) <- result.try(rewrite_parameter_list(
@@ -743,7 +750,7 @@ fn rewrite_operation(
     original_local_names,
   ))
   Ok(#(
-    spec.Operation(
+    openapi.Operation(
       ..operation,
       callbacks: new_callbacks,
       parameters: new_params,
@@ -761,14 +768,14 @@ fn rewrite_operation(
 /// `Ref` callback entries (e.g. `myEvent: { $ref: '#/components/callbacks/foo' }`),
 /// which we keep as refs rather than inlining.
 fn rewrite_callback_map(
-  callbacks: dict.Dict(String, spec.RefOr(spec.Callback(Unresolved))),
+  callbacks: dict.Dict(String, openapi.RefOr(openapi.Callback(Unresolved))),
   base_dir: String,
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   imports: dict.Dict(String, #(String, SchemaRef)),
   original_local_names: List(String),
 ) -> Result(
   #(
-    dict.Dict(String, spec.RefOr(spec.Callback(Unresolved))),
+    dict.Dict(String, openapi.RefOr(openapi.Callback(Unresolved))),
     dict.Dict(String, #(String, SchemaRef)),
   ),
   Diagnostic,
@@ -779,8 +786,8 @@ fn rewrite_callback_map(
       let #(collected, imports) = acc
       let #(name, ref_or_callback) = entry
       case ref_or_callback {
-        spec.Ref(_) as r -> Ok(#([#(name, r), ..collected], imports))
-        spec.Value(callback) -> {
+        openapi.Ref(_) as r -> Ok(#([#(name, r), ..collected], imports))
+        openapi.Value(callback) -> {
           use #(new_entries, new_imports) <- result.try(
             rewrite_callback_entries(
               callback.entries,
@@ -790,7 +797,8 @@ fn rewrite_callback_map(
               original_local_names,
             ),
           )
-          let new_callback = spec.Value(spec.Callback(entries: new_entries))
+          let new_callback =
+            openapi.Value(openapi.Callback(entries: new_entries))
           Ok(#([#(name, new_callback), ..collected], new_imports))
         }
       }
@@ -807,14 +815,14 @@ fn rewrite_callback_map(
 /// map URL-expression strings to `RefOr(PathItem)`; inline PathItems
 /// recurse via `rewrite_path_item`, Ref entries pass through.
 fn rewrite_callback_entries(
-  entries: dict.Dict(String, spec.RefOr(spec.PathItem(Unresolved))),
+  entries: dict.Dict(String, openapi.RefOr(openapi.PathItem(Unresolved))),
   base_dir: String,
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   imports: dict.Dict(String, #(String, SchemaRef)),
   original_local_names: List(String),
 ) -> Result(
   #(
-    dict.Dict(String, spec.RefOr(spec.PathItem(Unresolved))),
+    dict.Dict(String, openapi.RefOr(openapi.PathItem(Unresolved))),
     dict.Dict(String, #(String, SchemaRef)),
   ),
   Diagnostic,
@@ -825,7 +833,7 @@ fn rewrite_callback_entries(
       let #(collected, imports) = acc
       let #(url_expr, ref_or_item) = entry
       case ref_or_item {
-        spec.Value(path_item) -> {
+        openapi.Value(path_item) -> {
           use #(new_path_item, new_imports) <- result.try(rewrite_path_item(
             path_item,
             base_dir,
@@ -834,11 +842,12 @@ fn rewrite_callback_entries(
             original_local_names,
           ))
           Ok(#(
-            [#(url_expr, spec.Value(new_path_item)), ..collected],
+            [#(url_expr, openapi.Value(new_path_item)), ..collected],
             new_imports,
           ))
         }
-        spec.Ref(_) -> Ok(#([#(url_expr, ref_or_item), ..collected], imports))
+        openapi.Ref(_) ->
+          Ok(#([#(url_expr, ref_or_item), ..collected], imports))
       }
     }),
   )
@@ -850,20 +859,20 @@ fn rewrite_callback_entries(
 }
 
 fn rewrite_optional_request_body(
-  body: option.Option(spec.RefOr(spec.RequestBody(Unresolved))),
+  body: option.Option(openapi.RefOr(openapi.RequestBody(Unresolved))),
   base_dir: String,
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   imports: dict.Dict(String, #(String, SchemaRef)),
   original_local_names: List(String),
 ) -> Result(
   #(
-    option.Option(spec.RefOr(spec.RequestBody(Unresolved))),
+    option.Option(openapi.RefOr(openapi.RequestBody(Unresolved))),
     dict.Dict(String, #(String, SchemaRef)),
   ),
   Diagnostic,
 ) {
   case body {
-    Some(spec.Value(rb)) -> {
+    Some(openapi.Value(rb)) -> {
       use #(new_content, new_imports) <- result.try(rewrite_media_type_map(
         rb.content,
         base_dir,
@@ -871,18 +880,18 @@ fn rewrite_optional_request_body(
         imports,
         original_local_names,
       ))
-      let new_rb = spec.RequestBody(..rb, content: new_content)
-      Ok(#(Some(spec.Value(new_rb)), new_imports))
+      let new_rb = openapi.RequestBody(..rb, content: new_content)
+      Ok(#(Some(openapi.Value(new_rb)), new_imports))
     }
-    Some(spec.Ref(_)) -> Ok(#(body, imports))
+    Some(openapi.Ref(_)) -> Ok(#(body, imports))
     None -> Ok(#(None, imports))
   }
 }
 
 fn rewrite_response_map(
   responses: dict.Dict(
-    http.HttpStatusCode,
-    spec.RefOr(spec.Response(Unresolved)),
+    openapi.HttpStatusCode,
+    openapi.RefOr(openapi.Response(Unresolved)),
   ),
   base_dir: String,
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
@@ -890,7 +899,10 @@ fn rewrite_response_map(
   original_local_names: List(String),
 ) -> Result(
   #(
-    dict.Dict(http.HttpStatusCode, spec.RefOr(spec.Response(Unresolved))),
+    dict.Dict(
+      openapi.HttpStatusCode,
+      openapi.RefOr(openapi.Response(Unresolved)),
+    ),
     dict.Dict(String, #(String, SchemaRef)),
   ),
   Diagnostic,
@@ -901,7 +913,7 @@ fn rewrite_response_map(
       let #(collected, imports) = acc
       let #(status, ref_or_resp) = entry
       case ref_or_resp {
-        spec.Value(resp) -> {
+        openapi.Value(resp) -> {
           use #(new_resp, new_imports) <- result.try(rewrite_response_value(
             resp,
             base_dir,
@@ -909,9 +921,9 @@ fn rewrite_response_map(
             imports,
             original_local_names,
           ))
-          Ok(#([#(status, spec.Value(new_resp)), ..collected], new_imports))
+          Ok(#([#(status, openapi.Value(new_resp)), ..collected], new_imports))
         }
-        spec.Ref(_) -> Ok(#([#(status, ref_or_resp), ..collected], imports))
+        openapi.Ref(_) -> Ok(#([#(status, ref_or_resp), ..collected], imports))
       }
     }),
   )
@@ -997,7 +1009,7 @@ fn process_body_response_schemas(
       let #(collected, imports) = acc
       let #(name, ref_or_body) = entry
       case ref_or_body {
-        spec.Value(body) -> {
+        openapi.Value(body) -> {
           use #(new_content, new_imports) <- result.try(rewrite_media_type_map(
             body.content,
             base_dir,
@@ -1005,10 +1017,10 @@ fn process_body_response_schemas(
             imports,
             original_local_names,
           ))
-          let new_body = spec.RequestBody(..body, content: new_content)
-          Ok(#([#(name, spec.Value(new_body)), ..collected], new_imports))
+          let new_body = openapi.RequestBody(..body, content: new_content)
+          Ok(#([#(name, openapi.Value(new_body)), ..collected], new_imports))
         }
-        spec.Ref(_) -> Ok(#([#(name, ref_or_body), ..collected], imports))
+        openapi.Ref(_) -> Ok(#([#(name, ref_or_body), ..collected], imports))
       }
     }),
   )
@@ -1018,7 +1030,7 @@ fn process_body_response_schemas(
       let #(collected, imports) = acc
       let #(name, ref_or_resp) = entry
       case ref_or_resp {
-        spec.Value(resp) -> {
+        openapi.Value(resp) -> {
           use #(new_resp, new_imports) <- result.try(rewrite_response_value(
             resp,
             base_dir,
@@ -1026,9 +1038,9 @@ fn process_body_response_schemas(
             imports,
             original_local_names,
           ))
-          Ok(#([#(name, spec.Value(new_resp)), ..collected], new_imports))
+          Ok(#([#(name, openapi.Value(new_resp)), ..collected], new_imports))
         }
-        spec.Ref(_) -> Ok(#([#(name, ref_or_resp), ..collected], imports))
+        openapi.Ref(_) -> Ok(#([#(name, ref_or_resp), ..collected], imports))
       }
     }),
   )
@@ -1064,22 +1076,22 @@ fn process_body_response_schemas(
 /// either a `ParameterSchema` or a `ParameterContent` payload. `Ref`
 /// entries (external parameter-object refs) pass through unchanged.
 fn rewrite_ref_or_parameter(
-  ref_or_param: spec.RefOr(spec.Parameter(spec.Unresolved)),
+  ref_or_param: openapi.RefOr(openapi.Parameter(openapi.Unresolved)),
   base_dir: String,
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   imports: dict.Dict(String, #(String, SchemaRef)),
   original_local_names: List(String),
 ) -> Result(
   #(
-    spec.RefOr(spec.Parameter(spec.Unresolved)),
+    openapi.RefOr(openapi.Parameter(openapi.Unresolved)),
     dict.Dict(String, #(String, SchemaRef)),
   ),
   Diagnostic,
 ) {
   case ref_or_param {
-    spec.Value(p) ->
+    openapi.Value(p) ->
       case p.payload {
-        spec.ParameterSchema(schema_ref) -> {
+        openapi.ParameterSchema(schema_ref) -> {
           use #(new_ref, new_imports) <- result.try(maybe_hoist_ref(
             schema_ref,
             base_dir,
@@ -1088,10 +1100,10 @@ fn rewrite_ref_or_parameter(
             original_local_names,
           ))
           let new_param =
-            spec.Parameter(..p, payload: spec.ParameterSchema(new_ref))
-          Ok(#(spec.Value(new_param), new_imports))
+            openapi.Parameter(..p, payload: openapi.ParameterSchema(new_ref))
+          Ok(#(openapi.Value(new_param), new_imports))
         }
-        spec.ParameterContent(content) -> {
+        openapi.ParameterContent(content) -> {
           use #(new_content, new_imports) <- result.try(rewrite_media_type_map(
             content,
             base_dir,
@@ -1100,11 +1112,14 @@ fn rewrite_ref_or_parameter(
             original_local_names,
           ))
           let new_param =
-            spec.Parameter(..p, payload: spec.ParameterContent(new_content))
-          Ok(#(spec.Value(new_param), new_imports))
+            openapi.Parameter(
+              ..p,
+              payload: openapi.ParameterContent(new_content),
+            )
+          Ok(#(openapi.Value(new_param), new_imports))
         }
       }
-    spec.Ref(_) -> Ok(#(ref_or_param, imports))
+    openapi.Ref(_) -> Ok(#(ref_or_param, imports))
   }
 }
 
@@ -1113,13 +1128,13 @@ fn rewrite_ref_or_parameter(
 /// side response walkers so header schemas get the same external-ref
 /// treatment as body schemas.
 fn rewrite_response_value(
-  response: spec.Response(Unresolved),
+  response: openapi.Response(Unresolved),
   base_dir: String,
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   imports: dict.Dict(String, #(String, SchemaRef)),
   original_local_names: List(String),
 ) -> Result(
-  #(spec.Response(Unresolved), dict.Dict(String, #(String, SchemaRef))),
+  #(openapi.Response(Unresolved), dict.Dict(String, #(String, SchemaRef))),
   Diagnostic,
 ) {
   use #(new_content, imports_after_content) <- result.try(
@@ -1139,7 +1154,7 @@ fn rewrite_response_value(
     original_local_names,
   ))
   Ok(#(
-    spec.Response(..response, content: new_content, headers: new_headers),
+    openapi.Response(..response, content: new_content, headers: new_headers),
     new_imports,
   ))
 }
@@ -1149,13 +1164,13 @@ fn rewrite_response_value(
 /// placeholder handling — just iterate the dict and rewrite each
 /// entry that has a schema.
 fn rewrite_header_map(
-  headers: dict.Dict(String, spec.Header),
+  headers: dict.Dict(String, openapi.Header),
   base_dir: String,
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   imports: dict.Dict(String, #(String, SchemaRef)),
   original_local_names: List(String),
 ) -> Result(
-  #(dict.Dict(String, spec.Header), dict.Dict(String, #(String, SchemaRef))),
+  #(dict.Dict(String, openapi.Header), dict.Dict(String, #(String, SchemaRef))),
   Diagnostic,
 ) {
   let entries = dict.to_list(headers)
@@ -1172,7 +1187,7 @@ fn rewrite_header_map(
             imports,
             original_local_names,
           ))
-          let new_header = spec.Header(..header, schema: Some(new_ref))
+          let new_header = openapi.Header(..header, schema: Some(new_ref))
           Ok(#([#(name, new_header), ..collected], new_imports))
         }
         None -> Ok(#([#(name, header), ..collected], imports))
@@ -1243,7 +1258,7 @@ fn process_component_path_items(
       let #(collected, imports) = acc
       let #(name, ref_or_item) = entry
       case ref_or_item {
-        spec.Value(path_item) -> {
+        openapi.Value(path_item) -> {
           use #(new_path_item, new_imports) <- result.try(rewrite_path_item(
             path_item,
             base_dir,
@@ -1251,9 +1266,12 @@ fn process_component_path_items(
             imports,
             original_local_names,
           ))
-          Ok(#([#(name, spec.Value(new_path_item)), ..collected], new_imports))
+          Ok(#(
+            [#(name, openapi.Value(new_path_item)), ..collected],
+            new_imports,
+          ))
         }
-        spec.Ref(_) -> Ok(#([#(name, ref_or_item), ..collected], imports))
+        openapi.Ref(_) -> Ok(#([#(name, ref_or_item), ..collected], imports))
       }
     }),
   )
@@ -1280,13 +1298,16 @@ fn process_component_path_items(
 /// found on `MediaType.schema`. MediaType values with no schema pass
 /// through unchanged.
 fn rewrite_media_type_map(
-  content: dict.Dict(String, spec.MediaType),
+  content: dict.Dict(String, openapi.MediaType),
   base_dir: String,
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   imports: dict.Dict(String, #(String, SchemaRef)),
   original_local_names: List(String),
 ) -> Result(
-  #(dict.Dict(String, spec.MediaType), dict.Dict(String, #(String, SchemaRef))),
+  #(
+    dict.Dict(String, openapi.MediaType),
+    dict.Dict(String, #(String, SchemaRef)),
+  ),
   Diagnostic,
 ) {
   let entries = dict.to_list(content)
@@ -1303,7 +1324,7 @@ fn rewrite_media_type_map(
             imports,
             original_local_names,
           ))
-          let new_media = spec.MediaType(..media, schema: Some(new_ref))
+          let new_media = openapi.MediaType(..media, schema: Some(new_ref))
           Ok(#([#(media_key, new_media), ..collected], new_imports))
         }
         None -> Ok(#([#(media_key, media), ..collected], imports))
@@ -1358,17 +1379,17 @@ fn rewrite_object_properties(
 /// rewrite the inner ref to a local reference. `Forbidden` and `Untyped`
 /// pass through untouched.
 fn rewrite_additional_properties(
-  additional: schema.AdditionalProperties,
+  additional: openapi.AdditionalProperties,
   base_dir: String,
   parse_file: fn(String) -> Result(OpenApiSpec(Unresolved), Diagnostic),
   imports: dict.Dict(String, #(String, SchemaRef)),
   original_local_names: List(String),
 ) -> Result(
-  #(schema.AdditionalProperties, dict.Dict(String, #(String, SchemaRef))),
+  #(openapi.AdditionalProperties, dict.Dict(String, #(String, SchemaRef))),
   Diagnostic,
 ) {
   case additional {
-    schema.Typed(ref) -> {
+    openapi.Typed(ref) -> {
       use #(new_ref, new_imports) <- result.try(maybe_hoist_ref(
         ref,
         base_dir,
@@ -1376,7 +1397,7 @@ fn rewrite_additional_properties(
         imports,
         original_local_names,
       ))
-      Ok(#(schema.Typed(new_ref), new_imports))
+      Ok(#(openapi.Typed(new_ref), new_imports))
     }
     _ -> Ok(#(additional, imports))
   }

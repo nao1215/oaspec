@@ -11,6 +11,7 @@ import oaspec/internal/codegen/types
 import oaspec/internal/codegen/validate
 import oaspec/internal/openapi/capability_check
 import oaspec/internal/openapi/dedup
+import oaspec/internal/openapi/diagnostic
 import oaspec/internal/openapi/filter
 import oaspec/internal/openapi/hoist
 import oaspec/internal/openapi/location_index.{type LocationIndex}
@@ -18,8 +19,7 @@ import oaspec/internal/openapi/normalize
 import oaspec/internal/openapi/reachability
 import oaspec/internal/openapi/resolve
 import oaspec/internal/progress.{type Reporter}
-import oaspec/openapi/diagnostic.{type Diagnostic}
-import oaspec/openapi/spec.{type OpenApiSpec, type Unresolved}
+import oaspec/openapi.{type Diagnostic, type OpenApiSpec, type Unresolved}
 
 /// Result of a successful code generation run.
 pub type GenerationSummary {

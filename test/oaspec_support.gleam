@@ -22,6 +22,7 @@ import oaspec/internal/codegen/types
 import oaspec/internal/codegen/validate
 import oaspec/internal/openapi/capability_check
 import oaspec/internal/openapi/dedup
+import oaspec/internal/openapi/diagnostic
 import oaspec/internal/openapi/filter
 import oaspec/internal/openapi/hoist
 import oaspec/internal/openapi/location_index
@@ -29,15 +30,14 @@ import oaspec/internal/openapi/normalize
 import oaspec/internal/openapi/reachability
 import oaspec/internal/openapi/resolve
 import oaspec/internal/openapi/resolver
-import oaspec/internal/openapi/value
+import oaspec/internal/openapi/schema
+import oaspec/internal/openapi/spec
 import oaspec/internal/progress
 import oaspec/internal/util/content_type
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
-import oaspec/openapi/diagnostic.{Diagnostic, NoSourceLoc, SourceLoc}
+import oaspec/openapi.{Diagnostic, NoSourceLoc, SourceLoc}
 import oaspec/openapi/parser
-import oaspec/openapi/schema
-import oaspec/openapi/spec
 import simplifile
 
 pub fn main() {
@@ -849,7 +849,7 @@ pub fn parse_json_string_preserves_required_array_order_case() {
     }"
   let assert Ok(spec) = parser.parse_json_string(json)
   let assert Some(components) = spec.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(required:, ..))) =
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(required:, ..))) =
     dict.get(components.schemas, "Pinned")
   // Exact list equality — a regression that loses order would
   // surface as e.g. ["alpha", "middle", "yak", "zebra"].
@@ -898,8 +898,8 @@ pub fn parse_json_string_malformed_has_diagnostic_shape_case() {
   // instead of a silent contract drift.
   let bad_json = "::: not really json"
   let assert Error(d) = parser.parse_json_string(bad_json)
-  d.phase |> should.equal(diagnostic.PhaseParse)
-  d.severity |> should.equal(diagnostic.SeverityError)
+  d.phase |> should.equal(openapi.PhaseParse)
+  d.severity |> should.equal(openapi.SeverityError)
   d.message |> should.not_equal("")
   d.code |> should.not_equal("")
 }
@@ -1857,12 +1857,12 @@ pub fn oss_oai_webhook_example_components_match_case() {
   let assert Some(json_c) = json_spec.components
   dict.size(yaml_c.schemas) |> should.equal(dict.size(json_c.schemas))
 
-  let assert Ok(schema.Inline(schema.ObjectSchema(
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
     properties: yaml_props,
     required: yaml_required,
     ..,
   ))) = dict.get(yaml_c.schemas, "Pet")
-  let assert Ok(schema.Inline(schema.ObjectSchema(
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
     properties: json_props,
     required: json_required,
     ..,
@@ -2090,7 +2090,7 @@ pub fn parse_secure_api_has_security_schemes_case() {
 
 pub fn parse_secure_api_operation_has_security_case() {
   let assert Ok(spec) = parser.parse_file("test/fixtures/secure_api.yaml")
-  let assert Ok(spec.Value(path_item)) = dict.get(spec.paths, "/pets")
+  let assert Ok(openapi.Value(path_item)) = dict.get(spec.paths, "/pets")
   let assert Some(get_op) = path_item.get
   let assert Some(sec) = get_op.security
   list.length(sec) |> should.equal(1)
@@ -2114,7 +2114,7 @@ components:
   let assert Some(components) = spec.components
   let assert Ok(scheme) = dict.get(components.security_schemes, "BasicAuth")
   case scheme {
-    spec.Value(spec.HttpScheme(scheme: "basic", bearer_format: None)) ->
+    openapi.Value(openapi.HttpScheme(scheme: "basic", bearer_format: None)) ->
       should.be_true(True)
     _ -> should.fail()
   }
@@ -2138,7 +2138,7 @@ components:
   let assert Some(components) = spec.components
   let assert Ok(scheme) = dict.get(components.security_schemes, "DigestAuth")
   case scheme {
-    spec.Value(spec.HttpScheme(scheme: "digest", bearer_format: None)) ->
+    openapi.Value(openapi.HttpScheme(scheme: "digest", bearer_format: None)) ->
       should.be_true(True)
     _ -> should.fail()
   }
@@ -2184,11 +2184,11 @@ pub fn parse_global_security_inherited_case() {
   // Top-level security should be parsed
   list.length(spec.security) |> should.equal(1)
   // /me has no operation-level security -> inherits
-  let assert Ok(spec.Value(me_path)) = dict.get(spec.paths, "/me")
+  let assert Ok(openapi.Value(me_path)) = dict.get(spec.paths, "/me")
   let assert Some(get_me) = me_path.get
   get_me.security |> should.equal(None)
   // /public has explicit empty security -> opts out
-  let assert Ok(spec.Value(public_path)) = dict.get(spec.paths, "/public")
+  let assert Ok(openapi.Value(public_path)) = dict.get(spec.paths, "/public")
   let assert Some(get_public) = public_path.get
   get_public.security |> should.equal(Some([]))
 }
@@ -2217,8 +2217,8 @@ paths:
   let ctx = make_ctx_from_spec(spec)
   let errors =
     validate.validate(ctx)
-    |> list.filter(fn(e) { e.target != diagnostic.TargetServer })
-  let error_strings = list.map(errors, diagnostic.to_string)
+    |> list.filter(fn(e) { e.target != openapi.TargetServer })
+  let error_strings = list.map(errors, openapi.diagnostic_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
   |> should.be_false()
 }
@@ -2248,8 +2248,8 @@ paths:
   let ctx = make_ctx_from_spec(spec)
   let errors =
     validate.validate(ctx)
-    |> list.filter(fn(e) { e.target != diagnostic.TargetServer })
-  let error_strings = list.map(errors, diagnostic.to_string)
+    |> list.filter(fn(e) { e.target != openapi.TargetServer })
+  let error_strings = list.map(errors, openapi.diagnostic_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
   |> should.be_false()
 }
@@ -2434,7 +2434,7 @@ paths:
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, diagnostic.to_string)
+  let error_strings = list.map(errors, openapi.diagnostic_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "text/plain") && string.contains(s, "is not supported")
   })
@@ -2468,7 +2468,7 @@ paths:
   let errors = validate.validate(ctx)
   // No content-type-related diagnostic should mention application/octet-stream
   // as unsupported.
-  let error_strings = list.map(errors, diagnostic.to_string)
+  let error_strings = list.map(errors, openapi.diagnostic_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "application/octet-stream")
     && string.contains(s, "is not supported")
@@ -2567,18 +2567,18 @@ pub fn ref_to_name_simple_case() {
 
 pub fn parse_parameter_style_deep_object_case() {
   let assert Ok(spec) = parser.parse_file("test/fixtures/broken_openapi.yaml")
-  let assert Ok(spec.Value(path_item)) = dict.get(spec.paths, "/deep-object")
+  let assert Ok(openapi.Value(path_item)) = dict.get(spec.paths, "/deep-object")
   let assert Some(op) = path_item.get
-  let assert [spec.Value(param)] = op.parameters
+  let assert [openapi.Value(param)] = op.parameters
   param.name |> should.equal("filter")
-  param.style |> should.equal(Some(spec.DeepObjectStyle))
+  param.style |> should.equal(Some(openapi.DeepObjectStyle))
 }
 
 pub fn parse_parameter_style_none_case() {
   let assert Ok(spec) = parser.parse_file("test/fixtures/petstore.yaml")
-  let assert Ok(spec.Value(path_item)) = dict.get(spec.paths, "/pets")
+  let assert Ok(openapi.Value(path_item)) = dict.get(spec.paths, "/pets")
   let assert Some(op) = path_item.get
-  let assert [spec.Value(first), ..] = op.parameters
+  let assert [openapi.Value(first), ..] = op.parameters
   first.style |> should.equal(None)
 }
 
@@ -2587,10 +2587,10 @@ pub fn parse_parameter_style_none_case() {
 pub fn parse_additional_properties_untyped_case() {
   let assert Ok(spec) = parser.parse_file("test/fixtures/broken_openapi.yaml")
   let assert Some(components) = spec.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "UntypedPayload")
-  let assert Ok(schema.Inline(schema.ObjectSchema(
-    additional_properties: schema.Untyped,
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
+    additional_properties: openapi.Untyped,
     ..,
   ))) = dict.get(props, "payload")
 }
@@ -2615,9 +2615,11 @@ components:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let assert Some(components) = spec.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(additional_properties: ap, ..))) =
-    dict.get(components.schemas, "Bag")
-  ap |> should.equal(schema.Unspecified)
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
+    additional_properties: ap,
+    ..,
+  ))) = dict.get(components.schemas, "Bag")
+  ap |> should.equal(openapi.Unspecified)
 }
 
 // --- Validation Tests ---
@@ -2643,8 +2645,8 @@ pub fn validate_accepts_deep_object_case() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors =
     validate.validate(ctx)
-    |> list.filter(fn(e) { e.target != diagnostic.TargetServer })
-  let error_strings = list.map(errors, diagnostic.to_string)
+    |> list.filter(fn(e) { e.target != openapi.TargetServer })
+  let error_strings = list.map(errors, openapi.diagnostic_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "deepObject") })
   |> should.be_false()
 }
@@ -2653,8 +2655,8 @@ pub fn validate_accepts_complex_schema_parameter_case() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors =
     validate.validate(ctx)
-    |> list.filter(fn(e) { e.target != diagnostic.TargetServer })
-  let error_strings = list.map(errors, diagnostic.to_string)
+    |> list.filter(fn(e) { e.target != openapi.TargetServer })
+  let error_strings = list.map(errors, openapi.diagnostic_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "Complex schema parameters")
   })
@@ -2700,7 +2702,7 @@ components:
   let ctx = make_ctx_from_spec(spec)
   let errors =
     validate.validate(ctx)
-    |> list.filter(fn(e) { e.target != diagnostic.TargetServer })
+    |> list.filter(fn(e) { e.target != openapi.TargetServer })
   errors |> should.equal([])
 }
 
@@ -2709,8 +2711,8 @@ pub fn validate_accepts_multipart_form_data_case() {
   let errors = validate.validate(ctx)
   // Filter out server-targeted errors; multipart is valid for client codegen
   let client_errors =
-    list.filter(errors, fn(e) { e.target != diagnostic.TargetServer })
-  let error_strings = list.map(client_errors, diagnostic.to_string)
+    list.filter(errors, fn(e) { e.target != openapi.TargetServer })
+  let error_strings = list.map(client_errors, openapi.diagnostic_to_string)
   list.any(error_strings, fn(s) { string.contains(s, "multipart/form-data") })
   |> should.be_false()
 }
@@ -2754,7 +2756,7 @@ components:
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec_with_mode(spec, config.Client)
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, diagnostic.to_string)
+  let error_strings = list.map(errors, openapi.diagnostic_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "multipart/form-data fields")
   })
@@ -2765,7 +2767,7 @@ pub fn validate_broken_spec_accepts_inline_oneof_after_hoisting_case() {
   // Inline oneOf variants are now handled by hoisting, so no validation error
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, diagnostic.to_string)
+  let error_strings = list.map(errors, openapi.diagnostic_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "oneOf/anyOf with inline schemas")
   })
@@ -2775,7 +2777,7 @@ pub fn validate_broken_spec_accepts_inline_oneof_after_hoisting_case() {
 pub fn validate_broken_spec_accepts_untyped_additional_properties_case() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, diagnostic.to_string)
+  let error_strings = list.map(errors, openapi.diagnostic_to_string)
   // additionalProperties: true is now supported via Dict(String, Dynamic),
   // so it should NOT appear as a validation error
   list.any(error_strings, fn(s) { string.contains(s, "additionalProperties") })
@@ -2799,7 +2801,8 @@ pub fn validate_missing_responses_rejects_case() {
   let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
+      let error_details =
+        list.map(errors, fn(e) { openapi.diagnostic_to_string(e) })
       let has_missing =
         list.any(error_details, fn(d) { string.contains(d, "no responses") })
       should.be_true(has_missing)
@@ -2938,7 +2941,7 @@ pub fn validate_deep_inline_oneof_in_request_body_accepted_case() {
   // Inline oneOf in requestBody is now handled by hoisting
   let ctx = make_ctx("test/fixtures/deep_unsupported.yaml")
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, diagnostic.to_string)
+  let error_strings = list.map(errors, openapi.diagnostic_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "oneOf/anyOf with inline schemas")
     && string.contains(s, "requestBody")
@@ -2949,7 +2952,7 @@ pub fn validate_deep_inline_oneof_in_request_body_accepted_case() {
 pub fn validate_deep_additional_properties_in_response_case() {
   let ctx = make_ctx("test/fixtures/deep_unsupported.yaml")
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, diagnostic.to_string)
+  let error_strings = list.map(errors, openapi.diagnostic_to_string)
   // additionalProperties: true is now supported, so no error for it
   list.any(error_strings, fn(s) {
     string.contains(s, "additionalProperties") && string.contains(s, "payload")
@@ -2985,7 +2988,7 @@ pub fn validate_rejects_duplicate_operation_id_case() {
 pub fn validate_aggregates_multiple_errors_in_one_pass_case() {
   let ctx = make_ctx("test/fixtures/error_multiple_issues.yaml")
   let errors = validate.validate(ctx)
-  let messages = list.map(errors, diagnostic.to_string)
+  let messages = list.map(errors, openapi.diagnostic_to_string)
 
   // The contract: at least two distinct diagnostics returned.
   case list.length(errors) >= 2 {
@@ -3032,7 +3035,7 @@ paths:
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
   let errors = validate.validate(ctx)
-  let messages = list.map(errors, diagnostic.to_string)
+  let messages = list.map(errors, openapi.diagnostic_to_string)
   list.any(messages, fn(s) {
     string.contains(s, "list_items") && string.contains(s, "generated function")
   })
@@ -3044,7 +3047,7 @@ pub fn validate_accepts_unique_operation_ids_case() {
   // produce any duplicate-operationId diagnostic.
   let ctx = make_ctx("test/fixtures/collision.yaml")
   let errors = validate.validate(ctx)
-  let messages = list.map(errors, diagnostic.to_string)
+  let messages = list.map(errors, openapi.diagnostic_to_string)
   list.any(messages, fn(s) { string.contains(s, "Duplicate operationId") })
   |> should.be_false()
 }
@@ -3273,13 +3276,13 @@ components:
   dict.has_key(components.schemas, "PetAddress") |> should.be_true()
 
   // Pet.address should now be a $ref
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "Pet")
-  let assert Ok(schema.Reference(ref: ref, ..)) = dict.get(props, "address")
+  let assert Ok(openapi.Reference(ref: ref, ..)) = dict.get(props, "address")
   ref |> should.equal("#/components/schemas/PetAddress")
 
   // PetAddress should have street and city properties
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: addr_props, ..))) =
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(properties: addr_props, ..))) =
     dict.get(components.schemas, "PetAddress")
   dict.has_key(addr_props, "street") |> should.be_true()
   dict.has_key(addr_props, "city") |> should.be_true()
@@ -3309,12 +3312,12 @@ components:
   let assert Some(components) = hoisted.components
 
   // The oneOf variants should now be $ref references
-  let assert Ok(schema.Inline(schema.OneOfSchema(schemas: variants, ..))) =
+  let assert Ok(openapi.Inline(openapi.OneOfSchema(schemas: variants, ..))) =
     dict.get(components.schemas, "PetType")
   list.each(variants, fn(v) {
     case v {
-      schema.Reference(..) -> should.be_true(True)
-      schema.Inline(_) -> should.fail()
+      openapi.Reference(..) -> should.be_true(True)
+      openapi.Inline(_) -> should.fail()
     }
   })
 
@@ -3344,12 +3347,12 @@ components:
   let assert Ok(spec) = parser.parse_string(yaml)
   let hoisted = hoist.hoist(spec)
   let assert Some(components) = hoisted.components
-  let assert Ok(schema.Inline(pet)) = dict.get(components.schemas, "Pet")
-  schema.get_provenance(pet) |> should.equal(schema.UserAuthored)
-  let assert Ok(schema.Inline(pet_address)) =
+  let assert Ok(openapi.Inline(pet)) = dict.get(components.schemas, "Pet")
+  schema.get_provenance(pet) |> should.equal(openapi.UserAuthored)
+  let assert Ok(openapi.Inline(pet_address)) =
     dict.get(components.schemas, "PetAddress")
   schema.get_provenance(pet_address)
-  |> should.equal(schema.HoistedProperty(parent: "Pet", property: "address"))
+  |> should.equal(openapi.HoistedProperty(parent: "Pet", property: "address"))
 }
 
 pub fn hoist_oneof_variant_provenance_case() {
@@ -3374,14 +3377,14 @@ components:
   let assert Ok(spec) = parser.parse_string(yaml)
   let hoisted = hoist.hoist(spec)
   let assert Some(components) = hoisted.components
-  let assert Ok(schema.Inline(variant0)) =
+  let assert Ok(openapi.Inline(variant0)) =
     dict.get(components.schemas, "PetTypeVariant0")
   schema.get_provenance(variant0)
-  |> should.equal(schema.HoistedOneOfVariant(parent: "PetType", index: 0))
-  let assert Ok(schema.Inline(variant1)) =
+  |> should.equal(openapi.HoistedOneOfVariant(parent: "PetType", index: 0))
+  let assert Ok(openapi.Inline(variant1)) =
     dict.get(components.schemas, "PetTypeVariant1")
   schema.get_provenance(variant1)
-  |> should.equal(schema.HoistedOneOfVariant(parent: "PetType", index: 1))
+  |> should.equal(openapi.HoistedOneOfVariant(parent: "PetType", index: 1))
 }
 
 pub fn hoist_records_provenance_of_every_component_case() {
@@ -3412,15 +3415,15 @@ components:
   let hoisted = hoist.hoist(spec)
   let assert Some(components) = hoisted.components
   let provenance_of = fn(name) {
-    let assert Ok(schema.Inline(obj)) = dict.get(components.schemas, name)
+    let assert Ok(openapi.Inline(obj)) = dict.get(components.schemas, name)
     schema.get_provenance(obj)
   }
-  provenance_of("Pet") |> should.equal(schema.UserAuthored)
-  provenance_of("PetList") |> should.equal(schema.UserAuthored)
+  provenance_of("Pet") |> should.equal(openapi.UserAuthored)
+  provenance_of("PetList") |> should.equal(openapi.UserAuthored)
   provenance_of("PetAddress")
-  |> should.equal(schema.HoistedProperty(parent: "Pet", property: "address"))
+  |> should.equal(openapi.HoistedProperty(parent: "Pet", property: "address"))
   provenance_of("PetListItem")
-  |> should.equal(schema.HoistedArrayItem(parent: "PetList"))
+  |> should.equal(openapi.HoistedArrayItem(parent: "PetList"))
   dict.size(components.schemas) |> should.equal(4)
 }
 
@@ -3447,9 +3450,9 @@ components:
   let assert Some(components) = hoisted.components
 
   // Array items should now be a $ref
-  let assert Ok(schema.Inline(schema.ArraySchema(items: items_ref, ..))) =
+  let assert Ok(openapi.Inline(openapi.ArraySchema(items: items_ref, ..))) =
     dict.get(components.schemas, "PetList")
-  let assert schema.Reference(ref: ref, ..) = items_ref
+  let assert openapi.Reference(ref: ref, ..) = items_ref
   string.contains(ref, "#/components/schemas/") |> should.be_true()
 
   // The extracted schema should exist in components.schemas
@@ -3485,9 +3488,9 @@ components:
   dict.size(components.schemas) |> should.equal(2)
 
   // The $ref should remain unchanged
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "Pet")
-  let assert Ok(schema.Reference(ref: ref, ..)) = dict.get(props, "owner")
+  let assert Ok(openapi.Reference(ref: ref, ..)) = dict.get(props, "owner")
   ref |> should.equal("#/components/schemas/Owner")
 }
 
@@ -3517,15 +3520,15 @@ components:
   dict.size(components.schemas) |> should.equal(1)
 
   // Properties should remain inline primitives
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "User")
-  let assert Ok(schema.Inline(schema.StringSchema(..))) =
+  let assert Ok(openapi.Inline(openapi.StringSchema(..))) =
     dict.get(props, "name")
-  let assert Ok(schema.Inline(schema.IntegerSchema(..))) =
+  let assert Ok(openapi.Inline(openapi.IntegerSchema(..))) =
     dict.get(props, "age")
-  let assert Ok(schema.Inline(schema.BooleanSchema(..))) =
+  let assert Ok(openapi.Inline(openapi.BooleanSchema(..))) =
     dict.get(props, "active")
-  let assert Ok(schema.Inline(schema.NumberSchema(..))) =
+  let assert Ok(openapi.Inline(openapi.NumberSchema(..))) =
     dict.get(props, "score")
 }
 
@@ -3563,22 +3566,24 @@ components:
   |> should.be_true()
 
   // Company.headquarters should be a $ref
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: company_props, ..))) =
-    dict.get(components.schemas, "Company")
-  let assert Ok(schema.Reference(ref: hq_ref, ..)) =
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
+    properties: company_props,
+    ..,
+  ))) = dict.get(components.schemas, "Company")
+  let assert Ok(openapi.Reference(ref: hq_ref, ..)) =
     dict.get(company_props, "headquarters")
   hq_ref |> should.equal("#/components/schemas/CompanyHeadquarters")
 
   // CompanyHeadquarters.coordinates should be a $ref
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: hq_props, ..))) =
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(properties: hq_props, ..))) =
     dict.get(components.schemas, "CompanyHeadquarters")
-  let assert Ok(schema.Reference(ref: coord_ref, ..)) =
+  let assert Ok(openapi.Reference(ref: coord_ref, ..)) =
     dict.get(hq_props, "coordinates")
   coord_ref
   |> should.equal("#/components/schemas/CompanyHeadquartersCoordinates")
 
   // CompanyHeadquartersCoordinates should have lat and lon
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: coord_props, ..))) =
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(properties: coord_props, ..))) =
     dict.get(components.schemas, "CompanyHeadquartersCoordinates")
   dict.has_key(coord_props, "lat") |> should.be_true()
   dict.has_key(coord_props, "lon") |> should.be_true()
@@ -3616,11 +3621,11 @@ paths:
   |> should.be_true()
 
   // The request body should now reference the extracted schema
-  let assert Ok(spec.Value(path_item)) = dict.get(hoisted.paths, "/pets")
+  let assert Ok(openapi.Value(path_item)) = dict.get(hoisted.paths, "/pets")
   let assert Some(op) = path_item.post
-  let assert Some(spec.Value(req_body)) = op.request_body
+  let assert Some(openapi.Value(req_body)) = op.request_body
   let assert Ok(media_type) = dict.get(req_body.content, "application/json")
-  let assert Some(schema.Reference(ref: ref, ..)) = media_type.schema
+  let assert Some(openapi.Reference(ref: ref, ..)) = media_type.schema
   string.contains(ref, "#/components/schemas/") |> should.be_true()
 }
 
@@ -3655,11 +3660,12 @@ paths:
   |> should.be_true()
 
   // The response should now reference the extracted schema
-  let assert Ok(spec.Value(path_item)) = dict.get(hoisted.paths, "/pets")
+  let assert Ok(openapi.Value(path_item)) = dict.get(hoisted.paths, "/pets")
   let assert Some(op) = path_item.get
-  let assert Ok(spec.Value(response)) = dict.get(op.responses, http.Status(200))
+  let assert Ok(openapi.Value(response)) =
+    dict.get(op.responses, openapi.Status(200))
   let assert Ok(media_type) = dict.get(response.content, "application/json")
-  let assert Some(schema.Reference(ref: ref, ..)) = media_type.schema
+  let assert Some(openapi.Reference(ref: ref, ..)) = media_type.schema
   string.contains(ref, "#/components/schemas/") |> should.be_true()
 }
 
@@ -3732,9 +3738,9 @@ components:
   dict.size(components.schemas) |> should.equal(3)
 
   // Pet.address should reference the suffixed name, not the original PetAddress
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "Pet")
-  let assert Ok(schema.Reference(ref: ref, ..)) = dict.get(props, "address")
+  let assert Ok(openapi.Reference(ref: ref, ..)) = dict.get(props, "address")
   // The ref should NOT be the original PetAddress
   ref |> should.not_equal("#/components/schemas/PetAddress")
   // It should still be a valid components reference
@@ -3770,9 +3776,9 @@ components:
   dict.has_key(components.schemas, "user_address") |> should.be_true()
   dict.size(components.schemas) |> should.equal(3)
 
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "User")
-  let assert Ok(schema.Reference(ref: ref, ..)) = dict.get(props, "address")
+  let assert Ok(openapi.Reference(ref: ref, ..)) = dict.get(props, "address")
   ref |> should.not_equal("#/components/schemas/UserAddress")
 }
 
@@ -4020,7 +4026,7 @@ components:
   let assert Some(components) = parsed.components
   let assert Ok(scheme) = dict.get(components.security_schemes, "oauth2Auth")
   case scheme {
-    spec.Value(spec.OAuth2Scheme(
+    openapi.Value(openapi.OAuth2Scheme(
       description: Some("OAuth2 authorization code"),
       ..,
     )) -> should.be_true(True)
@@ -4052,8 +4058,10 @@ components:
   let assert Some(components) = parsed.components
   let assert Ok(scheme) = dict.get(components.security_schemes, "cookieAuth")
   case scheme {
-    spec.Value(spec.ApiKeyScheme(name: "session_id", in_: spec.SchemeInCookie)) ->
-      should.be_true(True)
+    openapi.Value(openapi.ApiKeyScheme(
+      name: "session_id",
+      in_: openapi.SchemeInCookie,
+    )) -> should.be_true(True)
     _ -> should.fail()
   }
 }
@@ -4135,7 +4143,7 @@ components:
   let assert Some(components) = parsed.components
   dict.get(components.security_schemes, "mtls")
   |> should.equal(
-    Ok(spec.Value(spec.UnsupportedScheme(scheme_type: "mutualTLS"))),
+    Ok(openapi.Value(openapi.UnsupportedScheme(scheme_type: "mutualTLS"))),
   )
 }
 
@@ -4154,7 +4162,7 @@ components:
   let assert Ok(parsed) = parser.parse_string(yaml)
   let assert Some(components) = parsed.components
   dict.get(components.security_schemes, "alias")
-  |> should.equal(Ok(spec.Ref("#/components/securitySchemes/real")))
+  |> should.equal(Ok(openapi.Ref("#/components/securitySchemes/real")))
 }
 
 pub fn parse_reports_first_invalid_security_scheme_type_by_name_case() {
@@ -5154,7 +5162,7 @@ paths:
   let assert Ok(spec) = parser.parse_string(yaml)
   spec.info.title |> should.equal("Callback Test")
   // The operation should have parsed successfully
-  let assert Ok(spec.Value(path_item)) = dict.get(spec.paths, "/subscribe")
+  let assert Ok(openapi.Value(path_item)) = dict.get(spec.paths, "/subscribe")
   let assert Some(op) = path_item.post
   op.operation_id |> should.equal(Some("subscribe"))
 }
@@ -5769,9 +5777,10 @@ paths:
   let assert Ok(spec) = parser.parse_string(yaml)
   // The callback "onEvent" must contain both URL expressions
   let subscribe_path = dict.get(spec.paths, "/subscribe")
-  let assert Ok(spec.Value(path_item)) = subscribe_path
+  let assert Ok(openapi.Value(path_item)) = subscribe_path
   let assert Some(post_op) = path_item.post
-  let assert Ok(spec.Value(callback)) = dict.get(post_op.callbacks, "onEvent")
+  let assert Ok(openapi.Value(callback)) =
+    dict.get(post_op.callbacks, "onEvent")
   // Callback entries dict must have 2 URL expressions
   let entries = dict.to_list(callback.entries)
   list.length(entries) |> should.equal(2)
@@ -6009,9 +6018,9 @@ components:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let assert Some(components) = spec.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "Installation")
-  let assert Ok(schema.Inline(schema.AnyOfSchema(
+  let assert Ok(openapi.Inline(openapi.AnyOfSchema(
     metadata: meta,
     schemas: branches,
     ..,
@@ -6045,7 +6054,7 @@ components:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let assert Some(components) = spec.components
-  let assert Ok(schema.Inline(schema.OneOfSchema(
+  let assert Ok(openapi.Inline(openapi.OneOfSchema(
     metadata: meta,
     schemas: branches,
     ..,
@@ -6077,7 +6086,7 @@ components:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let assert Some(components) = spec.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(metadata: meta, ..))) =
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(metadata: meta, ..))) =
     dict.get(components.schemas, "OnlyNull")
   meta.nullable |> should.be_true()
 }
@@ -6153,9 +6162,9 @@ components:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let assert Some(components) = spec.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "Commit")
-  let assert Ok(schema.Inline(schema.OneOfSchema(
+  let assert Ok(openapi.Inline(openapi.OneOfSchema(
     metadata: meta,
     schemas: branches,
     ..,
@@ -6203,9 +6212,9 @@ components:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let assert Some(components) = spec.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "Wrapper")
-  let assert Ok(schema.Inline(schema.AnyOfSchema(
+  let assert Ok(openapi.Inline(openapi.AnyOfSchema(
     metadata: meta,
     schemas: branches,
     ..,
@@ -6223,12 +6232,14 @@ pub fn external_file_ref_for_component_schema_case() {
   spec.info.title |> should.equal("External Ref Main")
   let assert Some(components) = spec.components
   // The referenced Widget schema must have been merged in.
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
-    dict.get(components.schemas, "Widget")
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
+    properties: widget_props,
+    ..,
+  ))) = dict.get(components.schemas, "Widget")
   dict.has_key(widget_props, "id") |> should.be_true()
   dict.has_key(widget_props, "label") |> should.be_true()
   // The original Item entry now points at the local Widget.
-  let assert Ok(schema.Reference(ref: item_ref, ..)) =
+  let assert Ok(openapi.Reference(ref: item_ref, ..)) =
     dict.get(components.schemas, "Item")
   item_ref |> should.equal("#/components/schemas/Widget")
 }
@@ -6320,15 +6331,17 @@ pub fn external_ref_in_component_path_items_case() {
       "test/fixtures/external_ref_component_path_items_main.yaml",
     )
   let assert Some(components) = loaded.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
-    dict.get(components.schemas, "Widget")
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
+    properties: widget_props,
+    ..,
+  ))) = dict.get(components.schemas, "Widget")
   dict.has_key(widget_props, "sku") |> should.be_true()
-  let assert Ok(spec.Value(path_item)) =
+  let assert Ok(openapi.Value(path_item)) =
     dict.get(components.path_items, "WidgetOps")
   let assert Some(post_op) = path_item.post
-  let assert Some(spec.Value(body)) = post_op.request_body
+  let assert Some(openapi.Value(body)) = post_op.request_body
   let assert Ok(media) = dict.get(body.content, "application/json")
-  let assert Some(schema.Reference(ref: body_ref, ..)) = media.schema
+  let assert Some(openapi.Reference(ref: body_ref, ..)) = media.schema
   body_ref |> should.equal("#/components/schemas/Widget")
 }
 
@@ -6351,20 +6364,22 @@ pub fn external_ref_in_header_schemas_case() {
   let assert Ok(loaded) =
     parser.parse_file("test/fixtures/external_ref_header_main.yaml")
   let assert Some(components) = loaded.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
-    dict.get(components.schemas, "Widget")
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
+    properties: widget_props,
+    ..,
+  ))) = dict.get(components.schemas, "Widget")
   dict.has_key(widget_props, "sku") |> should.be_true()
   // components.headers.RateInfo.schema rewritten.
   let assert Ok(rate_header) = dict.get(components.headers, "RateInfo")
-  let assert Some(schema.Reference(ref: comp_header_ref, ..)) =
+  let assert Some(openapi.Reference(ref: comp_header_ref, ..)) =
     rate_header.schema
   comp_header_ref |> should.equal("#/components/schemas/Widget")
   // Operation response header schema rewritten.
-  let assert Ok(spec.Value(path_item)) = dict.get(loaded.paths, "/widgets")
+  let assert Ok(openapi.Value(path_item)) = dict.get(loaded.paths, "/widgets")
   let assert Some(get_op) = path_item.get
-  let assert [#(_, spec.Value(resp))] = dict.to_list(get_op.responses)
+  let assert [#(_, openapi.Value(resp))] = dict.to_list(get_op.responses)
   let assert Ok(resp_header) = dict.get(resp.headers, "X-Rate-Info")
-  let assert Some(schema.Reference(ref: resp_header_ref, ..)) =
+  let assert Some(openapi.Reference(ref: resp_header_ref, ..)) =
     resp_header.schema
   resp_header_ref |> should.equal("#/components/schemas/Widget")
 }
@@ -6386,10 +6401,12 @@ pub fn external_ref_chained_local_alias_in_shared_file_case() {
   let assert Ok(loaded) =
     parser.parse_file("test/fixtures/external_ref_chained_main.yaml")
   let assert Some(components) = loaded.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: legacy_props, ..))) =
-    dict.get(components.schemas, "LegacyWidget")
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
+    properties: legacy_props,
+    ..,
+  ))) = dict.get(components.schemas, "LegacyWidget")
   dict.has_key(legacy_props, "sku") |> should.be_true()
-  let assert Ok(schema.Reference(ref: item_ref, ..)) =
+  let assert Ok(openapi.Reference(ref: item_ref, ..)) =
     dict.get(components.schemas, "Item")
   item_ref |> should.equal("#/components/schemas/LegacyWidget")
 }
@@ -6403,7 +6420,7 @@ pub fn external_ref_chained_across_files_resolves_transitively_case() {
   let assert Ok(loaded) =
     parser.parse_file("test/fixtures/external_ref_chained_cross_file_main.yaml")
   let assert Some(components) = loaded.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: props, ..))) =
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(properties: props, ..))) =
     dict.get(components.schemas, "Indirect")
   dict.has_key(props, "sku") |> should.be_true()
 }
@@ -6415,21 +6432,23 @@ pub fn external_ref_in_callback_path_item_case() {
   let assert Ok(loaded) =
     parser.parse_file("test/fixtures/external_ref_callback_main.yaml")
   let assert Some(components) = loaded.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
-    dict.get(components.schemas, "Widget")
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
+    properties: widget_props,
+    ..,
+  ))) = dict.get(components.schemas, "Widget")
   dict.has_key(widget_props, "sku") |> should.be_true()
   // Drill into the callback's PathItem and confirm the request body
   // schema ref is rewritten to local form.
-  let assert Ok(spec.Value(path_item)) = dict.get(loaded.paths, "/subscribe")
+  let assert Ok(openapi.Value(path_item)) = dict.get(loaded.paths, "/subscribe")
   let assert Some(post_op) = path_item.post
-  let assert Ok(spec.Value(callback)) =
+  let assert Ok(openapi.Value(callback)) =
     dict.get(post_op.callbacks, "widgetEvent")
-  let assert Ok(spec.Value(cb_path_item)) =
+  let assert Ok(openapi.Value(cb_path_item)) =
     dict.get(callback.entries, "{$request.body#/callbackUrl}")
   let assert Some(cb_post) = cb_path_item.post
-  let assert Some(spec.Value(cb_body)) = cb_post.request_body
+  let assert Some(openapi.Value(cb_body)) = cb_post.request_body
   let assert Ok(media) = dict.get(cb_body.content, "application/json")
-  let assert Some(schema.Reference(ref: cb_ref, ..)) = media.schema
+  let assert Some(openapi.Reference(ref: cb_ref, ..)) = media.schema
   cb_ref |> should.equal("#/components/schemas/Widget")
 }
 
@@ -6456,30 +6475,32 @@ pub fn external_ref_in_operation_schemas_case() {
   // Widget must have been pulled into components.schemas by the
   // operation walker, even though the source spec had an empty
   // components block.
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
-    dict.get(components.schemas, "Widget")
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
+    properties: widget_props,
+    ..,
+  ))) = dict.get(components.schemas, "Widget")
   dict.has_key(widget_props, "sku") |> should.be_true()
   // Path-level parameter schema rewritten.
-  let assert Ok(spec.Value(path_item)) = dict.get(loaded.paths, "/widgets")
-  let assert [spec.Value(path_param)] = path_item.parameters
-  let assert spec.ParameterSchema(schema.Reference(ref: path_param_ref, ..)) =
+  let assert Ok(openapi.Value(path_item)) = dict.get(loaded.paths, "/widgets")
+  let assert [openapi.Value(path_param)] = path_item.parameters
+  let assert openapi.ParameterSchema(openapi.Reference(ref: path_param_ref, ..)) =
     path_param.payload
   path_param_ref |> should.equal("#/components/schemas/Widget")
   // Operation-level parameter schema rewritten.
   let assert Some(post_op) = path_item.post
-  let assert [spec.Value(op_param)] = post_op.parameters
-  let assert spec.ParameterSchema(schema.Reference(ref: op_param_ref, ..)) =
+  let assert [openapi.Value(op_param)] = post_op.parameters
+  let assert openapi.ParameterSchema(openapi.Reference(ref: op_param_ref, ..)) =
     op_param.payload
   op_param_ref |> should.equal("#/components/schemas/Widget")
   // Request body media schema rewritten.
-  let assert Some(spec.Value(req_body)) = post_op.request_body
+  let assert Some(openapi.Value(req_body)) = post_op.request_body
   let assert Ok(body_media) = dict.get(req_body.content, "application/json")
-  let assert Some(schema.Reference(ref: body_ref, ..)) = body_media.schema
+  let assert Some(openapi.Reference(ref: body_ref, ..)) = body_media.schema
   body_ref |> should.equal("#/components/schemas/Widget")
   // Response media schema rewritten.
-  let assert [#(_, spec.Value(response))] = dict.to_list(post_op.responses)
+  let assert [#(_, openapi.Value(response))] = dict.to_list(post_op.responses)
   let assert Ok(resp_media) = dict.get(response.content, "application/json")
-  let assert Some(schema.Reference(ref: resp_ref, ..)) = resp_media.schema
+  let assert Some(openapi.Reference(ref: resp_ref, ..)) = resp_media.schema
   resp_ref |> should.equal("#/components/schemas/Widget")
 }
 
@@ -6504,13 +6525,16 @@ pub fn external_ref_in_parameter_content_schema_case() {
   let assert Ok(loaded) =
     parser.parse_file("test/fixtures/external_ref_parameter_content_main.yaml")
   let assert Some(components) = loaded.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
-    dict.get(components.schemas, "Widget")
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
+    properties: widget_props,
+    ..,
+  ))) = dict.get(components.schemas, "Widget")
   dict.has_key(widget_props, "sku") |> should.be_true()
-  let assert Ok(spec.Value(param)) = dict.get(components.parameters, "Filter")
-  let assert spec.ParameterContent(media_map) = param.payload
+  let assert Ok(openapi.Value(param)) =
+    dict.get(components.parameters, "Filter")
+  let assert openapi.ParameterContent(media_map) = param.payload
   let assert Ok(media) = dict.get(media_map, "application/json")
-  let assert Some(schema.Reference(ref: schema_ref, ..)) = media.schema
+  let assert Some(openapi.Reference(ref: schema_ref, ..)) = media.schema
   schema_ref |> should.equal("#/components/schemas/Widget")
 }
 
@@ -6532,13 +6556,15 @@ pub fn external_ref_in_request_body_schema_case() {
   let assert Ok(loaded) =
     parser.parse_file("test/fixtures/external_ref_request_body_main.yaml")
   let assert Some(components) = loaded.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
-    dict.get(components.schemas, "Widget")
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
+    properties: widget_props,
+    ..,
+  ))) = dict.get(components.schemas, "Widget")
   dict.has_key(widget_props, "sku") |> should.be_true()
-  let assert Ok(spec.Value(body)) =
+  let assert Ok(openapi.Value(body)) =
     dict.get(components.request_bodies, "CreateWidget")
   let assert Ok(media) = dict.get(body.content, "application/json")
-  let assert Some(schema.Reference(ref: schema_ref, ..)) = media.schema
+  let assert Some(openapi.Reference(ref: schema_ref, ..)) = media.schema
   schema_ref |> should.equal("#/components/schemas/Widget")
 }
 
@@ -6547,13 +6573,15 @@ pub fn external_ref_in_response_schema_case() {
   let assert Ok(loaded) =
     parser.parse_file("test/fixtures/external_ref_response_main.yaml")
   let assert Some(components) = loaded.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
-    dict.get(components.schemas, "Widget")
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
+    properties: widget_props,
+    ..,
+  ))) = dict.get(components.schemas, "Widget")
   dict.has_key(widget_props, "sku") |> should.be_true()
-  let assert Ok(spec.Value(resp)) =
+  let assert Ok(openapi.Value(resp)) =
     dict.get(components.responses, "WidgetPayload")
   let assert Ok(media) = dict.get(resp.content, "application/json")
-  let assert Some(schema.Reference(ref: schema_ref, ..)) = media.schema
+  let assert Some(openapi.Reference(ref: schema_ref, ..)) = media.schema
   schema_ref |> should.equal("#/components/schemas/Widget")
 }
 
@@ -6575,12 +6603,14 @@ pub fn external_ref_in_parameter_schema_case() {
   let assert Ok(loaded) =
     parser.parse_file("test/fixtures/external_ref_parameter_schema_main.yaml")
   let assert Some(components) = loaded.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
-    dict.get(components.schemas, "Widget")
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
+    properties: widget_props,
+    ..,
+  ))) = dict.get(components.schemas, "Widget")
   dict.has_key(widget_props, "sku") |> should.be_true()
-  let assert Ok(spec.Value(param)) =
+  let assert Ok(openapi.Value(param)) =
     dict.get(components.parameters, "WidgetHeader")
-  let assert spec.ParameterSchema(schema.Reference(ref: schema_ref, ..)) =
+  let assert openapi.ParameterSchema(openapi.Reference(ref: schema_ref, ..)) =
     param.payload
   schema_ref |> should.equal("#/components/schemas/Widget")
 }
@@ -6605,16 +6635,18 @@ pub fn external_ref_in_composition_branch_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/external_ref_composition_main.yaml")
   let assert Some(components) = spec.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
-    dict.get(components.schemas, "Widget")
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
+    properties: widget_props,
+    ..,
+  ))) = dict.get(components.schemas, "Widget")
   dict.has_key(widget_props, "sku") |> should.be_true()
-  let assert Ok(schema.Inline(schema.OneOfSchema(schemas: branches, ..))) =
+  let assert Ok(openapi.Inline(openapi.OneOfSchema(schemas: branches, ..))) =
     dict.get(components.schemas, "WidgetOrInline")
   // First branch (the external ref) rewritten to local; second stays inline.
   let assert [first, second] = branches
-  let assert schema.Reference(ref: branch_ref, ..) = first
+  let assert openapi.Reference(ref: branch_ref, ..) = first
   branch_ref |> should.equal("#/components/schemas/Widget")
-  let assert schema.Inline(schema.StringSchema(..)) = second
+  let assert openapi.Inline(openapi.StringSchema(..)) = second
 }
 
 pub fn external_ref_composition_collision_with_local_schema_rejected_case() {
@@ -6639,14 +6671,16 @@ pub fn external_ref_in_additional_properties_case() {
       "test/fixtures/external_ref_additional_properties_main.yaml",
     )
   let assert Some(components) = spec.components
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
-    dict.get(components.schemas, "Widget")
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
+    properties: widget_props,
+    ..,
+  ))) = dict.get(components.schemas, "Widget")
   dict.has_key(widget_props, "sku") |> should.be_true()
-  let assert Ok(schema.Inline(schema.ObjectSchema(
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
     additional_properties: additional,
     ..,
   ))) = dict.get(components.schemas, "WidgetMap")
-  let assert schema.Typed(schema.Reference(ref: added_ref, ..)) = additional
+  let assert openapi.Typed(openapi.Reference(ref: added_ref, ..)) = additional
   added_ref |> should.equal("#/components/schemas/Widget")
 }
 
@@ -6671,13 +6705,15 @@ pub fn external_ref_in_array_items_case() {
     parser.parse_file("test/fixtures/external_ref_array_items_main.yaml")
   let assert Some(components) = spec.components
   // Widget must have been pulled in from the shared file.
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
-    dict.get(components.schemas, "Widget")
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
+    properties: widget_props,
+    ..,
+  ))) = dict.get(components.schemas, "Widget")
   dict.has_key(widget_props, "sku") |> should.be_true()
   // Widgets.items must now be a local reference.
-  let assert Ok(schema.Inline(schema.ArraySchema(items: items_ref, ..))) =
+  let assert Ok(openapi.Inline(openapi.ArraySchema(items: items_ref, ..))) =
     dict.get(components.schemas, "Widgets")
-  let assert schema.Reference(ref: items_ref_str, ..) = items_ref
+  let assert openapi.Reference(ref: items_ref_str, ..) = items_ref
   items_ref_str |> should.equal("#/components/schemas/Widget")
 }
 
@@ -6702,20 +6738,22 @@ pub fn external_ref_nested_in_object_property_case() {
     parser.parse_file("test/fixtures/external_ref_nested_main.yaml")
   let assert Some(components) = spec.components
   // Widget must have been pulled in from the shared file.
-  let assert Ok(schema.Inline(schema.ObjectSchema(properties: widget_props, ..))) =
-    dict.get(components.schemas, "Widget")
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
+    properties: widget_props,
+    ..,
+  ))) = dict.get(components.schemas, "Widget")
   dict.has_key(widget_props, "sku") |> should.be_true()
   dict.has_key(widget_props, "price") |> should.be_true()
   // Envelope.payload must now be a local reference to that schema.
-  let assert Ok(schema.Inline(schema.ObjectSchema(
+  let assert Ok(openapi.Inline(openapi.ObjectSchema(
     properties: envelope_props,
     ..,
   ))) = dict.get(components.schemas, "Envelope")
-  let assert Ok(schema.Reference(ref: payload_ref, ..)) =
+  let assert Ok(openapi.Reference(ref: payload_ref, ..)) =
     dict.get(envelope_props, "payload")
   payload_ref |> should.equal("#/components/schemas/Widget")
   // Non-ref sibling property must be preserved unchanged.
-  let assert Ok(schema.Inline(schema.StringSchema(..))) =
+  let assert Ok(openapi.Inline(openapi.StringSchema(..))) =
     dict.get(envelope_props, "note")
 }
 
@@ -6904,7 +6942,7 @@ pub fn server_request_shape_boundary_fixtures_case() {
       validate.validate(ctx)
       |> list.filter(fn(e) {
         case e.target {
-          diagnostic.TargetServer | diagnostic.TargetBoth ->
+          openapi.TargetServer | openapi.TargetBoth ->
             string.contains(e.message, expected_message)
           _ -> False
         }
@@ -6960,7 +6998,8 @@ paths:
   case result {
     Ok(spec) -> {
       // If parse succeeded, the callback must NOT have been silently dropped
-      let assert Ok(spec.Value(path_item)) = dict.get(spec.paths, "/subscribe")
+      let assert Ok(openapi.Value(path_item)) =
+        dict.get(spec.paths, "/subscribe")
       let assert Some(post_op) = path_item.post
       // Currently the error is swallowed and onEvent is missing.
       // After fix, either parse fails (Error) or callback is present.
@@ -7137,7 +7176,7 @@ paths:
       // If parse succeeds, there must be some way to know HEAD was present.
       // Currently PathItem has no head field, so it silently drops it.
       // After fix: either head is in the AST, or parser returns an error.
-      let assert Ok(spec.Value(path_item)) = dict.get(spec.paths, "/ping")
+      let assert Ok(openapi.Value(path_item)) = dict.get(spec.paths, "/ping")
       // At minimum, the path should have at least one operation
       let has_any_op =
         option.is_some(path_item.get)
@@ -7197,7 +7236,7 @@ paths:
   // or parse returns an error (not silent success with no operations).
   case result {
     Ok(spec) -> {
-      let assert Ok(spec.Value(path_item)) = dict.get(spec.paths, "/cors")
+      let assert Ok(openapi.Value(path_item)) = dict.get(spec.paths, "/cors")
       // The path must have SOME operation — if it has none,
       // the OPTIONS was silently dropped
       // OPTIONS must be accessible in the AST
@@ -7354,7 +7393,7 @@ security:
   // OAuth2 scheme must preserve flow URLs and scopes.
   // Currently OAuth2Scheme only has description, losing all flow data.
   case scheme {
-    spec.Value(spec.OAuth2Scheme(flows:, ..)) -> {
+    openapi.Value(openapi.OAuth2Scheme(flows:, ..)) -> {
       // flows must not be empty — must contain the authorizationCode flow
       { flows != dict.new() }
       |> should.be_true()
@@ -7744,24 +7783,24 @@ paths:
 /// status_code_to_int_pattern must not pass through range codes like "2XX".
 pub fn status_code_range_pattern_case() {
   // Range codes must produce valid Gleam patterns, not raw "2XX"
-  http.status_code_to_int_pattern(http.StatusRange(2))
+  http.status_code_to_int_pattern(openapi.StatusRange(2))
   |> should.not_equal("2XX")
 
   // Exact codes still work
-  http.status_code_to_int_pattern(http.Status(200))
+  http.status_code_to_int_pattern(openapi.Status(200))
   |> should.equal("200")
 
   // Default is wildcard
-  http.status_code_to_int_pattern(http.DefaultStatus)
+  http.status_code_to_int_pattern(openapi.DefaultStatus)
   |> should.equal("_")
 }
 
 /// status_code_suffix must handle range codes.
 pub fn status_code_suffix_range_case() {
-  http.status_code_suffix(http.StatusRange(2))
+  http.status_code_suffix(openapi.StatusRange(2))
   |> should.equal("Status2xx")
 
-  http.status_code_suffix(http.StatusRange(4))
+  http.status_code_suffix(openapi.StatusRange(4))
   |> should.equal("Status4xx")
 }
 
@@ -7771,26 +7810,29 @@ pub fn status_code_suffix_range_case() {
 /// inconsistent variant naming across response types.
 pub fn status_code_suffix_full_iana_registry_case() {
   // Codes that previously fell through to the numeric form.
-  http.status_code_suffix(http.Status(202)) |> should.equal("Accepted")
-  http.status_code_suffix(http.Status(206)) |> should.equal("PartialContent")
-  http.status_code_suffix(http.Status(301)) |> should.equal("MovedPermanently")
-  http.status_code_suffix(http.Status(304)) |> should.equal("NotModified")
-  http.status_code_suffix(http.Status(308)) |> should.equal("PermanentRedirect")
-  http.status_code_suffix(http.Status(410)) |> should.equal("Gone")
-  http.status_code_suffix(http.Status(418)) |> should.equal("IAmATeapot")
-  http.status_code_suffix(http.Status(429)) |> should.equal("TooManyRequests")
-  http.status_code_suffix(http.Status(451))
+  http.status_code_suffix(openapi.Status(202)) |> should.equal("Accepted")
+  http.status_code_suffix(openapi.Status(206)) |> should.equal("PartialContent")
+  http.status_code_suffix(openapi.Status(301))
+  |> should.equal("MovedPermanently")
+  http.status_code_suffix(openapi.Status(304)) |> should.equal("NotModified")
+  http.status_code_suffix(openapi.Status(308))
+  |> should.equal("PermanentRedirect")
+  http.status_code_suffix(openapi.Status(410)) |> should.equal("Gone")
+  http.status_code_suffix(openapi.Status(418)) |> should.equal("IAmATeapot")
+  http.status_code_suffix(openapi.Status(429))
+  |> should.equal("TooManyRequests")
+  http.status_code_suffix(openapi.Status(451))
   |> should.equal("UnavailableForLegalReasons")
-  http.status_code_suffix(http.Status(503))
+  http.status_code_suffix(openapi.Status(503))
   |> should.equal("ServiceUnavailable")
   // Codes already named pre-fix should still produce the same suffix.
-  http.status_code_suffix(http.Status(200)) |> should.equal("Ok")
-  http.status_code_suffix(http.Status(204)) |> should.equal("NoContent")
-  http.status_code_suffix(http.Status(401)) |> should.equal("Unauthorized")
-  http.status_code_suffix(http.Status(500))
+  http.status_code_suffix(openapi.Status(200)) |> should.equal("Ok")
+  http.status_code_suffix(openapi.Status(204)) |> should.equal("NoContent")
+  http.status_code_suffix(openapi.Status(401)) |> should.equal("Unauthorized")
+  http.status_code_suffix(openapi.Status(500))
   |> should.equal("InternalServerError")
   // Non-standard codes keep the numeric fallback.
-  http.status_code_suffix(http.Status(599)) |> should.equal("Status599")
+  http.status_code_suffix(openapi.Status(599)) |> should.equal("Status599")
 }
 
 // --- additionalProperties: true encoder tests ---
@@ -8965,7 +9007,7 @@ components:
   let assert Ok(spec) = parser.parse_string(yaml)
   // The Pet schema must have a discriminator in the AST
   let assert Some(components) = spec.components
-  let assert Ok(schema.Inline(schema.AnyOfSchema(discriminator: disc, ..))) =
+  let assert Ok(openapi.Inline(openapi.AnyOfSchema(discriminator: disc, ..))) =
     dict.get(components.schemas, "Pet")
   // discriminator must be Some, not None
   disc
@@ -9121,11 +9163,11 @@ components:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   // /health path must exist as a Ref (lazy resolution)
-  let assert Ok(spec.Ref(ref_str)) = dict.get(spec.paths, "/health")
+  let assert Ok(openapi.Ref(ref_str)) = dict.get(spec.paths, "/health")
   ref_str |> should.equal("#/components/pathItems/HealthCheck")
   // The referenced PathItem must exist in components
   let assert Some(components) = spec.components
-  let assert Ok(spec.Value(path_item)) =
+  let assert Ok(openapi.Value(path_item)) =
     dict.get(components.path_items, "HealthCheck")
   let assert Some(get_op) = path_item.get
   get_op.operation_id
@@ -9312,7 +9354,7 @@ components:
   let assert Ok(spec) = parser.parse_string(yaml)
   // The NullablePet schema must have nullable: true in the AST
   let assert Some(components) = spec.components
-  let assert Ok(schema.Inline(oneof_schema)) =
+  let assert Ok(openapi.Inline(oneof_schema)) =
     dict.get(components.schemas, "NullablePet")
   schema.is_nullable(oneof_schema)
   |> should.be_true()
@@ -9597,7 +9639,7 @@ paths:
 
 /// schema_dispatch must return correct types for primitives.
 pub fn schema_dispatch_primitive_types_case() {
-  schema_dispatch.schema_base_type(schema.StringSchema(
+  schema_dispatch.schema_base_type(openapi.StringSchema(
     metadata: schema.default_metadata(),
     format: None,
     enum_values: [],
@@ -9607,7 +9649,7 @@ pub fn schema_dispatch_primitive_types_case() {
   ))
   |> should.equal("String")
 
-  schema_dispatch.schema_base_type(schema.IntegerSchema(
+  schema_dispatch.schema_base_type(openapi.IntegerSchema(
     metadata: schema.default_metadata(),
     format: None,
     minimum: None,
@@ -9622,7 +9664,7 @@ pub fn schema_dispatch_primitive_types_case() {
 /// schema_dispatch.to_string_expr must produce correct conversion expressions.
 pub fn schema_dispatch_to_string_expr_case() {
   schema_dispatch.to_string_expr(
-    schema.IntegerSchema(
+    openapi.IntegerSchema(
       metadata: schema.default_metadata(),
       format: None,
       minimum: None,
@@ -9881,13 +9923,13 @@ paths:
         '200': { description: ok }
 "
   let assert Ok(parsed) = parser.parse_string(yaml)
-  let assert Ok(spec.Value(pi)) = dict.get(parsed.paths, "/x/{id}")
+  let assert Ok(openapi.Value(pi)) = dict.get(parsed.paths, "/x/{id}")
   let assert Some(op) = pi.get
-  let assert [spec.Value(deep), spec.Value(form), spec.Value(simple)] =
+  let assert [openapi.Value(deep), openapi.Value(form), openapi.Value(simple)] =
     op.parameters
-  deep.style |> should.equal(Some(spec.DeepObjectStyle))
-  form.style |> should.equal(Some(spec.FormStyle))
-  simple.style |> should.equal(Some(spec.SimpleStyle))
+  deep.style |> should.equal(Some(openapi.DeepObjectStyle))
+  form.style |> should.equal(Some(openapi.FormStyle))
+  simple.style |> should.equal(Some(openapi.SimpleStyle))
 }
 
 // --- SchemaMetadata preserves title, readOnly, writeOnly, default, example ---
@@ -9920,10 +9962,10 @@ components:
 "
   let assert Ok(parsed) = parser.parse_string(yaml)
   let assert Some(c) = parsed.components
-  let assert Ok(schema.Inline(user)) = dict.get(c.schemas, "User")
+  let assert Ok(openapi.Inline(user)) = dict.get(c.schemas, "User")
   // Object metadata
   case user {
-    schema.ObjectSchema(metadata:, ..) -> {
+    openapi.ObjectSchema(metadata:, ..) -> {
       metadata.title |> should.equal(Some("User object"))
     }
     _ -> should.fail()
@@ -9962,17 +10004,17 @@ components:
   let assert Ok(q) = dict.get(c.security_schemes, "queryKey")
   let assert Ok(k) = dict.get(c.security_schemes, "cookieKey")
   case h {
-    spec.Value(spec.ApiKeyScheme(in_: spec.SchemeInHeader, ..)) ->
+    openapi.Value(openapi.ApiKeyScheme(in_: openapi.SchemeInHeader, ..)) ->
       should.be_ok(Ok(Nil))
     _ -> should.fail()
   }
   case q {
-    spec.Value(spec.ApiKeyScheme(in_: spec.SchemeInQuery, ..)) ->
+    openapi.Value(openapi.ApiKeyScheme(in_: openapi.SchemeInQuery, ..)) ->
       should.be_ok(Ok(Nil))
     _ -> should.fail()
   }
   case k {
-    spec.Value(spec.ApiKeyScheme(in_: spec.SchemeInCookie, ..)) ->
+    openapi.Value(openapi.ApiKeyScheme(in_: openapi.SchemeInCookie, ..)) ->
       should.be_ok(Ok(Nil))
     _ -> should.fail()
   }
@@ -10065,9 +10107,10 @@ paths:
               description: Get item by ID
 "
   let assert Ok(parsed) = parser.parse_string(yaml)
-  let assert Ok(spec.Value(pi)) = dict.get(parsed.paths, "/items")
+  let assert Ok(openapi.Value(pi)) = dict.get(parsed.paths, "/items")
   let assert Some(op) = pi.get
-  let assert Ok(spec.Value(resp)) = dict.get(op.responses, http.Status(200))
+  let assert Ok(openapi.Value(resp)) =
+    dict.get(op.responses, openapi.Status(200))
   let assert Ok(header) = dict.get(resp.headers, "X-Rate-Limit")
   header.description |> should.equal(Some("Rate limit"))
   header.required |> should.be_true()
@@ -11007,7 +11050,7 @@ paths:
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == diagnostic.TargetServer
+      e.target == openapi.TargetServer
       && string.contains(
         e.message,
         "multipart/form-data server request bodies only support",
@@ -11053,7 +11096,7 @@ paths:
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == diagnostic.TargetServer
+      e.target == openapi.TargetServer
       && string.contains(
         e.message,
         "application/x-www-form-urlencoded server request bodies only support",
@@ -11092,7 +11135,7 @@ paths:
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == diagnostic.TargetServer
+      e.target == openapi.TargetServer
       && string.contains(e.message, "not supported for server")
     })
   list.length(server_errors)
@@ -11242,7 +11285,7 @@ pub fn validate_rejects_array_params_for_server_codegen_case() {
   let array_errors =
     list.filter(errors, fn(e) {
       case e.target {
-        diagnostic.TargetServer | diagnostic.TargetBoth ->
+        openapi.TargetServer | openapi.TargetBoth ->
           string.contains(
             e.message,
             "Query array parameters are only supported",
@@ -11259,7 +11302,7 @@ pub fn validate_accepts_deep_object_params_for_server_codegen_case() {
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == diagnostic.TargetServer
+      e.target == openapi.TargetServer
       && string.contains(e.message, "deepObject")
     })
   list.length(server_errors)
@@ -11271,7 +11314,7 @@ pub fn validate_rejects_path_complex_params_for_server_codegen_case() {
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == diagnostic.TargetServer
+      e.target == openapi.TargetServer
       && string.contains(e.message, "Complex path parameters are not supported")
     })
   list.length(server_errors)
@@ -11317,15 +11360,15 @@ pub fn filter_by_mode_drops_server_errors_for_client_case() {
     diagnostic.validation(
       path: "x",
       detail: "server-only",
-      severity: diagnostic.SeverityError,
-      target: diagnostic.TargetServer,
+      severity: openapi.SeverityError,
+      target: openapi.TargetServer,
       hint: None,
     ),
     diagnostic.validation(
       path: "y",
       detail: "shared",
-      severity: diagnostic.SeverityError,
-      target: diagnostic.TargetBoth,
+      severity: openapi.SeverityError,
+      target: openapi.TargetBoth,
       hint: None,
     ),
   ]
@@ -11339,15 +11382,15 @@ pub fn filter_by_mode_drops_client_errors_for_server_case() {
     diagnostic.validation(
       path: "x",
       detail: "client-only",
-      severity: diagnostic.SeverityError,
-      target: diagnostic.TargetClient,
+      severity: openapi.SeverityError,
+      target: openapi.TargetClient,
       hint: None,
     ),
     diagnostic.validation(
       path: "y",
       detail: "shared",
-      severity: diagnostic.SeverityError,
-      target: diagnostic.TargetBoth,
+      severity: openapi.SeverityError,
+      target: openapi.TargetBoth,
       hint: None,
     ),
   ]
@@ -11361,22 +11404,22 @@ pub fn filter_by_mode_keeps_all_errors_for_both_case() {
     diagnostic.validation(
       path: "x",
       detail: "client-only",
-      severity: diagnostic.SeverityError,
-      target: diagnostic.TargetClient,
+      severity: openapi.SeverityError,
+      target: openapi.TargetClient,
       hint: None,
     ),
     diagnostic.validation(
       path: "y",
       detail: "server-only",
-      severity: diagnostic.SeverityError,
-      target: diagnostic.TargetServer,
+      severity: openapi.SeverityError,
+      target: openapi.TargetServer,
       hint: None,
     ),
     diagnostic.validation(
       path: "z",
       detail: "shared",
-      severity: diagnostic.SeverityError,
-      target: diagnostic.TargetBoth,
+      severity: openapi.SeverityError,
+      target: openapi.TargetBoth,
       hint: None,
     ),
   ]
@@ -11439,8 +11482,8 @@ paths:
   let issues = capability_check.check_preserved(ctx, location_index.empty())
   let warnings =
     list.filter(issues, fn(issue) {
-      issue.severity == diagnostic.SeverityWarning
-      && issue.target == diagnostic.TargetServer
+      issue.severity == openapi.SeverityWarning
+      && issue.target == openapi.TargetServer
       && string.contains(issue.message, "Multiple response content types")
     })
   list.length(warnings)
@@ -11483,7 +11526,7 @@ pub fn validate_accepts_cookie_params_for_server_codegen_case() {
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == diagnostic.TargetServer
+      e.target == openapi.TargetServer
       && string.contains(e.message, "Cookie parameters")
     })
   list.length(server_errors)
@@ -11599,7 +11642,7 @@ pub fn validate_accepts_header_array_params_for_server_codegen_case() {
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == diagnostic.TargetServer
+      e.target == openapi.TargetServer
       && string.contains(e.message, "Array parameters")
     })
   list.length(server_errors)
@@ -11649,7 +11692,7 @@ pub fn validate_accepts_query_array_params_for_server_codegen_case() {
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == diagnostic.TargetServer
+      e.target == openapi.TargetServer
       && string.contains(e.message, "Array parameters")
     })
   list.length(server_errors)
@@ -11788,7 +11831,7 @@ pub fn validate_accepts_form_urlencoded_body_for_server_codegen_case() {
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == diagnostic.TargetServer
+      e.target == openapi.TargetServer
       && string.contains(e.message, "application/x-www-form-urlencoded")
     })
   list.length(server_errors)
@@ -11859,7 +11902,7 @@ pub fn validate_accepts_nested_form_urlencoded_body_for_server_codegen_case() {
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == diagnostic.TargetServer
+      e.target == openapi.TargetServer
       && string.contains(e.message, "application/x-www-form-urlencoded")
     })
   list.length(server_errors)
@@ -11901,7 +11944,7 @@ pub fn validate_accepts_multipart_body_for_server_codegen_case() {
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == diagnostic.TargetServer
+      e.target == openapi.TargetServer
       && string.contains(e.message, "multipart/form-data")
     })
   list.length(server_errors)
@@ -11963,7 +12006,7 @@ pub fn validate_accepts_form_urlencoded_ref_fields_for_server_codegen_case() {
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == diagnostic.TargetServer
+      e.target == openapi.TargetServer
       && string.contains(e.message, "application/x-www-form-urlencoded")
     })
   list.length(server_errors)
@@ -12015,7 +12058,7 @@ pub fn validate_accepts_multipart_ref_fields_for_server_codegen_case() {
   let errors = validate.validate(ctx)
   let server_errors =
     list.filter(errors, fn(e) {
-      e.target == diagnostic.TargetServer
+      e.target == openapi.TargetServer
       && string.contains(e.message, "multipart/form-data")
     })
   list.length(server_errors)
@@ -12443,7 +12486,7 @@ paths:
   let multipart_errors =
     list.filter(errors, fn(e) {
       string.contains(e.message, "multipart")
-      && e.target == diagnostic.TargetServer
+      && e.target == openapi.TargetServer
     })
   list.length(multipart_errors)
   |> should.equal(0)
@@ -12554,7 +12597,7 @@ paths:
   let form_errors =
     list.filter(errors, fn(e) {
       string.contains(e.message, "form-urlencoded")
-      && e.target == diagnostic.TargetServer
+      && e.target == openapi.TargetServer
     })
   list.length(form_errors)
   |> should.equal(0)
@@ -12837,7 +12880,7 @@ pub fn oss_libopenapi_all_components_validates_security_case() {
   let blocking = diagnostic.errors_only(errors)
   let has_security_error =
     list.any(blocking, fn(e) {
-      string.contains(diagnostic.to_string(e), "api_key")
+      string.contains(openapi.diagnostic_to_string(e), "api_key")
     })
   should.be_true(has_security_error)
 }
@@ -12852,7 +12895,8 @@ pub fn oss_libopenapi_burgershop_rejects_not_keyword_case() {
   let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
+      let error_details =
+        list.map(errors, fn(e) { openapi.diagnostic_to_string(e) })
       let has_not = list.any(error_details, fn(d) { string.contains(d, "not") })
       should.be_true(has_not)
     }
@@ -13788,7 +13832,7 @@ pub fn oss_openapi_dotnet_dollar_id_parses_case() {
 pub fn validate_rejects_id_backed_url_ref_with_dedicated_diagnostic_case() {
   let ctx = make_ctx("test/fixtures/oss_openapi_dotnet_dollar_id.yaml")
   let errors = validate.validate(ctx) |> diagnostic.errors_only
-  let messages = list.map(errors, diagnostic.to_string)
+  let messages = list.map(errors, openapi.diagnostic_to_string)
   list.any(messages, fn(s) {
     string.contains(s, "URL-style $ref")
     && string.contains(s, "OpenAPI 3.1")
@@ -13833,13 +13877,13 @@ pub fn oss_swagger_parser_java_callback_ref_parses_case() {
 pub fn parse_preserves_operation_level_callback_ref_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_swagger_parser_java_callback_ref.yaml")
-  let assert Ok(spec.Value(path_item)) = dict.get(spec.paths, "/register")
+  let assert Ok(openapi.Value(path_item)) = dict.get(spec.paths, "/register")
   let assert Some(post_op) = path_item.post
   let assert Ok(entry) = dict.get(post_op.callbacks, "myEvent")
   case entry {
-    spec.Ref(ref_str) ->
+    openapi.Ref(ref_str) ->
       ref_str |> should.equal("#/components/callbacks/callbackEvent")
-    spec.Value(_) -> should.fail()
+    openapi.Value(_) -> should.fail()
   }
 }
 
@@ -13850,7 +13894,7 @@ pub fn parse_populates_components_callbacks_case() {
     parser.parse_file("test/fixtures/oss_swagger_parser_java_callback_ref.yaml")
   let assert Some(components) = spec.components
   dict.size(components.callbacks) |> should.equal(1)
-  let assert Ok(spec.Value(callback)) =
+  let assert Ok(openapi.Value(callback)) =
     dict.get(components.callbacks, "callbackEvent")
   dict.has_key(callback.entries, "{$request.body#/callbackUrl}")
   |> should.be_true()
@@ -13881,7 +13925,7 @@ components:
   let assert Ok(spec) = parser.parse_string(yaml)
   case resolve.resolve(spec) {
     Error(errors) -> {
-      let messages = list.map(errors, diagnostic.to_string)
+      let messages = list.map(errors, openapi.diagnostic_to_string)
       list.any(messages, fn(s) {
         string.contains(s, "doesNotExist")
         && string.contains(s, "components.callbacks")
@@ -13921,7 +13965,7 @@ components:
   let assert Ok(spec) = parser.parse_string(yaml)
   case resolve.resolve(spec) {
     Error(errors) -> {
-      let messages = list.map(errors, diagnostic.to_string)
+      let messages = list.map(errors, openapi.diagnostic_to_string)
       list.any(messages, fn(s) { string.contains(s, "cyclic") })
       |> should.be_true()
     }
@@ -13937,7 +13981,7 @@ pub fn capability_check_warns_on_callbacks_case() {
   let warnings =
     capability_check.check_preserved(ctx, location_index.empty())
     |> diagnostic.warnings_only
-  let messages = list.map(warnings, diagnostic.to_string)
+  let messages = list.map(warnings, openapi.diagnostic_to_string)
   list.any(messages, fn(s) {
     string.contains(s, "Operation-level callbacks")
     && string.contains(s, "parsed and preserved")
@@ -14187,7 +14231,7 @@ pub fn oss_swagger_parser_js_server_hierarchy_parses_case() {
   // Top-level server
   list.length(spec.servers) |> should.equal(1)
   // Path-level and operation-level servers
-  let assert Ok(spec.Value(pet_path)) = dict.get(spec.paths, "/pet")
+  let assert Ok(openapi.Value(pet_path)) = dict.get(spec.paths, "/pet")
   list.length(pet_path.servers) |> should.equal(1)
   let assert Some(get_op) = pet_path.get
   list.length(get_op.servers) |> should.equal(1)
@@ -14289,7 +14333,7 @@ pub fn oss_swagger_parser_java_31_security_rejects_mutualtls_case() {
   let assert Some(components) = parsed.components
   dict.get(components.security_schemes, "mutual_TLS")
   |> should.equal(
-    Ok(spec.Value(spec.UnsupportedScheme(scheme_type: "mutualTLS"))),
+    Ok(openapi.Value(openapi.UnsupportedScheme(scheme_type: "mutualTLS"))),
   )
   let cfg =
     config.new(
@@ -14325,7 +14369,8 @@ pub fn oss_swagger_parser_java_31_schema_siblings_rejects_case() {
   let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
+      let error_details =
+        list.map(errors, fn(e) { openapi.diagnostic_to_string(e) })
       let has_dependent =
         list.any(error_details, fn(d) { string.contains(d, "dependentSchemas") })
       should.be_true(has_dependent)
@@ -14383,7 +14428,8 @@ pub fn unsupported_if_then_else_capability_check_case() {
   let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
+      let error_details =
+        list.map(errors, fn(e) { openapi.diagnostic_to_string(e) })
       let has_if = list.any(error_details, fn(d) { string.contains(d, "if") })
       should.be_true(has_if)
     }
@@ -14401,7 +14447,8 @@ pub fn unsupported_prefix_items_capability_check_case() {
   let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
+      let error_details =
+        list.map(errors, fn(e) { openapi.diagnostic_to_string(e) })
       let has_prefix =
         list.any(error_details, fn(d) { string.contains(d, "prefixItems") })
       should.be_true(has_prefix)
@@ -14419,7 +14466,8 @@ pub fn unsupported_not_capability_check_case() {
   let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
+      let error_details =
+        list.map(errors, fn(e) { openapi.diagnostic_to_string(e) })
       let has_not = list.any(error_details, fn(d) { string.contains(d, "not") })
       should.be_true(has_not)
     }
@@ -14436,7 +14484,8 @@ pub fn unsupported_defs_capability_check_case() {
   let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
+      let error_details =
+        list.map(errors, fn(e) { openapi.diagnostic_to_string(e) })
       let has_defs =
         list.any(error_details, fn(d) { string.contains(d, "$defs") })
       should.be_true(has_defs)
@@ -14498,7 +14547,8 @@ pub fn validate_invalid_security_ref_rejects_case() {
   let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let error_details = list.map(errors, fn(e) { diagnostic.to_string(e) })
+      let error_details =
+        list.map(errors, fn(e) { openapi.diagnostic_to_string(e) })
       let has_security =
         list.any(error_details, fn(d) {
           string.contains(d, "nonexistent_scheme")
@@ -14584,14 +14634,14 @@ pub fn normalize_const_to_enum_case() {
   let assert Ok(spec) = parser.parse_file("test/fixtures/normalize_const.yaml")
   // Before normalize: const_value is stored
   let assert Some(components) = spec.components
-  let assert Ok(schema.Inline(schema.StringSchema(metadata: meta, ..))) =
+  let assert Ok(openapi.Inline(openapi.StringSchema(metadata: meta, ..))) =
     dict.get(components.schemas, "Status")
-  meta.const_value |> should.equal(Some(value.JsonString("active")))
+  meta.const_value |> should.equal(Some(openapi.JsonString("active")))
 
   // After normalize: const_value cleared, enum_values set
   let normalized = normalize.normalize(spec)
   let assert Some(norm_components) = normalized.components
-  let assert Ok(schema.Inline(schema.StringSchema(
+  let assert Ok(openapi.Inline(openapi.StringSchema(
     metadata: norm_meta,
     enum_values: enums,
     ..,
@@ -14608,7 +14658,7 @@ pub fn normalize_preserves_non_string_const_case() {
   let assert Some(components) = normalized.components
 
   // String const: normalized to enum
-  let assert Ok(schema.Inline(schema.StringSchema(
+  let assert Ok(openapi.Inline(openapi.StringSchema(
     metadata: str_meta,
     enum_values: str_enums,
     ..,
@@ -14617,14 +14667,14 @@ pub fn normalize_preserves_non_string_const_case() {
   str_enums |> should.equal(["active"])
 
   // Bool const: preserved as BooleanSchema with const_value
-  let assert Ok(schema.Inline(schema.BooleanSchema(metadata: bool_meta))) =
+  let assert Ok(openapi.Inline(openapi.BooleanSchema(metadata: bool_meta))) =
     dict.get(components.schemas, "BoolConst")
-  bool_meta.const_value |> should.equal(Some(value.JsonBool(True)))
+  bool_meta.const_value |> should.equal(Some(openapi.JsonBool(True)))
 
   // Int const: preserved as IntegerSchema with const_value
-  let assert Ok(schema.Inline(schema.IntegerSchema(metadata: int_meta, ..))) =
+  let assert Ok(openapi.Inline(openapi.IntegerSchema(metadata: int_meta, ..))) =
     dict.get(components.schemas, "IntConst")
-  int_meta.const_value |> should.equal(Some(value.JsonInt(42)))
+  int_meta.const_value |> should.equal(Some(openapi.JsonInt(42)))
 }
 
 /// Issue #238: a non-string `const` cannot be represented as a Gleam
@@ -14637,14 +14687,14 @@ pub fn normalize_flags_non_string_const_as_unsupported_case() {
     parser.parse_file("test/fixtures/normalize_const_types.yaml")
   let normalized = normalize.normalize(spec)
   let assert Some(components) = normalized.components
-  let assert Ok(schema.Inline(bool_schema)) =
+  let assert Ok(openapi.Inline(bool_schema)) =
     dict.get(components.schemas, "BoolConst")
   list.contains(
     schema.get_metadata(bool_schema).unsupported_keywords,
     "const (non-string)",
   )
   |> should.be_true()
-  let assert Ok(schema.Inline(int_schema)) =
+  let assert Ok(openapi.Inline(int_schema)) =
     dict.get(components.schemas, "IntConst")
   list.contains(
     schema.get_metadata(int_schema).unsupported_keywords,
@@ -14669,7 +14719,7 @@ pub fn generate_rejects_non_string_const_case() {
     )
   case generate.generate(spec, cfg) {
     Error(generate.ValidationErrors(errors:)) -> {
-      let messages = list.map(errors, diagnostic.to_string)
+      let messages = list.map(errors, openapi.diagnostic_to_string)
       list.any(messages, fn(s) { string.contains(s, "const (non-string)") })
       |> should.be_true()
     }
@@ -14697,7 +14747,7 @@ pub fn generate_rejects_multi_type_with_constraints_case() {
     )
   case generate.generate(spec, cfg) {
     Error(generate.ValidationErrors(errors:)) -> {
-      let messages = list.map(errors, diagnostic.to_string)
+      let messages = list.map(errors, openapi.diagnostic_to_string)
       list.any(messages, fn(s) {
         string.contains(s, "type: [T1, T2] with type-specific constraints")
       })
@@ -14713,14 +14763,14 @@ pub fn normalize_multi_type_to_oneof_case() {
     parser.parse_file("test/fixtures/normalize_multi_type.yaml")
   // Before normalize: raw_type stored
   let assert Some(components) = spec.components
-  let assert Ok(schema.Inline(schema.StringSchema(metadata: meta, ..))) =
+  let assert Ok(openapi.Inline(openapi.StringSchema(metadata: meta, ..))) =
     dict.get(components.schemas, "FlexibleId")
   meta.raw_type |> should.equal(Some(["string", "integer"]))
 
   // After normalize: becomes OneOfSchema
   let normalized = normalize.normalize(spec)
   let assert Some(norm_components) = normalized.components
-  let assert Ok(schema.Inline(schema.OneOfSchema(schemas: variants, ..))) =
+  let assert Ok(openapi.Inline(openapi.OneOfSchema(schemas: variants, ..))) =
     dict.get(norm_components.schemas, "FlexibleId")
   list.length(variants) |> should.equal(2)
 }
@@ -14730,7 +14780,7 @@ pub fn normalize_type_null_to_nullable_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/normalize_type_null.yaml")
   let assert Some(components) = spec.components
-  let assert Ok(schema.Inline(schema.StringSchema(metadata: meta, ..))) =
+  let assert Ok(openapi.Inline(openapi.StringSchema(metadata: meta, ..))) =
     dict.get(components.schemas, "NullableName")
   // Parser already handles [T, null] → nullable: true
   meta.nullable |> should.be_true()
@@ -14738,7 +14788,7 @@ pub fn normalize_type_null_to_nullable_case() {
   // Normalize preserves this
   let normalized = normalize.normalize(spec)
   let assert Some(norm_components) = normalized.components
-  let assert Ok(schema.Inline(schema.StringSchema(metadata: norm_meta, ..))) =
+  let assert Ok(openapi.Inline(openapi.StringSchema(metadata: norm_meta, ..))) =
     dict.get(norm_components.schemas, "NullableName")
   norm_meta.nullable |> should.be_true()
 }
@@ -14753,7 +14803,8 @@ pub fn resolve_component_alias_case() {
     parser.parse_file("test/fixtures/component_param_alias.yaml")
   let assert Some(components) = spec.components
   // After parse: AliasEntry is preserved
-  let assert Ok(spec.Ref(_)) = dict.get(components.parameters, "AliasedLimit")
+  let assert Ok(openapi.Ref(_)) =
+    dict.get(components.parameters, "AliasedLimit")
 
   // After resolve (via generate pipeline): AliasEntry becomes ConcreteEntry
   let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
@@ -14762,7 +14813,7 @@ pub fn resolve_component_alias_case() {
     Error(generate.ValidationErrors(errors:)) -> {
       // May have warnings but should not have blocking errors about aliases
       let blocking =
-        list.filter(errors, fn(e) { e.severity == diagnostic.SeverityError })
+        list.filter(errors, fn(e) { e.severity == openapi.SeverityError })
       list.length(blocking) |> should.equal(0)
     }
   }
@@ -14783,7 +14834,7 @@ pub fn capability_check_uses_registry_case() {
   let result = generate.generate(spec, context.config(make_ctx_from_spec(spec)))
   case result {
     Error(generate.ValidationErrors(errors:)) -> {
-      let details = list.map(errors, fn(e) { diagnostic.to_string(e) })
+      let details = list.map(errors, fn(e) { openapi.diagnostic_to_string(e) })
       should.be_true(list.any(details, fn(d) { string.contains(d, "if") }))
     }
     _ -> should.fail()
@@ -14819,14 +14870,14 @@ pub fn readme_boundaries_match_registry_case() {
 /// YAML syntax error includes line/column in error message.
 pub fn yaml_error_has_source_location_case() {
   // Test that SourceLoc type exists and to_short_string formats it
-  let loc = diagnostic.SourceLoc(line: 5, column: 10)
+  let loc = openapi.SourceLoc(line: 5, column: 10)
   let err = diagnostic.yaml_error(detail: "test error", loc: loc)
   let msg = diagnostic.to_short_string(err)
   should.be_true(string.contains(msg, "line 5"))
   should.be_true(string.contains(msg, "column 10"))
   // NoSourceLoc case
   let err2 =
-    diagnostic.yaml_error(detail: "test error", loc: diagnostic.NoSourceLoc)
+    diagnostic.yaml_error(detail: "test error", loc: openapi.NoSourceLoc)
   let msg2 = diagnostic.to_short_string(err2)
   should.equal(msg2, "test error")
 }
@@ -14858,7 +14909,8 @@ pub fn parse_wildcard_status_codes_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/wildcard_status_codes.yaml")
   spec.info.title |> should.equal("Wildcard Status Codes API")
-  let assert Ok(spec.Value(path_item)) = dict.get(spec.paths, "/resources/{id}")
+  let assert Ok(openapi.Value(path_item)) =
+    dict.get(spec.paths, "/resources/{id}")
   let assert Some(op) = path_item.get
   dict.size(op.responses) |> should.not_equal(0)
 }
@@ -14904,7 +14956,7 @@ pub fn parse_array_param_styles_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/array_param_styles.yaml")
   spec.info.title |> should.equal("Array Parameter Styles API")
-  let assert Ok(spec.Value(path_item)) =
+  let assert Ok(openapi.Value(path_item)) =
     dict.get(spec.paths, "/search/{categories}")
   let assert Some(op) = path_item.get
   list.length(op.parameters) |> should.not_equal(0)
@@ -14914,7 +14966,7 @@ pub fn parse_delimited_param_styles_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/delimited_param_styles.yaml")
   spec.info.title |> should.equal("Delimited Parameter Styles API")
-  let assert Ok(spec.Value(path_item)) = dict.get(spec.paths, "/items")
+  let assert Ok(openapi.Value(path_item)) = dict.get(spec.paths, "/items")
   let assert Some(op) = path_item.get
   list.length(op.parameters) |> should.equal(5)
   let by_name =
@@ -14923,20 +14975,20 @@ pub fn parse_delimited_param_styles_case() {
       dict.insert(acc, p.name, p)
     })
   let assert Ok(colors) = dict.get(by_name, "colors")
-  colors.style |> should.equal(Some(spec.PipeDelimitedStyle))
+  colors.style |> should.equal(Some(openapi.PipeDelimitedStyle))
   colors.explode |> should.equal(Some(False))
   let assert Ok(tags) = dict.get(by_name, "tags")
-  tags.style |> should.equal(Some(spec.PipeDelimitedStyle))
+  tags.style |> should.equal(Some(openapi.PipeDelimitedStyle))
   // explode omitted — preserved as None; codegen applies the spec default.
   tags.explode |> should.equal(None)
   let assert Ok(colors_exploded) = dict.get(by_name, "colors_exploded")
-  colors_exploded.style |> should.equal(Some(spec.PipeDelimitedStyle))
+  colors_exploded.style |> should.equal(Some(openapi.PipeDelimitedStyle))
   colors_exploded.explode |> should.equal(Some(True))
   let assert Ok(sizes) = dict.get(by_name, "sizes")
-  sizes.style |> should.equal(Some(spec.SpaceDelimitedStyle))
+  sizes.style |> should.equal(Some(openapi.SpaceDelimitedStyle))
   sizes.explode |> should.equal(Some(False))
   let assert Ok(sizes_exploded) = dict.get(by_name, "sizes_exploded")
-  sizes_exploded.style |> should.equal(Some(spec.SpaceDelimitedStyle))
+  sizes_exploded.style |> should.equal(Some(openapi.SpaceDelimitedStyle))
   sizes_exploded.explode |> should.equal(Some(True))
 }
 
@@ -14948,7 +15000,7 @@ pub fn validate_accepts_delimited_param_styles_case() {
 pub fn pipe_delimited_in_header_rejects_case() {
   let ctx = make_ctx("test/fixtures/pipe_delimited_in_header_rejects.yaml")
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, diagnostic.to_string)
+  let error_strings = list.map(errors, openapi.diagnostic_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "pipeDelimited")
     && string.contains(s, "only supported for 'in: query'")
@@ -14959,7 +15011,7 @@ pub fn pipe_delimited_in_header_rejects_case() {
 pub fn space_delimited_non_array_rejects_case() {
   let ctx = make_ctx("test/fixtures/space_delimited_non_array_rejects.yaml")
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, diagnostic.to_string)
+  let error_strings = list.map(errors, openapi.diagnostic_to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "spaceDelimited")
     && string.contains(s, "requires an array schema")
@@ -14971,9 +15023,9 @@ pub fn parse_empty_response_body_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/empty_response_body.yaml")
   spec.info.title |> should.equal("Empty Response Body API")
-  let assert Ok(spec.Value(path_item)) = dict.get(spec.paths, "/items")
+  let assert Ok(openapi.Value(path_item)) = dict.get(spec.paths, "/items")
   let assert Some(op) = path_item.post
-  let assert Ok(_) = dict.get(op.responses, http.Status(201))
+  let assert Ok(_) = dict.get(op.responses, openapi.Status(201))
 }
 
 pub fn parse_enum_edge_cases_case() {
@@ -14999,7 +15051,8 @@ pub fn parse_mixed_param_locations_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/mixed_param_locations.yaml")
   spec.info.title |> should.equal("Mixed Parameter Locations API")
-  let assert Ok(spec.Value(path_item)) = dict.get(spec.paths, "/resources/{id}")
+  let assert Ok(openapi.Value(path_item)) =
+    dict.get(spec.paths, "/resources/{id}")
   let assert Some(op) = path_item.get
   let param_count = list.length(op.parameters)
   { param_count >= 4 } |> should.be_true()
@@ -15037,9 +15090,9 @@ pub fn parse_default_response_only_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/default_response_only.yaml")
   spec.info.title |> should.equal("Default Response Only API")
-  let assert Ok(spec.Value(path_item)) = dict.get(spec.paths, "/proxy")
+  let assert Ok(openapi.Value(path_item)) = dict.get(spec.paths, "/proxy")
   let assert Some(op) = path_item.get
-  let assert Ok(_) = dict.get(op.responses, http.DefaultStatus)
+  let assert Ok(_) = dict.get(op.responses, openapi.DefaultStatus)
 }
 
 pub fn parse_abbreviation_identifiers_case() {
@@ -16621,11 +16674,11 @@ pub fn external_whole_object_parameter_ref_case() {
   // The parameter should be resolved from external file (Value, not Ref)
   let assert Ok(param_ref_or) = dict.get(components.parameters, "LimitParam")
   case param_ref_or {
-    spec.Value(param) -> {
+    openapi.Value(param) -> {
       param.name |> should.equal("limit")
-      param.in_ |> should.equal(spec.InQuery)
+      param.in_ |> should.equal(openapi.InQuery)
     }
-    spec.Ref(_) -> should.fail()
+    openapi.Ref(_) -> should.fail()
   }
 }
 
@@ -16637,8 +16690,8 @@ pub fn external_whole_object_request_body_ref_case() {
   let assert Ok(body_ref_or) =
     dict.get(components.request_bodies, "CreatePetBody")
   case body_ref_or {
-    spec.Value(_body) -> should.be_true(True)
-    spec.Ref(_) -> should.fail()
+    openapi.Value(_body) -> should.be_true(True)
+    openapi.Ref(_) -> should.fail()
   }
 }
 
@@ -16649,10 +16702,10 @@ pub fn external_whole_object_response_ref_case() {
 
   let assert Ok(resp_ref_or) = dict.get(components.responses, "NotFound")
   case resp_ref_or {
-    spec.Value(resp) -> {
+    openapi.Value(resp) -> {
       resp.description |> should.equal(Some("Not found"))
     }
-    spec.Ref(_) -> should.fail()
+    openapi.Ref(_) -> should.fail()
   }
 }
 
@@ -16676,7 +16729,7 @@ pub fn request_body_encoding_warning_is_surfaced_case() {
   let has_encoding_warning =
     list.any(result.warnings, fn(w) {
       string.contains(
-        diagnostic.to_string(w),
+        openapi.diagnostic_to_string(w),
         "Request-body encoding is parsed but not used",
       )
     })
@@ -16824,7 +16877,7 @@ pub fn validate_stripe_dotted_schema_no_longer_collides_case() {
   // The hard rejection must no longer fire on this collision shape.
   let has_collision_error =
     list.any(errors, fn(e) {
-      string.contains(diagnostic.to_string(e), "all map to Gleam type")
+      string.contains(openapi.diagnostic_to_string(e), "all map to Gleam type")
     })
   has_collision_error |> should.be_false()
 
@@ -16971,7 +17024,7 @@ pub fn validate_decode_list_collision_auto_disambiguates_case() {
   // No XxxList-style errors should be reported anymore.
   let has_collision_error =
     list.any(errors, fn(e) {
-      string.contains(diagnostic.to_string(e), "synthetic list decoder")
+      string.contains(openapi.diagnostic_to_string(e), "synthetic list decoder")
     })
   has_collision_error |> should.be_false()
 
@@ -17351,8 +17404,8 @@ components:
 pub fn diagnostic_render_includes_file_path_and_loc_case() {
   let d =
     diagnostic.capability(
-      severity: diagnostic.SeverityError,
-      target: diagnostic.TargetBoth,
+      severity: openapi.SeverityError,
+      target: openapi.TargetBoth,
       path: "components.schemas.Foo",
       detail: "boom",
       hint: None,
@@ -17368,14 +17421,14 @@ pub fn diagnostic_render_includes_file_path_and_loc_case() {
 pub fn diagnostic_render_without_file_path_matches_to_string_case() {
   let d =
     diagnostic.capability(
-      severity: diagnostic.SeverityError,
-      target: diagnostic.TargetBoth,
+      severity: openapi.SeverityError,
+      target: openapi.TargetBoth,
       path: "components.schemas.Foo",
       detail: "boom",
       hint: None,
       loc: SourceLoc(line: 42, column: 7),
     )
-  diagnostic.render(d, None) |> should.equal(diagnostic.to_string(d))
+  diagnostic.render(d, None) |> should.equal(openapi.diagnostic_to_string(d))
 }
 
 /// Issue #474: a schema declared as `type: object, properties: {},

@@ -1,17 +1,17 @@
 import gleam/option.{type Option, None, Some}
 import oaspec/internal/codegen/context.{type Context}
-import oaspec/openapi/schema
-import oaspec/openapi/spec
+import oaspec/internal/openapi/spec
+import oaspec/openapi
 
 /// Compute the effective explode value for a parameter.
 /// OpenAPI 3.x default: true for form/deepObject style, false otherwise.
 /// When style is None (on a query parameter), the default is form → true.
-pub fn effective_explode(param: spec.Parameter(spec.Resolved)) -> Bool {
+pub fn effective_explode(param: openapi.Parameter(openapi.Resolved)) -> Bool {
   case param.explode {
     Some(v) -> v
     None ->
       case param.style {
-        Some(spec.FormStyle) | Some(spec.DeepObjectStyle) | None -> True
+        Some(openapi.FormStyle) | Some(openapi.DeepObjectStyle) | None -> True
         _ -> False
       }
   }
@@ -19,10 +19,10 @@ pub fn effective_explode(param: spec.Parameter(spec.Resolved)) -> Bool {
 
 /// Return the delimiter character for a parameter style.
 /// pipeDelimited → "|", spaceDelimited → " ", all others → ","
-pub fn delimiter_for_style(style: Option(spec.ParameterStyle)) -> String {
+pub fn delimiter_for_style(style: Option(openapi.ParameterStyle)) -> String {
   case style {
-    Some(spec.PipeDelimitedStyle) -> "|"
-    Some(spec.SpaceDelimitedStyle) -> " "
+    Some(openapi.PipeDelimitedStyle) -> "|"
+    Some(openapi.SpaceDelimitedStyle) -> " "
     _ -> ","
   }
 }
@@ -30,21 +30,21 @@ pub fn delimiter_for_style(style: Option(spec.ParameterStyle)) -> String {
 /// Check if a parameter uses deepObject serialization.
 /// True when: in=query, style=deepObject, and schema is an ObjectSchema.
 pub fn is_deep_object_param(
-  param: spec.Parameter(spec.Resolved),
+  param: openapi.Parameter(openapi.Resolved),
   ctx: Context,
 ) -> Bool {
   case param.in_, param.style, spec.parameter_schema(param) {
-    spec.InQuery,
-      Some(spec.DeepObjectStyle),
-      Some(schema.Reference(..) as schema_ref)
+    openapi.InQuery,
+      Some(openapi.DeepObjectStyle),
+      Some(openapi.Reference(..) as schema_ref)
     ->
       case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(schema.ObjectSchema(..)) -> True
+        Ok(openapi.ObjectSchema(..)) -> True
         _ -> False
       }
-    spec.InQuery,
-      Some(spec.DeepObjectStyle),
-      Some(schema.Inline(schema.ObjectSchema(..)))
+    openapi.InQuery,
+      Some(openapi.DeepObjectStyle),
+      Some(openapi.Inline(openapi.ObjectSchema(..)))
     -> True
     _, _, _ -> False
   }

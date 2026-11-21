@@ -1,4 +1,5 @@
 import gleam/dict
+import gleam/http
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
@@ -8,8 +9,8 @@ import oaspec/codegen/writer
 import oaspec/config
 import oaspec/internal/codegen/context
 import oaspec/internal/codegen/import_analysis
-import oaspec/openapi/schema
-import oaspec/openapi/spec
+import oaspec/internal/openapi/schema
+import oaspec/openapi
 import simplifile
 
 pub fn main() {
@@ -445,12 +446,14 @@ pub fn write_all_on_write_callback_fires_per_written_file_test() {
 // ===================================================================
 
 fn make_operation(
-  parameters: List(spec.RefOr(spec.Parameter(spec.Resolved))),
-  request_body: option.Option(spec.RefOr(spec.RequestBody(spec.Resolved))),
+  parameters: List(openapi.RefOr(openapi.Parameter(openapi.Resolved))),
+  request_body: option.Option(
+    openapi.RefOr(openapi.RequestBody(openapi.Resolved)),
+  ),
 ) -> context.AnalyzedOperation {
   context.AnalyzedOperation(
     "testOp",
-    spec.Operation(
+    openapi.Operation(
       operation_id: Some("testOp"),
       summary: None,
       description: None,
@@ -465,18 +468,18 @@ fn make_operation(
       external_docs: None,
     ),
     "/test",
-    spec.Get,
+    http.Get,
   )
 }
 
 fn make_param(
   name: String,
   required: Bool,
-  payload: spec.ParameterPayload,
-) -> spec.Parameter(spec.Resolved) {
-  spec.Parameter(
+  payload: openapi.ParameterPayload,
+) -> openapi.Parameter(openapi.Resolved) {
+  openapi.Parameter(
     name: name,
-    in_: spec.InQuery,
+    in_: openapi.InQuery,
     description: None,
     required: required,
     payload: payload,
@@ -502,12 +505,12 @@ pub fn import_analysis_operations_need_typed_schemas_with_ref_param_test() {
     make_param(
       "id",
       True,
-      spec.ParameterSchema(schema.Reference(
+      openapi.ParameterSchema(openapi.Reference(
         ref: "#/components/schemas/UserId",
         name: "UserId",
       )),
     )
-  let op = make_operation([spec.Value(param)], None)
+  let op = make_operation([openapi.Value(param)], None)
   import_analysis.operations_need_typed_schemas([op])
   |> should.equal(True)
 }
@@ -517,8 +520,8 @@ pub fn import_analysis_operations_need_typed_schemas_with_inline_param_test() {
     make_param(
       "name",
       True,
-      spec.ParameterSchema(
-        schema.Inline(schema.StringSchema(
+      openapi.ParameterSchema(
+        openapi.Inline(openapi.StringSchema(
           metadata: schema.default_metadata(),
           format: None,
           enum_values: [],
@@ -528,20 +531,20 @@ pub fn import_analysis_operations_need_typed_schemas_with_inline_param_test() {
         )),
       ),
     )
-  let op = make_operation([spec.Value(param)], None)
+  let op = make_operation([openapi.Value(param)], None)
   import_analysis.operations_need_typed_schemas([op])
   |> should.equal(False)
 }
 
 pub fn import_analysis_operations_need_typed_schemas_with_ref_body_test() {
   let rb =
-    spec.RequestBody(
+    openapi.RequestBody(
       description: None,
       content: dict.from_list([
         #(
           "application/json",
-          spec.MediaType(
-            schema: Some(schema.Reference(
+          openapi.MediaType(
+            schema: Some(openapi.Reference(
               ref: "#/components/schemas/User",
               name: "User",
             )),
@@ -553,7 +556,7 @@ pub fn import_analysis_operations_need_typed_schemas_with_ref_body_test() {
       ]),
       required: True,
     )
-  let op = make_operation([], Some(spec.Value(rb)))
+  let op = make_operation([], Some(openapi.Value(rb)))
   import_analysis.operations_need_typed_schemas([op])
   |> should.equal(True)
 }
@@ -563,8 +566,8 @@ pub fn import_analysis_operations_have_optional_params_test() {
     make_param(
       "id",
       True,
-      spec.ParameterSchema(
-        schema.Inline(schema.StringSchema(
+      openapi.ParameterSchema(
+        openapi.Inline(openapi.StringSchema(
           metadata: schema.default_metadata(),
           format: None,
           enum_values: [],
@@ -578,8 +581,8 @@ pub fn import_analysis_operations_have_optional_params_test() {
     make_param(
       "filter",
       False,
-      spec.ParameterSchema(
-        schema.Inline(schema.StringSchema(
+      openapi.ParameterSchema(
+        openapi.Inline(openapi.StringSchema(
           metadata: schema.default_metadata(),
           format: None,
           enum_values: [],
@@ -591,29 +594,29 @@ pub fn import_analysis_operations_have_optional_params_test() {
     )
 
   // Only required params
-  let op1 = make_operation([spec.Value(required_param)], None)
+  let op1 = make_operation([openapi.Value(required_param)], None)
   import_analysis.operations_have_optional_params([op1])
   |> should.equal(False)
 
   // Has optional param
-  let op2 = make_operation([spec.Value(optional_param)], None)
+  let op2 = make_operation([openapi.Value(optional_param)], None)
   import_analysis.operations_have_optional_params([op2])
   |> should.equal(True)
 }
 
 pub fn import_analysis_operations_have_optional_body_test() {
   let required_body =
-    spec.RequestBody(description: None, content: dict.new(), required: True)
+    openapi.RequestBody(description: None, content: dict.new(), required: True)
   let optional_body =
-    spec.RequestBody(description: None, content: dict.new(), required: False)
+    openapi.RequestBody(description: None, content: dict.new(), required: False)
 
   // Required body
-  let op1 = make_operation([], Some(spec.Value(required_body)))
+  let op1 = make_operation([], Some(openapi.Value(required_body)))
   import_analysis.operations_have_optional_body([op1])
   |> should.equal(False)
 
   // Optional body
-  let op2 = make_operation([], Some(spec.Value(optional_body)))
+  let op2 = make_operation([], Some(openapi.Value(optional_body)))
   import_analysis.operations_have_optional_body([op2])
   |> should.equal(True)
 
@@ -625,18 +628,18 @@ pub fn import_analysis_operations_have_optional_body_test() {
 
 pub fn import_analysis_operations_need_typed_schemas_with_object_body_test() {
   let rb =
-    spec.RequestBody(
+    openapi.RequestBody(
       description: None,
       content: dict.from_list([
         #(
           "application/json",
-          spec.MediaType(
+          openapi.MediaType(
             schema: Some(
-              schema.Inline(schema.ObjectSchema(
+              openapi.Inline(openapi.ObjectSchema(
                 metadata: schema.default_metadata(),
                 properties: dict.new(),
                 required: [],
-                additional_properties: schema.Forbidden,
+                additional_properties: openapi.Forbidden,
                 min_properties: None,
                 max_properties: None,
               )),
@@ -649,22 +652,22 @@ pub fn import_analysis_operations_need_typed_schemas_with_object_body_test() {
       ]),
       required: True,
     )
-  let op = make_operation([], Some(spec.Value(rb)))
+  let op = make_operation([], Some(openapi.Value(rb)))
   import_analysis.operations_need_typed_schemas([op])
   |> should.equal(True)
 }
 
 pub fn import_analysis_operations_need_typed_schemas_with_allof_body_test() {
   let rb =
-    spec.RequestBody(
+    openapi.RequestBody(
       description: None,
       content: dict.from_list([
         #(
           "application/json",
-          spec.MediaType(
+          openapi.MediaType(
             schema: Some(
-              schema.Inline(
-                schema.AllOfSchema(
+              openapi.Inline(
+                openapi.AllOfSchema(
                   metadata: schema.default_metadata(),
                   schemas: [],
                 ),
@@ -678,14 +681,15 @@ pub fn import_analysis_operations_need_typed_schemas_with_allof_body_test() {
       ]),
       required: True,
     )
-  let op = make_operation([], Some(spec.Value(rb)))
+  let op = make_operation([], Some(openapi.Value(rb)))
   import_analysis.operations_need_typed_schemas([op])
   |> should.equal(True)
 }
 
 pub fn import_analysis_ref_params_return_false_test() {
   // Ref (unresolved) parameters should return False for all checks
-  let op = make_operation([spec.Ref("#/components/parameters/SomeParam")], None)
+  let op =
+    make_operation([openapi.Ref("#/components/parameters/SomeParam")], None)
   import_analysis.operations_need_typed_schemas([op])
   |> should.equal(False)
   import_analysis.operations_have_optional_params([op])
@@ -695,7 +699,7 @@ pub fn import_analysis_ref_params_return_false_test() {
 pub fn import_analysis_ref_body_returns_false_test() {
   // Ref (unresolved) request body should return False
   let op =
-    make_operation([], Some(spec.Ref("#/components/requestBodies/SomeBody")))
+    make_operation([], Some(openapi.Ref("#/components/requestBodies/SomeBody")))
   import_analysis.operations_need_typed_schemas([op])
   |> should.equal(False)
   import_analysis.operations_have_optional_body([op])
@@ -707,8 +711,8 @@ pub fn import_analysis_multiple_operations_any_match_test() {
     make_param(
       "name",
       True,
-      spec.ParameterSchema(
-        schema.Inline(schema.StringSchema(
+      openapi.ParameterSchema(
+        openapi.Inline(openapi.StringSchema(
           metadata: schema.default_metadata(),
           format: None,
           enum_values: [],
@@ -722,13 +726,13 @@ pub fn import_analysis_multiple_operations_any_match_test() {
     make_param(
       "id",
       True,
-      spec.ParameterSchema(schema.Reference(
+      openapi.ParameterSchema(openapi.Reference(
         ref: "#/components/schemas/UserId",
         name: "UserId",
       )),
     )
-  let op_no_typed = make_operation([spec.Value(inline_param)], None)
-  let op_typed = make_operation([spec.Value(ref_param)], None)
+  let op_no_typed = make_operation([openapi.Value(inline_param)], None)
+  let op_typed = make_operation([openapi.Value(ref_param)], None)
 
   // With multiple operations, list.any returns True if any match
   import_analysis.operations_need_typed_schemas([op_no_typed, op_typed])

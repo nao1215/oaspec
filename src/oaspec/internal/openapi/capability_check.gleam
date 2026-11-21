@@ -1,4 +1,5 @@
 import gleam/dict
+import gleam/http.{type Method} as _
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
@@ -6,19 +7,17 @@ import gleam/string
 import oaspec/config
 import oaspec/internal/capability
 import oaspec/internal/codegen/context.{type Context}
+import oaspec/internal/openapi/diagnostic
 import oaspec/internal/openapi/location_index.{type LocationIndex}
 import oaspec/internal/openapi/operations
+import oaspec/internal/openapi/schema
+import oaspec/internal/openapi/spec
 import oaspec/internal/util/http
-import oaspec/openapi/diagnostic.{
-  type Diagnostic, type SourceLoc, SeverityError, SeverityWarning, TargetBoth,
-  TargetServer,
-}
-import oaspec/openapi/schema.{
-  type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
-  Inline, ObjectSchema, OneOfSchema, Reference, Typed,
-}
-import oaspec/openapi/spec.{
-  type HttpMethod, type OpenApiSpec, type Resolved, Value,
+import oaspec/openapi.{
+  type Diagnostic, type OpenApiSpec, type Resolved, type SchemaObject,
+  type SchemaRef, type SourceLoc, AllOfSchema, AnyOfSchema, ArraySchema, Inline,
+  ObjectSchema, OneOfSchema, Reference, SeverityError, SeverityWarning,
+  TargetBoth, TargetServer, Typed, Value,
 }
 
 /// Run capability checks on a resolved spec.
@@ -75,7 +74,7 @@ fn check_inline_schemas(
 
 fn check_path_item_schemas(
   base_path: String,
-  pi: spec.PathItem(Resolved),
+  pi: openapi.PathItem(Resolved),
   index: LocationIndex,
 ) -> List(Diagnostic) {
   operations.path_item_operations(pi)
@@ -91,7 +90,7 @@ fn check_path_item_schemas(
 
 fn check_operation_schemas(
   base_path: String,
-  op: spec.Operation(Resolved),
+  op: openapi.Operation(Resolved),
   index: LocationIndex,
 ) -> List(Diagnostic) {
   // Check request body schemas
@@ -248,7 +247,7 @@ fn check_security_schemes(
       |> list.filter_map(fn(entry) {
         let #(name, ref_or) = entry
         case ref_or {
-          Value(spec.UnsupportedScheme(scheme_type:)) -> {
+          Value(openapi.UnsupportedScheme(scheme_type:)) -> {
             let path = "components.securitySchemes." <> name
             Ok(diagnostic.capability(
               severity: SeverityError,
@@ -274,7 +273,7 @@ fn check_security_schemes(
 /// (matching yamerl's literal YAML key text) so no `~1` escaping is
 /// needed; method names are folded to lowercase to match the YAML
 /// document.
-fn operation_yaml_prefix(url: String, method: HttpMethod) -> String {
+fn operation_yaml_prefix(url: String, method: Method) -> String {
   "paths." <> url <> "." <> string.lowercase(spec.method_to_string(method))
 }
 

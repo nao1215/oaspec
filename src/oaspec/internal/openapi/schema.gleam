@@ -1,45 +1,14 @@
-import gleam/dict.{type Dict}
+//// Helpers over the `oaspec/openapi` schema types.
+
 import gleam/list
-import gleam/option.{type Option}
+import gleam/option
 import gleam/result
 import gleam/string
-import oaspec/internal/openapi/value.{type JsonValue}
-
-/// Origin of a schema — user-authored or hoisted during codegen.
-/// Hoisted variants carry the call-site context so tooling can explain
-/// where synthetic component schemas came from.
-pub type OriginKind {
-  UserAuthored
-  HoistedProperty(parent: String, property: String)
-  HoistedArrayItem(parent: String)
-  HoistedOneOfVariant(parent: String, index: Int)
-  HoistedAnyOfVariant(parent: String, index: Int)
-  HoistedAllOfPart(parent: String, index: Int)
-  HoistedRequestBody(operation_id: String)
-  HoistedResponse(operation_id: String, status: String)
-  HoistedParameter(operation_id: String, name: String)
-  HoistedAdditionalProperties(parent: String)
-}
-
-/// Shared metadata for all schema types.
-/// Extracted from variants to avoid duplication and ensure composition
-/// schemas (allOf/oneOf/anyOf) don't lose these fields.
-pub type SchemaMetadata {
-  SchemaMetadata(
-    description: Option(String),
-    nullable: Bool,
-    deprecated: Bool,
-    title: Option(String),
-    read_only: Bool,
-    write_only: Bool,
-    default: Option(JsonValue),
-    example: Option(JsonValue),
-    const_value: Option(JsonValue),
-    raw_type: Option(List(String)),
-    unsupported_keywords: List(String),
-    internal: Bool,
-    provenance: OriginKind,
-  )
+import oaspec/openapi.{
+  type OriginKind, type SchemaMetadata, type SchemaObject, type SchemaRef,
+  AllOfSchema, AnyOfSchema, ArraySchema, BooleanSchema, IntegerSchema,
+  NumberSchema, ObjectSchema, OneOfSchema, Reference, SchemaMetadata,
+  StringSchema, UserAuthored,
 }
 
 /// Create default metadata with no description, not nullable, not deprecated.
@@ -61,89 +30,6 @@ pub fn default_metadata() -> SchemaMetadata {
   )
 }
 
-/// How additionalProperties is modeled in the AST.
-pub type AdditionalProperties {
-  /// additionalProperties: false (extra keys rejected)
-  Forbidden
-  /// additionalProperties: true (accept any JSON value, surfaced in
-  /// generated types as `Dict(String, Dynamic)`)
-  Untyped
-  /// additionalProperties: { schema } (typed dict in generated types)
-  Typed(SchemaRef)
-  /// additionalProperties key absent from the spec. Per JSON Schema
-  /// any extra keys are still permitted at runtime, but the generated
-  /// record does not surface them — users opt in by writing `true` or
-  /// a schema explicitly.
-  Unspecified
-}
-
-/// Represents a JSON Schema object within OpenAPI 3.x.
-/// This is the core building block for all type generation.
-/// All variants carry shared `metadata` for description, nullable, deprecated.
-pub type SchemaObject {
-  StringSchema(
-    metadata: SchemaMetadata,
-    format: Option(String),
-    enum_values: List(String),
-    min_length: Option(Int),
-    max_length: Option(Int),
-    pattern: Option(String),
-  )
-  IntegerSchema(
-    metadata: SchemaMetadata,
-    format: Option(String),
-    minimum: Option(Int),
-    maximum: Option(Int),
-    exclusive_minimum: Option(Int),
-    exclusive_maximum: Option(Int),
-    multiple_of: Option(Int),
-  )
-  NumberSchema(
-    metadata: SchemaMetadata,
-    format: Option(String),
-    minimum: Option(Float),
-    maximum: Option(Float),
-    exclusive_minimum: Option(Float),
-    exclusive_maximum: Option(Float),
-    multiple_of: Option(Float),
-  )
-  BooleanSchema(metadata: SchemaMetadata)
-  ArraySchema(
-    metadata: SchemaMetadata,
-    items: SchemaRef,
-    min_items: Option(Int),
-    max_items: Option(Int),
-    unique_items: Bool,
-  )
-  ObjectSchema(
-    metadata: SchemaMetadata,
-    properties: Dict(String, SchemaRef),
-    required: List(String),
-    additional_properties: AdditionalProperties,
-    min_properties: Option(Int),
-    max_properties: Option(Int),
-  )
-  AllOfSchema(metadata: SchemaMetadata, schemas: List(SchemaRef))
-  OneOfSchema(
-    metadata: SchemaMetadata,
-    schemas: List(SchemaRef),
-    discriminator: Option(Discriminator),
-  )
-  AnyOfSchema(
-    metadata: SchemaMetadata,
-    schemas: List(SchemaRef),
-    discriminator: Option(Discriminator),
-  )
-}
-
-/// A reference to a schema, either inline or via $ref.
-/// Reference carries both the full $ref string and the pre-extracted name
-/// (last segment) to eliminate repeated string splitting in codegen.
-pub type SchemaRef {
-  Inline(SchemaObject)
-  Reference(ref: String, name: String)
-}
-
 /// Create a Reference from a $ref string, auto-extracting the name.
 pub fn make_reference(ref: String) -> SchemaRef {
   let name = ref_to_schema_name(ref)
@@ -156,11 +42,6 @@ fn ref_to_schema_name(ref: String) -> String {
   string.split(ref, "/")
   |> list.last
   |> result.unwrap(ref)
-}
-
-/// OpenAPI discriminator for oneOf/anyOf.
-pub type Discriminator {
-  Discriminator(property_name: String, mapping: Dict(String, String))
 }
 
 /// Check if a schema is nullable.

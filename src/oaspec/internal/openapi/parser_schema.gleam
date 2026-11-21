@@ -9,14 +9,15 @@ import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
+import oaspec/internal/openapi/diagnostic
 import oaspec/internal/openapi/location_index.{type LocationIndex}
 import oaspec/internal/openapi/parser_value
 import oaspec/internal/openapi/parser_yay_error
-import oaspec/openapi/diagnostic.{type Diagnostic}
-import oaspec/openapi/schema.{
-  type Discriminator, type SchemaObject, type SchemaRef, AllOfSchema,
-  AnyOfSchema, ArraySchema, BooleanSchema, Discriminator, Inline, IntegerSchema,
-  NumberSchema, ObjectSchema, OneOfSchema, StringSchema,
+import oaspec/internal/openapi/schema
+import oaspec/openapi.{
+  type Diagnostic, type Discriminator, type SchemaObject, type SchemaRef,
+  AllOfSchema, AnyOfSchema, ArraySchema, BooleanSchema, Discriminator, Inline,
+  IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema, StringSchema,
 }
 import yay
 
@@ -57,7 +58,7 @@ fn parse_schema_object(
   let unsupported_keywords = detect_unsupported_keywords(node)
 
   let metadata =
-    schema.SchemaMetadata(
+    openapi.SchemaMetadata(
       description:,
       nullable:,
       deprecated:,
@@ -70,7 +71,7 @@ fn parse_schema_object(
       raw_type: None,
       unsupported_keywords:,
       internal: False,
-      provenance: schema.UserAuthored,
+      provenance: openapi.UserAuthored,
     )
 
   // Check for composition keywords first
@@ -87,7 +88,7 @@ fn parse_schema_object(
           let #(non_null_items, has_null) = partition_null_branches(items)
           let has_null_in_type = has_null_in_sibling_type(node)
           let metadata = case has_null || has_null_in_type {
-            True -> schema.SchemaMetadata(..metadata, nullable: True)
+            True -> openapi.SchemaMetadata(..metadata, nullable: True)
             False -> metadata
           }
           use schemas <- result.try(
@@ -119,7 +120,7 @@ fn parse_schema_object(
               let #(non_null_items, has_null) = partition_null_branches(items)
               let has_null_in_type = has_null_in_sibling_type(node)
               let metadata = case has_null || has_null_in_type {
-                True -> schema.SchemaMetadata(..metadata, nullable: True)
+                True -> openapi.SchemaMetadata(..metadata, nullable: True)
                 False -> metadata
               }
               use schemas <- result.try(
@@ -221,7 +222,7 @@ fn detect_unsupported_keywords(node: yay.Node) -> List(String) {
 /// Parse a typed schema (string, integer, number, boolean, array, object).
 fn parse_typed_schema(
   node: yay.Node,
-  metadata: schema.SchemaMetadata,
+  metadata: openapi.SchemaMetadata,
   path: String,
   index: LocationIndex,
 ) -> Result(SchemaObject, Diagnostic) {
@@ -244,7 +245,7 @@ fn parse_typed_schema(
           [single] ->
             Ok(#(
               single,
-              schema.SchemaMetadata(
+              openapi.SchemaMetadata(
                 ..metadata,
                 nullable: metadata.nullable || has_null,
               ),
@@ -252,7 +253,7 @@ fn parse_typed_schema(
           [] ->
             Ok(#(
               "object",
-              schema.SchemaMetadata(
+              openapi.SchemaMetadata(
                 ..metadata,
                 nullable: metadata.nullable || has_null,
               ),
@@ -260,7 +261,7 @@ fn parse_typed_schema(
           _ -> {
             // Store multi-type for normalize pass
             let updated_meta =
-              schema.SchemaMetadata(
+              openapi.SchemaMetadata(
                 ..metadata,
                 raw_type: Some(non_null_types),
                 nullable: metadata.nullable || has_null,
@@ -281,7 +282,7 @@ fn parse_typed_schema(
         // unrestricted nullable schema by lifting the null marker
         // to the metadata `nullable` flag and falling through to
         // the regular "object" branch for any sibling keywords.
-        Ok(#("object", schema.SchemaMetadata(..metadata, nullable: True)))
+        Ok(#("object", openapi.SchemaMetadata(..metadata, nullable: True)))
       Ok(yay.NodeStr(type_name)) -> Ok(#(type_name, metadata))
       _ -> {
         // When type is absent, default to "object".
@@ -487,20 +488,20 @@ fn parse_typed_schema(
       }
       use additional_properties <- result.try(
         case yay.select_sugar(from: node, selector: "additionalProperties") {
-          Ok(yay.NodeBool(True)) -> Ok(schema.Untyped)
-          Ok(yay.NodeBool(False)) -> Ok(schema.Forbidden)
+          Ok(yay.NodeBool(True)) -> Ok(openapi.Untyped)
+          Ok(yay.NodeBool(False)) -> Ok(openapi.Forbidden)
           Ok(ap_node) -> {
             use sr <- result.try(parse_schema_ref(
               ap_node,
               path <> ".additionalProperties",
               index,
             ))
-            Ok(schema.Typed(sr))
+            Ok(openapi.Typed(sr))
           }
           // Per JSON Schema, absent additionalProperties still permits extra
           // keys at runtime, but we surface them in generated types only when
           // the spec asks for them (true / schema).
-          _ -> Ok(schema.Unspecified)
+          _ -> Ok(openapi.Unspecified)
         },
       )
       let min_properties = parser_value.optional_int(node, "minProperties")

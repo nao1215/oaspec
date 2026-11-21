@@ -9,10 +9,10 @@ import oaspec/internal/codegen/import_analysis
 import oaspec/internal/codegen/ir_build
 import oaspec/internal/codegen/operation_ir
 import oaspec/internal/codegen/server_request_decode as decode_helpers
+import oaspec/internal/openapi/spec
 import oaspec/internal/util/content_type
 import oaspec/internal/util/naming
-import oaspec/openapi/schema.{Inline, Reference}
-import oaspec/openapi/spec.{type Resolved, Value}
+import oaspec/openapi.{type Resolved, Inline, Reference, Value}
 
 /// Structured requirements for router generation.
 pub type RouterRequirements {
@@ -207,13 +207,13 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
         case ref_p {
           Value(p) ->
             case p.in_ {
-              spec.InCookie -> True
-              spec.InQuery | spec.InHeader ->
+              openapi.InCookie -> True
+              openapi.InQuery | openapi.InHeader ->
                 decode_helpers.query_schema_needs_string(spec.parameter_schema(
                   p,
                 ))
                 || decode_helpers.deep_object_param_needs_string(p, ctx)
-              spec.InPath ->
+              openapi.InPath ->
                 decode_helpers.query_schema_needs_string(spec.parameter_schema(
                   p,
                 ))
@@ -233,7 +233,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
       let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
-          Value(p) -> p.in_ == spec.InCookie
+          Value(p) -> p.in_ == openapi.InCookie
           _ -> False
         }
       })
@@ -251,8 +251,8 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
         case ref_p {
           Value(p) ->
             case p.in_, spec.parameter_schema(p) {
-              spec.InQuery, Some(Inline(schema.ArraySchema(..))) -> True
-              spec.InHeader, Some(Inline(schema.ArraySchema(..))) -> True
+              openapi.InQuery, Some(Inline(openapi.ArraySchema(..))) -> True
+              openapi.InHeader, Some(Inline(openapi.ArraySchema(..))) -> True
               _, _ -> False
             }
           _ -> False
@@ -316,7 +316,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
     list.any(json_response_schemas, fn(schema_ref) {
       case schema_ref {
         Reference(..) -> True
-        Inline(schema.ArraySchema(items: Reference(..), ..)) -> True
+        Inline(openapi.ArraySchema(items: Reference(..), ..)) -> True
         _ -> False
       }
     })
@@ -339,7 +339,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
       let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
-          Value(p) -> p.in_ == spec.InQuery
+          Value(p) -> p.in_ == openapi.InQuery
           _ -> False
         }
       })
@@ -351,7 +351,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
       let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
-          Value(p) -> p.in_ == spec.InHeader || p.in_ == spec.InCookie
+          Value(p) -> p.in_ == openapi.InHeader || p.in_ == openapi.InCookie
           _ -> False
         }
       })
@@ -515,7 +515,7 @@ pub fn imports(requirements: RouterRequirements, ctx: Context) -> List(String) {
 }
 
 fn operation_needs_guard_validation(
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
   ctx: Context,
 ) -> Bool {
   let needs_body_guard = case operation.request_body {
@@ -524,8 +524,8 @@ fn operation_needs_guard_validation(
       case content_entries {
         [#(_, mt)] ->
           case mt.schema {
-            Some(Inline(schema.ObjectSchema(..)))
-            | Some(Inline(schema.AllOfSchema(..))) -> True
+            Some(Inline(openapi.ObjectSchema(..)))
+            | Some(Inline(openapi.AllOfSchema(..))) -> True
             Some(Reference(name:, ..)) -> guards.schema_has_validator(name, ctx)
             _ -> False
           }
@@ -602,7 +602,7 @@ pub type HeaderSpec {
 
 /// The response headers sorted by name.
 pub fn sorted_header_specs(
-  headers: dict.Dict(String, spec.Header),
+  headers: dict.Dict(String, openapi.Header),
 ) -> List(HeaderSpec) {
   headers
   |> dict.to_list

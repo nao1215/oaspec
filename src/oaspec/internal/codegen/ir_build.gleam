@@ -18,15 +18,16 @@ import oaspec/internal/codegen/ir.{
 import oaspec/internal/codegen/schema_dispatch
 import oaspec/internal/codegen/schema_utils
 import oaspec/internal/openapi/dedup
+import oaspec/internal/openapi/schema
 import oaspec/internal/util/content_type
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
-import oaspec/openapi/schema.{
-  type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
-  BooleanSchema, Forbidden, Inline, IntegerSchema, NumberSchema, ObjectSchema,
-  OneOfSchema, Reference, StringSchema, Typed, Unspecified, Untyped,
+import oaspec/openapi.{
+  type Resolved, type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema,
+  ArraySchema, BooleanSchema, Forbidden, Inline, IntegerSchema, NumberSchema,
+  ObjectSchema, OneOfSchema, Reference, StringSchema, Typed, Unspecified,
+  Untyped, Value,
 }
-import oaspec/openapi/spec.{type Resolved, Value}
 
 /// Build an IR Module for the types.gleam file from component schemas.
 pub fn build_types_module(ctx: Context) -> Module {
@@ -94,7 +95,7 @@ fn compute_request_type_imports(
 
 fn request_type_decl(
   op_id: String,
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
 ) -> Result(Declaration, Nil) {
   let params = operation.parameters
   case list.is_empty(params) && option.is_none(operation.request_body) {
@@ -130,15 +131,15 @@ fn request_type_decl(
 }
 
 fn request_param_field(
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   field_name: String,
 ) -> Field {
   let field_type = case param.payload {
-    spec.ParameterSchema(Inline(StringSchema(..))) -> "String"
-    spec.ParameterSchema(Inline(IntegerSchema(..))) -> "Int"
-    spec.ParameterSchema(Inline(NumberSchema(..))) -> "Float"
-    spec.ParameterSchema(Inline(BooleanSchema(..))) -> "Bool"
-    spec.ParameterSchema(Inline(ArraySchema(items:, ..))) -> {
+    openapi.ParameterSchema(Inline(StringSchema(..))) -> "String"
+    openapi.ParameterSchema(Inline(IntegerSchema(..))) -> "Int"
+    openapi.ParameterSchema(Inline(NumberSchema(..))) -> "Float"
+    openapi.ParameterSchema(Inline(BooleanSchema(..))) -> "Bool"
+    openapi.ParameterSchema(Inline(ArraySchema(items:, ..))) -> {
       let item_type = case items {
         Inline(StringSchema(..)) -> "String"
         Inline(IntegerSchema(..)) -> "Int"
@@ -153,13 +154,13 @@ fn request_param_field(
       }
       "List(" <> item_type <> ")"
     }
-    spec.ParameterSchema(Reference(name:, ..)) ->
+    openapi.ParameterSchema(Reference(name:, ..)) ->
       "types." <> naming.schema_to_type_name(name)
-    spec.ParameterSchema(Inline(ObjectSchema(..)))
-    | spec.ParameterSchema(Inline(AllOfSchema(..)))
-    | spec.ParameterSchema(Inline(OneOfSchema(..)))
-    | spec.ParameterSchema(Inline(AnyOfSchema(..)))
-    | spec.ParameterContent(_) -> "String"
+    openapi.ParameterSchema(Inline(ObjectSchema(..)))
+    | openapi.ParameterSchema(Inline(AllOfSchema(..)))
+    | openapi.ParameterSchema(Inline(OneOfSchema(..)))
+    | openapi.ParameterSchema(Inline(AnyOfSchema(..)))
+    | openapi.ParameterContent(_) -> "String"
   }
   let final_type = case param.required {
     True -> field_type
@@ -168,7 +169,10 @@ fn request_param_field(
   Field(name: field_name, type_expr: final_type)
 }
 
-fn request_body_field(rb: spec.RequestBody(Resolved), op_id: String) -> Field {
+fn request_body_field(
+  rb: openapi.RequestBody(Resolved),
+  op_id: String,
+) -> Field {
   let body_type = request_body_type(rb, op_id)
   let final_type = case rb.required {
     True -> body_type
@@ -177,7 +181,10 @@ fn request_body_field(rb: spec.RequestBody(Resolved), op_id: String) -> Field {
   Field(name: "body", type_expr: final_type)
 }
 
-fn request_body_type(rb: spec.RequestBody(Resolved), op_id: String) -> String {
+fn request_body_type(
+  rb: openapi.RequestBody(Resolved),
+  op_id: String,
+) -> String {
   let content_entries = sorted_entries(rb.content)
   case content_entries {
     [#(media_type_name, media_type), ..] ->
@@ -290,7 +297,7 @@ fn build_response_header_records(
 /// primitive schema, the component type for a `$ref`, and `String` for
 /// every other shape.
 pub fn header_schema_to_type(
-  schema_opt: option.Option(schema.SchemaRef),
+  schema_opt: option.Option(openapi.SchemaRef),
 ) -> String {
   case schema_opt {
     Some(Inline(IntegerSchema(..))) -> "Int"
@@ -358,7 +365,7 @@ fn responses_need_types_import(
 
 fn response_type_decl(
   op_id: String,
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
 ) -> Result(Declaration, Nil) {
   let type_name = naming.schema_to_type_name(op_id) <> "Response"
   let responses = http.sort_response_entries(dict.to_list(operation.responses))
@@ -385,8 +392,8 @@ fn response_type_decl(
 fn response_variant(
   type_name: String,
   op_id: String,
-  status_code: http.HttpStatusCode,
-  response: spec.Response(Resolved),
+  status_code: openapi.HttpStatusCode,
+  response: openapi.Response(Resolved),
 ) -> Variant {
   let variant_name = type_name <> http.status_code_suffix(status_code)
   let content_entries = sorted_entries(response.content)
@@ -406,7 +413,7 @@ fn response_variant(
   // shape adds a leading `Int` field that the router and client
   // decoder both pass through.
   case status_code {
-    http.DefaultStatus ->
+    openapi.DefaultStatus ->
       VariantDefault(
         name: variant_name,
         inner_type: inner_type_opt,
@@ -431,8 +438,8 @@ fn response_variant(
 /// from `response_variant` so the DefaultStatus dispatch can
 /// reuse the same per-content-type logic.
 fn response_inner_type(
-  content_entries: List(#(String, spec.MediaType)),
-  status_code: http.HttpStatusCode,
+  content_entries: List(#(String, openapi.MediaType)),
+  status_code: openapi.HttpStatusCode,
   op_id: String,
 ) -> option.Option(String) {
   case content_entries {
@@ -917,7 +924,7 @@ fn anonymous_type_decls(ctx: Context) -> List(Declaration) {
 
 fn anonymous_response_type_decls(
   op_id: String,
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
   ctx: Context,
 ) -> List(Declaration) {
   let responses = http.sort_response_entries(dict.to_list(operation.responses))
@@ -951,7 +958,7 @@ fn anonymous_response_type_decls(
 
 fn anonymous_request_body_type_decls(
   op_id: String,
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
   ctx: Context,
 ) -> List(Declaration) {
   case operation.request_body {
@@ -1101,7 +1108,7 @@ pub fn sorted_entries(d: dict.Dict(String, v)) -> List(#(String, v)) {
 }
 
 /// Check if a schema ref is marked as internal (allOf helper type).
-pub fn is_internal_schema(schema_ref: schema.SchemaRef) -> Bool {
+pub fn is_internal_schema(schema_ref: openapi.SchemaRef) -> Bool {
   case schema_ref {
     Inline(obj) -> schema.get_metadata(obj).internal
     _ -> False

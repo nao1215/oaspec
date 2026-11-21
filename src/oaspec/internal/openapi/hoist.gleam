@@ -3,18 +3,16 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import oaspec/internal/openapi/schema
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
-import oaspec/openapi/schema.{
-  type OriginKind, type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema,
-  ArraySchema, HoistedAdditionalProperties, HoistedAllOfPart,
-  HoistedAnyOfVariant, HoistedArrayItem, HoistedOneOfVariant, HoistedParameter,
-  HoistedProperty, HoistedRequestBody, HoistedResponse, Inline, ObjectSchema,
-  OneOfSchema, Reference, Typed,
-}
-import oaspec/openapi/spec.{
-  type OpenApiSpec, type PathItem, type RefOr, Components, OpenApiSpec, PathItem,
-  Ref, Value,
+import oaspec/openapi.{
+  type OpenApiSpec, type OriginKind, type PathItem, type RefOr,
+  type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
+  Components, HoistedAdditionalProperties, HoistedAllOfPart, HoistedAnyOfVariant,
+  HoistedArrayItem, HoistedOneOfVariant, HoistedParameter, HoistedProperty,
+  HoistedRequestBody, HoistedResponse, Inline, ObjectSchema, OneOfSchema,
+  OpenApiSpec, PathItem, Ref, Reference, Typed, Value,
 }
 
 /// Accumulated state during the hoisting traversal.
@@ -459,11 +457,11 @@ fn hoist_path_item(
 
 /// Hoist schemas in an optional operation.
 fn hoist_maybe_operation(
-  maybe_op: Option(spec.Operation(stage)),
+  maybe_op: Option(openapi.Operation(stage)),
   method: String,
   path: String,
   state: HoistState,
-) -> #(Option(spec.Operation(stage)), HoistState) {
+) -> #(Option(openapi.Operation(stage)), HoistState) {
   case maybe_op {
     None -> #(None, state)
     Some(operation) -> {
@@ -484,10 +482,10 @@ fn hoist_maybe_operation(
 
 /// Hoist schemas within a single Operation.
 fn hoist_operation(
-  operation: spec.Operation(stage),
+  operation: openapi.Operation(stage),
   op_id: String,
   state: HoistState,
-) -> #(spec.Operation(stage), HoistState) {
+) -> #(openapi.Operation(stage), HoistState) {
   // Hoist parameter schemas (complex object/array params)
   let #(parameters, state) =
     hoist_parameters(operation.parameters, op_id, state)
@@ -506,16 +504,16 @@ fn hoist_operation(
   let #(responses, state) = hoist_responses(operation.responses, op_id, state)
 
   let result =
-    spec.Operation(..operation, parameters:, request_body:, responses:)
+    openapi.Operation(..operation, parameters:, request_body:, responses:)
   #(result, state)
 }
 
 /// Hoist complex schemas within operation parameters.
 fn hoist_parameters(
-  params: List(RefOr(spec.Parameter(stage))),
+  params: List(RefOr(openapi.Parameter(stage))),
   op_id: String,
   state: HoistState,
-) -> #(List(RefOr(spec.Parameter(stage))), HoistState) {
+) -> #(List(RefOr(openapi.Parameter(stage))), HoistState) {
   // Build params_rev with prepend (O(1) per step), reverse once at the
   // end. Replaces the prior `list.append(acc, [x])` shape that was
   // O(N²) on the parameter count — observable on operations with many
@@ -527,7 +525,7 @@ fn hoist_parameters(
         Ref(_) -> #([ref_or_param, ..params_acc], state)
         Value(param) -> {
           case param.payload {
-            spec.ParameterSchema(schema_ref) -> {
+            openapi.ParameterSchema(schema_ref) -> {
               let suffix = "Param" <> naming.to_pascal_case(param.name)
               let #(hoisted, state) =
                 hoist_schema_ref(
@@ -538,10 +536,16 @@ fn hoist_parameters(
                   state,
                 )
               let new_param =
-                spec.Parameter(..param, payload: spec.ParameterSchema(hoisted))
+                openapi.Parameter(
+                  ..param,
+                  payload: openapi.ParameterSchema(hoisted),
+                )
               #([Value(new_param), ..params_acc], state)
             }
-            spec.ParameterContent(_) -> #([ref_or_param, ..params_acc], state)
+            openapi.ParameterContent(_) -> #(
+              [ref_or_param, ..params_acc],
+              state,
+            )
           }
         }
       }
@@ -551,10 +555,10 @@ fn hoist_parameters(
 
 /// Hoist schemas within a RequestBody.
 fn hoist_request_body(
-  rb: spec.RequestBody(stage),
+  rb: openapi.RequestBody(stage),
   op_id: String,
   state: HoistState,
-) -> #(spec.RequestBody(stage), HoistState) {
+) -> #(openapi.RequestBody(stage), HoistState) {
   let #(new_content, state) =
     dict.to_list(rb.content)
     |> list.fold(#(dict.new(), state), fn(acc, entry) {
@@ -570,21 +574,21 @@ fn hoist_request_body(
               HoistedRequestBody(operation_id: op_id),
               state,
             )
-          let mt = spec.MediaType(..media_type, schema: Some(hoisted))
+          let mt = openapi.MediaType(..media_type, schema: Some(hoisted))
           #(dict.insert(result, media_type_name, mt), state)
         }
         None -> #(dict.insert(result, media_type_name, media_type), state)
       }
     })
-  #(spec.RequestBody(..rb, content: new_content), state)
+  #(openapi.RequestBody(..rb, content: new_content), state)
 }
 
 /// Hoist schemas within response definitions.
 fn hoist_responses(
-  responses: Dict(http.HttpStatusCode, RefOr(spec.Response(stage))),
+  responses: Dict(openapi.HttpStatusCode, RefOr(openapi.Response(stage))),
   op_id: String,
   state: HoistState,
-) -> #(Dict(http.HttpStatusCode, RefOr(spec.Response(stage))), HoistState) {
+) -> #(Dict(openapi.HttpStatusCode, RefOr(openapi.Response(stage))), HoistState) {
   dict.to_list(responses)
   |> list.fold(#(dict.new(), state), fn(acc, entry) {
     let #(result, state) = acc
@@ -611,7 +615,7 @@ fn hoist_responses(
                     ),
                     state,
                   )
-                let mt = spec.MediaType(..media_type, schema: Some(hoisted))
+                let mt = openapi.MediaType(..media_type, schema: Some(hoisted))
                 #(dict.insert(ct_result, media_type_name, mt), state)
               }
               None -> #(
@@ -620,7 +624,8 @@ fn hoist_responses(
               )
             }
           })
-        let hoisted_response = spec.Response(..response, content: new_content)
+        let hoisted_response =
+          openapi.Response(..response, content: new_content)
         #(dict.insert(result, status_code, Value(hoisted_response)), state)
       }
     }

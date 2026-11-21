@@ -1,5 +1,6 @@
 import gleam/bool
 import gleam/dict
+import gleam/http as gleam_http
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
@@ -16,11 +17,11 @@ import oaspec/internal/codegen/ir_build
 import oaspec/internal/codegen/operation_ir
 import oaspec/internal/codegen/runtime_snippets
 import oaspec/internal/codegen/schema_dispatch
+import oaspec/internal/openapi/spec
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
 import oaspec/internal/util/string_extra as se
-import oaspec/openapi/schema
-import oaspec/openapi/spec.{type Resolved, Value}
+import oaspec/openapi.{type Resolved, Value}
 
 /// Generate client SDK files.
 pub fn generate(ctx: Context) -> List(GeneratedFile) {
@@ -100,7 +101,7 @@ fn generate_client(ctx: Context) -> String {
 /// Substitute server variable placeholders.
 fn substitute_server_variables(
   url: String,
-  variables: List(#(String, spec.ServerVariable)),
+  variables: List(#(String, openapi.ServerVariable)),
 ) -> String {
   list.fold(variables, url, fn(acc, entry) {
     let #(name, variable) = entry
@@ -173,7 +174,7 @@ fn generate_async_response_helper(sb: se.StringBuilder) -> se.StringBuilder {
 /// patterns in `emit_simple_query_param`.
 fn emit_deep_object_query_param(
   sb: se.StringBuilder,
-  p: spec.Parameter(Resolved),
+  p: openapi.Parameter(Resolved),
   param_name: String,
   op_id: String,
   ctx: Context,
@@ -228,13 +229,13 @@ fn emit_deep_object_query_param(
 /// ObjectSchema (the validator already pins this shape, so the
 /// fallback is just defensive).
 fn deep_object_properties_and_required(
-  p: spec.Parameter(Resolved),
+  p: openapi.Parameter(Resolved),
   ctx: Context,
-) -> #(List(#(String, schema.SchemaRef)), List(String)) {
+) -> #(List(#(String, openapi.SchemaRef)), List(String)) {
   case spec.parameter_schema(p) {
     Some(schema_ref) ->
       case context.resolve_schema_ref(schema_ref, ctx) |> option.from_result {
-        Some(schema.ObjectSchema(properties:, required:, ..)) -> #(
+        Some(openapi.ObjectSchema(properties:, required:, ..)) -> #(
           ir_build.sorted_entries(properties),
           required,
         )
@@ -249,12 +250,12 @@ fn deep_object_properties_and_required(
 /// Reference whose component schema is a primitive (e.g. an enum
 /// alias). Anything else is treated as "complex" and routes through
 /// the JSON escape hatch.
-fn items_resolve_to_primitive(items: schema.SchemaRef, ctx: Context) -> Bool {
+fn items_resolve_to_primitive(items: openapi.SchemaRef, ctx: Context) -> Bool {
   case context.resolve_schema_ref(items, ctx) |> option.from_result {
-    Some(schema.StringSchema(..))
-    | Some(schema.IntegerSchema(..))
-    | Some(schema.NumberSchema(..))
-    | Some(schema.BooleanSchema(..)) -> True
+    Some(openapi.StringSchema(..))
+    | Some(openapi.IntegerSchema(..))
+    | Some(openapi.NumberSchema(..))
+    | Some(openapi.BooleanSchema(..)) -> True
     _ -> False
   }
 }
@@ -263,7 +264,7 @@ fn emit_deep_object_property(
   sb: se.StringBuilder,
   key: String,
   field_access: String,
-  prop_ref: schema.SchemaRef,
+  prop_ref: openapi.SchemaRef,
   is_required_prop: Bool,
   prop_name: String,
   parent_path: String,
@@ -274,7 +275,7 @@ fn emit_deep_object_property(
   // properties of an outer that's already unwrapped to `v` still serialize
   // through `v.<prop>` access.
   case context.resolve_schema_ref(prop_ref, ctx) |> option.from_result {
-    Some(schema.ObjectSchema(properties: inner_props, ..)) ->
+    Some(openapi.ObjectSchema(properties: inner_props, ..)) ->
       emit_deep_object_nested_object(
         sb,
         key,
@@ -291,9 +292,9 @@ fn emit_deep_object_property(
     // used for form-urlencoded bodies. Arrays of
     // non-primitive items take the same path — there's no string
     // representation for `List(<RecordType>)` either.
-    Some(schema.OneOfSchema(..))
-    | Some(schema.AnyOfSchema(..))
-    | Some(schema.AllOfSchema(..)) ->
+    Some(openapi.OneOfSchema(..))
+    | Some(openapi.AnyOfSchema(..))
+    | Some(openapi.AllOfSchema(..)) ->
       emit_deep_object_json_property(
         sb,
         key,
@@ -301,7 +302,7 @@ fn emit_deep_object_property(
         prop_ref,
         is_required_prop,
       )
-    Some(schema.ArraySchema(items:, ..)) ->
+    Some(openapi.ArraySchema(items:, ..)) ->
       case items_resolve_to_primitive(items, ctx) {
         True ->
           emit_deep_object_primitive(
@@ -341,11 +342,11 @@ fn emit_deep_object_json_array_property(
   sb: se.StringBuilder,
   key: String,
   field_access: String,
-  items: schema.SchemaRef,
+  items: openapi.SchemaRef,
   is_required: Bool,
 ) -> se.StringBuilder {
   let item_encoder = case items {
-    schema.Reference(name:, ..) ->
+    openapi.Reference(name:, ..) ->
       "encode.encode_" <> naming.to_snake_case(name) <> "_json"
     _ -> schema_dispatch.json_encoder_fn(items)
   }
@@ -357,11 +358,11 @@ fn emit_deep_object_json_property(
   sb: se.StringBuilder,
   key: String,
   field_access: String,
-  prop_ref: schema.SchemaRef,
+  prop_ref: openapi.SchemaRef,
   is_required: Bool,
 ) -> se.StringBuilder {
   let inner = case prop_ref {
-    schema.Reference(name:, ..) ->
+    openapi.Reference(name:, ..) ->
       "encode.encode_" <> naming.to_snake_case(name) <> "_json(v_inner)"
     _ -> schema_dispatch.json_encoder_expr(prop_ref, "v_inner")
   }
@@ -373,7 +374,7 @@ fn emit_deep_object_primitive(
   sb: se.StringBuilder,
   key: String,
   field_access: String,
-  prop_ref: schema.SchemaRef,
+  prop_ref: openapi.SchemaRef,
   is_required: Bool,
   prop_name: String,
   parent_path: String,
@@ -389,7 +390,7 @@ fn emit_deep_object_primitive(
   let array_with_complex_items = case
     context.resolve_schema_ref(prop_ref, ctx) |> option.from_result
   {
-    Some(schema.ArraySchema(items:, ..)) ->
+    Some(openapi.ArraySchema(items:, ..)) ->
       case items_resolve_to_primitive(items, ctx) {
         True -> None
         False -> Some(items)
@@ -423,7 +424,7 @@ fn emit_deep_object_primitive_inner(
   sb: se.StringBuilder,
   key: String,
   field_access: String,
-  prop_ref: schema.SchemaRef,
+  prop_ref: openapi.SchemaRef,
   is_required: Bool,
   prop_name: String,
   parent_path: String,
@@ -434,7 +435,9 @@ fn emit_deep_object_primitive_inner(
   // the raw value — `schema_ref_to_string_expr` only resolves named
   // `$ref` enums.
   let value_expr = case prop_ref {
-    schema.Inline(schema.StringSchema(enum_values:, ..)) if enum_values != [] -> {
+    openapi.Inline(openapi.StringSchema(enum_values:, ..))
+      if enum_values != []
+    -> {
       let enum_type =
         ir_build.inline_enum_type_name_for(parent_path, prop_name, ctx)
       "encode.encode_"
@@ -450,7 +453,7 @@ fn emit_deep_object_nested_object(
   sb: se.StringBuilder,
   outer_key: String,
   outer_access: String,
-  inner_props: dict.Dict(String, schema.SchemaRef),
+  inner_props: dict.Dict(String, openapi.SchemaRef),
   outer_is_required: Bool,
   outer_prop_name: String,
   parent_path: String,
@@ -503,7 +506,7 @@ fn emit_deep_object_nested_object(
 
 fn emit_simple_query_param(
   sb: se.StringBuilder,
-  p: spec.Parameter(Resolved),
+  p: openapi.Parameter(Resolved),
   param_name: String,
   ctx: Context,
 ) -> se.StringBuilder {
@@ -530,16 +533,18 @@ fn emit_simple_query_param(
   }
 }
 
-fn http_method_expr(method: spec.HttpMethod) -> String {
+fn http_method_expr(method: gleam_http.Method) -> String {
   case method {
-    spec.Get -> "http.Get"
-    spec.Post -> "http.Post"
-    spec.Put -> "http.Put"
-    spec.Delete -> "http.Delete"
-    spec.Patch -> "http.Patch"
-    spec.Head -> "http.Head"
-    spec.Options -> "http.Options"
-    spec.Trace -> "http.Trace"
+    gleam_http.Get -> "http.Get"
+    gleam_http.Post -> "http.Post"
+    gleam_http.Put -> "http.Put"
+    gleam_http.Delete -> "http.Delete"
+    gleam_http.Patch -> "http.Patch"
+    gleam_http.Head -> "http.Head"
+    gleam_http.Options -> "http.Options"
+    gleam_http.Trace -> "http.Trace"
+    gleam_http.Connect -> "http.Connect"
+    gleam_http.Other(name) -> "http.Other(\"" <> name <> "\")"
   }
 }
 
@@ -548,9 +553,9 @@ fn http_method_expr(method: spec.HttpMethod) -> String {
 fn generate_client_function(
   sb: se.StringBuilder,
   op_id: String,
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
   path: String,
-  method: spec.HttpMethod,
+  method: gleam_http.Method,
   ctx: Context,
 ) -> se.StringBuilder {
   let fn_name = naming.operation_to_function_name(op_id)
@@ -576,13 +581,13 @@ fn generate_client_function(
     })
 
   let path_params =
-    list.filter(unwrapped_params, fn(p) { p.in_ == spec.InPath })
+    list.filter(unwrapped_params, fn(p) { p.in_ == openapi.InPath })
   let query_params =
-    list.filter(unwrapped_params, fn(p) { p.in_ == spec.InQuery })
+    list.filter(unwrapped_params, fn(p) { p.in_ == openapi.InQuery })
   let header_params =
-    list.filter(unwrapped_params, fn(p) { p.in_ == spec.InHeader })
+    list.filter(unwrapped_params, fn(p) { p.in_ == openapi.InHeader })
   let cookie_params =
-    list.filter(unwrapped_params, fn(p) { p.in_ == spec.InCookie })
+    list.filter(unwrapped_params, fn(p) { p.in_ == openapi.InCookie })
 
   let params_signature =
     client_request.build_param_list(
@@ -794,7 +799,7 @@ fn generate_client_function(
   let has_default =
     list.any(responses, fn(entry) {
       let #(code, _) = entry
-      code == http.DefaultStatus
+      code == openapi.DefaultStatus
     })
   let sb = case has_default {
     True -> sb
@@ -892,11 +897,11 @@ fn async_rename_note(fn_name: String, async_fn: String) -> String {
 
 /// Build the call-args list passed from `<op>` to `build_<op>_request`.
 fn build_call_args(
-  path_params: List(spec.Parameter(Resolved)),
-  query_params: List(spec.Parameter(Resolved)),
-  header_params: List(spec.Parameter(Resolved)),
-  cookie_params: List(spec.Parameter(Resolved)),
-  operation: spec.Operation(Resolved),
+  path_params: List(openapi.Parameter(Resolved)),
+  query_params: List(openapi.Parameter(Resolved)),
+  header_params: List(openapi.Parameter(Resolved)),
+  cookie_params: List(openapi.Parameter(Resolved)),
+  operation: openapi.Operation(Resolved),
 ) -> String {
   let all_params =
     list.append(path_params, query_params)
@@ -949,13 +954,13 @@ fn trim_leading_comma(s: String) -> String {
 fn generate_build_body(
   sb: se.StringBuilder,
   op_id: String,
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
   path: String,
-  method: spec.HttpMethod,
-  path_params: List(spec.Parameter(Resolved)),
-  query_params: List(spec.Parameter(Resolved)),
-  header_params: List(spec.Parameter(Resolved)),
-  cookie_params: List(spec.Parameter(Resolved)),
+  method: gleam_http.Method,
+  path_params: List(openapi.Parameter(Resolved)),
+  query_params: List(openapi.Parameter(Resolved)),
+  header_params: List(openapi.Parameter(Resolved)),
+  cookie_params: List(openapi.Parameter(Resolved)),
   ctx: Context,
 ) -> se.StringBuilder {
   let field_names = client_request.build_param_field_names(operation)
@@ -970,7 +975,7 @@ fn generate_build_body(
       case content_entries {
         [#(_, mt)] ->
           case mt.schema {
-            Some(schema.Reference(name:, ..)) ->
+            Some(openapi.Reference(name:, ..)) ->
               case guards.schema_has_validator(name, ctx) {
                 True -> Some(#(name, rb.required))
                 False -> None
@@ -1268,7 +1273,7 @@ fn generate_build_body(
 /// directly; single-content encodes per its schema.
 fn generate_body_emission(
   sb: se.StringBuilder,
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   op_id: String,
   ctx: Context,
 ) -> se.StringBuilder {
@@ -1346,7 +1351,7 @@ fn generate_body_emission(
 
 fn generate_multipart_body_emission(
   sb: se.StringBuilder,
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   op_id: String,
   ctx: Context,
 ) -> se.StringBuilder {
@@ -1360,7 +1365,7 @@ fn generate_multipart_body_emission(
 
 fn generate_form_urlencoded_body_emission(
   sb: se.StringBuilder,
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   op_id: String,
   ctx: Context,
 ) -> se.StringBuilder {

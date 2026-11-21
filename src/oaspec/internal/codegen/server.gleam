@@ -14,12 +14,12 @@ import oaspec/internal/codegen/router_ir
 import oaspec/internal/codegen/runtime_snippets
 import oaspec/internal/codegen/server_request_decode as decode_helpers
 import oaspec/internal/openapi/dedup
+import oaspec/internal/openapi/spec
 import oaspec/internal/util/content_type
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
 import oaspec/internal/util/string_extra as se
-import oaspec/openapi/schema.{Inline, Reference}
-import oaspec/openapi/spec.{type Resolved, Value}
+import oaspec/openapi.{type Resolved, Inline, Reference, Value}
 
 /// Generate server stub files.
 ///
@@ -166,7 +166,7 @@ fn generate_state_only_handlers() -> String {
 fn generate_operation_handler(
   ctx: Context,
   op_id: String,
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
 ) -> String {
   let pkg = config.package(context.config(ctx))
   let request_import = case has_handler_params(operation) {
@@ -222,7 +222,7 @@ fn generate_per_operation_handlers_generated(
 }
 
 /// True when the handler for `operation` takes a request argument.
-fn has_handler_params(operation: spec.Operation(Resolved)) -> Bool {
+fn has_handler_params(operation: openapi.Operation(Resolved)) -> Bool {
   !list.is_empty(operation.parameters) || option.is_some(operation.request_body)
 }
 
@@ -258,7 +258,7 @@ fn generate_handlers_generated(
 fn generate_handler_delegator(
   sb: se.StringBuilder,
   op_id: String,
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
   target_module: String,
 ) -> se.StringBuilder {
   let fn_name = naming.operation_to_function_name(op_id)
@@ -299,7 +299,7 @@ fn generate_handler_delegator(
 fn generate_handler(
   sb: se.StringBuilder,
   op_id: String,
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
 ) -> se.StringBuilder {
   let fn_name = naming.operation_to_function_name(op_id)
   let request_type = naming.schema_to_type_name(op_id) <> "Request"
@@ -527,7 +527,7 @@ fn generate_route_body(
   sb: se.StringBuilder,
   op_id: String,
   fn_name: String,
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
   has_params: Bool,
   ctx: Context,
 ) -> se.StringBuilder {
@@ -570,7 +570,7 @@ fn generate_safe_request_and_dispatch(
   response_type_name: String,
   op_id: String,
   fn_name: String,
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
   ctx: Context,
 ) -> se.StringBuilder {
   let params =
@@ -586,7 +586,7 @@ fn generate_safe_request_and_dispatch(
   // Collect path params that need Result-based parsing (int, float)
   let path_params_needing_parse =
     list.filter(params, fn(p) {
-      p.in_ == spec.InPath && decode_helpers.param_needs_result_unwrap(p)
+      p.in_ == openapi.InPath && decode_helpers.param_needs_result_unwrap(p)
     })
 
   // Required query / header / cookie params, and deep-object query params
@@ -594,20 +594,20 @@ fn generate_safe_request_and_dispatch(
   // expression so that a missing or invalid value returns 400.
   let required_query_params =
     list.filter(params, fn(p) {
-      p.in_ == spec.InQuery
+      p.in_ == openapi.InQuery
       && p.required
       && !operation_ir.is_deep_object_param(p, ctx)
     })
   let checked_deep_object_params =
     list.filter(params, fn(p) {
-      p.in_ == spec.InQuery
+      p.in_ == openapi.InQuery
       && operation_ir.is_deep_object_param(p, ctx)
       && decode_helpers.deep_object_has_required_properties(p, ctx)
     })
   let required_header_params =
-    list.filter(params, fn(p) { p.in_ == spec.InHeader && p.required })
+    list.filter(params, fn(p) { p.in_ == openapi.InHeader && p.required })
   let required_cookie_params =
-    list.filter(params, fn(p) { p.in_ == spec.InCookie && p.required })
+    list.filter(params, fn(p) { p.in_ == openapi.InCookie && p.required })
 
   // Check if the request body needs safe decoding (required JSON body)
   let needs_body_guard = case operation.request_body {
@@ -706,7 +706,7 @@ fn generate_safe_request_and_dispatch(
       case content_entries {
         [#(_ct_name, media_type)] ->
           case media_type.schema {
-            Some(schema.Reference(name:, ..)) -> Some(name)
+            Some(openapi.Reference(name:, ..)) -> Some(name)
             _ -> None
           }
         _ -> None
@@ -737,7 +737,7 @@ fn generate_safe_request_and_dispatch(
       case content_entries {
         [#(_ct_name, media_type)] ->
           case media_type.schema {
-            Some(schema.Reference(name:, ..)) -> {
+            Some(openapi.Reference(name:, ..)) -> {
               let decode_fn =
                 "decode.decode_" <> naming.to_snake_case(name) <> "(body)"
               sb
@@ -818,7 +818,7 @@ fn generate_safe_request_and_dispatch(
       let #(param, field_name) = entry
       let trailing = ","
       let value_expr = case param.in_ {
-        spec.InPath -> {
+        openapi.InPath -> {
           // Use the parsed variable if it needed Result unwrapping
           case decode_helpers.param_needs_result_unwrap(param) {
             True -> naming.to_snake_case(param.name) <> "_parsed"
@@ -828,7 +828,7 @@ fn generate_safe_request_and_dispatch(
             }
           }
         }
-        spec.InQuery -> {
+        openapi.InQuery -> {
           let key = param.name
           let raw_var = naming.to_snake_case(param.name) <> "_raw"
           let is_deep_object = operation_ir.is_deep_object_param(param, ctx)
@@ -849,7 +849,7 @@ fn generate_safe_request_and_dispatch(
             False, False -> decode_helpers.query_optional_expr(key, param, ctx)
           }
         }
-        spec.InHeader -> {
+        openapi.InHeader -> {
           let key = string.lowercase(param.name)
           let raw_var = naming.to_snake_case(param.name) <> "_raw"
           case param.required {
@@ -857,7 +857,7 @@ fn generate_safe_request_and_dispatch(
             False -> decode_helpers.header_optional_expr(key, param)
           }
         }
-        spec.InCookie -> {
+        openapi.InCookie -> {
           let key = param.name
           let raw_var = naming.to_snake_case(param.name) <> "_raw"
           case param.required {
@@ -976,9 +976,9 @@ fn generate_safe_request_and_dispatch(
 /// True when this query param is treated as a list (explode=true array).
 /// Matches the helper used by `query_required_expr` so the open/close
 /// scaffolding stays in sync with the value expression.
-fn query_param_explode_array(p: spec.Parameter(Resolved)) -> Bool {
+fn query_param_explode_array(p: openapi.Parameter(Resolved)) -> Bool {
   case spec.parameter_schema(p) {
-    Some(schema.Inline(schema.ArraySchema(..))) -> {
+    Some(openapi.Inline(openapi.ArraySchema(..))) -> {
       case p.explode {
         Some(False) -> False
         _ -> True
@@ -995,26 +995,26 @@ fn query_param_explode_array(p: spec.Parameter(Resolved)) -> Bool {
 /// String / Bool / array-of-string / array-of-bool need no extra case.
 fn query_required_open_parse_case(
   sb: se.StringBuilder,
-  p: spec.Parameter(Resolved),
+  p: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> se.StringBuilder {
   let raw_var = naming.to_snake_case(p.name) <> "_raw"
   let delim = case p.style {
-    Some(spec.PipeDelimitedStyle) -> "|"
-    Some(spec.SpaceDelimitedStyle) -> " "
+    Some(openapi.PipeDelimitedStyle) -> "|"
+    Some(openapi.SpaceDelimitedStyle) -> " "
     _ -> ","
   }
   case spec.parameter_schema(p) {
-    Some(schema.Inline(schema.IntegerSchema(..))) ->
+    Some(openapi.Inline(openapi.IntegerSchema(..))) ->
       sb
       |> se.indent(3, "case int.parse(" <> raw_var <> ") {")
       |> se.indent(4, "Ok(" <> raw_var <> "_parsed) -> {")
-    Some(schema.Inline(schema.NumberSchema(..))) ->
+    Some(openapi.Inline(openapi.NumberSchema(..))) ->
       sb
       |> se.indent(3, "case float.parse(" <> raw_var <> ") {")
       |> se.indent(4, "Ok(" <> raw_var <> "_parsed) -> {")
-    Some(schema.Inline(schema.ArraySchema(
-      items: Inline(schema.IntegerSchema(..)),
+    Some(openapi.Inline(openapi.ArraySchema(
+      items: Inline(openapi.IntegerSchema(..)),
       ..,
     ))) -> {
       let parse_expr = array_int_parse_expr(raw_var, p, delim)
@@ -1022,8 +1022,8 @@ fn query_required_open_parse_case(
       |> se.indent(3, "case " <> parse_expr <> " {")
       |> se.indent(4, "Ok(" <> raw_var <> "_parsed_list) -> {")
     }
-    Some(schema.Inline(schema.ArraySchema(
-      items: Inline(schema.NumberSchema(..)),
+    Some(openapi.Inline(openapi.ArraySchema(
+      items: Inline(openapi.NumberSchema(..)),
       ..,
     ))) -> {
       let parse_expr = array_float_parse_expr(raw_var, p, delim)
@@ -1058,7 +1058,7 @@ fn query_required_open_parse_case(
 
 fn array_int_parse_expr(
   raw_var: String,
-  p: spec.Parameter(Resolved),
+  p: openapi.Parameter(Resolved),
   delim: String,
 ) -> String {
   case p.explode {
@@ -1074,7 +1074,7 @@ fn array_int_parse_expr(
 
 fn array_float_parse_expr(
   raw_var: String,
-  p: spec.Parameter(Resolved),
+  p: openapi.Parameter(Resolved),
   delim: String,
 ) -> String {
   case p.explode {
@@ -1091,7 +1091,7 @@ fn array_float_parse_expr(
 /// Close the matching parse case for a required query param.
 fn close_query_required_parse_case(
   sb: se.StringBuilder,
-  p: spec.Parameter(Resolved),
+  p: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> se.StringBuilder {
   let close = fn(sb: se.StringBuilder) -> se.StringBuilder {
@@ -1104,14 +1104,14 @@ fn close_query_required_parse_case(
     |> se.indent(3, "}")
   }
   case spec.parameter_schema(p) {
-    Some(schema.Inline(schema.IntegerSchema(..)))
-    | Some(schema.Inline(schema.NumberSchema(..)))
-    | Some(schema.Inline(schema.ArraySchema(
-        items: Inline(schema.IntegerSchema(..)),
+    Some(openapi.Inline(openapi.IntegerSchema(..)))
+    | Some(openapi.Inline(openapi.NumberSchema(..)))
+    | Some(openapi.Inline(openapi.ArraySchema(
+        items: Inline(openapi.IntegerSchema(..)),
         ..,
       )))
-    | Some(schema.Inline(schema.ArraySchema(
-        items: Inline(schema.NumberSchema(..)),
+    | Some(openapi.Inline(openapi.ArraySchema(
+        items: Inline(openapi.NumberSchema(..)),
         ..,
       ))) -> close(sb)
     Some(ref) ->
@@ -1131,20 +1131,20 @@ fn close_query_required_parse_case(
 /// `list.map(string.split(...))` expression and get no parse case.
 fn single_value_required_open_parse_case(
   sb: se.StringBuilder,
-  p: spec.Parameter(Resolved),
+  p: openapi.Parameter(Resolved),
 ) -> se.StringBuilder {
   let raw_var = naming.to_snake_case(p.name) <> "_raw"
   case spec.parameter_schema(p) {
-    Some(schema.Inline(schema.IntegerSchema(..))) ->
+    Some(openapi.Inline(openapi.IntegerSchema(..))) ->
       sb
       |> se.indent(3, "case int.parse(" <> raw_var <> ") {")
       |> se.indent(4, "Ok(" <> raw_var <> "_parsed) -> {")
-    Some(schema.Inline(schema.NumberSchema(..))) ->
+    Some(openapi.Inline(openapi.NumberSchema(..))) ->
       sb
       |> se.indent(3, "case float.parse(" <> raw_var <> ") {")
       |> se.indent(4, "Ok(" <> raw_var <> "_parsed) -> {")
-    Some(schema.Inline(schema.ArraySchema(
-      items: Inline(schema.IntegerSchema(..)),
+    Some(openapi.Inline(openapi.ArraySchema(
+      items: Inline(openapi.IntegerSchema(..)),
       ..,
     ))) ->
       sb
@@ -1155,8 +1155,8 @@ fn single_value_required_open_parse_case(
           <> ", \",\"), string.trim), int.parse) {",
       )
       |> se.indent(4, "Ok(" <> raw_var <> "_parsed_list) -> {")
-    Some(schema.Inline(schema.ArraySchema(
-      items: Inline(schema.NumberSchema(..)),
+    Some(openapi.Inline(openapi.ArraySchema(
+      items: Inline(openapi.NumberSchema(..)),
       ..,
     ))) ->
       sb
@@ -1173,7 +1173,7 @@ fn single_value_required_open_parse_case(
 
 fn close_single_value_required_parse_case(
   sb: se.StringBuilder,
-  p: spec.Parameter(Resolved),
+  p: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> se.StringBuilder {
   let close = fn(sb: se.StringBuilder) -> se.StringBuilder {
@@ -1186,14 +1186,14 @@ fn close_single_value_required_parse_case(
     |> se.indent(3, "}")
   }
   case spec.parameter_schema(p) {
-    Some(schema.Inline(schema.IntegerSchema(..)))
-    | Some(schema.Inline(schema.NumberSchema(..)))
-    | Some(schema.Inline(schema.ArraySchema(
-        items: Inline(schema.IntegerSchema(..)),
+    Some(openapi.Inline(openapi.IntegerSchema(..)))
+    | Some(openapi.Inline(openapi.NumberSchema(..)))
+    | Some(openapi.Inline(openapi.ArraySchema(
+        items: Inline(openapi.IntegerSchema(..)),
         ..,
       )))
-    | Some(schema.Inline(schema.ArraySchema(
-        items: Inline(schema.NumberSchema(..)),
+    | Some(openapi.Inline(openapi.ArraySchema(
+        items: Inline(openapi.NumberSchema(..)),
         ..,
       ))) -> close(sb)
     Some(ref) ->
@@ -1252,7 +1252,7 @@ fn close_lookup_case(sb: se.StringBuilder) -> se.StringBuilder {
 fn generate_response_conversion(
   sb: se.StringBuilder,
   response_type_name: String,
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
 ) -> se.StringBuilder {
   let responses = http.sort_response_entries(dict.to_list(operation.responses))
 
@@ -1281,7 +1281,7 @@ fn generate_response_conversion(
               // outgoing `ServerResponse.status` instead of the
               // hardcoded representative-int (which was always 500).
               let is_default = case status_code {
-                http.DefaultStatus -> True
+                openapi.DefaultStatus -> True
                 _ -> False
               }
               let content_entries = dict.to_list(response.content)
@@ -1514,45 +1514,45 @@ fn stringify_header_value(field_type: String, value_expr: String) -> String {
 }
 
 /// Get the encode function name for a schema reference.
-fn get_encode_function(schema_ref: option.Option(schema.SchemaRef)) -> String {
+fn get_encode_function(schema_ref: option.Option(openapi.SchemaRef)) -> String {
   case schema_ref {
     Some(Reference(name:, ..)) -> {
       "encode.encode_" <> naming.to_snake_case(name) <> "_json"
     }
-    Some(Inline(schema.ArraySchema(items:, ..))) -> {
+    Some(Inline(openapi.ArraySchema(items:, ..))) -> {
       case items {
         Reference(name:, ..) ->
           "fn(items) { json.array(items, encode.encode_"
           <> naming.to_snake_case(name)
           <> "_json) }"
-        Inline(schema.StringSchema(..)) ->
+        Inline(openapi.StringSchema(..)) ->
           "fn(items) { json.array(items, json.string) }"
-        Inline(schema.IntegerSchema(..)) ->
+        Inline(openapi.IntegerSchema(..)) ->
           "fn(items) { json.array(items, json.int) }"
-        Inline(schema.NumberSchema(..)) ->
+        Inline(openapi.NumberSchema(..)) ->
           "fn(items) { json.array(items, json.float) }"
-        Inline(schema.BooleanSchema(..)) ->
+        Inline(openapi.BooleanSchema(..)) ->
           "fn(items) { json.array(items, json.bool) }"
         // Inline non-primitive items (e.g. nested ArraySchema, anonymous
         // ObjectSchema) at the top level of a response have no reusable
         // encoder. A homogeneous String array keeps the call type-checking
         // against List(_), where a bare "json.string" would not compile.
-        Inline(schema.ArraySchema(..))
-        | Inline(schema.ObjectSchema(..))
-        | Inline(schema.AllOfSchema(..))
-        | Inline(schema.OneOfSchema(..))
-        | Inline(schema.AnyOfSchema(..)) ->
+        Inline(openapi.ArraySchema(..))
+        | Inline(openapi.ObjectSchema(..))
+        | Inline(openapi.AllOfSchema(..))
+        | Inline(openapi.OneOfSchema(..))
+        | Inline(openapi.AnyOfSchema(..)) ->
           "fn(items) { json.array(items, json.string) }"
       }
     }
-    Some(Inline(schema.IntegerSchema(..))) -> "json.int"
-    Some(Inline(schema.NumberSchema(..))) -> "json.float"
-    Some(Inline(schema.BooleanSchema(..))) -> "json.bool"
-    Some(Inline(schema.StringSchema(..)))
-    | Some(Inline(schema.ObjectSchema(..)))
-    | Some(Inline(schema.AllOfSchema(..)))
-    | Some(Inline(schema.OneOfSchema(..)))
-    | Some(Inline(schema.AnyOfSchema(..)))
+    Some(Inline(openapi.IntegerSchema(..))) -> "json.int"
+    Some(Inline(openapi.NumberSchema(..))) -> "json.float"
+    Some(Inline(openapi.BooleanSchema(..))) -> "json.bool"
+    Some(Inline(openapi.StringSchema(..)))
+    | Some(Inline(openapi.ObjectSchema(..)))
+    | Some(Inline(openapi.AllOfSchema(..)))
+    | Some(Inline(openapi.OneOfSchema(..)))
+    | Some(Inline(openapi.AnyOfSchema(..)))
     | None -> "json.string"
   }
 }

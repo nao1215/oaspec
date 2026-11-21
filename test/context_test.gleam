@@ -12,8 +12,9 @@ import gleeunit/should
 import oaspec/internal/codegen/context
 import oaspec/internal/openapi/operations
 import oaspec/internal/openapi/resolver
-import oaspec/openapi/schema
-import oaspec/openapi/spec
+import oaspec/internal/openapi/schema
+import oaspec/internal/openapi/spec
+import oaspec/openapi
 import test_helpers
 
 pub fn main() {
@@ -127,10 +128,10 @@ pub fn schema_metadata_exposes_nested_property_flags_test() {
 }
 
 fn find_property_ref(
-  schema_ref: schema.SchemaRef,
+  schema_ref: openapi.SchemaRef,
   prop_name: String,
   ctx: context.Context,
-) -> option.Option(schema.SchemaRef) {
+) -> option.Option(openapi.SchemaRef) {
   case context.resolve_schema_ref(schema_ref, ctx) {
     Ok(schema_obj) -> find_property_ref_in_object(schema_obj, prop_name, ctx)
     // nolint: thrown_away_error -- test helper treats unresolved refs as absence while walking for a known property
@@ -139,18 +140,18 @@ fn find_property_ref(
 }
 
 fn find_property_ref_in_object(
-  schema_obj: schema.SchemaObject,
+  schema_obj: openapi.SchemaObject,
   prop_name: String,
   ctx: context.Context,
-) -> option.Option(schema.SchemaRef) {
+) -> option.Option(openapi.SchemaRef) {
   case schema_obj {
-    schema.ObjectSchema(properties:, ..) ->
+    openapi.ObjectSchema(properties:, ..) ->
       case dict.get(properties, prop_name) {
         Ok(prop_ref) -> Some(prop_ref)
         // nolint: thrown_away_error -- missing property means keep searching other allOf branches
         Error(_) -> None
       }
-    schema.AllOfSchema(schemas:, ..) ->
+    openapi.AllOfSchema(schemas:, ..) ->
       list.fold(schemas, None, fn(found, part_ref) {
         case found {
           Some(_) -> found

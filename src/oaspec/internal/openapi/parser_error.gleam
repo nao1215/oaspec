@@ -8,7 +8,8 @@
 //// `parser_yay_error` sibling.
 
 import gleam/option.{Some}
-import oaspec/openapi/diagnostic.{type Diagnostic, type SourceLoc, Diagnostic}
+import oaspec/internal/openapi/diagnostic
+import oaspec/openapi.{type Diagnostic, type SourceLoc, Diagnostic}
 
 /// Build a `missing_field` diagnostic whose hint surfaces the given
 /// detail string so an extractor- or selector-internal failure is not

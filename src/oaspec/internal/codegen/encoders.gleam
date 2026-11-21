@@ -21,12 +21,11 @@ import oaspec/internal/codegen/schema_utils
 import oaspec/internal/openapi/dedup
 import oaspec/internal/util/naming
 import oaspec/internal/util/string_extra as se
-import oaspec/openapi/schema.{
-  type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema, BooleanSchema,
-  Forbidden, Inline, IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema,
-  Reference, StringSchema, Typed, Unspecified, Untyped,
+import oaspec/openapi.{
+  type Resolved, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
+  BooleanSchema, Forbidden, Inline, IntegerSchema, NumberSchema, ObjectSchema,
+  OneOfSchema, Reference, StringSchema, Typed, Unspecified, Untyped, Value,
 }
-import oaspec/openapi/spec.{type Resolved, Value}
 
 /// Generate the `encode.gleam` module for the resolved spec.
 pub fn generate(ctx: Context) -> List(GeneratedFile) {
@@ -234,7 +233,7 @@ fn generate_anonymous_encoders(
 fn generate_anonymous_request_body_encoder(
   sb: se.StringBuilder,
   op_id: String,
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
   ctx: Context,
 ) -> se.StringBuilder {
   case operation.request_body {
@@ -255,7 +254,7 @@ fn generate_anonymous_request_body_encoder(
         _ -> sb
       }
     }
-    Some(spec.Ref(_)) -> sb
+    Some(openapi.Ref(_)) -> sb
     None -> sb
   }
 }

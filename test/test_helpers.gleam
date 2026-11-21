@@ -7,9 +7,9 @@ import oaspec/internal/codegen/context
 import oaspec/internal/openapi/dedup
 import oaspec/internal/openapi/hoist
 import oaspec/internal/openapi/resolve
+import oaspec/internal/openapi/schema
+import oaspec/openapi
 import oaspec/openapi/parser
-import oaspec/openapi/schema
-import oaspec/openapi/spec
 
 /// Create a context from a parsed (unresolved) spec.
 pub fn make_ctx_from_spec(spec) -> context.Context {
@@ -60,14 +60,14 @@ pub fn find_substring_index(
 /// Create a test parameter with all fields specified.
 pub fn make_test_param(
   name: String,
-  in_: spec.ParameterIn,
+  in_: openapi.ParameterIn,
   required: Bool,
-  payload: spec.ParameterPayload,
-  style: option.Option(spec.ParameterStyle),
+  payload: openapi.ParameterPayload,
+  style: option.Option(openapi.ParameterStyle),
   explode: option.Option(Bool),
   allow_reserved: Bool,
-) -> spec.Parameter(spec.Resolved) {
-  spec.Parameter(
+) -> openapi.Parameter(openapi.Resolved) {
+  openapi.Parameter(
     name: name,
     in_: in_,
     description: None,
@@ -81,8 +81,8 @@ pub fn make_test_param(
   )
 }
 
-pub fn string_schema() -> schema.SchemaObject {
-  schema.StringSchema(
+pub fn string_schema() -> openapi.SchemaObject {
+  openapi.StringSchema(
     metadata: schema.default_metadata(),
     format: None,
     enum_values: [],
@@ -92,8 +92,8 @@ pub fn string_schema() -> schema.SchemaObject {
   )
 }
 
-pub fn int_schema() -> schema.SchemaObject {
-  schema.IntegerSchema(
+pub fn int_schema() -> openapi.SchemaObject {
+  openapi.IntegerSchema(
     metadata: schema.default_metadata(),
     format: None,
     minimum: None,
@@ -104,8 +104,8 @@ pub fn int_schema() -> schema.SchemaObject {
   )
 }
 
-pub fn float_schema() -> schema.SchemaObject {
-  schema.NumberSchema(
+pub fn float_schema() -> openapi.SchemaObject {
+  openapi.NumberSchema(
     metadata: schema.default_metadata(),
     format: None,
     minimum: None,
@@ -116,20 +116,20 @@ pub fn float_schema() -> schema.SchemaObject {
   )
 }
 
-pub fn bool_schema() -> schema.SchemaObject {
-  schema.BooleanSchema(metadata: schema.default_metadata())
+pub fn bool_schema() -> openapi.SchemaObject {
+  openapi.BooleanSchema(metadata: schema.default_metadata())
 }
 
 pub fn simple_param(
   name: String,
   required: Bool,
-  schema_obj: schema.SchemaObject,
-) -> spec.Parameter(spec.Resolved) {
+  schema_obj: openapi.SchemaObject,
+) -> openapi.Parameter(openapi.Resolved) {
   make_test_param(
     name,
-    spec.InQuery,
+    openapi.InQuery,
     required,
-    spec.ParameterSchema(schema.Inline(schema_obj)),
+    openapi.ParameterSchema(openapi.Inline(schema_obj)),
     None,
     None,
     False,
@@ -139,9 +139,9 @@ pub fn simple_param(
 /// Create a minimal context with no operations for unit testing.
 pub fn make_minimal_ctx() -> context.Context {
   let minimal_spec =
-    spec.OpenApiSpec(
+    openapi.OpenApiSpec(
       openapi: "3.0.3",
-      info: spec.Info(
+      info: openapi.Info(
         title: "Test",
         description: None,
         version: "1.0.0",

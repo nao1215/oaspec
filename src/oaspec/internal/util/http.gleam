@@ -2,17 +2,7 @@ import gleam/bool
 import gleam/int
 import gleam/list
 import gleam/result
-
-/// Type-safe HTTP status code representation.
-/// Replaces raw String status codes throughout the codebase.
-pub type HttpStatusCode {
-  /// An exact HTTP status code, e.g. 200, 404, 500.
-  Status(Int)
-  /// A wildcard range, e.g. 2XX is StatusRange(2), 4XX is StatusRange(4).
-  StatusRange(Int)
-  /// The OpenAPI "default" catch-all response.
-  DefaultStatus
-}
+import oaspec/openapi.{type HttpStatusCode, DefaultStatus, Status, StatusRange}
 
 /// Parse a raw status code string from an OpenAPI spec into an HttpStatusCode.
 /// Returns `Error(Nil)` for strings outside the OAS-allowed grammar.

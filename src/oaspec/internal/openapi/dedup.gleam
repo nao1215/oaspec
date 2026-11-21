@@ -3,11 +3,11 @@ import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import oaspec/internal/util/naming
-import oaspec/openapi/schema.{
-  type SchemaObject, type SchemaRef, AnyOfSchema, Forbidden, Inline,
-  ObjectSchema, OneOfSchema, Reference, Typed, Unspecified, Untyped,
+import oaspec/openapi.{
+  type OpenApiSpec, type SchemaObject, type SchemaRef, AnyOfSchema, Components,
+  Forbidden, Inline, ObjectSchema, OneOfSchema, OpenApiSpec, Reference, Typed,
+  Unspecified, Untyped,
 }
-import oaspec/openapi/spec.{type OpenApiSpec, Components, OpenApiSpec}
 
 /// Deduplicate names within schemas to avoid collisions in generated code.
 /// This is a pre-processing pass that runs after hoisting and before validation.
@@ -115,7 +115,7 @@ pub fn dedup_property_names(prop_names: List(String)) -> List(String) {
 /// in the same order the spec lists them so type emission, server dispatch,
 /// and client builder agree on the final field name.
 pub fn dedup_param_field_names(
-  params: List(spec.Parameter(stage)),
+  params: List(openapi.Parameter(stage)),
 ) -> List(String) {
   let snake_names = list.map(params, fn(p) { naming.to_snake_case(p.name) })
   // Reserve every local the generated client function binds (`path`

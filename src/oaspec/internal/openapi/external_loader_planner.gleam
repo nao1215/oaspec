@@ -16,11 +16,11 @@ import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
-import oaspec/openapi/diagnostic.{type Diagnostic}
-import oaspec/openapi/schema.{type SchemaRef, Inline, Reference}
-import oaspec/openapi/spec.{
-  type Components, type OpenApiSpec, type Parameter, type PathItem,
-  type RequestBody, type Response, type Unresolved,
+import oaspec/internal/openapi/diagnostic
+import oaspec/openapi.{
+  type Components, type Diagnostic, type OpenApiSpec, type Parameter,
+  type PathItem, type RequestBody, type Response, type SchemaRef,
+  type Unresolved, Inline, Reference,
 }
 
 /// Names in the current spec that are *not themselves* external refs.
@@ -151,13 +151,13 @@ fn find_external_component(
   source_path: String,
   section section: String,
   kind kind: String,
-  entries entries: fn(spec.Components(Unresolved)) ->
-    dict.Dict(String, spec.RefOr(a)),
+  entries entries: fn(openapi.Components(Unresolved)) ->
+    dict.Dict(String, openapi.RefOr(a)),
 ) -> Result(a, Diagnostic) {
   let error = fn(detail, hint) {
     Error(diagnostic.validation(
-      severity: diagnostic.SeverityError,
-      target: diagnostic.TargetBoth,
+      severity: openapi.SeverityError,
+      target: openapi.TargetBoth,
       path: source_path,
       detail:,
       hint: Some(hint),
@@ -166,8 +166,8 @@ fn find_external_component(
   case loaded.components {
     Some(components) ->
       case dict.get(entries(components), name) {
-        Ok(spec.Value(value)) -> Ok(value)
-        Ok(spec.Ref(_)) ->
+        Ok(openapi.Value(value)) -> Ok(value)
+        Ok(openapi.Ref(_)) ->
           error(
             "External "
               <> kind
@@ -215,8 +215,8 @@ pub fn check_nested_local_collision(
     Ok(Nil),
   )
   Error(diagnostic.validation(
-    severity: diagnostic.SeverityError,
-    target: diagnostic.TargetBoth,
+    severity: openapi.SeverityError,
+    target: openapi.TargetBoth,
     path: source_path,
     detail: "Nested property $ref imports schema '"
       <> fragment_name
@@ -245,8 +245,8 @@ pub fn check_nested_cross_file_collision(
         True -> Ok(Nil)
         False ->
           Error(diagnostic.validation(
-            severity: diagnostic.SeverityError,
-            target: diagnostic.TargetBoth,
+            severity: openapi.SeverityError,
+            target: openapi.TargetBoth,
             path: resolved_path,
             detail: "Nested property $ref imports schema '"
               <> fragment_name
@@ -280,8 +280,8 @@ pub fn check_local_collision(
     Ok(Nil),
   )
   Error(diagnostic.validation(
-    severity: diagnostic.SeverityError,
-    target: diagnostic.TargetBoth,
+    severity: openapi.SeverityError,
+    target: openapi.TargetBoth,
     path: source_path,
     detail: "External $ref imports schema '"
       <> fragment_name
@@ -310,8 +310,8 @@ pub fn check_cross_file_collision(
         True -> Ok(Nil)
         False ->
           Error(diagnostic.validation(
-            severity: diagnostic.SeverityError,
-            target: diagnostic.TargetBoth,
+            severity: openapi.SeverityError,
+            target: openapi.TargetBoth,
             path: resolved_path,
             detail: "External $ref imports schema '"
               <> fragment_name
@@ -373,8 +373,8 @@ pub fn find_external_schema(
     Some(components) -> find_schema_follow_alias(components, name, source_path)
     None ->
       Error(diagnostic.validation(
-        severity: diagnostic.SeverityError,
-        target: diagnostic.TargetBoth,
+        severity: openapi.SeverityError,
+        target: openapi.TargetBoth,
         path: source_path,
         detail: "External file '" <> source_path <> "' has no components block.",
         hint: Some(
@@ -403,8 +403,8 @@ pub fn find_schema_follow_alias(
             Ok(Inline(_) as s) -> Ok(s)
             _ ->
               Error(diagnostic.validation(
-                severity: diagnostic.SeverityError,
-                target: diagnostic.TargetBoth,
+                severity: openapi.SeverityError,
+                target: openapi.TargetBoth,
                 path: source_path,
                 detail: "External schema '"
                   <> name
@@ -420,8 +420,8 @@ pub fn find_schema_follow_alias(
           }
         None ->
           Error(diagnostic.validation(
-            severity: diagnostic.SeverityError,
-            target: diagnostic.TargetBoth,
+            severity: openapi.SeverityError,
+            target: openapi.TargetBoth,
             path: source_path,
             detail: "External schema '"
               <> name
@@ -435,8 +435,8 @@ pub fn find_schema_follow_alias(
       }
     Error(Nil) ->
       Error(diagnostic.validation(
-        severity: diagnostic.SeverityError,
-        target: diagnostic.TargetBoth,
+        severity: openapi.SeverityError,
+        target: openapi.TargetBoth,
         path: source_path,
         detail: "External file '"
           <> source_path

@@ -18,7 +18,7 @@ import oaspec/internal/codegen/schema_dispatch
 import oaspec/internal/codegen/schema_utils
 import oaspec/internal/util/naming
 import oaspec/internal/util/string_extra as se
-import oaspec/openapi/schema.{
+import oaspec/openapi.{
   type SchemaObject, type SchemaRef, AllOfSchema, ArraySchema, Inline,
   IntegerSchema, NumberSchema, ObjectSchema, Reference, StringSchema, Typed,
   Untyped,

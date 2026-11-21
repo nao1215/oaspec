@@ -16,12 +16,11 @@ import oaspec/internal/codegen/server as server_gen
 import oaspec/internal/codegen/server_request_decode
 import oaspec/internal/codegen/types as types_gen
 import oaspec/internal/openapi/hoist
+import oaspec/internal/openapi/schema
 import oaspec/internal/util/content_type
-import oaspec/internal/util/http
 import oaspec/internal/util/naming
+import oaspec/openapi
 import oaspec/openapi/parser
-import oaspec/openapi/schema
-import oaspec/openapi/spec
 import test_helpers
 
 pub fn main() {
@@ -82,11 +81,11 @@ pub fn client_response_inline_schema_to_decoder_bool_test() {
 
 pub fn client_response_inline_schema_to_decoder_object_fallback_test() {
   let obj =
-    schema.ObjectSchema(
+    openapi.ObjectSchema(
       metadata: schema.default_metadata(),
       properties: dict.new(),
       required: [],
-      additional_properties: schema.Forbidden,
+      additional_properties: openapi.Forbidden,
       min_properties: None,
       max_properties: None,
     )
@@ -96,40 +95,40 @@ pub fn client_response_inline_schema_to_decoder_object_fallback_test() {
 
 pub fn client_response_get_response_decode_expr_reference_test() {
   let schema_ref =
-    schema.Reference(ref: "#/components/schemas/User", name: "User")
+    openapi.Reference(ref: "#/components/schemas/User", name: "User")
   client_response.get_response_decode_expr(
     schema_ref,
     "getUser",
-    http.Status(200),
+    openapi.Status(200),
   )
   |> should.equal("decode.decode_user(text)")
 }
 
 pub fn client_response_get_response_decode_expr_inline_string_test() {
-  let schema_ref = schema.Inline(test_helpers.string_schema())
+  let schema_ref = openapi.Inline(test_helpers.string_schema())
   client_response.get_response_decode_expr(
     schema_ref,
     "getUser",
-    http.Status(200),
+    openapi.Status(200),
   )
   |> should.equal("json.parse(text, dyn_decode.string)")
 }
 
 pub fn client_response_get_response_decode_expr_inline_int_test() {
-  let schema_ref = schema.Inline(test_helpers.int_schema())
+  let schema_ref = openapi.Inline(test_helpers.int_schema())
   client_response.get_response_decode_expr(
     schema_ref,
     "getUser",
-    http.Status(200),
+    openapi.Status(200),
   )
   |> should.equal("json.parse(text, dyn_decode.int)")
 }
 
 pub fn client_response_get_response_decode_expr_array_ref_test() {
   let schema_ref =
-    schema.Inline(schema.ArraySchema(
+    openapi.Inline(openapi.ArraySchema(
       metadata: schema.default_metadata(),
-      items: schema.Reference(ref: "#/components/schemas/Pet", name: "Pet"),
+      items: openapi.Reference(ref: "#/components/schemas/Pet", name: "Pet"),
       min_items: None,
       max_items: None,
       unique_items: False,
@@ -137,16 +136,16 @@ pub fn client_response_get_response_decode_expr_array_ref_test() {
   client_response.get_response_decode_expr(
     schema_ref,
     "listPets",
-    http.Status(200),
+    openapi.Status(200),
   )
   |> should.equal("json.parse(text, dyn_decode.list(decode.pet_decoder()))")
 }
 
 pub fn client_response_get_response_decode_expr_array_inline_test() {
   let schema_ref =
-    schema.Inline(schema.ArraySchema(
+    openapi.Inline(openapi.ArraySchema(
       metadata: schema.default_metadata(),
-      items: schema.Inline(test_helpers.int_schema()),
+      items: openapi.Inline(test_helpers.int_schema()),
       min_items: None,
       max_items: None,
       unique_items: False,
@@ -154,7 +153,7 @@ pub fn client_response_get_response_decode_expr_array_inline_test() {
   client_response.get_response_decode_expr(
     schema_ref,
     "getNumbers",
-    http.Status(200),
+    openapi.Status(200),
   )
   // The list combinator lives on `gleam/dynamic/decode` (imported as
   // `dyn_decode` in client.gleam); the local `decode` module is the
@@ -217,22 +216,22 @@ pub fn server_request_decode_body_field_kind_needs_float_false_test() {
 pub fn server_request_decode_body_field_kind_inline_test() {
   let ctx = test_helpers.make_minimal_ctx()
   server_request_decode.body_field_kind(
-    schema.Inline(test_helpers.string_schema()),
+    openapi.Inline(test_helpers.string_schema()),
     ctx,
   )
   |> should.equal(server_request_decode.BodyFieldString)
   server_request_decode.body_field_kind(
-    schema.Inline(test_helpers.int_schema()),
+    openapi.Inline(test_helpers.int_schema()),
     ctx,
   )
   |> should.equal(server_request_decode.BodyFieldInt)
   server_request_decode.body_field_kind(
-    schema.Inline(test_helpers.float_schema()),
+    openapi.Inline(test_helpers.float_schema()),
     ctx,
   )
   |> should.equal(server_request_decode.BodyFieldFloat)
   server_request_decode.body_field_kind(
-    schema.Inline(test_helpers.bool_schema()),
+    openapi.Inline(test_helpers.bool_schema()),
     ctx,
   )
   |> should.equal(server_request_decode.BodyFieldBool)
@@ -241,9 +240,9 @@ pub fn server_request_decode_body_field_kind_inline_test() {
 pub fn server_request_decode_body_field_kind_array_test() {
   let ctx = test_helpers.make_minimal_ctx()
   let arr =
-    schema.Inline(schema.ArraySchema(
+    openapi.Inline(openapi.ArraySchema(
       metadata: schema.default_metadata(),
-      items: schema.Inline(test_helpers.int_schema()),
+      items: openapi.Inline(test_helpers.int_schema()),
       min_items: None,
       max_items: None,
       unique_items: False,
@@ -260,11 +259,11 @@ pub fn server_request_decode_schema_ref_body_field_kind_none_test() {
 
 pub fn server_request_decode_query_schema_needs_string_test() {
   server_request_decode.query_schema_needs_string(
-    Some(schema.Inline(test_helpers.bool_schema())),
+    Some(openapi.Inline(test_helpers.bool_schema())),
   )
   |> should.be_true()
   server_request_decode.query_schema_needs_string(
-    Some(schema.Inline(test_helpers.string_schema())),
+    Some(openapi.Inline(test_helpers.string_schema())),
   )
   |> should.be_false()
   server_request_decode.query_schema_needs_string(None)
@@ -274,12 +273,12 @@ pub fn server_request_decode_query_schema_needs_string_test() {
 pub fn server_request_decode_query_schema_needs_int_test() {
   let ctx = test_helpers.make_minimal_ctx()
   server_request_decode.query_schema_needs_int(
-    Some(schema.Inline(test_helpers.int_schema())),
+    Some(openapi.Inline(test_helpers.int_schema())),
     ctx,
   )
   |> should.be_true()
   server_request_decode.query_schema_needs_int(
-    Some(schema.Inline(test_helpers.string_schema())),
+    Some(openapi.Inline(test_helpers.string_schema())),
     ctx,
   )
   |> should.be_false()
@@ -288,12 +287,12 @@ pub fn server_request_decode_query_schema_needs_int_test() {
 pub fn server_request_decode_query_schema_needs_float_test() {
   let ctx = test_helpers.make_minimal_ctx()
   server_request_decode.query_schema_needs_float(
-    Some(schema.Inline(test_helpers.float_schema())),
+    Some(openapi.Inline(test_helpers.float_schema())),
     ctx,
   )
   |> should.be_true()
   server_request_decode.query_schema_needs_float(
-    Some(schema.Inline(test_helpers.int_schema())),
+    Some(openapi.Inline(test_helpers.int_schema())),
     ctx,
   )
   |> should.be_false()
@@ -392,12 +391,12 @@ pub fn server_request_decode_cookie_required_expr_int_returns_bound_var_test() {
 
 pub fn server_request_decode_request_body_uses_form_urlencoded_test() {
   let rb =
-    spec.RequestBody(
+    openapi.RequestBody(
       description: None,
       content: dict.from_list([
         #(
           "application/x-www-form-urlencoded",
-          spec.MediaType(
+          openapi.MediaType(
             schema: None,
             example: None,
             examples: dict.new(),
@@ -413,12 +412,12 @@ pub fn server_request_decode_request_body_uses_form_urlencoded_test() {
 
 pub fn server_request_decode_request_body_uses_multipart_test() {
   let rb =
-    spec.RequestBody(
+    openapi.RequestBody(
       description: None,
       content: dict.from_list([
         #(
           "multipart/form-data",
-          spec.MediaType(
+          openapi.MediaType(
             schema: None,
             example: None,
             examples: dict.new(),
@@ -434,12 +433,12 @@ pub fn server_request_decode_request_body_uses_multipart_test() {
 
 pub fn server_request_decode_request_body_not_form_test() {
   let rb =
-    spec.RequestBody(
+    openapi.RequestBody(
       description: None,
       content: dict.from_list([
         #(
           "application/json",
-          spec.MediaType(
+          openapi.MediaType(
             schema: None,
             example: None,
             examples: dict.new(),
@@ -461,13 +460,13 @@ pub fn server_request_decode_request_body_not_form_test() {
 
 pub fn client_request_get_body_type_reference_test() {
   let rb =
-    spec.RequestBody(
+    openapi.RequestBody(
       description: None,
       content: dict.from_list([
         #(
           "application/json",
-          spec.MediaType(
-            schema: Some(schema.Reference(
+          openapi.MediaType(
+            schema: Some(openapi.Reference(
               ref: "#/components/schemas/Pet",
               name: "Pet",
             )),
@@ -485,13 +484,13 @@ pub fn client_request_get_body_type_reference_test() {
 
 pub fn client_request_get_body_type_inline_string_test() {
   let rb =
-    spec.RequestBody(
+    openapi.RequestBody(
       description: None,
       content: dict.from_list([
         #(
           "application/json",
-          spec.MediaType(
-            schema: Some(schema.Inline(test_helpers.string_schema())),
+          openapi.MediaType(
+            schema: Some(openapi.Inline(test_helpers.string_schema())),
             example: None,
             examples: dict.new(),
             encoding: dict.new(),
@@ -506,13 +505,13 @@ pub fn client_request_get_body_type_inline_string_test() {
 
 pub fn client_request_get_body_type_inline_int_test() {
   let rb =
-    spec.RequestBody(
+    openapi.RequestBody(
       description: None,
       content: dict.from_list([
         #(
           "application/json",
-          spec.MediaType(
-            schema: Some(schema.Inline(test_helpers.int_schema())),
+          openapi.MediaType(
+            schema: Some(openapi.Inline(test_helpers.int_schema())),
             example: None,
             examples: dict.new(),
             encoding: dict.new(),
@@ -527,14 +526,14 @@ pub fn client_request_get_body_type_inline_int_test() {
 
 pub fn client_request_get_body_type_multi_content_test() {
   let mt =
-    spec.MediaType(
+    openapi.MediaType(
       schema: None,
       example: None,
       examples: dict.new(),
       encoding: dict.new(),
     )
   let rb =
-    spec.RequestBody(
+    openapi.RequestBody(
       description: None,
       content: dict.from_list([
         #("application/json", mt),
@@ -548,29 +547,29 @@ pub fn client_request_get_body_type_multi_content_test() {
 
 pub fn client_request_get_body_type_empty_content_test() {
   let rb =
-    spec.RequestBody(description: None, content: dict.new(), required: True)
+    openapi.RequestBody(description: None, content: dict.new(), required: True)
   client_request.get_body_type(rb, "noContent")
   |> should.equal("String")
 }
 
 pub fn client_request_get_body_type_inline_object_test() {
   let obj =
-    schema.ObjectSchema(
+    openapi.ObjectSchema(
       metadata: schema.default_metadata(),
       properties: dict.new(),
       required: [],
-      additional_properties: schema.Forbidden,
+      additional_properties: openapi.Forbidden,
       min_properties: None,
       max_properties: None,
     )
   let rb =
-    spec.RequestBody(
+    openapi.RequestBody(
       description: None,
       content: dict.from_list([
         #(
           "application/json",
-          spec.MediaType(
-            schema: Some(schema.Inline(obj)),
+          openapi.MediaType(
+            schema: Some(openapi.Inline(obj)),
             example: None,
             examples: dict.new(),
             encoding: dict.new(),
@@ -586,9 +585,9 @@ pub fn client_request_get_body_type_inline_object_test() {
 pub fn client_request_is_exploded_array_param_default_test() {
   let ctx = test_helpers.make_minimal_ctx()
   let arr =
-    schema.ArraySchema(
+    openapi.ArraySchema(
       metadata: schema.default_metadata(),
-      items: schema.Inline(test_helpers.string_schema()),
+      items: openapi.Inline(test_helpers.string_schema()),
       min_items: None,
       max_items: None,
       unique_items: False,
@@ -596,9 +595,9 @@ pub fn client_request_is_exploded_array_param_default_test() {
   let param =
     test_helpers.make_test_param(
       "tags",
-      spec.InQuery,
+      openapi.InQuery,
       True,
-      spec.ParameterSchema(schema.Inline(arr)),
+      openapi.ParameterSchema(openapi.Inline(arr)),
       None,
       None,
       False,
@@ -611,9 +610,9 @@ pub fn client_request_is_exploded_array_param_default_test() {
 pub fn client_request_is_exploded_array_param_explicit_false_test() {
   let ctx = test_helpers.make_minimal_ctx()
   let arr =
-    schema.ArraySchema(
+    openapi.ArraySchema(
       metadata: schema.default_metadata(),
-      items: schema.Inline(test_helpers.string_schema()),
+      items: openapi.Inline(test_helpers.string_schema()),
       min_items: None,
       max_items: None,
       unique_items: False,
@@ -621,9 +620,9 @@ pub fn client_request_is_exploded_array_param_explicit_false_test() {
   let param =
     test_helpers.make_test_param(
       "tags",
-      spec.InQuery,
+      openapi.InQuery,
       True,
-      spec.ParameterSchema(schema.Inline(arr)),
+      openapi.ParameterSchema(openapi.Inline(arr)),
       None,
       Some(False),
       False,
@@ -643,21 +642,21 @@ pub fn client_request_is_exploded_array_param_non_array_test() {
 pub fn client_request_is_deep_object_param_object_test() {
   let ctx = test_helpers.make_minimal_ctx()
   let obj =
-    schema.ObjectSchema(
+    openapi.ObjectSchema(
       metadata: schema.default_metadata(),
       properties: dict.new(),
       required: [],
-      additional_properties: schema.Forbidden,
+      additional_properties: openapi.Forbidden,
       min_properties: None,
       max_properties: None,
     )
   let param =
     test_helpers.make_test_param(
       "filter",
-      spec.InQuery,
+      openapi.InQuery,
       True,
-      spec.ParameterSchema(schema.Inline(obj)),
-      Some(spec.DeepObjectStyle),
+      openapi.ParameterSchema(openapi.Inline(obj)),
+      Some(openapi.DeepObjectStyle),
       None,
       False,
     )
@@ -676,7 +675,7 @@ pub fn client_request_is_deep_object_param_string_test() {
 pub fn client_request_multipart_field_is_binary_true_test() {
   let ctx = test_helpers.make_minimal_ctx()
   let binary_schema =
-    schema.StringSchema(
+    openapi.StringSchema(
       metadata: schema.default_metadata(),
       format: Some("binary"),
       enum_values: [],
@@ -684,14 +683,14 @@ pub fn client_request_multipart_field_is_binary_true_test() {
       max_length: None,
       pattern: None,
     )
-  client_request.multipart_field_is_binary(schema.Inline(binary_schema), ctx)
+  client_request.multipart_field_is_binary(openapi.Inline(binary_schema), ctx)
   |> should.be_true()
 }
 
 pub fn client_request_multipart_field_is_binary_false_test() {
   let ctx = test_helpers.make_minimal_ctx()
   client_request.multipart_field_is_binary(
-    schema.Inline(test_helpers.string_schema()),
+    openapi.Inline(test_helpers.string_schema()),
     ctx,
   )
   |> should.be_false()
@@ -719,9 +718,9 @@ pub fn ir_build_sorted_entries_single_test() {
 }
 
 pub fn ir_build_is_internal_schema_true_test() {
-  let meta = schema.SchemaMetadata(..schema.default_metadata(), internal: True)
+  let meta = openapi.SchemaMetadata(..schema.default_metadata(), internal: True)
   let string_schema =
-    schema.StringSchema(
+    openapi.StringSchema(
       metadata: meta,
       format: None,
       enum_values: [],
@@ -729,17 +728,17 @@ pub fn ir_build_is_internal_schema_true_test() {
       max_length: None,
       pattern: None,
     )
-  ir_build.is_internal_schema(schema.Inline(string_schema))
+  ir_build.is_internal_schema(openapi.Inline(string_schema))
   |> should.be_true()
 }
 
 pub fn ir_build_is_internal_schema_false_test() {
-  ir_build.is_internal_schema(schema.Inline(test_helpers.string_schema()))
+  ir_build.is_internal_schema(openapi.Inline(test_helpers.string_schema()))
   |> should.be_false()
 }
 
 pub fn ir_build_is_internal_schema_reference_test() {
-  ir_build.is_internal_schema(schema.Reference(
+  ir_build.is_internal_schema(openapi.Reference(
     ref: "#/components/schemas/User",
     name: "User",
   ))
@@ -753,50 +752,50 @@ pub fn ir_build_is_internal_schema_reference_test() {
 pub fn allof_merge_single_object_test() {
   let ctx = test_helpers.make_minimal_ctx()
   let obj =
-    schema.ObjectSchema(
+    openapi.ObjectSchema(
       metadata: schema.default_metadata(),
       properties: dict.from_list([
-        #("name", schema.Inline(test_helpers.string_schema())),
-        #("age", schema.Inline(test_helpers.int_schema())),
+        #("name", openapi.Inline(test_helpers.string_schema())),
+        #("age", openapi.Inline(test_helpers.int_schema())),
       ]),
       required: ["name"],
-      additional_properties: schema.Forbidden,
+      additional_properties: openapi.Forbidden,
       min_properties: None,
       max_properties: None,
     )
-  let result = allof_merge.merge_allof_schemas([schema.Inline(obj)], ctx)
+  let result = allof_merge.merge_allof_schemas([openapi.Inline(obj)], ctx)
   dict.size(result.properties) |> should.equal(2)
   result.required |> should.equal(["name"])
-  result.additional_properties |> should.equal(schema.Forbidden)
+  result.additional_properties |> should.equal(openapi.Forbidden)
 }
 
 pub fn allof_merge_two_objects_test() {
   let ctx = test_helpers.make_minimal_ctx()
   let obj1 =
-    schema.ObjectSchema(
+    openapi.ObjectSchema(
       metadata: schema.default_metadata(),
       properties: dict.from_list([
-        #("name", schema.Inline(test_helpers.string_schema())),
+        #("name", openapi.Inline(test_helpers.string_schema())),
       ]),
       required: ["name"],
-      additional_properties: schema.Forbidden,
+      additional_properties: openapi.Forbidden,
       min_properties: None,
       max_properties: None,
     )
   let obj2 =
-    schema.ObjectSchema(
+    openapi.ObjectSchema(
       metadata: schema.default_metadata(),
       properties: dict.from_list([
-        #("age", schema.Inline(test_helpers.int_schema())),
+        #("age", openapi.Inline(test_helpers.int_schema())),
       ]),
       required: ["age"],
-      additional_properties: schema.Forbidden,
+      additional_properties: openapi.Forbidden,
       min_properties: None,
       max_properties: None,
     )
   let result =
     allof_merge.merge_allof_schemas(
-      [schema.Inline(obj1), schema.Inline(obj2)],
+      [openapi.Inline(obj1), openapi.Inline(obj2)],
       ctx,
     )
   dict.size(result.properties) |> should.equal(2)
@@ -808,7 +807,7 @@ pub fn allof_merge_non_object_value_field_test() {
   let ctx = test_helpers.make_minimal_ctx()
   let result =
     allof_merge.merge_allof_schemas(
-      [schema.Inline(test_helpers.string_schema())],
+      [openapi.Inline(test_helpers.string_schema())],
       ctx,
     )
   dict.has_key(result.properties, "value") |> should.be_true()
@@ -817,33 +816,33 @@ pub fn allof_merge_non_object_value_field_test() {
 pub fn allof_merge_additional_properties_typed_wins_test() {
   let ctx = test_helpers.make_minimal_ctx()
   let obj1 =
-    schema.ObjectSchema(
+    openapi.ObjectSchema(
       metadata: schema.default_metadata(),
       properties: dict.new(),
       required: [],
-      additional_properties: schema.Untyped,
+      additional_properties: openapi.Untyped,
       min_properties: None,
       max_properties: None,
     )
   let obj2 =
-    schema.ObjectSchema(
+    openapi.ObjectSchema(
       metadata: schema.default_metadata(),
       properties: dict.new(),
       required: [],
-      additional_properties: schema.Typed(
-        schema.Inline(test_helpers.string_schema()),
+      additional_properties: openapi.Typed(
+        openapi.Inline(test_helpers.string_schema()),
       ),
       min_properties: None,
       max_properties: None,
     )
   let result =
     allof_merge.merge_allof_schemas(
-      [schema.Inline(obj1), schema.Inline(obj2)],
+      [openapi.Inline(obj1), openapi.Inline(obj2)],
       ctx,
     )
   // Typed should take precedence over Untyped
   case result.additional_properties {
-    schema.Typed(_) -> True
+    openapi.Typed(_) -> True
     _ -> False
   }
   |> should.be_true()

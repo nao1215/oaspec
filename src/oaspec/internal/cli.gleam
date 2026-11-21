@@ -12,11 +12,11 @@ import oaspec/config
 import oaspec/generate
 import oaspec/internal/codegen/context
 import oaspec/internal/formatter
+import oaspec/internal/openapi/diagnostic
 import oaspec/internal/openapi/location_index.{type LocationIndex}
 import oaspec/internal/progress
-import oaspec/openapi/diagnostic
+import oaspec/openapi.{type OpenApiSpec, type Unresolved}
 import oaspec/openapi/parser
-import oaspec/openapi/spec.{type OpenApiSpec, type Unresolved}
 import simplifile
 
 @external(erlang, "oaspec_ffi", "is_stdout_tty")
@@ -1051,9 +1051,8 @@ fn format_generate_error_for(
       list.map(errors, fn(validation_error) {
         "  - "
         <> case validation_error.source_loc {
-          diagnostic.SourceLoc(..) ->
-            diagnostic.render(validation_error, file_opt)
-          diagnostic.NoSourceLoc -> diagnostic.to_short_string(validation_error)
+          openapi.SourceLoc(..) -> diagnostic.render(validation_error, file_opt)
+          openapi.NoSourceLoc -> diagnostic.to_short_string(validation_error)
         }
       }),
       "\n",
@@ -1066,7 +1065,7 @@ fn format_generate_error_for(
 /// `format_generate_error_for` for the rendering contract.
 fn print_warnings_for(
   file_path: String,
-  warnings: List(diagnostic.Diagnostic),
+  warnings: List(openapi.Diagnostic),
 ) -> Nil {
   let file_opt = case file_path {
     "" -> None
@@ -1078,8 +1077,8 @@ fn print_warnings_for(
       io.println_error("Warnings:")
       list.each(warnings, fn(w) {
         let rendered = case w.source_loc {
-          diagnostic.SourceLoc(..) -> diagnostic.render(w, file_opt)
-          diagnostic.NoSourceLoc -> diagnostic.to_short_string(w)
+          openapi.SourceLoc(..) -> diagnostic.render(w, file_opt)
+          openapi.NoSourceLoc -> diagnostic.to_short_string(w)
         }
         io.println_error("  - " <> rendered)
       })

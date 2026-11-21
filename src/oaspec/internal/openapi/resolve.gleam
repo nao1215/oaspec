@@ -5,13 +5,13 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/set
 import gleam/string
+import oaspec/internal/openapi/diagnostic
 import oaspec/internal/openapi/resolver
-import oaspec/openapi/diagnostic.{type Diagnostic, NoSourceLoc}
-import oaspec/openapi/spec.{
-  type Callback, type Components, type OpenApiSpec, type Operation,
-  type Parameter, type PathItem, type RefOr, type RequestBody, type Resolved,
-  type Response, type Unresolved, Callback, Components, Operation, PathItem, Ref,
-  Value,
+import oaspec/openapi.{
+  type Callback, type Components, type Diagnostic, type OpenApiSpec,
+  type Operation, type Parameter, type PathItem, type RefOr, type RequestBody,
+  type Resolved, type Response, type Unresolved, Callback, Components,
+  NoSourceLoc, Operation, PathItem, Ref, Value,
 }
 
 /// Resolve all RefOr aliases in the spec.
@@ -27,7 +27,7 @@ pub fn resolve(
 /// Relabel the stage phantom type. `stage` has no runtime representation,
 /// so this rebuilds the stage-typed records with the same contents.
 fn coerce_stage(spec: OpenApiSpec(a)) -> OpenApiSpec(b) {
-  spec.OpenApiSpec(
+  openapi.OpenApiSpec(
     ..spec,
     paths: restage_dict(spec.paths, restage_path_item),
     components: option.map(spec.components, restage_components),
@@ -85,15 +85,15 @@ fn restage_callback(callback: Callback(a)) -> Callback(b) {
 }
 
 fn restage_parameter(param: Parameter(a)) -> Parameter(b) {
-  spec.Parameter(..param, name: param.name)
+  openapi.Parameter(..param, name: param.name)
 }
 
 fn restage_request_body(body: RequestBody(a)) -> RequestBody(b) {
-  spec.RequestBody(..body, required: body.required)
+  openapi.RequestBody(..body, required: body.required)
 }
 
 fn restage_response(response: Response(a)) -> Response(b) {
-  spec.Response(..response, description: response.description)
+  openapi.Response(..response, description: response.description)
 }
 
 fn restage_dict(
@@ -140,7 +140,7 @@ fn resolve_internal(
         empty_components,
       ))
       Ok(
-        spec.OpenApiSpec(
+        openapi.OpenApiSpec(
           ..spec,
           paths: resolved_paths,
           webhooks: resolved_webhooks,
@@ -193,7 +193,7 @@ fn resolve_internal(
         resolved_components,
       ))
       Ok(
-        spec.OpenApiSpec(
+        openapi.OpenApiSpec(
           ..spec,
           components: Some(resolved_components),
           paths: resolved_paths,
@@ -508,7 +508,7 @@ fn follow_callback_ref_chain(
       detail: "Callback $ref chain is cyclic; visited: "
         <> string.join(list.reverse([ref_str, ..seen]), " -> ")
         <> ".",
-      loc: diagnostic.NoSourceLoc,
+      loc: openapi.NoSourceLoc,
     )),
   )
   use ref_name <- result.try(validate_ref_kind(
@@ -526,7 +526,7 @@ fn follow_callback_ref_chain(
         detail: "Callback $ref '"
           <> ref_str
           <> "' does not resolve to an entry in components.callbacks.",
-        loc: diagnostic.NoSourceLoc,
+        loc: openapi.NoSourceLoc,
       ))
   }
 }
