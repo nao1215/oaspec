@@ -229,9 +229,9 @@ oaspec validate --config=oaspec.yaml
 
 ## Guard validation
 
-By default, generated code does not validate request bodies at runtime.
-Enable `validate` in the config file or pass `--validate` to `generate`
-to add schema-constraint checks:
+`validate` is on by default for `mode: server` and `mode: both`, and off
+for `mode: client`. Set it in the config file, or pass `--validate` to
+`generate` to turn it on:
 
 ```yaml
 validate: true

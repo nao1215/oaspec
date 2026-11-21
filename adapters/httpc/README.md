@@ -48,15 +48,16 @@ let send =
 
 ## Tests in the consumer
 
-For unit tests of code that calls a generated client, prefer
-`oaspec/mock` over a real network. The adapter's `Send` shape matches
-`mock.Send`, so test code substitutes one for the other without
-touching the call sites:
+`httpc.send` is a `transport.Send`, so a test can pass a function that returns a fixed response instead:
 
 ```gleam
-import oaspec/mock
-
-let send = mock.text(200, "[{\"id\": 1, \"name\": \"Fido\"}]")
+let send = fn(_request) {
+  Ok(transport.Response(
+    status: 200,
+    headers: [],
+    body: transport.TextBody("[{\"id\": 1, \"name\": \"Fido\"}]"),
+  ))
+}
 let assert Ok(_) = client.list_pets(send, limit: None, offset: None)
 ```
 

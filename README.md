@@ -12,13 +12,13 @@
 [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/oaspec/)
 [![Hex Downloads](https://img.shields.io/hexpm/dt/oaspec)](https://hex.pm/packages/oaspec)
 [![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/nao1215/oaspec/total)](https://github.com/nao1215/oaspec/releases)
-[![License](https://img.shields.io/github/license/nao1215/oaspec)](./LICENSE)
+[![License](https://img.shields.io/github/license/nao1215/oaspec)](https://github.com/nao1215/oaspec/blob/main/LICENSE)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/nao1215/oaspec/badge)](https://scorecard.dev/viewer/?uri=github.com/nao1215/oaspec)
 
 Generate Gleam client and server modules from OpenAPI 3.x specs. The generator writes the request and response types, encoders, decoders, validation guards and the router. You supply credentials and a transport adapter, then call typed operation functions.
 
 ```gleam
-import api/client
+import api_client/client
 import oaspec/httpc
 import oaspec/transport
 
@@ -36,10 +36,10 @@ API reference: <https://hexdocs.pm/oaspec/>
 Most projects need both parts: the library from Hex in the project that uses the generated code, and the `oaspec` CLI (`init`, `generate`, `validate`) to run the generator.
 
 ```sh
-gleam add oaspec gleam_json
+gleam add oaspec gleam_json gleam_http
 ```
 
-The generated `decode.gleam`, `encode.gleam`, `guards.gleam` and `router.gleam` import `gleam/json`, so without `gleam_json` as a direct dependency `gleam check` warns on every generated file.
+Generated modules import `gleam/json`, and generated clients import `gleam/http` for request methods, so both need to be direct dependencies or `gleam check` warns on every generated file.
 
 ### CLI (GitHub release)
 
@@ -92,32 +92,35 @@ oaspec init
 oaspec generate --config=oaspec.yaml
 ```
 
-`oaspec init` writes a commented template in which only `input: openapi.yaml` and `package: api` are set. Path fields (`input`, `output.dir`, `output.server`, `output.client`) are resolved against the working directory, not the config file's location. [doc/configuration.md](./doc/configuration.md) lists every field and CLI flag, multi-target codegen and validate mode.
+`oaspec init` writes a commented template in which only `input: openapi.yaml` and `package: api` are set. Path fields (`input`, `output.dir`, `output.server`, `output.client`) are resolved against the working directory, not the config file's location. [doc/configuration.md](https://github.com/nao1215/oaspec/blob/main/doc/configuration.md) lists every field and CLI flag, multi-target codegen and validate mode.
 
-### Using oaspec as a library (without the CLI)
+### Using oaspec as a library
 
-To load and inspect a spec at run time, for example one uploaded to an HTTP endpoint, call `oaspec/openapi/parser.parse_string`. It returns `Result(OpenApiSpec(Unresolved), Diagnostic)`, and `parser.parse_error_to_string` renders the diagnostic.
+The `oaspec` module runs the same steps as the CLI: `parse_file` or `parse_string`, `generate`, then `write`. `generate` does no IO, so a build step or a test can look at the files before they are written.
 
 ```gleam
 import gleam/io
-import oaspec/openapi/parser
+import gleam/list
+import oaspec
+import oaspec/config
+import oaspec/openapi
 
 pub fn main() {
-  let spec_yaml =
-    "openapi: \"3.0.3\"\n"
-    <> "info:\n"
-    <> "  title: Demo\n"
-    <> "  version: \"1.0.0\"\n"
-    <> "paths: {}\n"
-
-  case parser.parse_string(spec_yaml) {
-    Ok(_spec) -> io.println("parsed OK")
-    Error(diagnostic) -> io.println(parser.parse_error_to_string(diagnostic))
+  let assert Ok(cfg) = config.load("oaspec.yaml")
+  case oaspec.parse_file(cfg.input) {
+    Error(diagnostic) -> io.println(openapi.diagnostic_to_string(diagnostic))
+    Ok(spec) ->
+      case oaspec.generate(spec, cfg) {
+        Ok(generated) -> {
+          let assert Ok(paths) = oaspec.write(generated)
+          list.each(paths, io.println)
+        }
+        Error(oaspec.InvalidSpec(errors)) ->
+          list.each(errors, fn(e) { io.println(openapi.diagnostic_to_string(e)) })
+      }
   }
 }
 ```
-
-[doc/library-api.md](./doc/library-api.md) covers the parse and generate pipeline.
 
 ## Generated files
 
@@ -147,11 +150,11 @@ src/my_api_client/           # client (mode: client | both)
 
 The base directory is `./src`, so `gleam build` picks the modules up. `output.dir`, or `output.server` and `output.client`, change it.
 
-`handlers.gleam` is yours: the generator writes panic stubs on the first run and never touches it again. Everything else is regenerated. With `handlers: per_operation`, each operation gets its own `handlers/<operation>.gleam`, so an operation added to the spec gets a stub on the next run; see [Configuration](doc/configuration.md#one-handler-file-per-operation).
+`handlers.gleam` is yours: the generator writes panic stubs on the first run and never touches it again. Everything else is regenerated. With `handlers: per_operation`, each operation gets its own `handlers/<operation>.gleam`, so an operation added to the spec gets a stub on the next run; see [Configuration](https://github.com/nao1215/oaspec/blob/main/doc/configuration.md#one-handler-file-per-operation).
 
 ## Using the generated client
 
-Generated clients depend on the small pure runtime `oaspec/transport`, not on an HTTP library. Each operation has a synchronous `transport.Send` entry point and an asynchronous `transport.AsyncSend` variant. The adapters that connect them to a real HTTP runtime are separate packages under [`adapters/`](./adapters), so `oaspec` itself does not depend on `gleam_httpc`. They are published to Hex on `oaspec_httpc-v*` and `oaspec_fetch-v*` tags.
+Generated clients depend on the small pure runtime `oaspec/transport`, not on an HTTP library. Each operation has a synchronous `transport.Send` entry point and an asynchronous `transport.AsyncSend` variant. The adapters that connect them to a real HTTP runtime are separate packages under [`adapters/`](https://github.com/nao1215/oaspec/tree/main/adapters), so `oaspec` itself does not depend on `gleam_httpc`. They are published to Hex on `oaspec_httpc-v*` and `oaspec_fetch-v*` tags.
 
 ### BEAM (`oaspec_httpc`)
 
@@ -160,7 +163,7 @@ gleam add oaspec_httpc
 ```
 
 ```gleam
-import api/client
+import api_client/client
 import oaspec/httpc
 import oaspec/transport
 
@@ -171,7 +174,7 @@ let send =
 let result = client.list_pets(send, limit: Some(10), offset: None)
 ```
 
-Runnable example: [`examples/petstore_client`](./examples/petstore_client).
+Runnable example: [`examples/petstore_client`](https://github.com/nao1215/oaspec/tree/main/examples/petstore_client).
 Run it with `just example-petstore`.
 
 ### JavaScript (`oaspec_fetch`)
@@ -181,7 +184,7 @@ gleam add oaspec_fetch
 ```
 
 ```gleam
-import api/client
+import api_client/client
 import oaspec/fetch
 import oaspec/transport
 
@@ -197,19 +200,23 @@ client.list_pets_async(send, limit: Some(10), offset: None)
 ```
 
 Runnable example:
-[`examples/petstore_client_fetch`](./examples/petstore_client_fetch).
+[`examples/petstore_client_fetch`](https://github.com/nao1215/oaspec/tree/main/examples/petstore_client_fetch).
 Run it with `just example-petstore-fetch`.
 
-### Tests (`oaspec/mock`)
+### Tests
+
+A `Send` is a function from `transport.Request` to a result, so a test can pass one that returns a fixed response, with no network:
 
 ```gleam
-import oaspec/mock
-
-let send = mock.text(200, "[{\"id\": 1, \"name\": \"Fido\"}]")
+let send = fn(_request) {
+  Ok(transport.Response(
+    status: 200,
+    headers: [],
+    body: transport.TextBody("[{\"id\": 1, \"name\": \"Fido\"}]"),
+  ))
+}
 let assert Ok(_) = client.list_pets(send, limit: None, offset: None)
 ```
-
-`oaspec/mock` is an in-memory transport with no network or FFI, for running generated clients in `gleam test`. The petstore example uses it.
 
 ### Authenticated requests
 
@@ -219,10 +226,7 @@ let assert Ok(_) = client.list_pets(send, limit: None, offset: None)
 let send =
   httpc.send
   |> transport.with_base_url(client.default_base_url())
-  |> transport.with_security(
-    transport.credentials()
-    |> transport.with_bearer_token("BearerAuth", token),
-  )
+  |> transport.with_security([transport.BearerToken("BearerAuth", token)])
 ```
 
 Each operation also has `build_<op>_request` and `decode_<op>_response` helpers and request-object wrappers for both call paths, so retry middleware, logging or a decoding test can handle the request and the response separately.
@@ -245,18 +249,17 @@ case response.body {
 }
 ```
 
-The router can be tested without an HTTP server. Runnable framework-free example: [`examples/server_adapter`](./examples/server_adapter), run with `just example-server-adapter`. [doc/server-adapters.md](./doc/server-adapters.md) has `mist` and `wisp` recipes.
+The router can be tested without an HTTP server. Runnable framework-free example: [`examples/server_adapter`](https://github.com/nao1215/oaspec/tree/main/examples/server_adapter), run with `just example-server-adapter`. [doc/server-adapters.md](https://github.com/nao1215/oaspec/blob/main/doc/server-adapters.md) has `mist` and `wisp` recipes.
 
-The router parses `security:` declarations but does not enforce them. Handlers check `Authorization`, `X-Api-Key` or cookies and return their own 401; [doc/server-security.md](./doc/server-security.md) shows two patterns.
+The router reads `security:` declarations but does not enforce them; [doc/server-security.md](https://github.com/nao1215/oaspec/blob/main/doc/server-security.md) shows where to check credentials.
 
 ## Documentation
 
-- [doc/openapi-support.md](./doc/openapi-support.md): what `oaspec` supports and rejects, and restrictions per mode
-- [doc/configuration.md](./doc/configuration.md): `oaspec.yaml` fields, CLI flags, multi-target codegen, `validate` mode
-- [doc/server-adapters.md](./doc/server-adapters.md): `mist` and `wisp` recipes for the generated router
-- [doc/server-security.md](./doc/server-security.md): enforcing auth on the server
-- [doc/library-api.md](./doc/library-api.md): the parse and generate pipeline as a library
-- [examples/](./examples): runnable examples covered by CI
+- [doc/openapi-support.md](https://github.com/nao1215/oaspec/blob/main/doc/openapi-support.md): what `oaspec` supports and rejects, and restrictions per mode
+- [doc/configuration.md](https://github.com/nao1215/oaspec/blob/main/doc/configuration.md): `oaspec.yaml` fields, CLI flags, multi-target codegen, `validate` mode
+- [doc/server-adapters.md](https://github.com/nao1215/oaspec/blob/main/doc/server-adapters.md): `mist` and `wisp` recipes for the generated router
+- [doc/server-security.md](https://github.com/nao1215/oaspec/blob/main/doc/server-security.md): enforcing auth on the server
+- [examples/](https://github.com/nao1215/oaspec/tree/main/examples): runnable examples covered by CI
 
 ## Development
 
@@ -278,21 +281,21 @@ just bench
 | `just test` | gleeunit | Parser, validator, naming, config, collision detection |
 | `just e2e` | atago | CLI behaviour, generated file trees, content snapshots, unsupported feature detection |
 | `just integration` | gleeunit | Generated code compiles and the generated modules work together |
-| `just bench` | himorime | Start-up, validate and generate on documents of 10 and 500 operations; pull requests are compared with their base ([bench/README.md](./bench/README.md)) |
+| `just bench` | himorime | Start-up, validate and generate on documents of 10 and 500 operations; pull requests are compared with their base ([bench/README.md](https://github.com/nao1215/oaspec/blob/main/bench/README.md)) |
 
 ## Testing
 
 | Technique | Bug class caught here |
 |---|---|
-| Examples and unit tests | [Wrong parsing, validation and code generation per stage, on documents from other OpenAPI tools](doc/testing.md#examples-and-unit-tests) |
-| Generated properties | [Naming and argument helpers that break on unusual input](doc/testing.md#generated-properties) |
-| Metamorphic relations | [Generated code that depends on YAML vs JSON, key order or extension keys](doc/testing.md#metamorphic-relations) |
-| Golden files | [Unreviewed changes to the generated code](doc/testing.md#golden-files) |
-| End-to-end tests and output snapshots | [Wrong exit codes, messages and file trees of the shipped escript](doc/testing.md#end-to-end-tests-and-output-snapshots) |
-| Real documents | [Generated code that does not compile for large published documents](doc/testing.md#real-documents) |
-| Paired CI benchmarks | [Slower start-up, validate and generate](doc/testing.md#paired-ci-benchmarks) |
-| Mutation testing (local) | [Branches of the generator that no test pins down](doc/testing.md#mutation-testing) |
+| Examples and unit tests | [Wrong parsing, validation and code generation per stage, on documents from other OpenAPI tools](https://github.com/nao1215/oaspec/blob/main/doc/testing.md#examples-and-unit-tests) |
+| Generated properties | [Naming and argument helpers that break on unusual input](https://github.com/nao1215/oaspec/blob/main/doc/testing.md#generated-properties) |
+| Metamorphic relations | [Generated code that depends on YAML vs JSON, key order or extension keys](https://github.com/nao1215/oaspec/blob/main/doc/testing.md#metamorphic-relations) |
+| Golden files | [Unreviewed changes to the generated code](https://github.com/nao1215/oaspec/blob/main/doc/testing.md#golden-files) |
+| End-to-end tests and output snapshots | [Wrong exit codes, messages and file trees of the shipped escript](https://github.com/nao1215/oaspec/blob/main/doc/testing.md#end-to-end-tests-and-output-snapshots) |
+| Real documents | [Generated code that does not compile for large published documents](https://github.com/nao1215/oaspec/blob/main/doc/testing.md#real-documents) |
+| Paired CI benchmarks | [Slower start-up, validate and generate](https://github.com/nao1215/oaspec/blob/main/doc/testing.md#paired-ci-benchmarks) |
+| Mutation testing (local) | [Branches of the generator that no test pins down](https://github.com/nao1215/oaspec/blob/main/doc/testing.md#mutation-testing) |
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/nao1215/oaspec/blob/main/LICENSE)
