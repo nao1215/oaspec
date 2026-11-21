@@ -593,16 +593,20 @@ fn generate_safe_request_and_dispatch(
       p.in_ == spec.InPath && decode_helpers.param_needs_result_unwrap(p)
     })
 
-  // Required query / header / cookie params. Issue #263: each of these
-  // becomes its own enclosing case expression so that a missing value
-  // returns 400 instead of crashing the BEAM via `let assert`. Deep
-  // object query params keep their legacy `let assert`-based path for
-  // now (tracked separately).
+  // Required query / header / cookie params, and deep-object query params
+  // with a required property. Each becomes its own enclosing case
+  // expression so that a missing or invalid value returns 400.
   let required_query_params =
     list.filter(params, fn(p) {
       p.in_ == spec.InQuery
       && p.required
       && !decode_helpers.is_deep_object_param(p, ctx)
+    })
+  let checked_deep_object_params =
+    list.filter(params, fn(p) {
+      p.in_ == spec.InQuery
+      && decode_helpers.is_deep_object_param(p, ctx)
+      && decode_helpers.deep_object_has_required_properties(p, ctx)
     })
   let required_header_params =
     list.filter(params, fn(p) { p.in_ == spec.InHeader && p.required })
@@ -650,6 +654,22 @@ fn generate_safe_request_and_dispatch(
   let sb =
     list.fold(required_query_params, sb, fn(sb, p) {
       query_required_open_parse_case(sb, p, ctx)
+    })
+
+  // Open result cases for deep-object params with a required property.
+  let sb =
+    list.fold(checked_deep_object_params, sb, fn(sb, p) {
+      let var_name = naming.to_snake_case(p.name) <> "_deep"
+      sb
+      |> se.indent(
+        3,
+        "let "
+          <> var_name
+          <> "_result = "
+          <> decode_helpers.deep_object_result_expr(p.name, p, op_id, ctx),
+      )
+      |> se.indent(3, "case " <> var_name <> "_result {")
+      |> se.indent(4, "Ok(" <> var_name <> ") -> {")
     })
 
   // Open lookup cases for required header params.
@@ -797,7 +817,15 @@ fn generate_safe_request_and_dispatch(
         spec.InQuery -> {
           let key = param.name
           let raw_var = naming.to_snake_case(param.name) <> "_raw"
-          case decode_helpers.is_deep_object_param(param, ctx), param.required {
+          let is_deep_object = decode_helpers.is_deep_object_param(param, ctx)
+          let checked_deep_object =
+            is_deep_object
+            && decode_helpers.deep_object_has_required_properties(param, ctx)
+          use <- bool.guard(
+            checked_deep_object,
+            naming.to_snake_case(param.name) <> "_deep",
+          )
+          case is_deep_object, param.required {
             True, True ->
               decode_helpers.deep_object_required_expr(key, param, op_id, ctx)
             True, False ->
@@ -879,8 +907,8 @@ fn generate_safe_request_and_dispatch(
   }
 
   // Close required-param case expressions in LIFO (reverse) order:
-  // cookie parse, cookie lookup, header parse, header lookup, query parse,
-  // query lookup, then finally the path int/float parse cases. The
+  // cookie parse, cookie lookup, header parse, header lookup, deep object,
+  // query parse, query lookup, then finally the path int/float parse cases. The
   // catch-all `_ ->` arm covers `Ok([])` (empty query lists) along with
   // `Error(_)` so all failure modes return 400.
   let sb =
@@ -895,6 +923,10 @@ fn generate_safe_request_and_dispatch(
     })
   let sb =
     list.fold(required_header_params, sb, fn(sb, _p) { close_lookup_case(sb) })
+  let sb =
+    list.fold(checked_deep_object_params, sb, fn(sb, _p) {
+      close_lookup_case(sb)
+    })
   let sb =
     list.fold(required_query_params, sb, fn(sb, p) {
       close_query_required_parse_case(sb, p, ctx)

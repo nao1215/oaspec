@@ -172,53 +172,63 @@ pub fn query_required_expr(
   )
 }
 
-/// Lookup-based required-query expression for deep object constructor
-/// fields. Top-level required query params already go through the
-/// `query_required_expr` + router-side case scaffolding (Issue #263);
-/// the deep-object path additionally falls back to a per-type default
-/// when the constructor key is missing or the inner parse fails, so a
-/// malformed deep-object request no longer panics inside the generated
-/// handler. (#327)
-fn deep_object_required_field_expr(
+/// Opening and closing text of the nested case that looks up one required
+/// deep-object property and binds it to `deep_<field>`. Any missing or
+/// unparseable value falls through to `Error(Nil)`.
+fn deep_object_required_field_case(
   key: String,
-  schema_ref: Option(SchemaRef),
-) -> String {
-  let base =
-    "case dict.get(query, \"" <> key <> "\") { Ok([v, ..]) -> v _ -> \"\" }"
+  binding: String,
+  schema_ref: SchemaRef,
+) -> #(String, String) {
+  let lookup = "case dict.get(query, \"" <> key <> "\") { "
+  let fail = " _ -> Error(Nil) }"
+  let parse_case = fn(parse_expr) {
+    #(
+      lookup
+        <> "Ok([v, ..]) -> case "
+        <> parse_expr
+        <> " { Ok("
+        <> binding
+        <> ") -> ",
+      fail <> fail,
+    )
+  }
+  let parse_list_case = fn(parse_fn) {
+    #(
+      lookup
+        <> "Ok(vs) -> case list.try_map(vs, fn(item) { "
+        <> parse_fn
+        <> "(string.trim(item)) }) { Ok("
+        <> binding
+        <> ") -> ",
+      fail <> fail,
+    )
+  }
+  let let_case = fn(pattern, value_expr) {
+    #(
+      lookup <> pattern <> " -> { let " <> binding <> " = " <> value_expr <> " ",
+      " }" <> fail,
+    )
+  }
   case schema_ref {
-    Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
-      "case dict.get(query, \""
-      <> key
-      <> "\") { Ok(vs) -> list.map(vs, fn(item) { string.trim(item) }) _ -> [] }"
-    Some(Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..))) ->
-      "case dict.get(query, \""
-      <> key
-      <> "\") { Ok(vs) -> list.map(vs, fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } }) _ -> [] }"
-    Some(Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..))) ->
-      "case dict.get(query, \""
-      <> key
-      <> "\") { Ok(vs) -> list.map(vs, fn(item) { let trimmed = string.trim(item) case float.parse(trimmed) { Ok(n) -> n _ -> 0.0 } }) _ -> [] }"
-    Some(Inline(schema.ArraySchema(items: Inline(schema.BooleanSchema(..)), ..))) ->
-      "case dict.get(query, \""
-      <> key
-      <> "\") { Ok(vs) -> list.map(vs, fn(item) { let v = string.trim(item) "
-      <> bool_parse_expr
-      <> " }) _ -> [] }"
-    Some(Inline(schema.IntegerSchema(..))) ->
-      "case dict.get(query, \""
-      <> key
-      <> "\") { Ok([v, ..]) -> case int.parse(v) { Ok(n) -> n _ -> 0 } _ -> 0 }"
-    Some(Inline(schema.NumberSchema(..))) ->
-      "case dict.get(query, \""
-      <> key
-      <> "\") { Ok([v, ..]) -> case float.parse(v) { Ok(n) -> n _ -> 0.0 } _ -> 0.0 }"
-    Some(Inline(schema.BooleanSchema(..))) ->
-      "case dict.get(query, \""
-      <> key
-      <> "\") { Ok([v, ..]) -> "
-      <> bool_parse_expr
-      <> " _ -> False }"
-    _ -> base
+    Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..)) ->
+      let_case("Ok(vs)", "list.map(vs, fn(item) { string.trim(item) })")
+    Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..)) ->
+      parse_list_case("int.parse")
+    Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..)) ->
+      parse_list_case("float.parse")
+    Inline(schema.ArraySchema(items: Inline(schema.BooleanSchema(..)), ..)) ->
+      let_case(
+        "Ok(vs)",
+        "list.map(vs, fn(item) { let v = string.trim(item) "
+          <> bool_parse_expr
+          <> " })",
+      )
+    Inline(schema.IntegerSchema(..)) -> parse_case("int.parse(v)")
+    Inline(schema.NumberSchema(..)) -> parse_case("float.parse(v)")
+    Inline(schema.BooleanSchema(..)) ->
+      let_case("Ok([v, ..])", "{ " <> bool_parse_expr <> " }")
+    _ -> #(lookup <> "Ok([" <> binding <> ", ..]) -> ", fail)
   }
 }
 
@@ -614,6 +624,39 @@ fn deep_object_type_name(
   }
 }
 
+/// True when the deep-object parameter has a required property, so the
+/// router must look it up into a Result and answer 400 when it is missing
+/// or does not parse.
+pub fn deep_object_has_required_properties(
+  param: spec.Parameter(Resolved),
+  ctx: Context,
+) -> Bool {
+  list.any(deep_object_properties(param, ctx), fn(prop) { prop.required })
+}
+
+/// Expression of type `Result(T, Nil)` (or `Result(Option(T), Nil)` for an
+/// optional parameter) that builds the deep-object record. The router binds
+/// it and answers 400 on `Error`.
+pub fn deep_object_result_expr(
+  key: String,
+  param: spec.Parameter(Resolved),
+  op_id: String,
+  ctx: Context,
+) -> String {
+  let constructor = deep_object_constructor_result_expr(key, param, op_id, ctx)
+  case param.required {
+    True -> constructor
+    False ->
+      "case "
+      <> deep_object_presence_check(key, param, ctx)
+      <> " { True -> case "
+      <> constructor
+      <> " { Ok(value) -> Ok(Some(value)) _ -> Error(Nil) } False -> Ok(None) }"
+  }
+}
+
+/// Plain expression that builds the deep-object record when the parameter
+/// has no required property.
 pub fn deep_object_required_expr(
   key: String,
   param: spec.Parameter(Resolved),
@@ -629,24 +672,61 @@ pub fn deep_object_optional_expr(
   op_id: String,
   ctx: Context,
 ) -> String {
-  let props = deep_object_properties(param, ctx)
-  let prop_names =
-    props
-    |> list.map(fn(prop) { "\"" <> prop.name <> "\"" })
-    |> string.join(", ")
-  let has_untyped_ap = deep_object_has_untyped_additional_properties(param, ctx)
-  let presence_check = case has_untyped_ap {
-    True -> "deep_object_present_any(query, \"" <> key <> "\")"
-    False ->
-      "deep_object_present(query, \"" <> key <> "\", [" <> prop_names <> "])"
-  }
   "case "
-  <> presence_check
+  <> deep_object_presence_check(key, param, ctx)
   <> " { True -> Some("
-  <> deep_object_constructor_expr(key, param, op_id, ctx)
+  <> deep_object_required_expr(key, param, op_id, ctx)
   <> ") False -> None }"
 }
 
+fn deep_object_presence_check(
+  key: String,
+  param: spec.Parameter(Resolved),
+  ctx: Context,
+) -> String {
+  case deep_object_has_untyped_additional_properties(param, ctx) {
+    True -> "deep_object_present_any(query, \"" <> key <> "\")"
+    False -> {
+      let prop_names =
+        deep_object_properties(param, ctx)
+        |> list.map(fn(prop) { "\"" <> prop.name <> "\"" })
+        |> string.join(", ")
+      "deep_object_present(query, \"" <> key <> "\", [" <> prop_names <> "])"
+    }
+  }
+}
+
+fn deep_object_constructor_result_expr(
+  key: String,
+  param: spec.Parameter(Resolved),
+  op_id: String,
+  ctx: Context,
+) -> String {
+  let cases =
+    deep_object_properties(param, ctx)
+    |> list.filter(fn(prop) { prop.required })
+    |> list.map(fn(prop) {
+      deep_object_required_field_case(
+        key <> "[" <> prop.name <> "]",
+        deep_object_binding(prop),
+        prop.schema_ref,
+      )
+    })
+  let opening = cases |> list.map(fn(c) { c.0 }) |> string.concat
+  let closing =
+    cases |> list.reverse |> list.map(fn(c) { c.1 }) |> string.concat
+  let constructor = deep_object_constructor_expr(key, param, op_id, ctx)
+  opening <> "Ok(" <> constructor <> ")" <> closing
+}
+
+fn deep_object_binding(prop: DeepObjectProperty) -> String {
+  "deep_" <> prop.field_name
+}
+
+/// Record constructor for the deep-object parameter. Required properties
+/// are read from the `deep_<field>` variables that
+/// `deep_object_constructor_result_expr` binds; optional ones are looked up
+/// inline.
 fn deep_object_constructor_expr(
   key: String,
   param: spec.Parameter(Resolved),
@@ -658,11 +738,7 @@ fn deep_object_constructor_expr(
     |> list.map(fn(prop) {
       let prop_key = key <> "[" <> prop.name <> "]"
       let value_expr = case prop.required {
-        // Deep object property handling intentionally retains the legacy
-        // `let assert`-based lookup. Issue #263 narrowed the safety fix to
-        // top-level query/header/cookie params; deep object follow-up is
-        // tracked separately.
-        True -> deep_object_required_field_expr(prop_key, Some(prop.schema_ref))
+        True -> deep_object_binding(prop)
         False ->
           query_optional_expr_with_schema(
             prop_key,

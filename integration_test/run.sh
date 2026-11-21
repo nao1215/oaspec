@@ -1105,6 +1105,44 @@ pub fn main() {
 }
 GLEAM_EOF
 
+mkdir -p "$DEEP_DIR/test"
+cat > "$DEEP_DIR/test/deepobject_test_test.gleam" << 'GLEAM_EOF'
+// A required deepObject property that is missing or does not parse must
+// answer 400, the same as any other required query parameter.
+
+import api/handlers
+import api/router
+import gleam/dict
+import gleeunit
+import gleeunit/should
+
+pub fn main() {
+  gleeunit.main()
+}
+
+fn route(query) {
+  router.route(handlers.State, "GET", ["search"], dict.from_list(query), dict.new(), "")
+}
+
+pub fn all_required_properties_returns_200_test() {
+  route([#("filter[name]", ["a"]), #("filter[scores]", ["1", "2"])]).status
+  |> should.equal(200)
+}
+
+pub fn missing_required_string_property_returns_400_test() {
+  route([#("filter[scores]", ["1"])]).status |> should.equal(400)
+}
+
+pub fn missing_required_array_property_returns_400_test() {
+  route([#("filter[name]", ["a"])]).status |> should.equal(400)
+}
+
+pub fn unparseable_required_array_item_returns_400_test() {
+  route([#("filter[name]", ["a"]), #("filter[scores]", ["1", "x"])]).status
+  |> should.equal(400)
+}
+GLEAM_EOF
+
 cd "$DEEP_DIR"
 gleam deps download
 
@@ -1113,6 +1151,12 @@ if gleam build --warnings-as-errors 2>&1; then
   info "PASS: Generated deepObject params server code compiles (warnings-as-errors)."
 else
   fail "Generated deepObject params server code failed to compile."
+fi
+
+if gleam test; then
+  info "PASS: Missing or invalid required deepObject properties return 400."
+else
+  fail "DeepObject required-property integration tests failed."
 fi
 
 rm -rf "$DEEP_DIR"

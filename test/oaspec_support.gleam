@@ -11756,13 +11756,25 @@ pub fn server_deep_object_params_are_parsed_case() {
 
   string.contains(content, "import api/types")
   |> should.be_true()
-  string.contains(content, "filter: types.SearchItemsParamFilter(")
+  string.contains(content, "Ok(types.SearchItemsParamFilter(")
+  |> should.be_true()
+  // Required deep-object properties are looked up into a Result first so a
+  // missing or unparseable property answers 400 instead of a zero value.
+  string.contains(content, "let filter_deep_result = ")
   |> should.be_true()
   string.contains(
     content,
-    "name: case dict.get(query, \"filter[name]\") { Ok([v, ..]) -> v _ -> \"\" }",
+    "case dict.get(query, \"filter[name]\") { Ok([deep_name, ..]) -> ",
   )
   |> should.be_true()
+  string.contains(content, "name: deep_name,")
+  |> should.be_true()
+  string.contains(content, "case filter_deep_result {")
+  |> should.be_true()
+  string.contains(content, "filter: filter_deep,")
+  |> should.be_true()
+  string.contains(content, "\"filter[name]\") { Ok([v, ..]) -> v _ -> \"\" }")
+  |> should.be_false()
   string.contains(
     content,
     "active: case dict.get(query, \"filter[active]\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
@@ -11775,8 +11787,10 @@ pub fn server_deep_object_params_are_parsed_case() {
   |> should.be_true()
   string.contains(
     content,
-    "scores: case dict.get(query, \"filter[scores]\") { Ok(vs) -> list.map(vs, fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } }) _ -> [] }",
+    "case dict.get(query, \"filter[scores]\") { Ok(vs) -> case list.try_map(vs, fn(item) { int.parse(string.trim(item)) }) { Ok(deep_scores) -> ",
   )
+  |> should.be_true()
+  string.contains(content, "scores: deep_scores,")
   |> should.be_true()
   string.contains(
     content,
