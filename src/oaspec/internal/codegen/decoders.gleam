@@ -950,7 +950,9 @@ fn generate_anyof_decoder(
   |> se.blank_line()
 }
 
-/// Generate decoder for a primitive type (String, Int, Float, Bool).
+/// Generate a `<decoder_fn_name>()` decoder with body `decoder_expr` and
+/// its `<fn_name>(json_string)` JSON parse wrapper. Used for primitive
+/// types and arrays.
 fn generate_primitive_decoder(
   sb: se.StringBuilder,
   fn_name: String,
@@ -976,7 +978,7 @@ fn generate_primitive_decoder(
     <> gleam_type
     <> ", json.DecodeError) {",
   )
-  |> se.indent(1, "json.parse(json_string, " <> decoder_expr <> ")")
+  |> se.indent(1, "json.parse(json_string, " <> decoder_fn_name <> "())")
   |> se.line("}")
   |> se.blank_line()
 }
@@ -1014,27 +1016,13 @@ fn generate_array_decoder(
     )
     False -> #(list_type, list_decoder)
   }
-  sb
-  |> se.line(
-    "pub fn "
-    <> decoder_fn_name
-    <> "() -> decode.Decoder("
-    <> gleam_type
-    <> ") {",
+  generate_primitive_decoder(
+    sb,
+    fn_name,
+    decoder_fn_name,
+    gleam_type,
+    decoder_expr,
   )
-  |> se.indent(1, decoder_expr)
-  |> se.line("}")
-  |> se.blank_line()
-  |> se.line(
-    "pub fn "
-    <> fn_name
-    <> "(json_string: String) -> Result("
-    <> gleam_type
-    <> ", json.DecodeError) {",
-  )
-  |> se.indent(1, "json.parse(json_string, " <> decoder_fn_name <> "())")
-  |> se.line("}")
-  |> se.blank_line()
 }
 
 /// Generate decoder for oneOf/anyOf union types.
