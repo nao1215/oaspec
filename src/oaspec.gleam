@@ -4,6 +4,10 @@
 //// the same steps are available as functions: read a document, resolve
 //// its `$ref`s, generate the modules and write them.
 ////
+//// `write` stores the modules as generated, without formatting them. The
+//// CLI runs `gleam format` on the output directories afterwards; do the
+//// same if the files should match what `oaspec generate` writes.
+////
 //// ```gleam
 //// import oaspec
 //// import oaspec/config
@@ -263,6 +267,10 @@ pub fn validate(
 ///
 /// A `SkipIfExists` file that already exists is left alone and is not in
 /// the returned list.
+///
+/// The files are written unformatted. The CLI runs `gleam format` on the
+/// output directories after writing; run it yourself to get the same
+/// result.
 ///
 /// ## Examples
 ///
