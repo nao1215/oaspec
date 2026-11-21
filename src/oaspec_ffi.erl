@@ -5,6 +5,7 @@
     is_stdout_tty/0,
     no_color_set/0,
     monotonic_ms/0,
+    temp_dir/0,
     capture_panic/1
 ]).
 
@@ -69,6 +70,24 @@ no_color_set() ->
 -spec monotonic_ms() -> integer().
 monotonic_ms() ->
     erlang:monotonic_time(millisecond).
+
+%% The OS temp directory: the first non-empty TMPDIR, TEMP or TMP, else
+%% /tmp on Unix and the current directory elsewhere.
+-spec temp_dir() -> binary().
+temp_dir() ->
+    temp_dir(["TMPDIR", "TEMP", "TMP"]).
+
+temp_dir([Name | Rest]) ->
+    case os:getenv(Name) of
+        false -> temp_dir(Rest);
+        "" -> temp_dir(Rest);
+        Dir -> unicode:characters_to_binary(Dir)
+    end;
+temp_dir([]) ->
+    case os:type() of
+        {unix, _} -> <<"/tmp">>;
+        _ -> <<".">>
+    end.
 
 %% Run a thunk and report `{Panicked, Message}` to the caller. Used by
 %% tests that exercise functions which intentionally panic on invalid

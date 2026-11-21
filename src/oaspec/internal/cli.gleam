@@ -776,7 +776,10 @@ fn run_check(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
   let expected_paths = writer.expected_paths(files, cfg)
 
   // Format generated content via temp files before comparison
-  let resolved = format_resolved_content(resolved)
+  use resolved <- require(format_resolved_content(resolved), fn(e) {
+    "Error: could not format the generated code for comparison: "
+    <> check_format_error_to_string(e)
+  })
 
   // Check for missing or differing files
   let diffs =
@@ -824,55 +827,91 @@ fn run_check(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
   }
 }
 
-/// Format resolved content by writing to a temp directory, running gleam format,
-/// and reading back the formatted content.
+/// Format resolved content by writing it to a scratch directory under the
+/// OS temp directory, running gleam format there, and reading it back.
+/// Any failure is returned so the check never compares unformatted code.
 fn format_resolved_content(
   resolved: List(#(String, String)),
-) -> List(#(String, String)) {
-  let temp_dir = "/tmp/oaspec_check_" <> unique_id()
-  case simplifile.create_directory_all(temp_dir) {
-    // nolint: thrown_away_error -- if temp dir cannot be created we fall back to unformatted content
-    Error(_) -> resolved
-    Ok(Nil) -> {
-      // Write each file to the temp directory with unique indexed names
-      let temp_entries =
-        list.index_map(resolved, fn(entry, idx) {
-          let #(original_path, content) = entry
-          let temp_path = temp_dir <> "/" <> int.to_string(idx) <> ".gleam"
-          // Best-effort temp write; formatter step falls back if anything failed
-          let _ignored_write = simplifile.write(temp_path, content)
-          #(original_path, temp_path)
-        })
+) -> Result(List(#(String, String)), CheckFormatError) {
+  let temp_dir = filepath.join(temp_dir(), "oaspec_check_" <> unique_id())
+  use _ <- result.try(
+    simplifile.create_directory_all(temp_dir)
+    |> result.map_error(ScratchFileError(
+      action: "create",
+      path: temp_dir,
+      error: _,
+    )),
+  )
+  let formatted = format_in_dir(resolved, temp_dir)
+  let deleted =
+    simplifile.delete(temp_dir)
+    |> result.map_error(ScratchFileError(
+      action: "delete",
+      path: temp_dir,
+      error: _,
+    ))
+  use formatted <- result.try(formatted)
+  use _ <- result.map(deleted)
+  formatted
+}
 
-      // Format all temp files
-      let temp_paths = list.map(temp_entries, fn(entry) { entry.1 })
-      let formatted_resolved = case formatter.format_files(temp_paths) {
-        Ok(Nil) -> {
-          list.map(temp_entries, fn(entry) {
-            let #(original_path, temp_path) = entry
-            case simplifile.read(temp_path) {
-              Ok(formatted) -> #(original_path, formatted)
-              // nolint: thrown_away_error -- unreadable temp file falls back to unformatted original content
-              Error(_) -> {
-                let content =
-                  list.find(resolved, fn(r) { r.0 == original_path })
-                  |> result.map(fn(r) { r.1 })
-                  |> result.unwrap("")
-                #(original_path, content)
-              }
-            }
-          })
-        }
-        // nolint: thrown_away_error -- formatter failure falls back to unformatted content
-        Error(_) -> resolved
-      }
+fn format_in_dir(
+  resolved: List(#(String, String)),
+  temp_dir: String,
+) -> Result(List(#(String, String)), CheckFormatError) {
+  use temp_entries <- result.try(
+    list.index_map(resolved, fn(entry, idx) {
+      #(entry, filepath.join(temp_dir, int.to_string(idx) <> ".gleam"))
+    })
+    |> list.try_map(fn(pair) {
+      let #(#(original_path, content), temp_path) = pair
+      simplifile.write(temp_path, content)
+      |> result.replace(#(original_path, temp_path))
+      |> result.map_error(ScratchFileError(
+        action: "write",
+        path: temp_path,
+        error: _,
+      ))
+    }),
+  )
+  use _ <- result.try(
+    formatter.format_files(list.map(temp_entries, fn(entry) { entry.1 }))
+    |> result.map_error(ScratchFormatError),
+  )
+  list.try_map(temp_entries, fn(entry) {
+    let #(original_path, temp_path) = entry
+    simplifile.read(temp_path)
+    |> result.map(fn(formatted) { #(original_path, formatted) })
+    |> result.map_error(ScratchFileError(
+      action: "read",
+      path: temp_path,
+      error: _,
+    ))
+  })
+}
 
-      // Clean up temp directory; leaked temp dirs are not fatal
-      let _ignored_delete = simplifile.delete(temp_dir)
-      formatted_resolved
-    }
+/// Why `--check` could not format the generated code for comparison.
+type CheckFormatError {
+  ScratchFileError(action: String, path: String, error: simplifile.FileError)
+  ScratchFormatError(formatter.FormatError)
+}
+
+fn check_format_error_to_string(error: CheckFormatError) -> String {
+  case error {
+    ScratchFileError(action:, path:, error:) ->
+      "cannot "
+      <> action
+      <> " "
+      <> path
+      <> ": "
+      <> simplifile.describe_error(error)
+    ScratchFormatError(error) -> formatter.error_to_string(error)
   }
 }
+
+/// The OS temp directory: TMPDIR, TEMP or TMP, else the platform default.
+@external(erlang, "oaspec_ffi", "temp_dir")
+fn temp_dir() -> String
 
 /// Generate a unique ID string for temp directories.
 @external(erlang, "erlang", "unique_integer")

@@ -747,6 +747,38 @@ scenarios:
           stderr:
             empty: true
 
+  - name: generate --check fails when the generated code cannot be formatted
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/petstore.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+      # A regular file as TMPDIR makes the scratch directory impossible to
+      # create, so the check cannot format and must say so.
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml --check
+          cwd: project
+          sandbox_home: true
+          env:
+            TMPDIR: ./openapi.yaml
+      - assert:
+          exit_code: 1
+          stderr:
+            contains: could not format the generated code
+            not_contains: out of date
+
   - name: generate --check fails when no generated output exists yet
     steps:
       - fixture:
