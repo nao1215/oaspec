@@ -833,7 +833,8 @@ fn run_check(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
 
 /// Format resolved content by writing it to a scratch directory under the
 /// OS temp directory, running gleam format there, and reading it back.
-/// Any failure is returned so the check never compares unformatted code.
+/// A failure to create, write, format or read is returned so the check
+/// never compares unformatted code; deleting the directory is best-effort.
 fn format_resolved_content(
   resolved: List(#(String, String)),
 ) -> Result(List(#(String, String)), CheckFormatError) {
@@ -847,15 +848,9 @@ fn format_resolved_content(
     )),
   )
   let formatted = format_in_dir(resolved, temp_dir)
-  let deleted =
-    simplifile.delete(temp_dir)
-    |> result.map_error(ScratchFileFailed(
-      action: "delete",
-      path: temp_dir,
-      error: _,
-    ))
-  use formatted <- result.try(formatted)
-  use _ <- result.map(deleted)
+  // Best-effort cleanup: the formatted content is already read back, so a
+  // scratch directory left behind does not affect the check.
+  let _ignored_delete = simplifile.delete(temp_dir)
   formatted
 }
 
