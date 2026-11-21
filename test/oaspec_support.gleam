@@ -20,6 +20,7 @@ import oaspec/internal/codegen/schema_dispatch
 import oaspec/internal/codegen/server as server_gen
 import oaspec/internal/codegen/types
 import oaspec/internal/codegen/validate
+import oaspec/internal/config_check
 import oaspec/internal/openapi/capability_check
 import oaspec/internal/openapi/dedup
 import oaspec/internal/openapi/diagnostic
@@ -80,10 +81,10 @@ pub fn capitalize_case() {
 
 pub fn load_config_case() {
   let assert Ok(cfg) = config.load("test/fixtures/oaspec.yaml")
-  config.input(cfg) |> should.equal("test/fixtures/petstore.yaml")
-  config.output_server(cfg) |> should.equal("./test_output/api")
-  config.output_client(cfg) |> should.equal("./test_output_client/api")
-  config.package(cfg) |> should.equal("api")
+  cfg.input |> should.equal("test/fixtures/petstore.yaml")
+  cfg.output_server |> should.equal("./test_output/api")
+  cfg.output_client |> should.equal("./test_output_client/api")
+  cfg.package |> should.equal("api")
 }
 
 pub fn config_not_found_case() {
@@ -106,17 +107,19 @@ pub fn config_error_to_string_file_not_found_case() {
 
 pub fn config_error_to_string_file_read_error_case() {
   let s =
-    config.error_to_string(config.FileReadError(
+    config.error_to_string(config.CannotReadFile(
       path: "x.yaml",
-      detail: "permission denied",
+      reason: simplifile.Eacces,
     ))
   s |> string.contains("Error reading config file") |> should.be_true()
   s |> string.contains("x.yaml") |> should.be_true()
-  s |> string.contains("permission denied") |> should.be_true()
+  s
+  |> string.contains(simplifile.describe_error(simplifile.Eacces))
+  |> should.be_true()
 }
 
 pub fn config_error_to_string_parse_error_case() {
-  let s = config.error_to_string(config.ParseError(detail: "unexpected token"))
+  let s = config.error_to_string(config.InvalidYaml(detail: "unexpected token"))
   s |> string.contains("Config parse error") |> should.be_true()
   s |> string.contains("unexpected token") |> should.be_true()
 }
@@ -148,10 +151,10 @@ pub fn config_load_missing_input_returns_missing_field_case() {
 }
 
 pub fn parse_mode_case() {
-  config.parse_mode("server") |> should.be_ok()
-  config.parse_mode("client") |> should.be_ok()
-  config.parse_mode("both") |> should.be_ok()
-  config.parse_mode("invalid") |> should.be_error()
+  config_check.parse_mode("server") |> should.be_ok()
+  config_check.parse_mode("client") |> should.be_ok()
+  config_check.parse_mode("both") |> should.be_ok()
+  config_check.parse_mode("invalid") |> should.be_error()
 }
 
 // Issue #268: when `validate:` is omitted, the default depends on `mode:`.
@@ -161,13 +164,13 @@ pub fn parse_mode_case() {
 pub fn config_validate_default_server_case() {
   let assert Ok(cfg) =
     config.load("test/fixtures/oaspec_validate_default_server.yaml")
-  config.validate(cfg) |> should.be_true()
+  cfg.validate |> should.be_true()
 }
 
 pub fn config_validate_default_client_case() {
   let assert Ok(cfg) =
     config.load("test/fixtures/oaspec_validate_default_client.yaml")
-  config.validate(cfg) |> should.be_false()
+  cfg.validate |> should.be_false()
 }
 
 // Issue #262: in client-only mode the default `output.client` must drop
@@ -181,84 +184,94 @@ pub fn config_client_only_default_drops_client_suffix_case() {
   // Fixture explicitly sets `output.dir: ./gen`. The test name says
   // "default" because it pins the **client mode default** of dropping
   // the `_client` suffix (#262) — `output.dir` itself is supplied.
-  config.output_client(cfg) |> should.equal("./gen/api")
+  cfg.output_client |> should.equal("./gen/api")
 }
 
 pub fn config_with_output_client_only_drops_suffix_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/petstore.yaml",
       output_server: "./old/api",
       output_client: "./old/api_client",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let updated = config.with_output(cfg, Some("./new"))
-  config.output_server(updated) |> should.equal("./new/api")
-  config.output_client(updated) |> should.equal("./new/api")
+  let updated = config_check.with_output(cfg, Some("./new"))
+  updated.output_server |> should.equal("./new/api")
+  updated.output_client |> should.equal("./new/api")
 }
 
 pub fn config_with_output_both_keeps_suffix_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/petstore.yaml",
       output_server: "./old/api",
       output_client: "./old/api_client",
       package: "api",
       mode: config.Both,
       validate: True,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let updated = config.with_output(cfg, Some("./new"))
-  config.output_server(updated) |> should.equal("./new/api")
-  config.output_client(updated) |> should.equal("./new/api_client")
+  let updated = config_check.with_output(cfg, Some("./new"))
+  updated.output_server |> should.equal("./new/api")
+  updated.output_client |> should.equal("./new/api_client")
 }
 
 pub fn config_validate_default_both_case() {
   let assert Ok(cfg) =
     config.load("test/fixtures/oaspec_validate_default_both.yaml")
-  config.validate(cfg) |> should.be_true()
+  cfg.validate |> should.be_true()
 }
 
 pub fn config_package_dir_mismatch_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./gen/wrong_name",
       output_client: "./gen/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let result = config.validate_output_package_match(cfg)
+  let result = config_check.validate_output_package_match(cfg)
   should.be_error(result)
 }
 
 pub fn config_client_dir_mismatch_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./gen/api",
       output_client: "./gen/wrong_client",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let result = config.validate_output_package_match(cfg)
+  let result = config_check.validate_output_package_match(cfg)
   should.be_error(result)
 }
 
 pub fn config_package_dir_match_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./gen/api",
       output_client: "./gen_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let result = config.validate_output_package_match(cfg)
+  let result = config_check.validate_output_package_match(cfg)
   should.be_ok(result)
 }
 
@@ -267,71 +280,81 @@ pub fn config_package_dir_match_case() {
 
 pub fn config_output_dir_under_src_subdir_is_rejected_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./src/gen/api",
       output_client: "./src/gen/api_client",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let result = config.validate_output_dir_layout(cfg)
+  let result = config_check.validate_output_dir_layout(cfg)
   should.be_error(result)
 }
 
 pub fn config_output_dir_directly_under_src_is_accepted_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./src/api",
       output_client: "./src/api_client",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let result = config.validate_output_dir_layout(cfg)
+  let result = config_check.validate_output_dir_layout(cfg)
   should.be_ok(result)
 }
 
 pub fn config_output_dir_outside_src_is_accepted_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./gen/api",
       output_client: "./gen/api_client",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let result = config.validate_output_dir_layout(cfg)
+  let result = config_check.validate_output_dir_layout(cfg)
   should.be_ok(result)
 }
 
 pub fn config_output_dir_deep_under_src_is_rejected_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./pkg/src/gen/api",
       output_client: "./pkg/src/gen/api_client",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let result = config.validate_output_dir_layout(cfg)
+  let result = config_check.validate_output_dir_layout(cfg)
   should.be_error(result)
 }
 
 pub fn config_output_dir_client_only_under_src_subdir_is_rejected_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./gen/api",
       output_client: "./src/gen/api_client",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let result = config.validate_output_dir_layout(cfg)
+  let result = config_check.validate_output_dir_layout(cfg)
   should.be_error(result)
 }
 
@@ -342,99 +365,113 @@ pub fn config_output_dir_client_only_under_src_subdir_is_rejected_case() {
 
 pub fn config_nested_package_dir_match_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./gen/dco_check/github",
       output_client: "./gen/dco_check/github_client",
       package: "dco_check/github",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let result = config.validate_output_package_match(cfg)
+  let result = config_check.validate_output_package_match(cfg)
   should.be_ok(result)
 }
 
 pub fn config_nested_package_wrong_middle_segment_rejected_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./gen/wrong/github",
       output_client: "./gen/wrong/github_client",
       package: "dco_check/github",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let result = config.validate_output_package_match(cfg)
+  let result = config_check.validate_output_package_match(cfg)
   should.be_error(result)
 }
 
 pub fn config_nested_package_wrong_last_segment_rejected_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./gen/dco_check/wrong",
       output_client: "./gen/dco_check/wrong_client",
       package: "dco_check/github",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let result = config.validate_output_package_match(cfg)
+  let result = config_check.validate_output_package_match(cfg)
   should.be_error(result)
 }
 
 pub fn config_nested_package_client_no_suffix_accepted_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./gen/dco_check/github",
       output_client: "./gen/dco_check/github",
       package: "dco_check/github",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let result = config.validate_output_package_match(cfg)
+  let result = config_check.validate_output_package_match(cfg)
   should.be_ok(result)
 }
 
 pub fn config_nested_package_layout_under_src_accepted_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./src/dco_check/github",
       output_client: "./src/dco_check/github_client",
       package: "dco_check/github",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let result = config.validate_output_dir_layout(cfg)
+  let result = config_check.validate_output_dir_layout(cfg)
   should.be_ok(result)
 }
 
 pub fn config_nested_package_layout_under_src_subdir_rejected_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./src/foo/dco_check/github",
       output_client: "./src/foo/dco_check/github_client",
       package: "dco_check/github",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let result = config.validate_output_dir_layout(cfg)
+  let result = config_check.validate_output_dir_layout(cfg)
   should.be_error(result)
 }
 
 pub fn config_nested_package_layout_outside_src_accepted_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./gen/dco_check/github",
       output_client: "./gen/dco_check/github_client",
       package: "dco_check/github",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let result = config.validate_output_dir_layout(cfg)
+  let result = config_check.validate_output_dir_layout(cfg)
   should.be_ok(result)
 }
 
@@ -442,32 +479,36 @@ pub fn config_nested_package_layout_outside_src_accepted_case() {
 // last_n / drop_last_n helpers beyond the two-segment happy path.
 pub fn config_nested_package_three_segments_match_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./src/dco_check/internal/github",
       output_client: "./src/dco_check/internal/github_client",
       package: "dco_check/internal/github",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let pkg_match = config.validate_output_package_match(cfg)
+  let pkg_match = config_check.validate_output_package_match(cfg)
   should.be_ok(pkg_match)
-  let layout = config.validate_output_dir_layout(cfg)
+  let layout = config_check.validate_output_dir_layout(cfg)
   should.be_ok(layout)
 }
 
 // A trailing slash on `package` should be tolerated by `package_segments`.
 pub fn config_nested_package_trailing_slash_match_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./gen/dco_check/github",
       output_client: "./gen/dco_check/github_client",
       package: "dco_check/github/",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let result = config.validate_output_package_match(cfg)
+  let result = config_check.validate_output_package_match(cfg)
   should.be_ok(result)
 }
 
@@ -478,15 +519,17 @@ pub fn config_nested_package_trailing_slash_match_case() {
 // review on PR #443.
 pub fn config_output_dir_double_src_with_immediate_parent_rejected_case() {
   let cfg =
-    config.new(
+    config.Config(
       input: "openapi.yaml",
       output_server: "./src/foo/src/dco_check/github",
       output_client: "./src/foo/src/dco_check/github_client",
       package: "dco_check/github",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
-  let result = config.validate_output_dir_layout(cfg)
+  let result = config_check.validate_output_dir_layout(cfg)
   should.be_error(result)
 }
 
@@ -508,13 +551,13 @@ pub fn config_load_all_single_target_case() {
   let assert Ok(cfgs) = config.load_all(path)
   let assert [cfg] = cfgs
   let assert Ok(legacy) = config.load(path)
-  config.input(cfg) |> should.equal(config.input(legacy))
-  config.mode(cfg) |> should.equal(config.mode(legacy))
-  config.validate(cfg) |> should.equal(config.validate(legacy))
-  config.package(cfg) |> should.equal(config.package(legacy))
-  config.output_server(cfg) |> should.equal(config.output_server(legacy))
-  config.output_client(cfg) |> should.equal(config.output_client(legacy))
-  config.include(cfg) |> should.equal(config.include(legacy))
+  cfg.input |> should.equal(legacy.input)
+  cfg.mode |> should.equal(legacy.mode)
+  cfg.validate |> should.equal(legacy.validate)
+  cfg.package |> should.equal(legacy.package)
+  cfg.output_server |> should.equal(legacy.output_server)
+  cfg.output_client |> should.equal(legacy.output_client)
+  cfg.include |> should.equal(legacy.include)
 }
 
 pub fn config_load_all_multi_target_case() {
@@ -525,12 +568,12 @@ pub fn config_load_all_multi_target_case() {
   // shared input/mode/validate are baked into both.
   let packages =
     cfgs
-    |> list.map(fn(c) { config.package(c) })
+    |> list.map(fn(c) { c.package })
     |> list.sort(string.compare)
   packages |> should.equal(["petshop/details", "petshop/listing"])
   list.each(cfgs, fn(c) {
-    config.input(c) |> should.equal("petstore.yaml")
-    config.mode(c) |> should.equal(config.Client)
+    c.input |> should.equal("petstore.yaml")
+    c.mode |> should.equal(config.Client)
   })
 }
 
@@ -541,18 +584,16 @@ pub fn config_load_targets_per_target_include_case() {
   // regardless of dict iteration order.
   let by_package =
     cfgs
-    |> list.sort(fn(a, b) {
-      string.compare(config.package(a), config.package(b))
-    })
+    |> list.sort(fn(a, b) { string.compare(a.package, b.package) })
   let assert [details, listing] = by_package
-  config.include(details).paths |> should.equal(["/pets/**"])
-  config.include(listing).paths |> should.equal(["/pets"])
+  details.include.paths |> should.equal(["/pets/**"])
+  listing.include.paths |> should.equal(["/pets"])
   // No `tags:` declared in this fixture, so each target should
   // default to an empty tag list. Asserting this catches any
   // regression where tag defaulting silently leaks state across
   // targets or fails to parse omitted tag lists as `[]`.
-  config.include(details).tags |> should.equal([])
-  config.include(listing).tags |> should.equal([])
+  details.include.tags |> should.equal([])
+  listing.include.tags |> should.equal([])
 }
 
 pub fn config_load_targets_per_target_output_case() {
@@ -563,7 +604,7 @@ pub fn config_load_targets_per_target_output_case() {
   // `_client` suffix.
   let outputs =
     cfgs
-    |> list.map(fn(c) { config.output_client(c) })
+    |> list.map(fn(c) { c.output_client })
     |> list.sort(string.compare)
   outputs |> should.equal(["./gen/petshop/details", "./gen/petshop/listing"])
 }
@@ -588,26 +629,26 @@ pub fn config_load_multi_target_via_load_returns_error_case() {
 
 pub fn config_load_parses_include_block_case() {
   let assert Ok(cfg) = config.load("test/fixtures/oaspec_include_filter.yaml")
-  let inc = config.include(cfg)
-  config.include_is_empty(inc) |> should.be_false
+  let inc = cfg.include
+  config_check.include_is_empty(inc) |> should.be_false
   inc.tags |> should.equal(["pets"])
   inc.paths |> should.equal(["/pets", "/pets/**"])
 }
 
 pub fn config_load_omitted_include_is_empty_case() {
   let assert Ok(cfg) = config.load("test/fixtures/oaspec.yaml")
-  config.include(cfg) |> config.include_is_empty |> should.be_true
+  config_check.include_is_empty(cfg.include) |> should.be_true
 }
 
 pub fn config_default_include_is_empty_case() {
   let cfg = make_default_cfg()
-  config.include(cfg) |> config.include_is_empty |> should.be_true
+  config_check.include_is_empty(cfg.include) |> should.be_true
 }
 
 pub fn config_with_include_round_trip_case() {
   let include = config.Include(tags: ["a", "b"], paths: ["/x", "/y/**"])
-  let cfg = make_default_cfg() |> config.with_include(include)
-  config.include(cfg) |> should.equal(include)
+  let cfg = config.Config(..make_default_cfg(), include: include)
+  cfg.include |> should.equal(include)
 }
 
 pub fn filter_apply_empty_filter_returns_spec_unchanged_case() {
@@ -615,7 +656,7 @@ pub fn filter_apply_empty_filter_returns_spec_unchanged_case() {
   let assert Ok(resolved) = resolve.resolve(unresolved)
   let before = dict.size(resolved.paths)
   let after =
-    filter.apply(resolved, config.empty_include())
+    filter.apply(resolved, config.Include(tags: [], paths: []))
     |> fn(s) { dict.size(s.paths) }
   after |> should.equal(before)
 }
@@ -730,8 +771,10 @@ pub fn reachability_prune_pipeline_omits_dead_types_in_generated_output_case() {
   // must not appear in the output.
   let assert Ok(unresolved) = parser.parse_file("test/fixtures/petstore.yaml")
   let cfg =
-    make_default_cfg()
-    |> config.with_include(config.Include(tags: [], paths: ["/pets/{petId}"]))
+    config.Config(
+      ..make_default_cfg(),
+      include: config.Include(tags: [], paths: ["/pets/{petId}"]),
+    )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(types_file) =
     list.find(summary.files, fn(f) { f.path == "types.gleam" })
@@ -757,13 +800,15 @@ pub fn filter_path_matches_exact_and_glob_case() {
 }
 
 fn make_default_cfg() -> config.Config {
-  config.new(
+  config.Config(
     input: "openapi.yaml",
     output_server: "./gen/api",
     output_client: "./gen/api_client",
     package: "api",
     mode: config.Both,
     validate: False,
+    include: config.Include(tags: [], paths: []),
+    handler_layout: config.SingleFile,
   )
 }
 
@@ -2540,13 +2585,15 @@ fn make_ctx_from_spec(spec) -> context.Context {
 fn make_ctx_from_spec_with_mode(spec, mode) -> context.Context {
   let assert Ok(resolved) = resolve.resolve(spec)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: mode,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   context.new(resolved, cfg)
 }
@@ -2630,13 +2677,15 @@ fn make_ctx(spec_path: String) -> context.Context {
   let resolved = hoist.hoist(resolved)
   let resolved = dedup.dedup(resolved)
   let cfg =
-    config.new(
+    config.Config(
       input: spec_path,
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   context.new(resolved, cfg)
 }
@@ -4514,13 +4563,15 @@ paths:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Error(generate.ValidationErrors(errors:)) =
     generate.validate_only(spec, cfg)
@@ -4556,13 +4607,15 @@ webhooks:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.validate_only(spec, cfg)
   // Should have at least one warning (webhooks parsed but unused)
@@ -5285,13 +5338,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let files = client_gen.generate(ctx)
@@ -5336,13 +5391,15 @@ components:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let files = client_gen.generate(ctx)
@@ -5384,13 +5441,15 @@ components:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let files = client_gen.generate(ctx)
@@ -7030,13 +7089,15 @@ paths:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let result = generate.generate(spec, cfg)
   should.be_ok(result)
@@ -7588,13 +7649,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let errors = validate.validate(ctx)
@@ -7630,13 +7693,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let errors = validate.validate(ctx)
@@ -7674,13 +7739,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let errors = validate.validate(ctx)
@@ -7716,13 +7783,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let errors = validate.validate(ctx)
@@ -7760,13 +7829,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let files = client_gen.generate(ctx)
@@ -7916,13 +7987,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let issues = validate.validate(ctx)
@@ -7971,13 +8044,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let issues = validate.validate(ctx)
@@ -8018,13 +8093,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let errors = validate.validate(ctx)
@@ -8065,13 +8142,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let errors = validate.validate(ctx)
@@ -8111,13 +8190,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let errors = validate.validate(ctx)
@@ -8142,13 +8223,15 @@ pub fn deep_object_nested_object_passes_client_validation_case() {
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test/fixtures/deep_object_nested.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let errors = validate.validate(ctx)
@@ -8163,13 +8246,15 @@ pub fn deep_object_nested_object_emits_bracketed_query_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/deep_object_nested.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/deep_object_nested.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(client_file) =
@@ -8195,13 +8280,15 @@ pub fn deep_object_param_client_imports_some_none_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/deep_object_nested.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/deep_object_nested.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(client_file) =
@@ -8226,13 +8313,15 @@ pub fn deep_object_primitive_props_client_imports_primitives_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/deep_object_primitive_props.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/deep_object_primitive_props.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(client_file) =
@@ -8305,7 +8394,7 @@ pub fn config_load_rejects_non_yaml_extension_case() {
   // The path doesn't need to exist — the extension check happens
   // before `simplifile.read`.
   case config.load("/tmp/oaspec-test/oaspec.toml") {
-    Error(config.ParseError(detail:)) -> {
+    Error(config.InvalidYaml(detail:)) -> {
       string.contains(detail, "config files must be YAML")
       |> should.be_true()
       string.contains(detail, "'.toml'")
@@ -8345,13 +8434,15 @@ pub fn oas30_exclusive_bool_emits_strict_guard_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/guard_oas30_exclusive_bool.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/guard_oas30_exclusive_bool.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Server,
       validate: True,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(guards_file) =
@@ -8389,13 +8480,15 @@ pub fn ref_scalar_query_params_decode_with_parse_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/server_ref_scalar_query_params.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/server_ref_scalar_query_params.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Server,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(router_file) =
@@ -8426,13 +8519,15 @@ pub fn multiple_of_with_range_guard_compiles_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/guard_multiple_of_with_range.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/guard_multiple_of_with_range.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Server,
       validate: True,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(guards_file) =
@@ -8465,13 +8560,15 @@ pub fn nested_validate_recurses_into_records_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/guard_nested_constraints.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/guard_nested_constraints.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Server,
       validate: True,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(guards_file) =
@@ -8501,13 +8598,15 @@ pub fn nested_validate_handles_cycles_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/guard_nested_constraints.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/guard_nested_constraints.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Server,
       validate: True,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   // The mere fact that `generate.generate` returns `Ok(_)` (rather
   // than spinning on `User` ↔ `Link` or on `Comment.replies`) is the
@@ -8536,13 +8635,15 @@ pub fn multipart_object_array_client_imports_list_json_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/multipart_object_array.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/multipart_object_array.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(client_file) =
@@ -8615,13 +8716,15 @@ pub fn fixtures_sweep_parse_resolve_no_panic_case() {
 pub fn petstore_client_generated_surface_invariants_case() {
   let assert Ok(unresolved) = parser.parse_file("test/fixtures/petstore.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/petstore.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
 
@@ -8709,13 +8812,15 @@ pub fn wildcard_request_body_uses_bytes_body_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/wildcard_content_type.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/wildcard_content_type.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(client_file) =
@@ -8743,13 +8848,15 @@ pub fn multipart_object_array_fields_pass_validation_case() {
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test/fixtures/multipart_object_array.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let errors = validate.validate(ctx)
@@ -8764,13 +8871,15 @@ pub fn multipart_object_array_fields_emit_expected_parts_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/multipart_object_array.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/multipart_object_array.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(client_file) =
@@ -8811,13 +8920,15 @@ pub fn wildcard_content_type_passes_validation_case() {
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test/fixtures/wildcard_content_type.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Both,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let errors = validate.validate(ctx)
@@ -8844,13 +8955,15 @@ pub fn wildcard_content_type_generates_bitarray_bodies_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/wildcard_content_type.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/wildcard_content_type.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(request_types_file) =
@@ -8895,13 +9008,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let errors = validate.validate(ctx)
@@ -8941,13 +9056,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let errors = validate.validate(ctx)
@@ -9292,13 +9409,15 @@ components:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let files = client_gen.generate(ctx)
@@ -9458,13 +9577,15 @@ components:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let files = client_gen.generate(ctx)
@@ -9516,13 +9637,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let files = client_gen.generate(ctx)
@@ -9564,13 +9687,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let files = client_gen.generate(ctx)
@@ -10197,13 +10322,15 @@ components:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let files = client_gen.generate(ctx)
@@ -10256,13 +10383,15 @@ components:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let files = client_gen.generate(ctx)
@@ -10312,13 +10441,15 @@ webhooks:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   // Generation must succeed even with warnings
   let result = generate.generate(spec, cfg)
@@ -10708,13 +10839,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let files = client_gen.generate(ctx)
@@ -10751,13 +10884,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let files = client_gen.generate(ctx)
@@ -10790,13 +10925,15 @@ paths:
   let ctx =
     context.new(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Client,
         validate: False,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   let files = client_gen.generate(ctx)
@@ -11343,13 +11480,15 @@ paths:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   generate.generate(spec, cfg)
   |> should.be_ok()
@@ -11446,13 +11585,15 @@ paths:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(spec, cfg)
   { summary.warnings != [] }
@@ -12377,13 +12518,15 @@ paths:
   let assert Ok(spec) = parser.parse_string(yaml)
   let assert Ok(spec) = resolve.resolve(spec)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Server,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let ctx = context.new(spec, cfg)
   let files = server_gen.generate(ctx)
@@ -12473,13 +12616,15 @@ paths:
   let assert Ok(spec) = parser.parse_string(yaml)
   let assert Ok(spec) = resolve.resolve(spec)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Server,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let ctx = context.new(spec, cfg)
   let errors = validate.validate(ctx)
@@ -12527,13 +12672,15 @@ paths:
   let assert Ok(spec) = parser.parse_string(yaml)
   let assert Ok(spec) = resolve.resolve(spec)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Server,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let ctx = context.new(spec, cfg)
   let files = server_gen.generate(ctx)
@@ -12584,13 +12731,15 @@ paths:
   let assert Ok(spec) = parser.parse_string(yaml)
   let assert Ok(spec) = resolve.resolve(spec)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Server,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let ctx = context.new(spec, cfg)
   let errors = validate.validate(ctx)
@@ -12636,13 +12785,15 @@ paths:
   let assert Ok(spec) = parser.parse_string(yaml)
   let assert Ok(spec) = resolve.resolve(spec)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Server,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let ctx = context.new(spec, cfg)
   let files = server_gen.generate(ctx)
@@ -12688,13 +12839,15 @@ components:
   let assert Ok(spec) = parser.parse_string(yaml)
   let assert Ok(spec) = resolve.resolve(spec)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Server,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let ctx = context.new(spec, cfg)
   let errors = validate.validate(ctx)
@@ -12744,13 +12897,15 @@ components:
   let assert Ok(spec) = parser.parse_string(yaml)
   let assert Ok(spec) = resolve.resolve(spec)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Server,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let ctx = context.new(spec, cfg)
   let errors = validate.validate(ctx)
@@ -13233,13 +13388,15 @@ pub fn oss_openapi_gen_petstore_server_generates_client_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/oss_openapi_gen_petstore_server.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let result = generate.generate(spec, cfg)
   case result {
@@ -14336,13 +14493,15 @@ pub fn oss_swagger_parser_java_31_security_rejects_mutualtls_case() {
     Ok(openapi.Value(openapi.UnsupportedScheme(scheme_type: "mutualTLS"))),
   )
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let result = generate.generate(parsed, cfg)
   case result {
@@ -14509,13 +14668,15 @@ pub fn inline_not_keyword_rejected_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/inline_not_keyword.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let result = generate.generate(spec, cfg)
   case result {
@@ -14565,13 +14726,15 @@ pub fn external_param_ref_rejects_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/external_param_ref.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   // Must produce a diagnostic error, not panic
   let result = generate.generate(spec, cfg)
@@ -14591,13 +14754,15 @@ pub fn external_param_ref_rejects_case() {
 pub fn wrong_kind_ref_rejects_case() {
   let assert Ok(spec) = parser.parse_file("test/fixtures/wrong_kind_ref.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let result = generate.generate(spec, cfg)
   case result {
@@ -14709,13 +14874,15 @@ pub fn generate_rejects_non_string_const_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/normalize_const_types.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/normalize_const_types.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   case generate.generate(spec, cfg) {
     Error(generate.ValidationErrors(errors:)) -> {
@@ -14737,13 +14904,15 @@ pub fn generate_rejects_multi_type_with_constraints_case() {
       "test/fixtures/normalize_multi_type_with_constraints.yaml",
     )
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/normalize_multi_type_with_constraints.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   case generate.generate(spec, cfg) {
     Error(generate.ValidationErrors(errors:)) -> {
@@ -15414,13 +15583,15 @@ pub fn error_missing_path_param_case() {
       let resolved = hoist.hoist(resolved)
       let resolved = dedup.dedup(resolved)
       let cfg =
-        config.new(
+        config.Config(
           input: "test.yaml",
           output_server: "./test_output/api",
           output_client: "./test_output_client/api",
           package: "api",
           mode: config.Both,
           validate: False,
+          include: config.Include(tags: [], paths: []),
+          handler_layout: config.SingleFile,
         )
       let ctx = context.new(resolved, cfg)
       let diagnostics = validate.validate(ctx)
@@ -15822,13 +15993,15 @@ pub fn e2e_wildcard_status_codes_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/wildcard_status_codes.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/wildcard_status_codes.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let result = generate.generate(spec, cfg)
   case result {
@@ -15841,13 +16014,15 @@ pub fn e2e_wildcard_status_codes_case() {
 pub fn e2e_format_types_case() {
   let assert Ok(spec) = parser.parse_file("test/fixtures/format_types.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/format_types.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let result = generate.generate(spec, cfg)
   case result {
@@ -15861,13 +16036,15 @@ pub fn e2e_complex_discriminator_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/complex_discriminator.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/complex_discriminator.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let result = generate.generate(spec, cfg)
   case result {
@@ -15880,13 +16057,15 @@ pub fn e2e_complex_discriminator_case() {
 pub fn e2e_enum_edge_cases_case() {
   let assert Ok(spec) = parser.parse_file("test/fixtures/enum_edge_cases.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/enum_edge_cases.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let result = generate.generate(spec, cfg)
   case result {
@@ -15900,13 +16079,15 @@ pub fn e2e_mixed_param_locations_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/mixed_param_locations.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/mixed_param_locations.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let result = generate.generate(spec, cfg)
   case result {
@@ -15920,13 +16101,15 @@ pub fn e2e_inline_nested_objects_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/inline_nested_objects.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/inline_nested_objects.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let result = generate.generate(spec, cfg)
   case result {
@@ -15940,13 +16123,15 @@ pub fn e2e_optional_required_combinations_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/optional_required_combinations.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/optional_required_combinations.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let result = generate.generate(spec, cfg)
   case result {
@@ -15959,13 +16144,15 @@ pub fn e2e_optional_required_combinations_case() {
 pub fn e2e_no_servers_case() {
   let assert Ok(spec) = parser.parse_file("test/fixtures/no_servers.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/no_servers.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let result = generate.generate(spec, cfg)
   case result {
@@ -15986,13 +16173,15 @@ fn make_validate_ctx_from_yaml(yaml: String) -> context.Context {
   let resolved = hoist.hoist(resolved)
   let resolved = dedup.dedup(resolved)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: True,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   context.new(resolved, cfg)
 }
@@ -16100,13 +16289,15 @@ pub fn guard_integration_server_no_validation_when_disabled_case() {
   let resolved = hoist.hoist(resolved)
   let resolved = dedup.dedup(resolved)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let ctx = context.new(resolved, cfg)
   let files = server_gen.generate(ctx)
@@ -16160,13 +16351,15 @@ pub fn guard_integration_client_no_validation_when_disabled_case() {
   let resolved = hoist.hoist(resolved)
   let resolved = dedup.dedup(resolved)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let ctx = context.new(resolved, cfg)
   let files = client_gen.generate(ctx)
@@ -16329,7 +16522,7 @@ pub fn config_validate_field_case() {
   let temp_path = "/tmp/oaspec_validate_test.yaml"
   let assert Ok(Nil) = simplifile.write(temp_path, yaml_content)
   let assert Ok(cfg) = config.load(temp_path)
-  config.validate(cfg) |> should.be_true()
+  cfg.validate |> should.be_true()
   let _ = simplifile.delete(temp_path)
   Nil
 }
@@ -16343,7 +16536,7 @@ pub fn config_validate_default_when_omitted_case() {
   let temp_path = "/tmp/oaspec_validate_default_test.yaml"
   let assert Ok(Nil) = simplifile.write(temp_path, yaml_content)
   let assert Ok(cfg) = config.load(temp_path)
-  config.validate(cfg) |> should.be_true()
+  cfg.validate |> should.be_true()
   let _ = simplifile.delete(temp_path)
   Nil
 }
@@ -16408,13 +16601,15 @@ paths:
   let resolved = hoist.hoist(resolved)
   let resolved = dedup.dedup(resolved)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let ctx = context.new(resolved, cfg)
   let files = client_gen.generate(ctx)
@@ -16462,13 +16657,15 @@ paths:
   let resolved = hoist.hoist(resolved)
   let resolved = dedup.dedup(resolved)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let ctx = context.new(resolved, cfg)
   let files = client_gen.generate(ctx)
@@ -16502,13 +16699,15 @@ pub fn server_override_no_capability_warnings_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/operation_server_override.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/operation_server_override.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let files = generate.generate(spec, cfg)
   case files {
@@ -16551,13 +16750,15 @@ paths:
   let resolved = hoist.hoist(resolved)
   let resolved = dedup.dedup(resolved)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let ctx = context.new(resolved, cfg)
   let files = client_gen.generate(ctx)
@@ -16717,13 +16918,15 @@ pub fn request_body_encoding_warning_is_surfaced_case() {
   let assert Ok(spec) =
     parser.parse_file("test/fixtures/request_body_encoding.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/request_body_encoding.yaml",
       output_server: "./gen/api",
       output_client: "./gen_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(result) = generate.generate(spec, cfg)
   let has_encoding_warning =
@@ -16864,13 +17067,15 @@ pub fn validate_stripe_dotted_schema_no_longer_collides_case() {
   let resolved = hoist.hoist(resolved)
   let resolved = dedup.dedup(resolved)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let ctx = context.new(resolved, cfg)
   let errors = validate.validate(ctx)
@@ -16942,13 +17147,15 @@ pub fn validate_inline_enum_component_collision_auto_disambiguates_case() {
   let resolved = hoist.hoist(resolved)
   let resolved = dedup.dedup(resolved)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let ctx = context.new(resolved, cfg)
   let errors = validate.validate(ctx)
@@ -17011,13 +17218,15 @@ pub fn validate_decode_list_collision_auto_disambiguates_case() {
   let resolved = hoist.hoist(resolved)
   let resolved = dedup.dedup(resolved)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let ctx = context.new(resolved, cfg)
   let errors = validate.validate(ctx)
@@ -17492,13 +17701,15 @@ pub fn client_omits_bytes_body_helper_when_response_has_no_schema_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/wildcard_response_no_schema.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/wildcard_response_no_schema.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(client_file) =
@@ -17515,13 +17726,15 @@ pub fn client_keeps_bytes_body_when_response_has_schema_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/wildcard_content_type.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/wildcard_content_type.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(client_file) =
@@ -17801,13 +18014,15 @@ pub fn generate_emits_per_substage_progress_events_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/wildcard_response_no_schema.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/wildcard_response_no_schema.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(_summary) =
     generate.generate_with_progress_and_locations(
@@ -17845,13 +18060,15 @@ pub fn generate_completes_within_budget_for_synthetic_large_spec_case() {
   let yaml = build_synthetic_large_spec_yaml(400, 80)
   let assert Ok(unresolved) = parser.parse_string(yaml)
   let cfg =
-    config.new(
+    config.Config(
       input: "synthetic.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let #(elapsed_ms, result) =
     progress.timed(fn() { generate.generate(unresolved, cfg) })
@@ -17953,13 +18170,15 @@ pub fn form_urlencoded_object_with_primitive_array_case() {
       "test/fixtures/form_urlencoded_object_primitive_array.yaml",
     )
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/form_urlencoded_object_primitive_array.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(client_file) =
@@ -17989,13 +18208,15 @@ pub fn form_urlencoded_object_array_of_object_case() {
       "test/fixtures/form_urlencoded_object_array_of_object.yaml",
     )
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/form_urlencoded_object_array_of_object.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(client_file) =
@@ -18026,13 +18247,15 @@ pub fn form_urlencoded_encoding_contenttype_json_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/form_urlencoded_encoding_json.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/form_urlencoded_encoding_json.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(client_file) =
@@ -18073,13 +18296,15 @@ pub fn form_urlencoded_composite_field_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/form_urlencoded_composite_field.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/form_urlencoded_composite_field.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(client_file) =
@@ -18119,13 +18344,15 @@ pub fn query_array_of_objects_emits_json_escape_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/query_array_of_objects.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/query_array_of_objects.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(client_file) =
@@ -18149,13 +18376,15 @@ pub fn deep_object_composite_property_emits_json_escape_case() {
   let assert Ok(unresolved) =
     parser.parse_file("test/fixtures/deep_object_composite_property.yaml")
   let cfg =
-    config.new(
+    config.Config(
       input: "test/fixtures/deep_object_composite_property.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(client_file) =

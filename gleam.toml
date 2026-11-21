@@ -94,6 +94,7 @@ unwrap_used = "error"
 # project-wide refactor that is out of scope for enabling glinter.
 "src/oaspec/internal/cli.gleam" = ["label_possible", "deep_nesting"]
 "src/oaspec/config.gleam" = ["label_possible"]
+"src/oaspec/internal/config_check.gleam" = ["label_possible"]
 "src/oaspec/internal/capability.gleam" = ["label_possible"]
 "src/oaspec/internal/formatter.gleam" = ["label_possible"]
 "src/oaspec/generate.gleam" = ["label_possible", "deep_nesting"]

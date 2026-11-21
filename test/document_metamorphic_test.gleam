@@ -51,13 +51,15 @@ fn generated(
 
 fn generate_files(spec) -> Result(List(#(String, String)), Nil) {
   let cfg =
-    config.new(
+    config.Config(
       input: "spec.yaml",
       output_server: "./out/api",
       output_client: "./out/api",
       package: "api",
       mode: config.Both,
       validate: True,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   case generate.generate(spec, cfg) {
     Ok(summary) ->

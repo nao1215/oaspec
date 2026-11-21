@@ -11,6 +11,7 @@ import oaspec/codegen/writer
 import oaspec/config
 import oaspec/generate
 import oaspec/internal/codegen/context
+import oaspec/internal/config_check
 import oaspec/internal/formatter
 import oaspec/internal/openapi/diagnostic
 import oaspec/internal/openapi/location_index.{type LocationIndex}
@@ -320,7 +321,7 @@ fn run_generate(
   let targets =
     list.map([first, ..rest], fn(c) {
       case validate_mode {
-        True -> config.with_validate(c, True)
+        True -> config.Config(..c, validate: True)
         False -> c
       }
     })
@@ -391,7 +392,7 @@ fn for_each_target(
   case targets {
     [] -> Nil
     [first, ..rest] -> {
-      let path = config.input(first)
+      let path = first.input
       io.println("Parsing OpenAPI spec: " <> path)
       let reporter = progress.stdout_with_elapsed()
       use parsed <- require(
@@ -405,7 +406,7 @@ fn for_each_target(
           [] -> Nil
           [_, ..] -> {
             io.println("")
-            io.println("[target: " <> config.package(cfg) <> "]")
+            io.println("[target: " <> cfg.package <> "]")
           }
         }
         run(cfg, input)
@@ -427,13 +428,13 @@ fn print_resolved_paths_for_all(
           io.println("  config: " <> resolve_path_from_cwd(config_path, cwd))
           let inputs =
             multiple
-            |> list.map(fn(c) { config.input(c) })
+            |> list.map(fn(c) { c.input })
             |> list.unique
           list.each(inputs, fn(p) {
             io.println("  input: " <> resolve_path_from_cwd(p, cwd))
           })
           list.each(multiple, fn(cfg) {
-            io.println("  target [" <> config.package(cfg) <> "]:")
+            io.println("  target [" <> cfg.package <> "]:")
             print_target_outputs(cfg, cwd, "    ")
           })
         }
@@ -449,31 +450,31 @@ fn print_target_outputs(
   cwd: String,
   prefix: String,
 ) -> Nil {
-  case config.mode(cfg) {
+  case cfg.mode {
     config.Server -> {
       io.println(
         prefix
         <> "output.server: "
-        <> resolve_path_from_cwd(config.output_server(cfg), cwd),
+        <> resolve_path_from_cwd(cfg.output_server, cwd),
       )
     }
     config.Client -> {
       io.println(
         prefix
         <> "output.client: "
-        <> resolve_path_from_cwd(config.output_client(cfg), cwd),
+        <> resolve_path_from_cwd(cfg.output_client, cwd),
       )
     }
     config.Both -> {
       io.println(
         prefix
         <> "output.server: "
-        <> resolve_path_from_cwd(config.output_server(cfg), cwd),
+        <> resolve_path_from_cwd(cfg.output_server, cwd),
       )
       io.println(
         prefix
         <> "output.client: "
-        <> resolve_path_from_cwd(config.output_client(cfg), cwd),
+        <> resolve_path_from_cwd(cfg.output_client, cwd),
       )
     }
   }
@@ -502,9 +503,9 @@ fn validate_no_target_overlap(
 }
 
 fn active_output_paths(cfg: config.Config) -> List(String) {
-  case config.mode(cfg) {
-    config.Server -> [config.output_server(cfg)]
-    config.Client -> [config.output_client(cfg)]
+  case cfg.mode {
+    config.Server -> [cfg.output_server]
+    config.Client -> [cfg.output_client]
     // For a single config with `mode: both`, `output.server` and
     // `output.client` may legitimately resolve to the same directory.
     // The codegen writes shared files (types/decode/encode/guards/
@@ -516,8 +517,8 @@ fn active_output_paths(cfg: config.Config) -> List(String) {
     // `validate_no_target_overlap` reject cross-config (multi-target)
     // collisions.
     config.Both -> {
-      let server_path = config.output_server(cfg)
-      let client_path = config.output_client(cfg)
+      let server_path = cfg.output_server
+      let client_path = cfg.output_client
       case server_path == client_path {
         True -> [server_path]
         False -> [server_path, client_path]
@@ -563,18 +564,18 @@ pub fn resolved_path_entries(
 ) -> List(#(String, String)) {
   let base_entries = [
     #("config", resolve_path_from_cwd(config_path, cwd)),
-    #("input", resolve_path_from_cwd(config.input(cfg), cwd)),
+    #("input", resolve_path_from_cwd(cfg.input, cwd)),
   ]
-  let output_entries = case config.mode(cfg) {
+  let output_entries = case cfg.mode {
     config.Server -> [
-      #("output.server", resolve_path_from_cwd(config.output_server(cfg), cwd)),
+      #("output.server", resolve_path_from_cwd(cfg.output_server, cwd)),
     ]
     config.Client -> [
-      #("output.client", resolve_path_from_cwd(config.output_client(cfg), cwd)),
+      #("output.client", resolve_path_from_cwd(cfg.output_client, cwd)),
     ]
     config.Both -> [
-      #("output.server", resolve_path_from_cwd(config.output_server(cfg), cwd)),
-      #("output.client", resolve_path_from_cwd(config.output_client(cfg), cwd)),
+      #("output.server", resolve_path_from_cwd(cfg.output_server, cwd)),
+      #("output.client", resolve_path_from_cwd(cfg.output_client, cwd)),
     ]
   }
   list.append(base_entries, output_entries)
@@ -677,7 +678,7 @@ fn single_file_handlers_warning(
   files: List(context.GeneratedFile),
   cfg: config.Config,
 ) -> List(String) {
-  let server_output = case config.mode(cfg) {
+  let server_output = case cfg.mode {
     config.Server | config.Both -> True
     config.Client -> False
   }
@@ -688,8 +689,8 @@ fn single_file_handlers_warning(
         _ -> Error(Nil)
       }
     })
-  let path = config.output_server(cfg) <> "/handlers.gleam"
-  case config.handler_layout(cfg), server_output, simplifile.read(path) {
+  let path = cfg.output_server <> "/handlers.gleam"
+  case cfg.handler_layout, server_output, simplifile.read(path) {
     config.PerOperation, True, Ok(content) ->
       case
         list.any(handler_names, fn(name) {
@@ -985,16 +986,16 @@ fn load_configs(
   use #(first, rest) <- result.try(case mode_opt {
     None -> Ok(#(first, rest))
     Some(mode_str) -> {
-      use parsed <- result.map(config.parse_mode(mode_str))
+      use parsed <- result.map(config_check.parse_mode(mode_str))
       #(
-        config.with_mode(first, parsed),
-        list.map(rest, config.with_mode(_, parsed)),
+        config.Config(..first, mode: parsed),
+        list.map(rest, fn(c) { config.Config(..c, mode: parsed) }),
       )
     }
   })
   use first <- result.try(case output_opt, rest {
     None, _ -> Ok(first)
-    Some(path), [] -> Ok(config.with_output(first, Some(path)))
+    Some(path), [] -> Ok(config_check.with_output(first, Some(path)))
     Some(_), [_, ..] ->
       Error(config.InvalidValue(
         field: "--output",
@@ -1011,8 +1012,8 @@ fn load_configs(
 fn validate_target_paths(
   cfg: config.Config,
 ) -> Result(Nil, config.ConfigError) {
-  use _ <- result.try(config.validate_output_package_match(cfg))
-  config.validate_output_dir_layout(cfg)
+  use _ <- result.try(config_check.validate_output_package_match(cfg))
+  config_check.validate_output_dir_layout(cfg)
 }
 
 /// Unwrap a Result or print the error message and exit.

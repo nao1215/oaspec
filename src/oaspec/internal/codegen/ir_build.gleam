@@ -6,7 +6,6 @@ import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
-import oaspec/config
 import oaspec/internal/codegen/allof_merge
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/import_analysis
@@ -84,7 +83,7 @@ fn compute_request_type_imports(
     || import_analysis.operations_have_optional_body(operations)
   let needs_types = import_analysis.operations_need_typed_schemas(operations)
   let base_imports = case needs_types {
-    True -> [config.package(context.config(ctx)) <> "/types"]
+    True -> [context.config(ctx).package <> "/types"]
     False -> []
   }
   case needs_option {
@@ -234,9 +233,9 @@ pub fn build_response_types_module(ctx: Context) -> Module {
   {
     True, True -> [
       "gleam/option.{type Option}",
-      config.package(context.config(ctx)) <> "/types",
+      context.config(ctx).package <> "/types",
     ]
-    True, False -> [config.package(context.config(ctx)) <> "/types"]
+    True, False -> [context.config(ctx).package <> "/types"]
     False, True -> ["gleam/option.{type Option}"]
     False, False -> []
   }

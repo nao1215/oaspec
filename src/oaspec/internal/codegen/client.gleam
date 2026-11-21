@@ -4,7 +4,6 @@ import gleam/http as gleam_http
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
-import oaspec/config
 import oaspec/internal/codegen/client_ir
 import oaspec/internal/codegen/client_request
 import oaspec/internal/codegen/client_response
@@ -967,7 +966,7 @@ fn generate_build_body(
 
   // Validation guard.
   let client_guard_schema = case
-    config.validate(context.config(ctx)),
+    context.config(ctx).validate,
     operation.request_body
   {
     True, Some(Value(rb)) -> {

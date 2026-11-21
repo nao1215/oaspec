@@ -47,14 +47,14 @@ fn placements(
     list.filter(files, fn(f) { f.target == target })
   }
   let shared_files = of_target(context.SharedTarget)
-  let server_path = config.output_server(cfg)
-  let client_path = config.output_client(cfg)
+  let server_path = cfg.output_server
+  let client_path = cfg.output_client
   let server = #(
     server_path,
     list.append(shared_files, of_target(context.ServerTarget)),
   )
   let client_files = of_target(context.ClientTarget)
-  case config.mode(cfg) {
+  case cfg.mode {
     Server -> [server]
     Client -> [#(client_path, list.append(shared_files, client_files))]
     Both ->
@@ -190,10 +190,10 @@ pub fn expected_paths(
 
 /// Return the output directories that would be written to for the given config.
 pub fn output_dirs(cfg: config.Config) -> List(String) {
-  case config.mode(cfg) {
-    Server -> [config.output_server(cfg)]
-    Client -> [config.output_client(cfg)]
-    Both -> [config.output_server(cfg), config.output_client(cfg)]
+  case cfg.mode {
+    Server -> [cfg.output_server]
+    Client -> [cfg.output_client]
+    Both -> [cfg.output_server, cfg.output_client]
   }
 }
 
@@ -215,20 +215,20 @@ pub fn owned_dirs(
     |> list.filter_map(fn(f) { parent_dir(f.path) })
     |> list.unique
   }
-  let server_sub_dirs = case config.handler_layout(cfg) {
+  let server_sub_dirs = case cfg.handler_layout {
     config.PerOperation ->
       list.unique(["handlers", ..sub_dirs(context.ServerTarget)])
     config.SingleFile -> sub_dirs(context.ServerTarget)
   }
-  let server_dirs = case config.mode(cfg) {
+  let server_dirs = case cfg.mode {
     Server | Both ->
-      list.map(server_sub_dirs, fn(d) { config.output_server(cfg) <> "/" <> d })
+      list.map(server_sub_dirs, fn(d) { cfg.output_server <> "/" <> d })
     Client -> []
   }
-  let client_dirs = case config.mode(cfg) {
+  let client_dirs = case cfg.mode {
     Client | Both ->
       list.map(sub_dirs(context.ClientTarget), fn(d) {
-        config.output_client(cfg) <> "/" <> d
+        cfg.output_client <> "/" <> d
       })
     Server -> []
   }

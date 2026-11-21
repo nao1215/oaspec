@@ -2,7 +2,6 @@ import gleam/dict
 import gleam/list
 import gleam/option.{Some}
 import gleam/string
-import oaspec/config
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/guards
 import oaspec/internal/codegen/import_analysis
@@ -374,7 +373,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
     decode_helpers.operations_have_enum_ref_params(operations, ctx)
 
   let needs_guards =
-    config.validate(context.config(ctx))
+    context.config(ctx).validate
     && list.any(operations, fn(op) {
       let context.AnalyzedOperation(_, operation, _, _) = op
       operation_needs_guard_validation(operation, ctx)
@@ -465,8 +464,8 @@ pub fn imports(requirements: RouterRequirements, ctx: Context) -> List(String) {
   }
 
   let pkg_imports = [
-    config.package(context.config(ctx)) <> "/handlers",
-    config.package(context.config(ctx)) <> "/handlers_generated",
+    context.config(ctx).package <> "/handlers",
+    context.config(ctx).package <> "/handlers_generated",
   ]
   let pkg_imports = case
     requirements.has_deep_object
@@ -474,39 +473,38 @@ pub fn imports(requirements: RouterRequirements, ctx: Context) -> List(String) {
     || requirements.has_multipart_body
     || requirements.has_enum_ref_params
   {
-    True ->
-      list.append(pkg_imports, [config.package(context.config(ctx)) <> "/types"])
+    True -> list.append(pkg_imports, [context.config(ctx).package <> "/types"])
     False -> pkg_imports
   }
   let pkg_imports = case requirements.needs_decode {
     True ->
       list.append(pkg_imports, [
-        config.package(context.config(ctx)) <> "/decode",
+        context.config(ctx).package <> "/decode",
       ])
     False -> pkg_imports
   }
   let pkg_imports = case requirements.needs_encode {
     True ->
       list.append(pkg_imports, [
-        config.package(context.config(ctx)) <> "/encode",
+        context.config(ctx).package <> "/encode",
       ])
     False -> pkg_imports
   }
   let pkg_imports = case requirements.has_params_ops {
     True ->
       list.append(pkg_imports, [
-        config.package(context.config(ctx)) <> "/request_types",
-        config.package(context.config(ctx)) <> "/response_types",
+        context.config(ctx).package <> "/request_types",
+        context.config(ctx).package <> "/response_types",
       ])
     False ->
       list.append(pkg_imports, [
-        config.package(context.config(ctx)) <> "/response_types",
+        context.config(ctx).package <> "/response_types",
       ])
   }
   let pkg_imports = case requirements.needs_guards {
     True ->
       list.append(pkg_imports, [
-        config.package(context.config(ctx)) <> "/guards",
+        context.config(ctx).package <> "/guards",
       ])
     False -> pkg_imports
   }
@@ -534,7 +532,7 @@ fn operation_needs_guard_validation(
     }
     _ -> False
   }
-  config.validate(context.config(ctx)) && needs_body_guard
+  context.config(ctx).validate && needs_body_guard
 }
 
 fn operations_have_response_headers(

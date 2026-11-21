@@ -42,7 +42,7 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
   let operations = context.operations(ctx)
   let router_content = generate_router(ctx, operations)
 
-  let user_files = case config.handler_layout(context.config(ctx)) {
+  let user_files = case context.config(ctx).handler_layout {
     config.SingleFile -> [
       GeneratedFile(
         path: "handlers.gleam",
@@ -118,8 +118,8 @@ fn generate_handlers(
     |> se.line("//// `handlers_generated.gleam`, which delegates here.")
     |> se.blank_line()
     |> se.imports([
-      config.package(context.config(ctx)) <> "/request_types",
-      config.package(context.config(ctx)) <> "/response_types",
+      context.config(ctx).package <> "/request_types",
+      context.config(ctx).package <> "/response_types",
     ])
     |> state_type()
 
@@ -168,7 +168,7 @@ fn generate_operation_handler(
   op_id: String,
   operation: openapi.Operation(Resolved),
 ) -> String {
-  let pkg = config.package(context.config(ctx))
+  let pkg = context.config(ctx).package
   let request_import = case has_handler_params(operation) {
     True -> [pkg <> "/request_types"]
     False -> []
@@ -197,7 +197,7 @@ fn generate_per_operation_handlers_generated(
   ctx: Context,
   operations: List(context.AnalyzedOperation),
 ) -> String {
-  let pkg = config.package(context.config(ctx))
+  let pkg = context.config(ctx).package
   let handler_imports =
     list.map(operations, fn(op) {
       let fn_name = naming.operation_to_function_name(op.operation_id)
@@ -235,7 +235,7 @@ fn generate_handlers_generated(
   ctx: Context,
   operations: List(context.AnalyzedOperation),
 ) -> String {
-  let pkg = config.package(context.config(ctx))
+  let pkg = context.config(ctx).package
   let sb =
     se.file_header(context.version)
     |> se.imports([
@@ -721,7 +721,7 @@ fn generate_safe_request_and_dispatch(
   // Inline request body schemas with constraints are decoded but NOT
   // guard-validated.
   let needs_guard_validation =
-    config.validate(context.config(ctx))
+    context.config(ctx).validate
     && needs_body_guard
     && {
       case body_schema_ref_name {

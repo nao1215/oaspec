@@ -347,7 +347,7 @@ pub fn check_preserved(ctx: Context, index: LocationIndex) -> List(Diagnostic) {
             let base_path =
               op_id <> ".responses." <> http.status_code_to_string(status_code)
             let multi_content_warnings = case
-              config.mode(context.config(ctx)),
+              context.config(ctx).mode,
               list.length(dict.to_list(response.content))
             {
               config.Client, _ -> []

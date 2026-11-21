@@ -7,7 +7,6 @@ import gleam/option.{type Option, None, Some}
 import gleam/order
 import gleam/set.{type Set}
 import gleam/string
-import oaspec/config
 import oaspec/internal/codegen/allof_merge
 import oaspec/internal/codegen/codec_helpers
 import oaspec/internal/codegen/context.{
@@ -147,7 +146,7 @@ pub fn build_module(ctx: Context) -> GuardModule {
       }
     })
   let imports = case needs_types {
-    True -> [config.package(context.config(ctx)) <> "/types", ..imports]
+    True -> [context.config(ctx).package <> "/types", ..imports]
     False -> imports
   }
   // Import option module when composite validators handle optional fields

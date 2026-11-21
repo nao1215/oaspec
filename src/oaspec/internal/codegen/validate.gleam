@@ -369,7 +369,7 @@ fn validate_server_structured_param(
       case schema_utils.resolves_to_primitive(items, ctx) {
         True -> []
         False ->
-          case config.mode(context.config(ctx)) {
+          case context.config(ctx).mode {
             config.Client -> []
             _ -> [
               diagnostic.validation_error_server(
@@ -418,7 +418,7 @@ fn validate_server_structured_param(
   // The deepObject server-only constraint (primitive scalars /
   // primitive arrays only) stays gated to server mode — the client
   // emitter handles nested objects.
-  let deep_object_errors = case config.mode(context.config(ctx)) {
+  let deep_object_errors = case context.config(ctx).mode {
     config.Client -> []
     _ -> validate_server_deep_object_param(path, param, ctx)
   }
@@ -537,7 +537,7 @@ fn validate_complex_param_schema(
         | Some(AnyOfSchema(..)) ->
           case param.in_ {
             openapi.InPath ->
-              case config.mode(context.config(ctx)) {
+              case context.config(ctx).mode {
                 config.Client -> []
                 _ -> [
                   diagnostic.validation_error_server(
@@ -578,7 +578,7 @@ fn validate_deep_object_no_nested_objects(
   param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> List(Diagnostic) {
-  case config.mode(context.config(ctx)) {
+  case context.config(ctx).mode {
     config.Client -> []
     _ ->
       case
@@ -785,7 +785,7 @@ fn validate_server_form_urlencoded_request_body(
   // "inline schema reached to_string_fn after hoist" panic. Reject
   // those shapes in BOTH modes; the server-mode-only multi-content
   // restriction stays gated to server.
-  let server_mode_errors = case config.mode(context.config(ctx)) {
+  let server_mode_errors = case context.config(ctx).mode {
     config.Client -> []
     _ ->
       case dict.get(content, "application/x-www-form-urlencoded") {
@@ -976,7 +976,7 @@ fn validate_server_request_body_content_types(
   content_keys: List(String),
   ctx: Context,
 ) -> List(Diagnostic) {
-  case config.mode(context.config(ctx)) {
+  case context.config(ctx).mode {
     config.Client -> []
     _ -> {
       let non_json_but_supported =
@@ -1013,7 +1013,7 @@ fn validate_server_multipart_request_body(
   content_keys: List(String),
   ctx: Context,
 ) -> List(Diagnostic) {
-  case config.mode(context.config(ctx)) {
+  case context.config(ctx).mode {
     config.Client -> []
     _ ->
       case dict.get(content, "multipart/form-data") {

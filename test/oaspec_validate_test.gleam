@@ -148,13 +148,15 @@ pub fn generate_succeeds_with_ecma_unicode_escape_pattern_test() {
   let assert Ok(summary) =
     generate.generate(
       spec,
-      config.new(
+      config.Config(
         input: "test.yaml",
         output_server: "./test_output/api",
         output_client: "./test_output_client/api",
         package: "api",
         mode: config.Both,
         validate: True,
+        include: config.Include(tags: [], paths: []),
+        handler_layout: config.SingleFile,
       ),
     )
   list.any(summary.warnings, fn(d) { string.contains(d.pointer, "pattern") })

@@ -15,13 +15,15 @@ import oaspec/openapi/parser
 pub fn make_ctx_from_spec(spec) -> context.Context {
   let assert Ok(resolved) = resolve.resolve(spec)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   context.new(resolved, cfg)
 }
@@ -33,13 +35,15 @@ pub fn make_ctx(spec_path: String) -> context.Context {
   let resolved = hoist.hoist(resolved)
   let resolved = dedup.dedup(resolved)
   let cfg =
-    config.new(
+    config.Config(
       input: spec_path,
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   context.new(resolved, cfg)
 }
@@ -160,13 +164,15 @@ pub fn make_minimal_ctx() -> context.Context {
       json_schema_dialect: None,
     )
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   context.new(minimal_spec, cfg)
 }

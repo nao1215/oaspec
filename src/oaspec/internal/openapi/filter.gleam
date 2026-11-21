@@ -14,6 +14,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/config.{type Include}
+import oaspec/internal/config_check
 import oaspec/openapi.{
   type OpenApiSpec, type Operation, type PathItem, type RefOr, type Resolved,
   OpenApiSpec, PathItem, Ref, Value,
@@ -28,7 +29,7 @@ pub fn apply(
   spec: OpenApiSpec(Resolved),
   include: Include,
 ) -> OpenApiSpec(Resolved) {
-  use <- bool.guard(config.include_is_empty(include), spec)
+  use <- bool.guard(config_check.include_is_empty(include), spec)
   let new_paths = filter_paths(spec.paths, include)
   OpenApiSpec(..spec, paths: new_paths)
 }

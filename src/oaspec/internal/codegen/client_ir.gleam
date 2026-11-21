@@ -1,7 +1,6 @@
 import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import oaspec/config
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/guards
 import oaspec/internal/codegen/import_analysis
@@ -471,7 +470,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     })
 
   let needs_guards =
-    config.validate(context.config(ctx))
+    context.config(ctx).validate
     && list.any(operations, fn(op) {
       let context.AnalyzedOperation(_, operation, _, _) = op
       case operation.request_body {
@@ -833,8 +832,8 @@ pub fn imports(requirements: ClientRequirements, ctx: Context) -> List(String) {
   let base_imports = [
     "gleam/result",
     "oaspec/transport",
-    config.package(context.config(ctx)) <> "/decode",
-    config.package(context.config(ctx)) <> "/response_types",
+    context.config(ctx).package <> "/decode",
+    context.config(ctx).package <> "/response_types",
   ]
   // Request literals name their method as `http.Get` etc., so gleam/http is
   // only imported when the client has an operation to build.
@@ -854,15 +853,15 @@ pub fn imports(requirements: ClientRequirements, ctx: Context) -> List(String) {
     True ->
       list.append(
         [
-          config.package(context.config(ctx)) <> "/types",
-          config.package(context.config(ctx)) <> "/encode",
+          context.config(ctx).package <> "/types",
+          context.config(ctx).package <> "/encode",
         ],
         base_imports,
       )
     False -> base_imports
   }
   let base_imports = [
-    config.package(context.config(ctx)) <> "/request_types",
+    context.config(ctx).package <> "/request_types",
     ..base_imports
   ]
   let base_imports = case requirements.needs_string {
@@ -894,7 +893,7 @@ pub fn imports(requirements: ClientRequirements, ctx: Context) -> List(String) {
     False -> imports
   }
   case requirements.needs_guards {
-    True -> [config.package(context.config(ctx)) <> "/guards", ..imports]
+    True -> [context.config(ctx).package <> "/guards", ..imports]
     False -> imports
   }
 }

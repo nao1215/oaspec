@@ -94,13 +94,15 @@ fn make_ctx_from_yaml(yaml: String, validate: Bool) -> context.Context {
   let resolved = hoist.hoist(resolved)
   let resolved = dedup.dedup(resolved)
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Both,
       validate: validate,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   context.new(resolved, cfg)
 }

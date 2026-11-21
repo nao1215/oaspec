@@ -20,13 +20,15 @@ pub fn main() {
 // --- Writer Tests ---
 
 fn test_config(mode: config.GenerateMode) -> config.Config {
-  config.new(
+  config.Config(
     input: "test.yaml",
     output_server: "./gen/api",
     output_client: "./gen_client/api",
     package: "api",
     mode: mode,
     validate: False,
+    include: config.Include(tags: [], paths: []),
+    handler_layout: config.SingleFile,
   )
 }
 
@@ -140,13 +142,15 @@ fn writer_test_config(
   mode: config.GenerateMode,
   scratch: String,
 ) -> config.Config {
-  config.new(
+  config.Config(
     input: "test.yaml",
     output_server: scratch <> "/server",
     output_client: scratch <> "/client",
     package: "api",
     mode: mode,
     validate: False,
+    include: config.Include(tags: [], paths: []),
+    handler_layout: config.SingleFile,
   )
 }
 
@@ -243,13 +247,15 @@ fn writer_test_config_same_path(
     True -> server <> "/"
     False -> server
   }
-  config.new(
+  config.Config(
     input: "test.yaml",
     output_server: server,
     output_client: client,
     package: "api",
     mode: config.Both,
     validate: False,
+    include: config.Include(tags: [], paths: []),
+    handler_layout: config.SingleFile,
   )
 }
 
@@ -367,13 +373,15 @@ pub fn write_all_distinct_paths_still_writes_shared_to_both_test() {
 
 pub fn resolve_paths_dedupes_shared_files_when_paths_overlap_test() {
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./out",
       output_client: "./out",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let result = writer.resolve_paths(test_files(), cfg)
   result
@@ -386,13 +394,15 @@ pub fn resolve_paths_dedupes_shared_files_when_paths_overlap_test() {
 
 pub fn expected_paths_dedupes_shared_files_when_paths_overlap_test() {
   let cfg =
-    config.new(
+    config.Config(
       input: "test.yaml",
       output_server: "./out",
       output_client: "./out",
       package: "api",
       mode: config.Both,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   let result = writer.expected_paths(test_files(), cfg)
   result
@@ -808,7 +818,10 @@ pub fn owned_dirs_keeps_handlers_dir_under_per_operation_without_operations_test
   // but the stubs left there must still be scanned for orphans.
   writer.owned_dirs(
     [],
-    config.with_handler_layout(test_config(config.Server), config.PerOperation),
+    config.Config(
+      ..test_config(config.Server),
+      handler_layout: config.PerOperation,
+    ),
   )
   |> should.equal(["./gen/api", "./gen/api/handlers"])
 }

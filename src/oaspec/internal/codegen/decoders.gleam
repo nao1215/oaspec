@@ -3,7 +3,6 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
-import oaspec/config
 import oaspec/internal/codegen/allof_merge
 import oaspec/internal/codegen/codec_helpers
 import oaspec/internal/codegen/context.{
@@ -117,7 +116,7 @@ fn generate_decoders(
   let base_imports = case needs_types {
     True ->
       list.append(base_imports, [
-        config.package(context.config(ctx)) <> "/types",
+        context.config(ctx).package <> "/types",
       ])
     False -> base_imports
   }

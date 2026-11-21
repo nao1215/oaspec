@@ -43,15 +43,16 @@ fn golden_generate_with(
   // (which goes through `config.load`) line up with the snapshots
   // compared here.
   let cfg =
-    config.new(
+    config.Config(
       input: spec_path,
       output_server: "./golden_unused/api",
       output_client: "./golden_unused/api",
       package: "api",
       mode: mode,
       validate: True,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: layout,
     )
-    |> config.with_handler_layout(layout)
   let assert Ok(summary) = generate.generate(spec, cfg)
   summary.files
 }
