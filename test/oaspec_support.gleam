@@ -11710,7 +11710,7 @@ pub fn server_deep_object_params_are_parsed_case() {
   |> should.be_true()
   // Required deep-object properties are looked up into a Result first so a
   // missing or unparseable property answers 400 instead of a zero value.
-  string.contains(content, "let filter_deep_result = ")
+  string.contains(content, "let filter__deep_result = ")
   |> should.be_true()
   string.contains(
     content,
@@ -11719,9 +11719,9 @@ pub fn server_deep_object_params_are_parsed_case() {
   |> should.be_true()
   string.contains(content, "name: deep_name,")
   |> should.be_true()
-  string.contains(content, "case filter_deep_result {")
+  string.contains(content, "case filter__deep_result {")
   |> should.be_true()
-  string.contains(content, "filter: filter_deep,")
+  string.contains(content, "filter: filter__deep,")
   |> should.be_true()
   string.contains(content, "\"filter[name]\") { Ok([v, ..]) -> v _ -> \"\" }")
   |> should.be_false()
@@ -11815,7 +11815,7 @@ pub fn server_form_urlencoded_body_is_parsed_case() {
   |> should.be_true()
   // Required fields are looked up into a Result first so a missing or
   // unparseable field answers 400 instead of an empty string or zero.
-  string.contains(content, "let body_result = ")
+  string.contains(content, "let body__result = ")
   |> should.be_true()
   string.contains(content, "Ok(types.SubmitFormRequest(")
   |> should.be_true()
@@ -11826,9 +11826,9 @@ pub fn server_form_urlencoded_body_is_parsed_case() {
   |> should.be_true()
   string.contains(content, "name: body_name,")
   |> should.be_true()
-  string.contains(content, "case body_result {")
+  string.contains(content, "case body__result {")
   |> should.be_true()
-  string.contains(content, "body: checked_body,")
+  string.contains(content, "body: checked__body,")
   |> should.be_true()
   string.contains(content, "Ok([v, ..]) -> v _ -> \"\" }")
   |> should.be_false()
@@ -11932,7 +11932,7 @@ pub fn server_multipart_body_is_parsed_case() {
     "case dict.get(multipart_body, \"name\") { Ok([body_name, ..]) -> ",
   )
   |> should.be_true()
-  string.contains(content, "body: checked_body,")
+  string.contains(content, "body: checked__body,")
   |> should.be_true()
   string.contains(
     content,

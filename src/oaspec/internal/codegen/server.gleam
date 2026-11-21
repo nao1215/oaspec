@@ -653,9 +653,11 @@ fn generate_safe_request_and_dispatch(
     })
 
   // Open result cases for deep-object params with a required property.
+  // `<param>__deep` cannot collide with a parameter variable (see the
+  // checked body below).
   let sb =
     list.fold(checked_deep_object_params, sb, fn(sb, p) {
-      let var_name = naming.to_snake_case(p.name) <> "_deep"
+      let var_name = naming.to_snake_case(p.name) <> "__deep"
       sb
       |> se.indent(
         3,
@@ -790,7 +792,9 @@ fn generate_safe_request_and_dispatch(
   }
 
   // A form or multipart body with a required field is built into a Result
-  // first, so a missing or invalid field answers 400.
+  // first, so a missing or invalid field answers 400. The router's own
+  // variables contain `__`, which `naming.to_snake_case` never produces, so
+  // they cannot collide with a parameter variable.
   let checked_body = case operation.request_body {
     Some(Value(rb)) -> decode_helpers.checked_body_result_expr(rb, op_id, ctx)
     _ -> None
@@ -798,9 +802,9 @@ fn generate_safe_request_and_dispatch(
   let sb = case checked_body {
     Some(result_expr) ->
       sb
-      |> se.indent(3, "let body_result = " <> result_expr)
-      |> se.indent(3, "case body_result {")
-      |> se.indent(4, "Ok(checked_body) -> {")
+      |> se.indent(3, "let body__result = " <> result_expr)
+      |> se.indent(3, "case body__result {")
+      |> se.indent(4, "Ok(checked__body) -> {")
     None -> sb
   }
 
@@ -833,7 +837,7 @@ fn generate_safe_request_and_dispatch(
             && decode_helpers.deep_object_has_required_properties(param, ctx)
           use <- bool.guard(
             checked_deep_object,
-            naming.to_snake_case(param.name) <> "_deep",
+            naming.to_snake_case(param.name) <> "__deep",
           )
           case is_deep_object, param.required {
             True, True ->
@@ -868,7 +872,7 @@ fn generate_safe_request_and_dispatch(
   // Add body field
   let sb = case needs_body_guard, checked_body {
     True, _ -> sb |> se.indent(4, "body: decoded_body,")
-    False, Some(_) -> sb |> se.indent(4, "body: checked_body,")
+    False, Some(_) -> sb |> se.indent(4, "body: checked__body,")
     False, None ->
       case operation.request_body {
         Some(Value(rb)) -> {

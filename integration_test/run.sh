@@ -1450,6 +1450,59 @@ rm -rf "$BOOL_DIR"
 info "Required boolean integration tests passed."
 
 # -------------------------------------------------------
+# Step 13c: router variables do not collide with parameter variables
+# -------------------------------------------------------
+info "Testing router variable names against colliding parameter names..."
+
+COLL_DIR="$SCRIPT_DIR/router_collision_test"
+rm -rf "$COLL_DIR"
+mkdir -p "$COLL_DIR/src"
+
+cat > "$COLL_DIR/oaspec-coll.yaml" << 'YAML_EOF'
+input: test/fixtures/server_router_variable_collisions.yaml
+output:
+  server: ./integration_test/router_collision_test/src/api
+package: api
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$COLL_DIR/oaspec-coll.yaml" \
+  --mode=server
+
+cat > "$COLL_DIR/gleam.toml" << 'TOML_EOF'
+name = "router_collision_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+TOML_EOF
+
+cat > "$COLL_DIR/src/router_collision_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$COLL_DIR"
+gleam deps download
+
+verify_generated_format src/api
+if gleam build --warnings-as-errors 2>&1; then
+  info "PASS: Router with colliding parameter names compiles (warnings-as-errors)."
+else
+  fail "Router with colliding parameter names failed to compile."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$COLL_DIR"
+
+info "Router variable collision integration tests passed."
+
+# -------------------------------------------------------
 # Step 14: Generate reserved-keyword spec and verify it compiles
 # -------------------------------------------------------
 # Guards the escape pipeline in src/oaspec/util/naming.gleam against
