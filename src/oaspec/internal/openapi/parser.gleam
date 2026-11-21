@@ -251,10 +251,9 @@ pub fn default_limits() -> ParseLimits {
 /// to be JSON.
 ///
 /// `parse_string` does **not** apply the DoS limits documented in
-/// `ParseLimits`. Reach for `parse_string_with_limits` when the input
-/// is attacker-controlled or sourced from an untrusted file system
-/// (admin-uploaded specs, contract-validation pipelines, CI runners
-/// over user-supplied specs).
+/// `ParseLimits`; the public `oaspec.parse_string` and `oaspec.parse_file`
+/// go through `parse_string_or_json_with_locations` and
+/// `parse_file_internal`, which apply `default_limits()`.
 ///
 /// **YAML 1.1 type coercion: parse_string vs parse_json_string.**
 /// yamerl applies YAML 1.1 implicit-type rules to scalars before they
@@ -291,7 +290,7 @@ pub fn parse_string(
 
 /// Same as `parse_string` but also returns the YAML `LocationIndex`
 /// built from the input. Caller-side companion to
-/// `parse_file_with_locations`.
+/// `parse_file_with_progress_and_locations`.
 pub fn parse_string_with_locations(
   content: String,
 ) -> Result(#(OpenApiSpec(Unresolved), LocationIndex), Diagnostic) {

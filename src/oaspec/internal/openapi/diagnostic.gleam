@@ -147,11 +147,11 @@ pub fn resolve_error(
   )
 }
 
-/// Capability checks now thread a YAML `SourceLoc` through
-/// every diagnostic. Pass `NoSourceLoc` only when the caller genuinely
-/// has no LocationIndex available (e.g. tests that bypass the parser
-/// path); production code always has one because it goes through
-/// `parser.parse_file_with_locations` / `generate.generate_with_locations`.
+/// Capability checks thread a YAML `SourceLoc` through every diagnostic.
+/// Pass `NoSourceLoc` only when the caller has no LocationIndex (tests that
+/// bypass the parser, or the library `oaspec.generate`); the CLI always has
+/// one because it goes through `parser.parse_file_with_progress_and_locations`
+/// and `generate.generate_with_progress_and_locations`.
 pub fn capability(
   path path: String,
   detail detail: String,

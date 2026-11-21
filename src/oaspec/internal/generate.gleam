@@ -191,9 +191,9 @@ fn prepare_context(
 ///
 /// Capability-check diagnostics from this entry point carry no source
 /// location information. Callers that already have a YAML
-/// `LocationIndex` (e.g. via `parser.parse_file_with_locations`)
-/// should prefer `generate_with_locations` so capability-check errors
-/// surface line/column for the offending spec node.
+/// `LocationIndex` (e.g. via `parser.parse_file_with_progress_and_locations`)
+/// should prefer `generate_with_progress_and_locations` so capability-check
+/// errors surface line/column for the offending spec node.
 pub fn generate(
   spec: OpenApiSpec(Unresolved),
   cfg: Config,
