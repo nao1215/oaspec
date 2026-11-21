@@ -34,7 +34,9 @@ import simplifile
 import yay
 
 /// Parse an OpenAPI spec from a file path.
-/// Supports both YAML (.yaml, .yml) and JSON (.json) files.
+/// Supports both YAML (.yaml, .yml) and JSON (.json) files. Every file read
+/// (the root document and each external `$ref` target) is held to
+/// `default_limits().max_input_bytes`.
 /// After parsing, resolves relative-file `$ref` values across schemas,
 /// parameters, request bodies, responses, and path items — including
 /// nested object/array properties and composition branches — by loading
@@ -94,6 +96,7 @@ fn parse_file_internal(
       )
     }),
   )
+  use _ <- result.try(enforce_input_byte_limit(content, default_limits()))
   progress.report(
     reporter,
     "read "
@@ -444,7 +447,8 @@ pub fn parse_json_string_with_locations(
 
 /// Auto-dispatch over `parse_string_with_locations` (YAML) and
 /// `parse_json_string_with_locations` (JSON) based on the first
-/// non-whitespace byte of `content`.
+/// non-whitespace byte of `content`. Content larger than
+/// `default_limits().max_input_bytes` is refused before parsing.
 ///
 /// `{` and `[` route to the JSON parser (orders of magnitude faster on
 /// large specs — see `parse_json_string`); anything else routes to
@@ -461,6 +465,7 @@ pub fn parse_json_string_with_locations(
 pub fn parse_string_or_json_with_locations(
   content: String,
 ) -> Result(#(OpenApiSpec(Unresolved), LocationIndex), Diagnostic) {
+  use _ <- result.try(enforce_input_byte_limit(content, default_limits()))
   case looks_like_json(content) {
     True -> parse_json_string_with_locations(content)
     False -> parse_string_with_locations(content)

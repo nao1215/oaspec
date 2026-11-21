@@ -105,6 +105,9 @@ pub type WriteError {
 /// followed. The result is not resolved yet: pass it to `generate`, or to
 /// `resolve` to inspect it.
 ///
+/// A file larger than 16 MiB is refused with a `parse_limit_exceeded`
+/// diagnostic before it is parsed.
+///
 /// ## Examples
 ///
 /// ```gleam
@@ -124,7 +127,8 @@ pub fn parse_file(path: String) -> Result(OpenApiSpec(Unresolved), Diagnostic) {
 /// Parses an OpenAPI document from a string. Content that starts with `{`
 /// or `[` is read as JSON, anything else as YAML.
 ///
-/// `$ref`s to other files are left as they are.
+/// `$ref`s to other files are left as they are. Content larger than 16 MiB
+/// is refused with a `parse_limit_exceeded` diagnostic before it is parsed.
 ///
 /// ## Examples
 ///

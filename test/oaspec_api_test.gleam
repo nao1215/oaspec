@@ -132,3 +132,23 @@ pub fn write_writes_files_and_keeps_user_files_test() {
   assert simplifile.read(handlers) == Ok("// mine\n")
   let _ignored_delete = simplifile.delete(dir)
 }
+
+pub fn parse_string_refuses_input_over_the_size_cap_test() {
+  let content = "openapi: 3.0.3\n# " <> string.repeat("x", 16 * 1024 * 1024)
+  let assert Error(diagnostic) = oaspec.parse_string(content)
+  assert diagnostic.code == "parse_limit_exceeded"
+}
+
+pub fn parse_file_refuses_input_over_the_size_cap_test() {
+  let path = "./test_output/api_limit_test.yaml"
+  let assert Ok(Nil) = simplifile.create_directory_all("./test_output")
+  let assert Ok(Nil) =
+    simplifile.write(
+      path,
+      "openapi: 3.0.3\n# " <> string.repeat("x", 16 * 1024 * 1024),
+    )
+  let result = oaspec.parse_file(path)
+  let _ignored_delete = simplifile.delete(path)
+  let assert Error(diagnostic) = result
+  assert diagnostic.code == "parse_limit_exceeded"
+}
