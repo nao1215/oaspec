@@ -2,10 +2,10 @@ import gleam/list
 import gleam/string
 import gleeunit/should
 import oaspec/config
-import oaspec/generate
 import oaspec/internal/codegen/context
 import oaspec/internal/codegen/server as server_gen
-import oaspec/openapi/parser
+import oaspec/internal/generate
+import oaspec/internal/openapi/parser
 import oaspec_support as support
 import test_helpers
 
@@ -68,15 +68,16 @@ fn generate_server_files(
 ) -> List(context.GeneratedFile) {
   let assert Ok(spec) = parser.parse_file(spec_path)
   let cfg =
-    config.new(
+    config.Config(
       input: spec_path,
       output_server: "./test_output/api",
       output_client: "./test_output_client/api",
       package: "api",
       mode: config.Server,
       validate: True,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: layout,
     )
-    |> config.with_handler_layout(layout)
   let assert Ok(summary) = generate.generate(spec, cfg)
   summary.files
 }
@@ -88,14 +89,14 @@ fn file_content(files: List(context.GeneratedFile), path: String) -> String {
 
 pub fn config_handlers_defaults_to_single_file_test() {
   let assert Ok(cfg) = config.load("test/fixtures/oaspec.yaml")
-  config.handler_layout(cfg) |> should.equal(config.SingleFile)
+  cfg.handler_layout |> should.equal(config.SingleFile)
 }
 
 pub fn config_handlers_per_operation_is_shared_by_every_target_test() {
   let assert Ok(cfgs) =
     config.load_all("test/fixtures/oaspec_handlers_per_operation.yaml")
   cfgs
-  |> list.map(config.handler_layout)
+  |> list.map(fn(cfg: config.Config) { cfg.handler_layout })
   |> should.equal([config.PerOperation, config.PerOperation])
 }
 

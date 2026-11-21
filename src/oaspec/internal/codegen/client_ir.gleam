@@ -1,15 +1,14 @@
 import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import oaspec/config
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/guards
 import oaspec/internal/codegen/import_analysis
 import oaspec/internal/codegen/operation_ir
 import oaspec/internal/codegen/schema_utils
+import oaspec/internal/openapi/spec
 import oaspec/internal/util/content_type as ct_util
-import oaspec/openapi/schema.{Inline}
-import oaspec/openapi/spec.{ParameterSchema, Value}
+import oaspec/openapi.{Inline, ParameterSchema, Value}
 
 /// Structured import / helper requirements for client generation.
 pub type ClientRequirements {
@@ -52,26 +51,26 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
   let needs_bool =
     list.any(all_params, fn(p) {
       case p.payload {
-        ParameterSchema(Inline(schema.BooleanSchema(..))) -> True
+        ParameterSchema(Inline(openapi.BooleanSchema(..))) -> True
         _ -> False
       }
     })
     || deep_object_param_has_property(operations, ctx, fn(s) {
       case s {
-        schema.BooleanSchema(..) -> True
+        openapi.BooleanSchema(..) -> True
         _ -> False
       }
     })
   let needs_float_param =
     list.any(all_params, fn(p) {
       case p.payload {
-        ParameterSchema(Inline(schema.NumberSchema(..))) -> True
+        ParameterSchema(Inline(openapi.NumberSchema(..))) -> True
         _ -> False
       }
     })
     || deep_object_param_has_property(operations, ctx, fn(s) {
       case s {
-        schema.NumberSchema(..) -> True
+        openapi.NumberSchema(..) -> True
         _ -> False
       }
     })
@@ -121,14 +120,14 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
   let has_multipart_array_field =
     multipart_has_field(operations, ctx, fn(s) {
       case s {
-        schema.ArraySchema(..) -> True
+        openapi.ArraySchema(..) -> True
         _ -> False
       }
     })
   let has_multipart_object_field =
     multipart_has_field(operations, ctx, fn(s) {
       case s {
-        schema.ObjectSchema(..) -> True
+        openapi.ObjectSchema(..) -> True
         _ -> False
       }
     })
@@ -190,9 +189,9 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     // Array fields fold the input via list.fold; object
     // fields don't need list directly but other multipart paths might.
     || has_multipart_array_field
-    || list.any(all_params, fn(p) { p.in_ == spec.InQuery })
-    || list.any(all_params, fn(p) { p.in_ == spec.InCookie })
-    || list.any(all_params, fn(p) { p.in_ == spec.InHeader })
+    || list.any(all_params, fn(p) { p.in_ == openapi.InQuery })
+    || list.any(all_params, fn(p) { p.in_ == openapi.InCookie })
+    || list.any(all_params, fn(p) { p.in_ == openapi.InHeader })
     || list.any(all_params, fn(p) {
       spec.parameter_schema(p)
       |> option.then(schema_utils.array_items(_, ctx))
@@ -220,11 +219,11 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
                     // Array responses keyed by `$ref` items also go
                     // through `dyn_decode.list(...)`, so the import
                     // must fire for them too.
-                    Some(Inline(schema.ArraySchema(items: _, ..))) -> True
-                    Some(Inline(schema.StringSchema(..))) -> True
-                    Some(Inline(schema.IntegerSchema(..))) -> True
-                    Some(Inline(schema.NumberSchema(..))) -> True
-                    Some(Inline(schema.BooleanSchema(..))) -> True
+                    Some(Inline(openapi.ArraySchema(items: _, ..))) -> True
+                    Some(Inline(openapi.StringSchema(..))) -> True
+                    Some(Inline(openapi.IntegerSchema(..))) -> True
+                    Some(Inline(openapi.NumberSchema(..))) -> True
+                    Some(Inline(openapi.BooleanSchema(..))) -> True
                     _ -> False
                   }
               }
@@ -277,10 +276,10 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
               ct_util.ApplicationOctetStream | ct_util.Wildcard -> False
               _ ->
                 case mt.schema {
-                  Some(Inline(schema.StringSchema(..))) -> True
-                  Some(Inline(schema.IntegerSchema(..))) -> True
-                  Some(Inline(schema.NumberSchema(..))) -> True
-                  Some(Inline(schema.BooleanSchema(..))) -> True
+                  Some(Inline(openapi.StringSchema(..))) -> True
+                  Some(Inline(openapi.IntegerSchema(..))) -> True
+                  Some(Inline(openapi.NumberSchema(..))) -> True
+                  Some(Inline(openapi.BooleanSchema(..))) -> True
                   _ -> False
                 }
             }
@@ -294,7 +293,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     || has_form_urlencoded
     || has_multipart
     || list.any(all_params, fn(p) {
-      p.in_ == spec.InPath || p.in_ == spec.InCookie
+      p.in_ == openapi.InPath || p.in_ == openapi.InCookie
     })
 
   let needs_typed_schemas =
@@ -337,7 +336,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
             list.any(dict.to_list(response.headers), fn(h_entry) {
               let #(_, header) = h_entry
               case header.schema {
-                Some(Inline(schema.IntegerSchema(..))) -> True
+                Some(Inline(openapi.IntegerSchema(..))) -> True
                 _ -> False
               }
             })
@@ -355,7 +354,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
             list.any(dict.to_list(response.headers), fn(h_entry) {
               let #(_, header) = h_entry
               case header.schema {
-                Some(Inline(schema.NumberSchema(..))) -> True
+                Some(Inline(openapi.NumberSchema(..))) -> True
                 _ -> False
               }
             })
@@ -373,21 +372,21 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
   let has_form_urlencoded_int =
     form_body_has_primitive(operations, ctx, fn(s) {
       case s {
-        schema.IntegerSchema(..) -> True
+        openapi.IntegerSchema(..) -> True
         _ -> False
       }
     })
   let has_form_urlencoded_float =
     form_body_has_primitive(operations, ctx, fn(s) {
       case s {
-        schema.NumberSchema(..) -> True
+        openapi.NumberSchema(..) -> True
         _ -> False
       }
     })
   let has_form_urlencoded_bool =
     form_body_has_primitive(operations, ctx, fn(s) {
       case s {
-        schema.BooleanSchema(..) -> True
+        openapi.BooleanSchema(..) -> True
         _ -> False
       }
     })
@@ -402,9 +401,9 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
         spec.parameter_schema(p)
         |> option.map(context.resolve_schema_ref(_, ctx))
       {
-        Some(Ok(schema.IntegerSchema(..)))
-        | Some(Ok(schema.ArraySchema(
-            items: Inline(schema.IntegerSchema(..)),
+        Some(Ok(openapi.IntegerSchema(..)))
+        | Some(Ok(openapi.ArraySchema(
+            items: Inline(openapi.IntegerSchema(..)),
             ..,
           ))) -> True
         _ -> False
@@ -412,7 +411,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     })
     || deep_object_param_has_property(operations, ctx, fn(s) {
       case s {
-        schema.IntegerSchema(..) -> True
+        openapi.IntegerSchema(..) -> True
         _ -> False
       }
     })
@@ -467,11 +466,11 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
   let needs_uri =
     has_form_urlencoded
     || list.any(all_params, fn(p) {
-      p.in_ == spec.InPath || p.in_ == spec.InCookie
+      p.in_ == openapi.InPath || p.in_ == openapi.InCookie
     })
 
   let needs_guards =
-    config.validate(context.config(ctx))
+    context.config(ctx).validate
     && list.any(operations, fn(op) {
       let context.AnalyzedOperation(_, operation, _, _) = op
       case operation.request_body {
@@ -480,7 +479,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
           case content_entries {
             [#(_, mt)] ->
               case mt.schema {
-                Some(schema.Reference(name:, ..)) ->
+                Some(openapi.Reference(name:, ..)) ->
                   guards.schema_has_validator(name, ctx)
                 _ -> False
               }
@@ -519,7 +518,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
 fn multipart_has_field(
   operations: List(context.AnalyzedOperation),
   ctx: Context,
-  pred: fn(schema.SchemaObject) -> Bool,
+  pred: fn(openapi.SchemaObject) -> Bool,
 ) -> Bool {
   list.any(operations, fn(op) {
     let context.AnalyzedOperation(_, operation, _, _) = op
@@ -560,7 +559,7 @@ fn multipart_has_optional_complex_field(
                 context.resolve_schema_ref(r, ctx) |> option.from_result
               })
             {
-              Some(schema.ObjectSchema(properties:, required:, ..)) ->
+              Some(openapi.ObjectSchema(properties:, required:, ..)) ->
                 dict.to_list(properties)
                 |> list.any(fn(entry) {
                   let #(name, prop_ref) = entry
@@ -570,8 +569,8 @@ fn multipart_has_optional_complex_field(
                     context.resolve_schema_ref(prop_ref, ctx)
                     |> option.from_result
                   {
-                    Some(schema.ArraySchema(..)) -> True
-                    Some(schema.ObjectSchema(..)) -> True
+                    Some(openapi.ArraySchema(..)) -> True
+                    Some(openapi.ObjectSchema(..)) -> True
                     _ -> False
                   }
                 })
@@ -586,15 +585,15 @@ fn multipart_has_optional_complex_field(
 }
 
 fn multipart_object_props(
-  media_schema: Option(schema.SchemaRef),
+  media_schema: Option(openapi.SchemaRef),
   ctx: Context,
-) -> List(#(String, schema.SchemaRef)) {
+) -> List(#(String, openapi.SchemaRef)) {
   case
     option.then(media_schema, fn(r) {
       context.resolve_schema_ref(r, ctx) |> option.from_result
     })
   {
-    Some(schema.ObjectSchema(properties:, ..)) -> dict.to_list(properties)
+    Some(openapi.ObjectSchema(properties:, ..)) -> dict.to_list(properties)
     _ -> []
   }
 }
@@ -606,7 +605,7 @@ fn multipart_object_props(
 /// transitively contains a composite (`oneOf` / `anyOf` / `allOf`)
 /// shape — both branches emit `json.to_string(...)` and so require
 /// `gleam/json` in the client's import set.
-fn form_body_uses_json_escape(mt: spec.MediaType, ctx: Context) -> Bool {
+fn form_body_uses_json_escape(mt: openapi.MediaType, ctx: Context) -> Bool {
   let explicit =
     list.any(dict.to_list(mt.encoding), fn(entry) {
       let #(_, enc) = entry
@@ -624,7 +623,7 @@ fn form_body_uses_json_escape(mt: spec.MediaType, ctx: Context) -> Bool {
       context.resolve_schema_ref(r, ctx) |> option.from_result
     })
   {
-    Some(schema.ObjectSchema(properties:, ..)) ->
+    Some(openapi.ObjectSchema(properties:, ..)) ->
       dict.to_list(properties)
       |> list.any(fn(entry) {
         let #(_, child_schema) = entry
@@ -640,11 +639,11 @@ fn form_body_uses_json_escape(mt: spec.MediaType, ctx: Context) -> Bool {
 /// when the emitter will produce `json.to_string(...)` and so requires
 /// `gleam/json` in the import set.
 fn param_uses_json_escape(
-  param: spec.Parameter(spec.Resolved),
+  param: openapi.Parameter(openapi.Resolved),
   ctx: Context,
 ) -> Bool {
   let in_query = case param.in_ {
-    spec.InQuery -> True
+    openapi.InQuery -> True
     _ -> False
   }
   let array_items =
@@ -663,7 +662,7 @@ fn param_uses_json_escape(
           context.resolve_schema_ref(r, ctx) |> option.from_result
         })
       {
-        Some(schema.ObjectSchema(properties:, ..)) ->
+        Some(openapi.ObjectSchema(properties:, ..)) ->
           dict.to_list(properties)
           |> list.any(fn(entry) {
             let #(_, child_schema) = entry
@@ -684,7 +683,7 @@ fn param_uses_json_escape(
 fn form_body_has_primitive(
   operations: List(context.AnalyzedOperation),
   ctx: Context,
-  pred: fn(schema.SchemaObject) -> Bool,
+  pred: fn(openapi.SchemaObject) -> Bool,
 ) -> Bool {
   list.any(operations, fn(op) {
     let context.AnalyzedOperation(_, operation, _, _) = op
@@ -711,9 +710,9 @@ fn form_body_has_primitive(
 }
 
 fn ref_contains_primitive(
-  ref: schema.SchemaRef,
+  ref: openapi.SchemaRef,
   ctx: Context,
-  pred: fn(schema.SchemaObject) -> Bool,
+  pred: fn(openapi.SchemaObject) -> Bool,
 ) -> Bool {
   case context.resolve_schema_ref(ref, ctx) |> option.from_result {
     Some(s) ->
@@ -721,9 +720,9 @@ fn ref_contains_primitive(
         True -> True
         False ->
           case s {
-            schema.ArraySchema(items:, ..) ->
+            openapi.ArraySchema(items:, ..) ->
               ref_contains_primitive(items, ctx, pred)
-            schema.ObjectSchema(properties:, ..) ->
+            openapi.ObjectSchema(properties:, ..) ->
               dict.to_list(properties)
               |> list.any(fn(entry) {
                 let #(_, child) = entry
@@ -736,13 +735,13 @@ fn ref_contains_primitive(
   }
 }
 
-fn ref_contains_composite(ref: schema.SchemaRef, ctx: Context) -> Bool {
+fn ref_contains_composite(ref: openapi.SchemaRef, ctx: Context) -> Bool {
   case context.resolve_schema_ref(ref, ctx) |> option.from_result {
-    Some(schema.OneOfSchema(..))
-    | Some(schema.AnyOfSchema(..))
-    | Some(schema.AllOfSchema(..)) -> True
-    Some(schema.ArraySchema(items:, ..)) -> ref_contains_composite(items, ctx)
-    Some(schema.ObjectSchema(properties:, ..)) ->
+    Some(openapi.OneOfSchema(..))
+    | Some(openapi.AnyOfSchema(..))
+    | Some(openapi.AllOfSchema(..)) -> True
+    Some(openapi.ArraySchema(items:, ..)) -> ref_contains_composite(items, ctx)
+    Some(openapi.ObjectSchema(properties:, ..)) ->
       dict.to_list(properties)
       |> list.any(fn(entry) {
         let #(_, child_schema) = entry
@@ -762,7 +761,7 @@ fn ref_contains_composite(ref: schema.SchemaRef, ctx: Context) -> Bool {
 fn deep_object_param_has_property(
   operations: List(context.AnalyzedOperation),
   ctx: Context,
-  pred: fn(schema.SchemaObject) -> Bool,
+  pred: fn(openapi.SchemaObject) -> Bool,
 ) -> Bool {
   list.any(operations, fn(op) {
     let context.AnalyzedOperation(_, operation, _, _) = op
@@ -795,12 +794,12 @@ fn deep_object_param_has_property(
 /// `emit_deep_object_nested_object/_property` in
 /// `oaspec/internal/codegen/client.gleam`.
 fn object_properties_match(
-  obj: schema.SchemaObject,
+  obj: openapi.SchemaObject,
   ctx: Context,
-  pred: fn(schema.SchemaObject) -> Bool,
+  pred: fn(openapi.SchemaObject) -> Bool,
 ) -> Bool {
   case obj {
-    schema.ObjectSchema(properties:, ..) ->
+    openapi.ObjectSchema(properties:, ..) ->
       list.any(dict.to_list(properties), fn(entry) {
         let #(_, prop_ref) = entry
         case context.resolve_schema_ref(prop_ref, ctx) |> option.from_result {
@@ -833,9 +832,15 @@ pub fn imports(requirements: ClientRequirements, ctx: Context) -> List(String) {
   let base_imports = [
     "gleam/result",
     "oaspec/transport",
-    config.package(context.config(ctx)) <> "/decode",
-    config.package(context.config(ctx)) <> "/response_types",
+    context.config(ctx).package <> "/decode",
+    context.config(ctx).package <> "/response_types",
   ]
+  // Request literals name their method as `http.Get` etc., so gleam/http is
+  // only imported when the client has an operation to build.
+  let base_imports = case context.operations(ctx) {
+    [] -> base_imports
+    _ -> ["gleam/http", ..base_imports]
+  }
   let base_imports = case requirements.needs_int {
     True -> ["gleam/int", ..base_imports]
     False -> base_imports
@@ -848,15 +853,15 @@ pub fn imports(requirements: ClientRequirements, ctx: Context) -> List(String) {
     True ->
       list.append(
         [
-          config.package(context.config(ctx)) <> "/types",
-          config.package(context.config(ctx)) <> "/encode",
+          context.config(ctx).package <> "/types",
+          context.config(ctx).package <> "/encode",
         ],
         base_imports,
       )
     False -> base_imports
   }
   let base_imports = [
-    config.package(context.config(ctx)) <> "/request_types",
+    context.config(ctx).package <> "/request_types",
     ..base_imports
   ]
   let base_imports = case requirements.needs_string {
@@ -888,7 +893,7 @@ pub fn imports(requirements: ClientRequirements, ctx: Context) -> List(String) {
     False -> imports
   }
   case requirements.needs_guards {
-    True -> [config.package(context.config(ctx)) <> "/guards", ..imports]
+    True -> [context.config(ctx).package <> "/guards", ..imports]
     False -> imports
   }
 }

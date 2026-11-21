@@ -6,6 +6,7 @@ import api/request_types
 import api/response_types
 import api/types
 import gleam/dynamic/decode as dyn_decode
+import gleam/http
 import gleam/int
 import gleam/json
 import gleam/list
@@ -102,7 +103,7 @@ pub fn build_list_pets_request(
   let body = transport.EmptyBody
   Ok(
     transport.Request(
-      method: transport.Get,
+      method: http.Get,
       base_url: Some(default_base_url()),
       path: path,
       query: query,
@@ -188,7 +189,7 @@ pub fn build_create_pet_request(
   let headers = [#("content-type", "application/json"), ..headers]
   Ok(
     transport.Request(
-      method: transport.Post,
+      method: http.Post,
       base_url: Some(default_base_url()),
       path: path,
       query: query,
@@ -276,7 +277,7 @@ pub fn build_get_pet_request(
   let body = transport.EmptyBody
   Ok(
     transport.Request(
-      method: transport.Get,
+      method: http.Get,
       base_url: Some(default_base_url()),
       path: path,
       query: query,
@@ -364,7 +365,7 @@ pub fn build_delete_pet_request(
   let body = transport.EmptyBody
   Ok(
     transport.Request(
-      method: transport.Delete,
+      method: http.Delete,
       base_url: Some(default_base_url()),
       path: path,
       query: query,

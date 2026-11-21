@@ -1,19 +1,16 @@
 import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
-import oaspec/internal/openapi/value
-import oaspec/openapi/schema.{
-  type SchemaMetadata, type SchemaObject, type SchemaRef, AllOfSchema,
-  AnyOfSchema, ArraySchema, BooleanSchema, Forbidden, Inline, IntegerSchema,
-  NumberSchema, ObjectSchema, OneOfSchema, Reference, SchemaMetadata,
-  StringSchema, Typed,
-}
-import oaspec/openapi/spec.{
+import oaspec/internal/openapi/schema
+import oaspec/openapi.{
   type Callback, type Components, type Header, type MediaType, type OpenApiSpec,
   type Operation, type Parameter, type PathItem, type RefOr, type RequestBody,
-  type Response, Callback, Components, Header, MediaType, OpenApiSpec, Operation,
-  Parameter, ParameterContent, ParameterSchema, PathItem, Ref, RequestBody,
-  Response, Value,
+  type Response, type SchemaMetadata, type SchemaObject, type SchemaRef,
+  AllOfSchema, AnyOfSchema, ArraySchema, BooleanSchema, Callback, Components,
+  Forbidden, Header, Inline, IntegerSchema, MediaType, NumberSchema,
+  ObjectSchema, OneOfSchema, OpenApiSpec, Operation, Parameter, ParameterContent,
+  ParameterSchema, PathItem, Ref, Reference, RequestBody, Response,
+  SchemaMetadata, StringSchema, Typed, Value,
 }
 
 /// Normalize an OpenApiSpec after parsing.
@@ -191,7 +188,7 @@ fn normalize_schema(schema_obj: SchemaObject) -> SchemaObject {
   let schema_obj = case schema_obj {
     StringSchema(metadata: meta, ..) ->
       case meta.const_value {
-        Some(value.JsonString(str_val)) ->
+        Some(openapi.JsonString(str_val)) ->
           StringSchema(
             ..schema_obj,
             enum_values: [str_val],

@@ -7,20 +7,45 @@ import oaspec/internal/openapi/parser_value
 import simplifile
 import yay
 
-/// Configuration for oaspec code generation.
+/// One generation target: which spec to read, what to generate and where
+/// to write it.
 ///
-/// Opaque: external callers construct via `new/6` and read fields via
-/// the accessors below. Mutators (`with_mode`, `with_validate`,
-/// `with_output`, `with_include`, `with_handler_layout`) live in this
-/// module too, so every change to a `Config` value goes through an
-/// explicit function.
-pub opaque type Config {
+/// `load` and `load_all` build it from an `oaspec.yaml`. To build one in
+/// code, write the record and change fields with the record update syntax.
+///
+/// ## Examples
+///
+/// ```gleam
+/// let cfg =
+///   config.Config(
+///     input: "openapi.yaml",
+///     output_server: "./src/api",
+///     output_client: "./src/api_client",
+///     package: "api",
+///     mode: config.Both,
+///     validate: True,
+///     include: config.Include(tags: [], paths: []),
+///     handler_layout: config.SingleFile,
+///   )
+/// config.Config(..cfg, mode: config.Client)
+/// ```
+///
+pub type Config {
   Config(
+    /// Path of the OpenAPI document.
     input: String,
+    /// Directory the server modules are written to; it must end in
+    /// `package`.
     output_server: String,
+    /// Directory the client modules are written to; it must end in
+    /// `package` or `<package>_client`.
     output_client: String,
+    /// Module prefix of the generated code, such as `api` for
+    /// `import api/types`.
     package: String,
     mode: GenerateMode,
+    /// Whether the generated server checks request values against the
+    /// schema's constraints before calling a handler.
     validate: Bool,
     include: Include,
     handler_layout: HandlerLayout,
@@ -57,121 +82,49 @@ pub type Include {
   Include(tags: List(String), paths: List(String))
 }
 
-/// The default include filter — matches everything. Equivalent to
-/// `oaspec.yaml` omitting the `include:` key entirely.
-pub fn empty_include() -> Include {
-  Include(tags: [], paths: [])
-}
-
-/// True when no filter is active (both tag and path lists empty).
-pub fn include_is_empty(include: Include) -> Bool {
-  list.is_empty(include.tags) && list.is_empty(include.paths)
-}
-
-/// Construct a new `Config` from its six required fields. Prefer
-/// `load/1` in production code; `new/6` is primarily for tests and
-/// ad-hoc tooling that assembles a config in memory. The include
-/// filter defaults to `empty_include()` (match everything) and the
-/// handler layout to `SingleFile`; use `with_include/2` and
-/// `with_handler_layout/2` to override.
-pub fn new(
-  input input: String,
-  output_server output_server: String,
-  output_client output_client: String,
-  package package: String,
-  mode mode: GenerateMode,
-  validate validate: Bool,
-) -> Config {
-  Config(
-    input:,
-    output_server:,
-    output_client:,
-    package:,
-    mode:,
-    validate:,
-    include: empty_include(),
-    handler_layout: SingleFile,
-  )
-}
-
-/// Path to the OpenAPI spec this config was built for.
-pub fn input(cfg: Config) -> String {
-  cfg.input
-}
-
-/// Output directory for server-side generated files.
-pub fn output_server(cfg: Config) -> String {
-  cfg.output_server
-}
-
-/// Output directory for client-side generated files.
-pub fn output_client(cfg: Config) -> String {
-  cfg.output_client
-}
-
-/// Gleam package name (module prefix) for generated files.
-pub fn package(cfg: Config) -> String {
-  cfg.package
-}
-
-/// Generation mode: server, client, or both.
-pub fn mode(cfg: Config) -> GenerateMode {
-  cfg.mode
-}
-
-/// Whether guard-based runtime validation is enabled.
-pub fn validate(cfg: Config) -> Bool {
-  cfg.validate
-}
-
-/// Operation include filter (tags / paths).
-pub fn include(cfg: Config) -> Include {
-  cfg.include
-}
-
-/// Layout of the user-owned server handler stubs.
-pub fn handler_layout(cfg: Config) -> HandlerLayout {
-  cfg.handler_layout
-}
-
-/// Generation mode.
+/// Which side of the API to generate.
 pub type GenerateMode {
+  /// Types, decoders, router and handler stubs for a server.
   Server
+  /// Types, decoders and a client.
   Client
+  /// Both of the above, into the two output directories.
   Both
 }
 
-/// Errors that can occur when loading config.
+/// A reason `load` or `load_all` could not build a `Config`.
 pub type ConfigError {
+  /// No file exists at the path.
   FileNotFound(path: String)
-  FileReadError(path: String, detail: String)
-  ParseError(detail: String)
+  /// The file exists but could not be read.
+  CannotReadFile(path: String, reason: simplifile.FileError)
+  /// The file is not YAML, or the YAML does not parse.
+  InvalidYaml(detail: String)
+  /// A required key, such as `input`, is missing.
   MissingField(field: String)
+  /// A key has a value oaspec does not accept. `field` is the key path,
+  /// such as `mode` or `targets[1].package`.
   InvalidValue(field: String, detail: String)
 }
 
-/// Parse a mode string into GenerateMode.
-pub fn parse_mode(mode: String) -> Result(GenerateMode, ConfigError) {
-  case mode {
-    "server" -> Ok(Server)
-    "client" -> Ok(Client)
-    "both" -> Ok(Both)
-    _ ->
-      Error(InvalidValue(
-        field: "mode",
-        detail: "must be one of: server, client, both",
-      ))
-  }
-}
-
-/// Load config from a YAML file.
+/// Reads an `oaspec.yaml` that declares one target.
 ///
-/// Returns the single target the YAML declares. When the YAML has a
-/// `targets:` array with more than one entry, this errors out with
-/// a multi-target hint — callers that need to handle the multi-
-/// target case must use `load_all/1` instead. For ordinary
-/// single-target configs (no `targets:` key, or a `targets:` array
-/// with exactly one entry) the result is the same as before.
+/// Paths are resolved against the current directory. A config with more
+/// than one entry under `targets:` is an `InvalidValue` error; use
+/// `load_all` for those.
+///
+/// ## Examples
+///
+/// ```gleam
+/// config.load("oaspec.yaml")
+/// // -> Ok(Config(input: "openapi.yaml", package: "api", ..))
+/// ```
+///
+/// ```gleam
+/// config.load("missing.yaml")
+/// // -> Error(FileNotFound("missing.yaml"))
+/// ```
+///
 pub fn load(path: String) -> Result(Config, ConfigError) {
   use targets <- result.try(load_all(path))
   case targets {
@@ -189,14 +142,27 @@ pub fn load(path: String) -> Result(Config, ConfigError) {
   }
 }
 
-/// Load every target declared by an oaspec.yaml. A config without a
-/// `targets:` key is treated as a single implicit target whose
-/// fields come from the top-level `package:`, `output:`, and
-/// `include:` keys (the legacy single-target shape). A config with
-/// a `targets:` sequence yields one `Config` per element, each
-/// carrying its own `package` / `output_*` / `include` while
-/// sharing the top-level `input:`, `mode:`, `validate:`, and
-/// `handlers:` values.
+/// Reads an `oaspec.yaml` and returns one `Config` per target.
+///
+/// Without a `targets:` key the file is a single target. With one, each
+/// entry gets its own `package`, `output` and `include`, and shares
+/// `input`, `mode`, `validate` and `handlers` from the top level. When
+/// `validate` is absent it defaults to `True` for `server` and `both`
+/// and to `False` for `client`; `mode` defaults to `both` and the output
+/// directory to `./src`.
+///
+/// ## Examples
+///
+/// ```gleam
+/// config.load_all("oaspec.yaml")
+/// // -> Ok([Config(package: "github", ..), Config(package: "stripe", ..)])
+/// ```
+///
+/// ```gleam
+/// config.load_all("oaspec.toml")
+/// // -> Error(InvalidYaml("config files must be YAML; got '.toml' extension. ..."))
+/// ```
+///
 pub fn load_all(path: String) -> Result(List(Config), ConfigError) {
   // Yay's Erlang FFI for `parse_string` returns a raw
   // `{yaml_error, Message, {Line, Col}}` tuple in some failure
@@ -209,7 +175,7 @@ pub fn load_all(path: String) -> Result(List(Config), ConfigError) {
   // return a friendly error before yay even sees the file.
   use _ <- result.try(case non_yaml_extension(path) {
     Some(ext) ->
-      Error(ParseError(
+      Error(InvalidYaml(
         detail: "config files must be YAML; got '."
         <> ext
         <> "' extension. Try renaming to '.yaml' (or '.yml').",
@@ -222,11 +188,7 @@ pub fn load_all(path: String) -> Result(List(Config), ConfigError) {
     |> result.map_error(fn(e) {
       case e {
         simplifile.Enoent -> FileNotFound(path:)
-        _ ->
-          FileReadError(
-            path:,
-            detail: "Failed to read file: " <> simplifile.describe_error(e),
-          )
+        _ -> CannotReadFile(path:, reason: e)
       }
     }),
   )
@@ -234,13 +196,13 @@ pub fn load_all(path: String) -> Result(List(Config), ConfigError) {
   use docs <- result.try(
     yay.parse_string(content)
     |> result.map_error(fn(e) {
-      ParseError(detail: "YAML parse error: " <> yaml_error_to_string(e))
+      InvalidYaml(detail: "YAML parse error: " <> yaml_error_to_string(e))
     }),
   )
 
   use doc <- result.try(case docs {
     [first, ..] -> Ok(first)
-    [] -> Error(ParseError(detail: "Empty YAML document"))
+    [] -> Error(InvalidYaml(detail: "Empty YAML document"))
   })
 
   let root = yay.document_root(doc)
@@ -431,12 +393,12 @@ fn parse_target_item(
   }
 }
 
-/// Parse the optional `include:` block. Returns `empty_include()`
+/// Parse the optional `include:` block. Returns an empty `Include`
 /// when the key is absent so the absence path stays cheap.
 fn parse_include(root: yay.Node) -> Result(Include, ConfigError) {
   case yay.select_sugar(from: root, selector: "include") {
     // nolint: thrown_away_error -- absent `include:` key is the documented default; the empty-include filter matches everything.
-    Error(_) -> Ok(empty_include())
+    Error(_) -> Ok(Include(tags: [], paths: []))
     Ok(include_node) -> {
       use tags <- result.try(extract_optional_string_list(
         include_node,
@@ -477,265 +439,27 @@ fn extract_optional_string_list(
   }
 }
 
-/// Apply CLI overrides to a config.
-pub fn with_mode(config: Config, mode: GenerateMode) -> Config {
-  Config(..config, mode:)
-}
-
-/// Apply validation mode override.
-pub fn with_validate(config: Config, validate: Bool) -> Config {
-  Config(..config, validate:)
-}
-
-/// Apply include-filter override. Useful for tests
-/// that build a `Config` in memory.
-pub fn with_include(config: Config, include: Include) -> Config {
-  Config(..config, include:)
-}
-
-/// Apply handler-layout override. Useful for tests and tooling that
-/// build a `Config` in memory.
-pub fn with_handler_layout(
-  config: Config,
-  handler_layout: HandlerLayout,
-) -> Config {
-  Config(..config, handler_layout:)
-}
-
-/// Apply output base directory override.
-/// Derives server/client paths as <dir>/<package> and <dir>/<package>_client
-/// in `Both` mode. In client-only mode the client path drops the suffix
-/// so generated `import <package>/...` lines resolve.
+/// Returns a one-line description of a config error.
 ///
-/// The suffix decision reads `config.mode` at call time, so apply
-/// `with_mode/2` before `with_output/2` if both overrides are needed —
-/// otherwise the client path will reflect the previous mode's default.
-pub fn with_output(config: Config, output: Option(String)) -> Config {
-  case output {
-    Some(dir) ->
-      Config(
-        ..config,
-        output_server: dir <> "/" <> config.package,
-        output_client: case config.mode {
-          Client -> dir <> "/" <> config.package
-          Server | Both -> dir <> "/" <> config.package <> "_client"
-        },
-      )
-    None -> config
-  }
-}
-
-/// Validate that output directory basenames are valid Gleam module names
-/// usable as import roots.
+/// ## Examples
 ///
-/// Server output must end in `<package>` so generated imports such as
-/// `import <package>/types` resolve. Client output may end in either
-/// `<package>` (when client lives in its own project) or `<package>_client`
-/// (the new default sinceboth server and client share the same
-/// `<dir>` and need distinct basenames). Anything else is a misconfigured
-/// package/output mismatch the user should be told about.
+/// ```gleam
+/// config.error_to_string(config.MissingField("input"))
+/// // -> "Missing required config field: input"
+/// ```
 ///
-/// Nested packages: a `package` containing `/` such as
-/// `dco_check/github` declares an N-segment Gleam module path. The path
-/// tail compared against the package is N segments deep — the LAST N
-/// segments of the output path must equal the package's segments. The
-/// `_client` suffix attaches to the LAST package segment only, matching
-/// the single-segment behaviour (`dco_check/github` →
-/// `dco_check/github_client`, never `dco_check_client/github`).
-pub fn validate_output_package_match(
-  config: Config,
-) -> Result(Nil, ConfigError) {
-  let pkg = package_segments(config.package)
-  case pkg {
-    // Empty package would make the rule vacuously true; bail out
-    // explicitly so a stray `package: ""` does not silently disable
-    // the validation.
-    [] -> Ok(Nil)
-    _ ->
-      case config.mode {
-        Server | Both ->
-          validate_path_tail_matches_package(
-            "output.server",
-            config.output_server,
-            pkg,
-            False,
-          )
-        Client -> Ok(Nil)
-      }
-      |> result.try(fn(_) {
-        case config.mode {
-          Client | Both ->
-            validate_path_tail_matches_package(
-              "output.client",
-              config.output_client,
-              pkg,
-              True,
-            )
-          Server -> Ok(Nil)
-        }
-      })
-  }
-}
-
-fn validate_path_tail_matches_package(
-  field: String,
-  path: String,
-  pkg: List(String),
-  allow_client_suffix: Bool,
-) -> Result(Nil, ConfigError) {
-  let tail = last_n(path_segments(path), list.length(pkg))
-  let pkg_with_suffix = suffix_last_segment(pkg, "_client")
-  case tail == pkg, allow_client_suffix && tail == pkg_with_suffix {
-    True, _ | _, True -> Ok(Nil)
-    False, False ->
-      Error(
-        InvalidValue(field: field, detail: case allow_client_suffix {
-          True ->
-            "Output path tail '"
-            <> string.join(tail, "/")
-            <> "' must match package '"
-            <> string.join(pkg, "/")
-            <> "' or '"
-            <> string.join(pkg_with_suffix, "/")
-            <> "'"
-          False ->
-            "Output path tail '"
-            <> string.join(tail, "/")
-            <> "' must match package '"
-            <> string.join(pkg, "/")
-            <> "'"
-        }),
-      )
-  }
-}
-
-/// Split a package name into its slash-separated segments. Empty
-/// entries are dropped so trailing slashes and accidental double
-/// slashes are tolerated. `"api"` → `["api"]`,
-/// `"dco_check/github"` → `["dco_check", "github"]`.
-fn package_segments(package: String) -> List(String) {
-  package
-  |> string.split("/")
-  |> list.filter(fn(s) { s != "" })
-}
-
-/// Split a filesystem path into its segments, dropping `.` and empty
-/// entries so `./src/foo/`, `src/foo`, and `./src//foo` all yield
-/// `["src", "foo"]`.
-fn path_segments(path: String) -> List(String) {
-  path
-  |> string.split("/")
-  |> list.filter(fn(s) { s != "" && s != "." })
-}
-
-/// Return the last `n` entries of `items`, preserving order. If
-/// `items` has fewer than `n` entries, returns `items` unchanged.
-fn last_n(items: List(a), n: Int) -> List(a) {
-  items |> list.reverse |> list.take(n) |> list.reverse
-}
-
-/// Drop the last `n` entries of `items`, preserving order. If
-/// `items` has fewer than `n` entries, returns `[]`.
-fn drop_last_n(items: List(a), n: Int) -> List(a) {
-  items |> list.reverse |> list.drop(n) |> list.reverse
-}
-
-/// Append `suffix` to the LAST segment of `segments`. Empty input
-/// stays empty. `["a","b"]` + `"_client"` → `["a","b_client"]`. Used
-/// to derive the client-output spelling for nested packages while
-/// keeping all but the leaf intact.
-fn suffix_last_segment(segments: List(String), suffix: String) -> List(String) {
-  case list.reverse(segments) {
-    [] -> []
-    [last, ..rest] -> list.reverse([last <> suffix, ..rest])
-  }
-}
-
-/// Validate the on-disk layout implied by `output.dir`.
-///
-/// When `output.dir` is something like `./src/gen`, generated
-/// code lands at `src/gen/<pkg>/types.gleam` whose Gleam module path is
-/// `gen/<pkg>/types` — but oaspec emits `import <pkg>/types`, which the
-/// compiler can't resolve. Catch this at config time so the user sees a
-/// clear error instead of a wall of `Unknown module ...` from
-/// `gleam build`.
-///
-/// Heuristic: in the path leading up to the package's top-level
-/// directory, `src` must either be the immediate parent (the "<dir>
-/// is the project's src/" pattern) or be absent (the standalone-
-/// Gleam-project pattern). `src` in any other position is the
-/// foot-gun.
-///
-/// Nested packages: for a package like `dco_check/github`
-/// the "package directory" is the last 2 path segments, and the rule
-/// applies to whatever sits BEFORE that pair. So `./src/dco_check/github`
-/// has parent chain `[src]` (immediate parent `src` → ok), and
-/// `./pkg/src/foo/dco_check/github` has parent chain
-/// `[pkg, src, foo]` (last is `foo` and `src` appears earlier → bad).
-pub fn validate_output_dir_layout(config: Config) -> Result(Nil, ConfigError) {
-  let segment_count = list.length(package_segments(config.package))
-  case segment_count {
-    // Empty package: nothing to peel; skip the layout rule entirely.
-    0 -> Ok(Nil)
-    _ ->
-      case config.mode {
-        Server | Both ->
-          case path_has_misplaced_src(config.output_server, segment_count) {
-            False -> Ok(Nil)
-            True ->
-              Error(misplaced_src_error("output.server", config.output_server))
-          }
-        Client -> Ok(Nil)
-      }
-      |> result.try(fn(_) {
-        case config.mode {
-          Client | Both ->
-            case path_has_misplaced_src(config.output_client, segment_count) {
-              False -> Ok(Nil)
-              True ->
-                Error(misplaced_src_error("output.client", config.output_client))
-            }
-          Server -> Ok(Nil)
-        }
-      })
-  }
-}
-
-fn misplaced_src_error(field: String, path: String) -> ConfigError {
-  InvalidValue(
-    field: field,
-    detail: "'"
-      <> path
-      <> "' contains a 'src' segment that is not the immediate parent of the package directory. Generated code lands inside src/.../<package>/, but oaspec emits imports as `<package>/...`, which the Gleam compiler resolves relative to src/, not relative to <dir>. Either set the path so that 'src' is the direct parent of the package directory (e.g. './src'), or move the output outside any 'src/' tree (e.g. './gen') and treat that directory as a standalone Gleam project root with its own gleam.toml.",
-  )
-}
-
-fn path_has_misplaced_src(path: String, package_segment_count: Int) -> Bool {
-  let parent_segments = drop_last_n(path_segments(path), package_segment_count)
-  let earlier_parents = drop_last_n(parent_segments, 1)
-  case list.last(parent_segments) {
-    // 'src' is the immediate parent of the package's top-level
-    // directory. Still a foot-gun if `src` ALSO appears earlier in
-    // the parent chain (e.g. `./src/foo/src/<pkg>`), because Gleam
-    // resolves imports against the outermost `src/` and the inner
-    // copy ends up baked into the module path.
-    Ok("src") -> list.any(earlier_parents, fn(s) { s == "src" })
-    // No parent segment, or some other parent: foot-gun iff 'src'
-    // appears anywhere in the parent chain.
-    _ -> list.any(parent_segments, fn(s) { s == "src" })
-  }
-}
-
-/// Convert config error to a human-readable string.
 pub fn error_to_string(error: ConfigError) -> String {
   case error {
     FileNotFound(path:) ->
       "Config file not found: "
       <> path
       <> " (paths resolve relative to the current working directory)"
-    FileReadError(path:, detail:) ->
-      "Error reading config file " <> path <> ": " <> detail
-    ParseError(detail:) -> "Config parse error: " <> detail
+    CannotReadFile(path:, reason:) ->
+      "Error reading config file "
+      <> path
+      <> ": Failed to read file: "
+      <> simplifile.describe_error(reason)
+    InvalidYaml(detail:) -> "Config parse error: " <> detail
     MissingField(field:) -> "Missing required config field: " <> field
     InvalidValue(field:, detail:) ->
       "Invalid value for " <> field <> ": " <> detail

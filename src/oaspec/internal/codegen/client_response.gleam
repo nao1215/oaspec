@@ -6,12 +6,11 @@ import oaspec/internal/util/content_type
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
 import oaspec/internal/util/string_extra as se
-import oaspec/openapi/schema.{
-  type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema, BooleanSchema, Inline,
-  IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema, Reference,
-  StringSchema,
+import oaspec/openapi.{
+  type Resolved, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
+  BooleanSchema, Inline, IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema,
+  Reference, StringSchema,
 }
-import oaspec/openapi/spec.{type Resolved}
 
 /// The `default` response branch must capture the actual
 /// runtime status code so the decoded `XxxResponseDefault(...)`
@@ -19,9 +18,9 @@ import oaspec/openapi/spec.{type Resolved}
 /// branches the case pattern is the matched status int (or guard
 /// expression for `2xx` ranges); the default branch binds `status`
 /// instead of using `_` so the variant constructor can pass it on.
-fn status_branch_pattern(status_code: http.HttpStatusCode) -> String {
+fn status_branch_pattern(status_code: openapi.HttpStatusCode) -> String {
   case status_code {
-    http.DefaultStatus -> "status"
+    openapi.DefaultStatus -> "status"
     _ -> http.status_code_to_int_pattern(status_code)
   }
 }
@@ -31,10 +30,10 @@ fn status_branch_pattern(status_code: http.HttpStatusCode) -> String {
 /// every other status the variant arity is unchanged.
 fn prepend_default_status(
   arg: String,
-  status_code: http.HttpStatusCode,
+  status_code: openapi.HttpStatusCode,
 ) -> String {
   case status_code {
-    http.DefaultStatus ->
+    openapi.DefaultStatus ->
       case arg {
         "" -> "status"
         _ -> "status, " <> arg
@@ -67,10 +66,10 @@ pub type HeadersRecord {
 /// the caller can short-circuit with `use`.
 pub fn generate_single_content_response(
   sb: se.StringBuilder,
-  status_code: http.HttpStatusCode,
+  status_code: openapi.HttpStatusCode,
   variant_name: String,
   media_type_name: String,
-  media_type: spec.MediaType,
+  media_type: openapi.MediaType,
   op_id: String,
   headers: Option(HeadersRecord),
 ) -> se.StringBuilder {
@@ -137,7 +136,7 @@ pub fn generate_single_content_response(
 /// and text/xml branches.
 fn body_branch(
   sb: se.StringBuilder,
-  status_code: http.HttpStatusCode,
+  status_code: openapi.HttpStatusCode,
   variant_name: String,
   body_arg: String,
   headers: Option(HeadersRecord),
@@ -168,7 +167,7 @@ fn body_branch(
 /// any required header forces a `use` chain.
 fn empty_body_branch(
   sb: se.StringBuilder,
-  status_code: http.HttpStatusCode,
+  status_code: openapi.HttpStatusCode,
   variant_name: String,
   headers: Option(HeadersRecord),
 ) -> se.StringBuilder {
@@ -205,7 +204,7 @@ fn empty_body_branch(
           <> " -> Ok("
           <> variant_name
           <> case status_code {
-          http.DefaultStatus -> "(status)"
+          openapi.DefaultStatus -> "(status)"
           _ -> ""
         }
           <> ")",
@@ -248,7 +247,7 @@ fn append_headers_arg(
 /// it collapses to a single `<status> -> Ok(<Variant>)` line.
 pub fn generate_empty_content_response(
   sb: se.StringBuilder,
-  status_code: http.HttpStatusCode,
+  status_code: openapi.HttpStatusCode,
   variant_name: String,
   headers: Option(HeadersRecord),
 ) -> se.StringBuilder {
@@ -260,7 +259,7 @@ pub fn generate_empty_content_response(
 /// extracts text and constructs the variant.
 pub fn generate_multi_content_response(
   sb: se.StringBuilder,
-  status_code: http.HttpStatusCode,
+  status_code: openapi.HttpStatusCode,
   variant_name: String,
   headers: Option(HeadersRecord),
 ) -> se.StringBuilder {
@@ -290,8 +289,8 @@ pub fn generate_multi_content_response(
 /// error in the generated module.
 pub fn build_headers_record(
   op_id: String,
-  status_code: http.HttpStatusCode,
-  response: spec.Response(Resolved),
+  status_code: openapi.HttpStatusCode,
+  response: openapi.Response(Resolved),
 ) -> Option(HeadersRecord) {
   let headers =
     response.headers
@@ -383,7 +382,7 @@ fn unreachable_header_panic(header_name: String, kind: String) -> String {
 fn header_field_extraction(
   field_name: String,
   header_name: String,
-  header: spec.Header,
+  header: openapi.Header,
 ) -> String {
   let lookup = header_lookup_expr(header_name)
   let kind = classify_header_schema(header.schema, header_name)
@@ -477,15 +476,15 @@ fn header_lookup_expr(header_name: String) -> String {
 /// references `text` (which the caller's surrounding `use` brings into
 /// scope from `text_body(resp.body)`).
 pub fn get_response_decode_expr(
-  schema_ref: schema.SchemaRef,
+  schema_ref: openapi.SchemaRef,
   op_id: String,
-  status_code: http.HttpStatusCode,
+  status_code: openapi.HttpStatusCode,
 ) -> String {
   case schema_ref {
     Reference(name:, ..) -> {
       "decode.decode_" <> naming.to_snake_case(name) <> "(text)"
     }
-    Inline(schema.ArraySchema(items:, ..)) ->
+    Inline(openapi.ArraySchema(items:, ..)) ->
       case items {
         Reference(name:, ..) -> {
           // Parse with `decode.list(<schema>_decoder())` directly
@@ -509,10 +508,10 @@ pub fn get_response_decode_expr(
           "json.parse(text, dyn_decode.list(" <> inner_decoder <> "))"
         }
       }
-    Inline(schema.StringSchema(..)) -> "json.parse(text, dyn_decode.string)"
-    Inline(schema.IntegerSchema(..)) -> "json.parse(text, dyn_decode.int)"
-    Inline(schema.NumberSchema(..)) -> "json.parse(text, dyn_decode.float)"
-    Inline(schema.BooleanSchema(..)) -> "json.parse(text, dyn_decode.bool)"
+    Inline(openapi.StringSchema(..)) -> "json.parse(text, dyn_decode.string)"
+    Inline(openapi.IntegerSchema(..)) -> "json.parse(text, dyn_decode.int)"
+    Inline(openapi.NumberSchema(..)) -> "json.parse(text, dyn_decode.float)"
+    Inline(openapi.BooleanSchema(..)) -> "json.parse(text, dyn_decode.bool)"
     Inline(_) -> {
       let fn_name =
         "decode_"
@@ -527,12 +526,12 @@ pub fn get_response_decode_expr(
 /// Convert an inline schema to a decoder expression for use in generated
 /// client code (uses `dyn_decode` to avoid colliding with the `decode`
 /// module that holds the spec-derived decoders).
-pub fn inline_schema_to_decoder(s: schema.SchemaObject) -> String {
+pub fn inline_schema_to_decoder(s: openapi.SchemaObject) -> String {
   case s {
-    schema.StringSchema(..) -> "dyn_decode.string"
-    schema.IntegerSchema(..) -> "dyn_decode.int"
-    schema.NumberSchema(..) -> "dyn_decode.float"
-    schema.BooleanSchema(..) -> "dyn_decode.bool"
+    openapi.StringSchema(..) -> "dyn_decode.string"
+    openapi.IntegerSchema(..) -> "dyn_decode.int"
+    openapi.NumberSchema(..) -> "dyn_decode.float"
+    openapi.BooleanSchema(..) -> "dyn_decode.bool"
     _ -> "dyn_decode.string"
   }
 }

@@ -8,7 +8,7 @@
 
 import gleam/int
 import oaspec/internal/openapi/parser_error
-import oaspec/openapi/diagnostic.{type Diagnostic, type SourceLoc}
+import oaspec/openapi.{type Diagnostic, type SourceLoc}
 import yay
 
 /// Build a `missing_field` diagnostic from a `yay.ExtractionError`,

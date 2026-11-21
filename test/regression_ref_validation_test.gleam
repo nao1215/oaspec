@@ -12,7 +12,7 @@
 ////   - the legacy `parse_string` keeps its lenient behaviour
 
 import gleeunit/should
-import oaspec/openapi/parser as oaspec_parser
+import oaspec/internal/openapi/parser as oaspec_parser
 
 pub fn parse_resolved_rejects_missing_ref_test() {
   let spec =

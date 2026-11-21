@@ -20,7 +20,6 @@
 //// ```
 
 import gleam/bit_array
-import gleam/http
 import gleam/http/request
 import gleam/http/response
 import gleam/httpc
@@ -124,7 +123,7 @@ fn build_http_request(
     request.to(url)
     |> result.map_error(fn(_) { transport.InvalidBaseUrl(detail: url) }),
   )
-  let parsed = request.set_method(parsed, convert_method(req.method))
+  let parsed = request.set_method(parsed, req.method)
   let parsed =
     list.fold(req.headers, parsed, fn(r, h) {
       let #(name, value) = h
@@ -157,21 +156,6 @@ fn encode_query(query: List(#(String, String))) -> String {
         })
       "?" <> string.join(parts, "&")
     }
-  }
-}
-
-fn convert_method(method: transport.Method) -> http.Method {
-  case method {
-    transport.Get -> http.Get
-    transport.Post -> http.Post
-    transport.Put -> http.Put
-    transport.Delete -> http.Delete
-    transport.Patch -> http.Patch
-    transport.Head -> http.Head
-    transport.Options -> http.Options
-    transport.Trace -> http.Trace
-    transport.Connect -> http.Connect
-    transport.Other(s) -> http.Other(s)
   }
 }
 

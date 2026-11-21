@@ -10,24 +10,24 @@ import oaspec/internal/codegen/operation_ir
 import oaspec/internal/codegen/schema_dispatch
 import oaspec/internal/codegen/schema_utils
 import oaspec/internal/openapi/dedup
+import oaspec/internal/openapi/spec
 import oaspec/internal/util/content_type
 import oaspec/internal/util/naming
 import oaspec/internal/util/string_extra as se
-import oaspec/openapi/schema.{Inline, Reference}
-import oaspec/openapi/spec.{type Resolved, ParameterSchema, Value}
+import oaspec/openapi.{type Resolved, Inline, ParameterSchema, Reference, Value}
 
 /// Map from a parameter's `(wire name, location)` pair to its deduped Gleam
 /// field name within an operation. Used to keep type emission, server
 /// dispatch, and client builders in sync when two parameters in different
 /// locations would otherwise collide on the same snake_case field.
 pub type ParamFieldNames =
-  Dict(#(String, spec.ParameterIn), String)
+  Dict(#(String, openapi.ParameterIn), String)
 
 /// Build a `(name, in)` → deduped-field-name map for a single operation.
 /// The dedup order matches the spec's parameter order, so all codegen
 /// callers that use this map agree on the final field names.
 pub fn build_param_field_names(
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
 ) -> ParamFieldNames {
   let resolved =
     list.filter_map(operation.parameters, fn(r) {
@@ -50,7 +50,7 @@ pub fn build_param_field_names(
 /// if a caller ever passes a mismatched map.
 pub fn field_name_for(
   map: ParamFieldNames,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
 ) -> String {
   case dict.get(map, #(param.name, param.in_)) {
     Ok(name) -> name
@@ -65,11 +65,11 @@ pub fn field_name_for(
 /// body (where the flat API also takes a `content_type` argument that the
 /// request type does not carry).
 pub fn build_request_object_call_args(
-  path_params: List(spec.Parameter(Resolved)),
-  query_params: List(spec.Parameter(Resolved)),
-  header_params: List(spec.Parameter(Resolved)),
-  cookie_params: List(spec.Parameter(Resolved)),
-  operation: spec.Operation(Resolved),
+  path_params: List(openapi.Parameter(Resolved)),
+  query_params: List(openapi.Parameter(Resolved)),
+  header_params: List(openapi.Parameter(Resolved)),
+  cookie_params: List(openapi.Parameter(Resolved)),
+  operation: openapi.Operation(Resolved),
 ) -> Option(String) {
   let all_params =
     list.append(path_params, query_params)
@@ -103,11 +103,11 @@ pub fn build_request_object_call_args(
 
 /// Build parameter list for function signature.
 pub fn build_param_list(
-  path_params: List(spec.Parameter(Resolved)),
-  query_params: List(spec.Parameter(Resolved)),
-  header_params: List(spec.Parameter(Resolved)),
-  cookie_params: List(spec.Parameter(Resolved)),
-  operation: spec.Operation(Resolved),
+  path_params: List(openapi.Parameter(Resolved)),
+  query_params: List(openapi.Parameter(Resolved)),
+  header_params: List(openapi.Parameter(Resolved)),
+  cookie_params: List(openapi.Parameter(Resolved)),
+  operation: openapi.Operation(Resolved),
   op_id: String,
   ctx: Context,
 ) -> String {
@@ -148,7 +148,7 @@ pub fn build_param_list(
 }
 
 /// Convert a parameter to its Gleam type string.
-fn param_to_type(param: spec.Parameter(Resolved), ctx: Context) -> String {
+fn param_to_type(param: openapi.Parameter(Resolved), ctx: Context) -> String {
   let base =
     schema_dispatch.resolve_param_type(spec.parameter_schema(param), ctx)
   case param.required {
@@ -159,12 +159,12 @@ fn param_to_type(param: spec.Parameter(Resolved), ctx: Context) -> String {
 
 /// Convert a parameter value to its String representation for URL/header use.
 pub fn param_to_string_expr(
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   param_name: String,
   ctx: Context,
 ) -> String {
   case param.payload {
-    ParameterSchema(Inline(schema.ArraySchema(items:, ..))) -> {
+    ParameterSchema(Inline(openapi.ArraySchema(items:, ..))) -> {
       let item_to_str = schema_dispatch.to_string_fn(items, ctx)
       "string.join(list.map("
       <> param_name
@@ -176,7 +176,7 @@ pub fn param_to_string_expr(
     ParameterSchema(Reference(..) as schema_ref) -> {
       // Resolve the $ref to determine the actual schema type
       case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(schema.ArraySchema(items:, ..)) -> {
+        Ok(openapi.ArraySchema(items:, ..)) -> {
           let item_to_str = schema_dispatch.to_string_fn(items, ctx)
           "string.join(list.map("
           <> param_name
@@ -194,18 +194,18 @@ pub fn param_to_string_expr(
 
 /// Convert an optional param value (bound to `v`) to string.
 pub fn to_str_for_optional_value(
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> String {
   case param.payload {
-    ParameterSchema(Inline(schema.ArraySchema(items:, ..))) -> {
+    ParameterSchema(Inline(openapi.ArraySchema(items:, ..))) -> {
       let item_to_str = schema_dispatch.to_string_fn(items, ctx)
       "string.join(list.map(v, " <> item_to_str <> "), \",\")"
     }
     ParameterSchema(Inline(s)) -> schema_dispatch.to_string_expr(s, "v")
     ParameterSchema(Reference(..) as schema_ref) -> {
       case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(schema.ArraySchema(items:, ..)) -> {
+        Ok(openapi.ArraySchema(items:, ..)) -> {
           let item_to_str = schema_dispatch.to_string_fn(items, ctx)
           "string.join(list.map(v, " <> item_to_str <> "), \",\")"
         }
@@ -224,7 +224,10 @@ pub fn to_str_for_optional_value(
 /// `BitArray`), and forcing it through `String` means arbitrary
 /// binary payloads cannot round-trip. The `String` fallback for
 /// every other content type stays unchanged.
-pub fn get_body_type(rb: spec.RequestBody(Resolved), op_id: String) -> String {
+pub fn get_body_type(
+  rb: openapi.RequestBody(Resolved),
+  op_id: String,
+) -> String {
   let content_entries = ir_build.sorted_entries(rb.content)
   case content_entries {
     // Multiple content types: use pre-serialized String
@@ -237,10 +240,10 @@ pub fn get_body_type(rb: spec.RequestBody(Resolved), op_id: String) -> String {
           case media_type.schema {
             Some(Reference(name:, ..)) ->
               "types." <> naming.schema_to_type_name(name)
-            Some(Inline(schema.StringSchema(..))) -> "String"
-            Some(Inline(schema.IntegerSchema(..))) -> "Int"
-            Some(Inline(schema.NumberSchema(..))) -> "Float"
-            Some(Inline(schema.BooleanSchema(..))) -> "Bool"
+            Some(Inline(openapi.StringSchema(..))) -> "String"
+            Some(Inline(openapi.IntegerSchema(..))) -> "Int"
+            Some(Inline(openapi.NumberSchema(..))) -> "Float"
+            Some(Inline(openapi.BooleanSchema(..))) -> "Bool"
             Some(Inline(_)) ->
               "types." <> naming.schema_to_type_name(op_id) <> "RequestBody"
             _ -> "String"
@@ -252,7 +255,7 @@ pub fn get_body_type(rb: spec.RequestBody(Resolved), op_id: String) -> String {
 
 /// Get the encode expression for a request body.
 pub fn get_body_encode_expr(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   op_id: String,
 ) -> String {
   let content_entries = ir_build.sorted_entries(rb.content)
@@ -262,13 +265,13 @@ pub fn get_body_encode_expr(
         Some(Reference(name:, ..)) -> {
           "encode.encode_" <> naming.to_snake_case(name) <> "(body)"
         }
-        Some(Inline(schema.StringSchema(..))) ->
+        Some(Inline(openapi.StringSchema(..))) ->
           "json.to_string(json.string(body))"
-        Some(Inline(schema.IntegerSchema(..))) ->
+        Some(Inline(openapi.IntegerSchema(..))) ->
           "json.to_string(json.int(body))"
-        Some(Inline(schema.NumberSchema(..))) ->
+        Some(Inline(openapi.NumberSchema(..))) ->
           "json.to_string(json.float(body))"
-        Some(Inline(schema.BooleanSchema(..))) ->
+        Some(Inline(openapi.BooleanSchema(..))) ->
           "json.to_string(json.bool(body))"
         Some(Inline(_)) -> {
           let fn_name =
@@ -284,7 +287,7 @@ pub fn get_body_encode_expr(
 /// Generate multipart/form-data body encoding in the client function.
 pub fn generate_multipart_body(
   sb: se.StringBuilder,
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   op_id: String,
   ctx: Context,
 ) -> se.StringBuilder {
@@ -296,13 +299,13 @@ pub fn generate_multipart_body(
   let #(properties, required_fields) = case content_entries {
     [#(_, media_type), ..] ->
       case media_type.schema {
-        Some(Inline(schema.ObjectSchema(properties:, required:, ..))) -> #(
+        Some(Inline(openapi.ObjectSchema(properties:, required:, ..))) -> #(
           ir_build.sorted_entries(properties),
           required,
         )
         Some(Reference(..) as schema_ref) ->
           case context.resolve_schema_ref(schema_ref, ctx) {
-            Ok(schema.ObjectSchema(properties:, required:, ..)) -> {
+            Ok(openapi.ObjectSchema(properties:, required:, ..)) -> {
               #(ir_build.sorted_entries(properties), required)
             }
             _ -> #([], [])
@@ -373,11 +376,11 @@ pub fn generate_multipart_body(
 }
 
 pub fn multipart_field_is_binary(
-  field_schema: schema.SchemaRef,
+  field_schema: openapi.SchemaRef,
   ctx: Context,
 ) -> Bool {
   case context.resolve_schema_ref(field_schema, ctx) {
-    Ok(schema.StringSchema(format: Some("binary"), ..)) -> True
+    Ok(openapi.StringSchema(format: Some("binary"), ..)) -> True
     _ -> False
   }
 }
@@ -389,12 +392,12 @@ pub fn multipart_field_is_binary(
 type MultipartFieldKind {
   MultipartScalarKind
   MultipartBinaryKind
-  MultipartArrayKind(items: schema.SchemaRef)
+  MultipartArrayKind(items: openapi.SchemaRef)
   MultipartObjectKind
 }
 
 fn multipart_field_kind(
-  field_schema: schema.SchemaRef,
+  field_schema: openapi.SchemaRef,
   ctx: Context,
 ) -> MultipartFieldKind {
   use <- bool.guard(
@@ -402,12 +405,12 @@ fn multipart_field_kind(
     MultipartBinaryKind,
   )
   case field_schema {
-    Inline(schema.ArraySchema(items:, ..)) -> MultipartArrayKind(items)
-    Inline(schema.ObjectSchema(..)) -> MultipartObjectKind
+    Inline(openapi.ArraySchema(items:, ..)) -> MultipartArrayKind(items)
+    Inline(openapi.ObjectSchema(..)) -> MultipartObjectKind
     Reference(..) as schema_ref ->
       case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(schema.ArraySchema(items:, ..)) -> MultipartArrayKind(items)
-        Ok(schema.ObjectSchema(..)) -> MultipartObjectKind
+        Ok(openapi.ArraySchema(items:, ..)) -> MultipartArrayKind(items)
+        Ok(openapi.ObjectSchema(..)) -> MultipartObjectKind
         _ -> MultipartScalarKind
       }
     _ -> MultipartScalarKind
@@ -487,7 +490,7 @@ fn emit_multipart_array_field(
   sb: se.StringBuilder,
   field_name: String,
   gleam_field: String,
-  items: schema.SchemaRef,
+  items: openapi.SchemaRef,
   is_required: Bool,
   ctx: Context,
 ) -> se.StringBuilder {
@@ -530,7 +533,7 @@ fn emit_multipart_object_field(
   sb: se.StringBuilder,
   field_name: String,
   gleam_field: String,
-  field_schema: schema.SchemaRef,
+  field_schema: openapi.SchemaRef,
   is_required: Bool,
 ) -> se.StringBuilder {
   let part_header =
@@ -568,7 +571,7 @@ fn emit_multipart_object_field(
 }
 
 fn multipart_object_encode_expr(
-  field_schema: schema.SchemaRef,
+  field_schema: openapi.SchemaRef,
   input_expr: String,
 ) -> String {
   case field_schema {
@@ -593,7 +596,7 @@ fn multipart_object_encode_expr(
 }
 
 fn multipart_field_to_string_fn(
-  field_schema: schema.SchemaRef,
+  field_schema: openapi.SchemaRef,
   ctx: Context,
 ) -> String {
   let result = schema_dispatch.to_string_fn(field_schema, ctx)
@@ -611,13 +614,13 @@ fn multipart_field_to_string_fn(
 /// be passed straight to `uri.percent_encode` and the Gleam compiler
 /// would complain (`Expected: String, Found: types.<EnumType>`).
 fn form_field_to_string_fn(
-  field_schema: schema.SchemaRef,
+  field_schema: openapi.SchemaRef,
   field_name: String,
   parent_name: String,
   ctx: Context,
 ) -> String {
   case field_schema {
-    Inline(schema.StringSchema(enum_values:, ..)) if enum_values != [] -> {
+    Inline(openapi.StringSchema(enum_values:, ..)) if enum_values != [] -> {
       let enum_type_name =
         ir_build.inline_enum_type_name_for(parent_name, field_name, ctx)
       "encode.encode_" <> naming.to_snake_case(enum_type_name) <> "_to_string"
@@ -629,11 +632,11 @@ fn form_field_to_string_fn(
 /// Convert an array field's items to a string expression for form-urlencoded encoding.
 /// Returns an expression that converts `item` to a String.
 fn form_array_item_to_string(
-  field_schema: schema.SchemaRef,
+  field_schema: openapi.SchemaRef,
   ctx: Context,
 ) -> String {
   case field_schema {
-    Inline(schema.ArraySchema(items:, ..)) ->
+    Inline(openapi.ArraySchema(items:, ..)) ->
       schema_dispatch.schema_ref_to_string_expr(items, "item", ctx)
     _ -> "item"
   }
@@ -643,22 +646,22 @@ fn form_array_item_to_string(
 /// resolution. Used to dispatch nested-form encoding into the
 /// recursive bracket-key path.
 fn schema_resolves_to_object(
-  schema_ref: schema.SchemaRef,
+  schema_ref: openapi.SchemaRef,
   ctx: Context,
 ) -> Bool {
   case context.resolve_schema_ref(schema_ref, ctx) {
-    Ok(schema.ObjectSchema(..)) -> True
+    Ok(openapi.ObjectSchema(..)) -> True
     _ -> False
   }
 }
 
 /// True when `schema_ref` resolves to an `ArraySchema`.
 fn schema_resolves_to_array(
-  schema_ref: schema.SchemaRef,
+  schema_ref: openapi.SchemaRef,
   ctx: Context,
 ) -> Bool {
   case context.resolve_schema_ref(schema_ref, ctx) {
-    Ok(schema.ArraySchema(..)) -> True
+    Ok(openapi.ArraySchema(..)) -> True
     _ -> False
   }
 }
@@ -683,7 +686,7 @@ fn generate_form_indexed_array(
   sb: se.StringBuilder,
   key_prefix_quoted: String,
   accessor: String,
-  items_schema: schema.SchemaRef,
+  items_schema: openapi.SchemaRef,
   is_required: Bool,
   indent_base: Int,
   parts_var: String,
@@ -728,7 +731,7 @@ fn emit_array_fold(
   sb: se.StringBuilder,
   key_prefix_quoted: String,
   list_expr: String,
-  items_schema: schema.SchemaRef,
+  items_schema: openapi.SchemaRef,
   indent_base: Int,
   parts_var: String,
   parent_path: String,
@@ -844,7 +847,7 @@ fn emit_form_object_recurse(
   sb: se.StringBuilder,
   key_prefix_quoted: String,
   accessor: String,
-  schema_ref: schema.SchemaRef,
+  schema_ref: openapi.SchemaRef,
   indent_base: Int,
   parts_var: String,
   parent_path: String,
@@ -852,7 +855,7 @@ fn emit_form_object_recurse(
 ) -> se.StringBuilder {
   let resolved = context.resolve_schema_ref(schema_ref, ctx)
   case resolved {
-    Ok(schema.ObjectSchema(properties:, required:, ..)) -> {
+    Ok(openapi.ObjectSchema(properties:, required:, ..)) -> {
       let props = ir_build.sorted_entries(properties)
       list.fold(props, sb, fn(sb, entry) {
         let #(prop_name, prop_ref) = entry
@@ -914,7 +917,7 @@ fn emit_form_field(
   sb: se.StringBuilder,
   key_prefix_quoted: String,
   accessor: String,
-  schema_ref: schema.SchemaRef,
+  schema_ref: openapi.SchemaRef,
   is_required: Bool,
   indent_base: Int,
   parts_var: String,
@@ -1038,7 +1041,7 @@ fn generate_form_nested_object(
   sb: se.StringBuilder,
   field_name: String,
   gleam_field: String,
-  field_schema: schema.SchemaRef,
+  field_schema: openapi.SchemaRef,
   is_required: Bool,
   parent_path: String,
   ctx: Context,
@@ -1050,7 +1053,7 @@ fn generate_form_nested_object(
   let nested_parent = parent_path <> "_" <> gleam_field
   let resolved = context.resolve_schema_ref(field_schema, ctx)
   let sub_props = case resolved {
-    Ok(schema.ObjectSchema(properties:, required:, ..)) -> #(
+    Ok(openapi.ObjectSchema(properties:, required:, ..)) -> #(
       ir_build.sorted_entries(properties),
       required,
     )
@@ -1085,11 +1088,11 @@ fn generate_form_nested_object(
       let sub_required = list.contains(required_fields, sub_name)
       // Check if sub-property is an object — need recursive bracket encoding
       let is_sub_object = case context.resolve_schema_ref(sub_ref, ctx) {
-        Ok(schema.ObjectSchema(..)) -> True
+        Ok(openapi.ObjectSchema(..)) -> True
         _ -> False
       }
       let is_sub_array = case context.resolve_schema_ref(sub_ref, ctx) {
-        Ok(schema.ArraySchema(..)) -> True
+        Ok(openapi.ArraySchema(..)) -> True
         _ -> False
       }
       let sub_constant =
@@ -1231,7 +1234,7 @@ fn generate_form_bracket_fields(
   sb: se.StringBuilder,
   key_prefix: String,
   accessor_prefix: String,
-  field_schema: schema.SchemaRef,
+  field_schema: openapi.SchemaRef,
   is_required: Bool,
   indent_base: Int,
   parts_var: String,
@@ -1290,7 +1293,7 @@ fn emit_bracket_props(
   sb: se.StringBuilder,
   key_prefix: String,
   accessor_prefix: String,
-  field_schema: schema.SchemaRef,
+  field_schema: openapi.SchemaRef,
   indent_base: Int,
   parts_var: String,
   parent_path: String,
@@ -1298,7 +1301,7 @@ fn emit_bracket_props(
 ) -> se.StringBuilder {
   let resolved = context.resolve_schema_ref(field_schema, ctx)
   case resolved {
-    Ok(schema.ObjectSchema(properties:, required:, ..)) -> {
+    Ok(openapi.ObjectSchema(properties:, required:, ..)) -> {
       let props = ir_build.sorted_entries(properties)
       list.fold(props, sb, fn(sb, entry) {
         let #(prop_name, prop_ref) = entry
@@ -1306,11 +1309,11 @@ fn emit_bracket_props(
         let prop_accessor = accessor_prefix <> "." <> prop_field
         let prop_required = list.contains(required, prop_name)
         let is_obj = case context.resolve_schema_ref(prop_ref, ctx) {
-          Ok(schema.ObjectSchema(..)) -> True
+          Ok(openapi.ObjectSchema(..)) -> True
           _ -> False
         }
         let is_arr = case context.resolve_schema_ref(prop_ref, ctx) {
-          Ok(schema.ArraySchema(..)) -> True
+          Ok(openapi.ArraySchema(..)) -> True
           _ -> False
         }
         let nested_parent = parent_path <> "_" <> prop_field
@@ -1433,15 +1436,15 @@ fn emit_bracket_props(
 /// single `json.array(...)` call without round-tripping through the
 /// hoist contract.
 fn form_field_json_encoder_expr(
-  ref: schema.SchemaRef,
+  ref: openapi.SchemaRef,
   value: String,
 ) -> String {
   case ref {
-    Inline(schema.StringSchema(..)) -> "json.string(" <> value <> ")"
-    Inline(schema.IntegerSchema(..)) -> "json.int(" <> value <> ")"
-    Inline(schema.NumberSchema(..)) -> "json.float(" <> value <> ")"
-    Inline(schema.BooleanSchema(..)) -> "json.bool(" <> value <> ")"
-    Inline(schema.ArraySchema(items:, ..)) ->
+    Inline(openapi.StringSchema(..)) -> "json.string(" <> value <> ")"
+    Inline(openapi.IntegerSchema(..)) -> "json.int(" <> value <> ")"
+    Inline(openapi.NumberSchema(..)) -> "json.float(" <> value <> ")"
+    Inline(openapi.BooleanSchema(..)) -> "json.bool(" <> value <> ")"
+    Inline(openapi.ArraySchema(items:, ..)) ->
       "json.array(" <> value <> ", " <> form_field_json_encoder_fn(items) <> ")"
     Reference(name:, ..) ->
       // The generated client lives in a different module from the
@@ -1454,13 +1457,13 @@ fn form_field_json_encoder_expr(
   }
 }
 
-fn form_field_json_encoder_fn(ref: schema.SchemaRef) -> String {
+fn form_field_json_encoder_fn(ref: openapi.SchemaRef) -> String {
   case ref {
-    Inline(schema.StringSchema(..)) -> "json.string"
-    Inline(schema.IntegerSchema(..)) -> "json.int"
-    Inline(schema.NumberSchema(..)) -> "json.float"
-    Inline(schema.BooleanSchema(..)) -> "json.bool"
-    Inline(schema.ArraySchema(items:, ..)) ->
+    Inline(openapi.StringSchema(..)) -> "json.string"
+    Inline(openapi.IntegerSchema(..)) -> "json.int"
+    Inline(openapi.NumberSchema(..)) -> "json.float"
+    Inline(openapi.BooleanSchema(..)) -> "json.bool"
+    Inline(openapi.ArraySchema(items:, ..)) ->
       "fn(xs) { json.array(xs, " <> form_field_json_encoder_fn(items) <> ") }"
     Reference(name:, ..) ->
       "encode.encode_" <> naming.to_snake_case(name) <> "_json"
@@ -1484,14 +1487,14 @@ fn form_field_json_encoder_fn(ref: schema.SchemaRef) -> String {
 /// Stripe's `documents` (object → properties → array → items → `anyOf`)
 /// would slip back into the bracket-index emitter and panic in
 /// `to_string_fn` after hoist.
-fn field_resolves_to_composite(ref: schema.SchemaRef, ctx: Context) -> Bool {
+fn field_resolves_to_composite(ref: openapi.SchemaRef, ctx: Context) -> Bool {
   case context.resolve_schema_ref(ref, ctx) |> option.from_result {
-    Some(schema.OneOfSchema(..))
-    | Some(schema.AnyOfSchema(..))
-    | Some(schema.AllOfSchema(..)) -> True
-    Some(schema.ArraySchema(items:, ..)) ->
+    Some(openapi.OneOfSchema(..))
+    | Some(openapi.AnyOfSchema(..))
+    | Some(openapi.AllOfSchema(..)) -> True
+    Some(openapi.ArraySchema(items:, ..)) ->
       field_resolves_to_composite(items, ctx)
-    Some(schema.ObjectSchema(properties:, ..)) ->
+    Some(openapi.ObjectSchema(properties:, ..)) ->
       dict.to_list(properties)
       |> list.any(fn(entry) {
         let #(_, child_schema) = entry
@@ -1506,11 +1509,11 @@ fn field_resolves_to_composite(ref: schema.SchemaRef, ctx: Context) -> Bool {
 /// `application/json; charset=utf-8`). Per OAS 3.x this triggers the
 /// per-property JSON serialisation escape hatch.
 fn form_encoding_is_json(
-  encoding: Dict(String, spec.Encoding),
+  encoding: Dict(String, openapi.Encoding),
   field_name: String,
 ) -> Bool {
   case dict.get(encoding, field_name) {
-    Ok(spec.Encoding(content_type: Some(ct), ..)) ->
+    Ok(openapi.Encoding(content_type: Some(ct), ..)) ->
       case content_type.from_string(ct) {
         content_type.ApplicationJson -> True
         _ -> False
@@ -1522,7 +1525,7 @@ fn form_encoding_is_json(
 /// Generate application/x-www-form-urlencoded body encoding in the client function.
 pub fn generate_form_urlencoded_body(
   sb: se.StringBuilder,
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   op_id: String,
   ctx: Context,
 ) -> se.StringBuilder {
@@ -1534,14 +1537,14 @@ pub fn generate_form_urlencoded_body(
   let #(properties, required_fields, encoding) = case content_entries {
     [#(_, media_type), ..] ->
       case media_type.schema {
-        Some(Inline(schema.ObjectSchema(properties:, required:, ..))) -> #(
+        Some(Inline(openapi.ObjectSchema(properties:, required:, ..))) -> #(
           ir_build.sorted_entries(properties),
           required,
           media_type.encoding,
         )
         Some(Reference(..) as schema_ref) ->
           case context.resolve_schema_ref(schema_ref, ctx) {
-            Ok(schema.ObjectSchema(properties:, required:, ..)) -> {
+            Ok(openapi.ObjectSchema(properties:, required:, ..)) -> {
               #(
                 ir_build.sorted_entries(properties),
                 required,
@@ -1602,11 +1605,11 @@ pub fn generate_form_urlencoded_body(
         },
       )
       let is_array = case context.resolve_schema_ref(field_schema, ctx) {
-        Ok(schema.ArraySchema(..)) -> True
+        Ok(openapi.ArraySchema(..)) -> True
         _ -> False
       }
       let is_object = case context.resolve_schema_ref(field_schema, ctx) {
-        Ok(schema.ObjectSchema(..)) -> True
+        Ok(openapi.ObjectSchema(..)) -> True
         _ -> False
       }
       // Top-level array of objects (Stripe `marketing_features` shape)
@@ -1803,7 +1806,7 @@ pub fn generate_form_urlencoded_body(
 /// Check if a parameter is an array with explode behavior.
 /// OpenAPI default: style: form has explode: true by default.
 pub fn is_exploded_array_param(
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> Bool {
   let is_array =
@@ -1820,7 +1823,7 @@ pub fn is_exploded_array_param(
 /// (pipeDelimited or spaceDelimited). Returns None for everything else
 /// including form arrays — we keep that on the existing path.
 pub fn is_delimited_array_param(
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> option.Option(String) {
   let is_array =
@@ -1831,8 +1834,8 @@ pub fn is_delimited_array_param(
   // `explode` yields the delimited path, matching OpenAPI semantics.
   let is_non_exploded = !operation_ir.effective_explode(param)
   case is_array, is_non_exploded, param.style {
-    True, True, option.Some(spec.PipeDelimitedStyle)
-    | True, True, option.Some(spec.SpaceDelimitedStyle)
+    True, True, option.Some(openapi.PipeDelimitedStyle)
+    | True, True, option.Some(openapi.SpaceDelimitedStyle)
     -> option.Some(operation_ir.delimiter_for_style(param.style))
     _, _, _ -> option.None
   }
@@ -1842,7 +1845,7 @@ pub fn is_delimited_array_param(
 /// tags=a|b|c (pipeDelimited) or tags=a%20b%20c (spaceDelimited).
 pub fn generate_delimited_array_query_param(
   sb: se.StringBuilder,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   param_name: String,
   joiner: String,
   ctx: Context,
@@ -1851,7 +1854,7 @@ pub fn generate_delimited_array_query_param(
     spec.parameter_schema(param)
     |> option.map(context.resolve_schema_ref(_, ctx))
   {
-    Some(Ok(schema.ArraySchema(items:, ..))) ->
+    Some(Ok(openapi.ArraySchema(items:, ..))) ->
       schema_dispatch.to_string_fn(items, ctx)
     _ -> "fn(x) { x }"
   }
@@ -1896,7 +1899,7 @@ pub fn generate_delimited_array_query_param(
 /// Generate exploded array query parameter: tags=a&tags=b
 pub fn generate_exploded_array_query_param(
   sb: se.StringBuilder,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   param_name: String,
   ctx: Context,
 ) -> se.StringBuilder {
@@ -1952,9 +1955,9 @@ pub fn generate_exploded_array_query_param(
 /// in `to_string_fn` on non-primitive items.
 fn emit_json_array_query_param(
   sb: se.StringBuilder,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   param_name: String,
-  items: schema.SchemaRef,
+  items: openapi.SchemaRef,
 ) -> se.StringBuilder {
   let item_encoder = case items {
     Reference(name:, ..) ->

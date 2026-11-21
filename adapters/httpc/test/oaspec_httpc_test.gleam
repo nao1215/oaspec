@@ -1,3 +1,4 @@
+import gleam/http
 import gleam/int
 import gleam/option.{Some}
 import gleeunit
@@ -17,7 +18,7 @@ fn closed_port() -> Int
 
 fn get(port: Int) -> transport.Request {
   transport.Request(
-    method: transport.Get,
+    method: http.Get,
     base_url: Some("http://127.0.0.1:" <> int.to_string(port)),
     path: "/",
     query: [],

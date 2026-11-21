@@ -2,17 +2,16 @@ import gleam/dict
 import gleam/list
 import gleam/option.{Some}
 import gleam/string
-import oaspec/config
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/guards
 import oaspec/internal/codegen/import_analysis
 import oaspec/internal/codegen/ir_build
 import oaspec/internal/codegen/operation_ir
 import oaspec/internal/codegen/server_request_decode as decode_helpers
+import oaspec/internal/openapi/spec
 import oaspec/internal/util/content_type
 import oaspec/internal/util/naming
-import oaspec/openapi/schema.{Inline, Reference}
-import oaspec/openapi/spec.{type Resolved, Value}
+import oaspec/openapi.{type Resolved, Inline, Reference, Value}
 
 /// Structured requirements for router generation.
 pub type RouterRequirements {
@@ -207,13 +206,13 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
         case ref_p {
           Value(p) ->
             case p.in_ {
-              spec.InCookie -> True
-              spec.InQuery | spec.InHeader ->
+              openapi.InCookie -> True
+              openapi.InQuery | openapi.InHeader ->
                 decode_helpers.query_schema_needs_string(spec.parameter_schema(
                   p,
                 ))
                 || decode_helpers.deep_object_param_needs_string(p, ctx)
-              spec.InPath ->
+              openapi.InPath ->
                 decode_helpers.query_schema_needs_string(spec.parameter_schema(
                   p,
                 ))
@@ -233,7 +232,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
       let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
-          Value(p) -> p.in_ == spec.InCookie
+          Value(p) -> p.in_ == openapi.InCookie
           _ -> False
         }
       })
@@ -251,8 +250,8 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
         case ref_p {
           Value(p) ->
             case p.in_, spec.parameter_schema(p) {
-              spec.InQuery, Some(Inline(schema.ArraySchema(..))) -> True
-              spec.InHeader, Some(Inline(schema.ArraySchema(..))) -> True
+              openapi.InQuery, Some(Inline(openapi.ArraySchema(..))) -> True
+              openapi.InHeader, Some(Inline(openapi.ArraySchema(..))) -> True
               _, _ -> False
             }
           _ -> False
@@ -316,7 +315,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
     list.any(json_response_schemas, fn(schema_ref) {
       case schema_ref {
         Reference(..) -> True
-        Inline(schema.ArraySchema(items: Reference(..), ..)) -> True
+        Inline(openapi.ArraySchema(items: Reference(..), ..)) -> True
         _ -> False
       }
     })
@@ -339,7 +338,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
       let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
-          Value(p) -> p.in_ == spec.InQuery
+          Value(p) -> p.in_ == openapi.InQuery
           _ -> False
         }
       })
@@ -351,7 +350,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
       let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
-          Value(p) -> p.in_ == spec.InHeader || p.in_ == spec.InCookie
+          Value(p) -> p.in_ == openapi.InHeader || p.in_ == openapi.InCookie
           _ -> False
         }
       })
@@ -374,7 +373,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
     decode_helpers.operations_have_enum_ref_params(operations, ctx)
 
   let needs_guards =
-    config.validate(context.config(ctx))
+    context.config(ctx).validate
     && list.any(operations, fn(op) {
       let context.AnalyzedOperation(_, operation, _, _) = op
       operation_needs_guard_validation(operation, ctx)
@@ -465,8 +464,8 @@ pub fn imports(requirements: RouterRequirements, ctx: Context) -> List(String) {
   }
 
   let pkg_imports = [
-    config.package(context.config(ctx)) <> "/handlers",
-    config.package(context.config(ctx)) <> "/handlers_generated",
+    context.config(ctx).package <> "/handlers",
+    context.config(ctx).package <> "/handlers_generated",
   ]
   let pkg_imports = case
     requirements.has_deep_object
@@ -474,39 +473,38 @@ pub fn imports(requirements: RouterRequirements, ctx: Context) -> List(String) {
     || requirements.has_multipart_body
     || requirements.has_enum_ref_params
   {
-    True ->
-      list.append(pkg_imports, [config.package(context.config(ctx)) <> "/types"])
+    True -> list.append(pkg_imports, [context.config(ctx).package <> "/types"])
     False -> pkg_imports
   }
   let pkg_imports = case requirements.needs_decode {
     True ->
       list.append(pkg_imports, [
-        config.package(context.config(ctx)) <> "/decode",
+        context.config(ctx).package <> "/decode",
       ])
     False -> pkg_imports
   }
   let pkg_imports = case requirements.needs_encode {
     True ->
       list.append(pkg_imports, [
-        config.package(context.config(ctx)) <> "/encode",
+        context.config(ctx).package <> "/encode",
       ])
     False -> pkg_imports
   }
   let pkg_imports = case requirements.has_params_ops {
     True ->
       list.append(pkg_imports, [
-        config.package(context.config(ctx)) <> "/request_types",
-        config.package(context.config(ctx)) <> "/response_types",
+        context.config(ctx).package <> "/request_types",
+        context.config(ctx).package <> "/response_types",
       ])
     False ->
       list.append(pkg_imports, [
-        config.package(context.config(ctx)) <> "/response_types",
+        context.config(ctx).package <> "/response_types",
       ])
   }
   let pkg_imports = case requirements.needs_guards {
     True ->
       list.append(pkg_imports, [
-        config.package(context.config(ctx)) <> "/guards",
+        context.config(ctx).package <> "/guards",
       ])
     False -> pkg_imports
   }
@@ -515,7 +513,7 @@ pub fn imports(requirements: RouterRequirements, ctx: Context) -> List(String) {
 }
 
 fn operation_needs_guard_validation(
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
   ctx: Context,
 ) -> Bool {
   let needs_body_guard = case operation.request_body {
@@ -524,8 +522,8 @@ fn operation_needs_guard_validation(
       case content_entries {
         [#(_, mt)] ->
           case mt.schema {
-            Some(Inline(schema.ObjectSchema(..)))
-            | Some(Inline(schema.AllOfSchema(..))) -> True
+            Some(Inline(openapi.ObjectSchema(..)))
+            | Some(Inline(openapi.AllOfSchema(..))) -> True
             Some(Reference(name:, ..)) -> guards.schema_has_validator(name, ctx)
             _ -> False
           }
@@ -534,7 +532,7 @@ fn operation_needs_guard_validation(
     }
     _ -> False
   }
-  config.validate(context.config(ctx)) && needs_body_guard
+  context.config(ctx).validate && needs_body_guard
 }
 
 fn operations_have_response_headers(
@@ -602,7 +600,7 @@ pub type HeaderSpec {
 
 /// The response headers sorted by name.
 pub fn sorted_header_specs(
-  headers: dict.Dict(String, spec.Header),
+  headers: dict.Dict(String, openapi.Header),
 ) -> List(HeaderSpec) {
   headers
   |> dict.to_list

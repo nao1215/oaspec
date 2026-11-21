@@ -4,9 +4,9 @@
 //// `oaspec/httpc` swap when you want live BEAM HTTP, or
 //// `examples/petstore_client_fetch/` for the JavaScript fetch path.
 ////
-//// The program calls `list_pets` against a `mock.from(...)` transport
-//// that returns a canned 200 response, then prints the typed
-//// `ListPetsResponseOk(...)` payload.
+//// The program calls `list_pets` with a send function that returns a
+//// canned 200 response, then prints the typed `ListPetsResponseOk(...)`
+//// payload.
 
 import api/client
 import api/response_types
@@ -15,16 +15,14 @@ import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
-import oaspec/mock
 import oaspec/transport
 
 pub fn main() {
   // The transport.Send value is the only thing client functions need.
-  // Here we build a mock that returns a canned 200 response with two pets,
-  // so the example runs without needing a live Petstore instance.
-  let send = mock.from(stub_handler)
-
-  case client.list_pets(send, Some(10), None) {
+  // Any function of type `fn(transport.Request) -> Result(transport.Response,
+  // transport.TransportError)` will do; this one returns a canned 200 response
+  // with two pets, so the example runs without a live Petstore instance.
+  case client.list_pets(stub_handler, Some(10), None) {
     Ok(response_types.ListPetsResponseOk(pets)) -> print_pets(pets)
     Ok(response_types.ListPetsResponseUnauthorized) ->
       io.println("server returned 401 Unauthorized")

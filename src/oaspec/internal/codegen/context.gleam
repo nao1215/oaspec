@@ -1,16 +1,16 @@
 import gleam/dict
+import gleam/http.{type Method}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/config.{type Config}
 import oaspec/internal/openapi/operations
 import oaspec/internal/openapi/resolver
+import oaspec/internal/openapi/schema
 import oaspec/internal/util/naming
-import oaspec/openapi/schema.{
-  type SchemaMetadata, type SchemaObject, type SchemaRef, Inline, Reference,
-}
-import oaspec/openapi/spec.{
-  type HttpMethod, type OpenApiSpec, type Operation, type Resolved,
+import oaspec/openapi.{
+  type OpenApiSpec, type Operation, type Resolved, type SchemaMetadata,
+  type SchemaObject, type SchemaRef, Inline, Reference,
 }
 
 /// The version of oaspec used for generated code headers.
@@ -24,7 +24,7 @@ pub type AnalyzedOperation {
     operation_id: String,
     operation: Operation(Resolved),
     path: String,
-    method: HttpMethod,
+    method: Method,
   )
 }
 

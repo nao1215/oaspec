@@ -1,13 +1,14 @@
+import gleam/bool
 import gleam/dict.{type Dict}
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import oaspec/internal/util/naming
-import oaspec/openapi/schema.{
-  type SchemaObject, type SchemaRef, AnyOfSchema, Forbidden, Inline,
-  ObjectSchema, OneOfSchema, Reference, Typed, Unspecified, Untyped,
+import oaspec/openapi.{
+  type OpenApiSpec, type SchemaObject, type SchemaRef, AnyOfSchema, Components,
+  Forbidden, Inline, ObjectSchema, OneOfSchema, OpenApiSpec, Reference, Typed,
+  Unspecified, Untyped,
 }
-import oaspec/openapi/spec.{type OpenApiSpec, Components, OpenApiSpec}
 
 /// Deduplicate names within schemas to avoid collisions in generated code.
 /// This is a pre-processing pass that runs after hoisting and before validation.
@@ -115,9 +116,10 @@ pub fn dedup_property_names(prop_names: List(String)) -> List(String) {
 /// in the same order the spec lists them so type emission, server dispatch,
 /// and client builder agree on the final field name.
 pub fn dedup_param_field_names(
-  params: List(spec.Parameter(stage)),
+  params: List(openapi.Parameter(stage)),
 ) -> List(String) {
-  let snake_names = list.map(params, fn(p) { naming.to_snake_case(p.name) })
+  let snake_names =
+    list.map(params, fn(p) { avoid_module_alias(naming.to_snake_case(p.name)) })
   // Reserve every local the generated client function binds (`path`
   // for the URL template, `query` for the form-style key/value list,
   // `headers`, plus the request-record `body`). A parameter literally
@@ -129,6 +131,22 @@ pub fn dedup_param_field_names(
     [_, _, _, _, ..rest] -> rest
     _ -> []
   }
+}
+
+/// Module names the generated client (and server) bodies refer to as
+/// `module.member`. A parameter bound under one of these names would shadow
+/// the module (`http.Get`, `transport.Request`, `list.reverse(query)`) and
+/// the generated code would not compile, so such a parameter gets a
+/// trailing underscore, the same escape `naming` uses for keywords.
+const generated_module_aliases = [
+  "bool", "decode", "dyn_decode", "encode", "float", "guards", "http", "int",
+  "json", "list", "option", "request_types", "response_types", "result",
+  "string", "transport", "types", "uri",
+]
+
+fn avoid_module_alias(name: String) -> String {
+  use <- bool.guard(!list.contains(generated_module_aliases, name), name)
+  name <> "_"
 }
 
 /// Given a list of original enum values (JSON wire values), return a list

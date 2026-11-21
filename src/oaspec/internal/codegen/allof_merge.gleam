@@ -3,7 +3,7 @@ import gleam/int
 import gleam/list
 import gleam/set
 import oaspec/internal/codegen/context.{type Context}
-import oaspec/openapi/schema.{
+import oaspec/openapi.{
   type AdditionalProperties, type SchemaRef, AllOfSchema, Forbidden, Inline,
   ObjectSchema, Reference, Typed, Unspecified, Untyped,
 }
@@ -69,7 +69,7 @@ fn merge_members(
 
 fn merge_one(
   acc: MergedAllOf,
-  resolved: Result(schema.SchemaObject, e),
+  resolved: Result(openapi.SchemaObject, e),
   idx: Int,
 ) -> MergedAllOf {
   case resolved {

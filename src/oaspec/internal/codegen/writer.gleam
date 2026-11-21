@@ -1,3 +1,4 @@
+import filepath
 import gleam/bool
 import gleam/list
 import gleam/result
@@ -8,8 +9,8 @@ import simplifile
 
 /// Errors that can occur during file writing.
 pub type WriteError {
-  DirectoryCreateError(path: String, detail: String)
-  FileWriteError(path: String, detail: String)
+  CannotCreateDirectory(path: String, reason: simplifile.FileError)
+  CannotWriteFile(path: String, reason: simplifile.FileError)
 }
 
 /// Write pre-generated files to disk based on configuration.
@@ -47,14 +48,14 @@ fn placements(
     list.filter(files, fn(f) { f.target == target })
   }
   let shared_files = of_target(context.SharedTarget)
-  let server_path = config.output_server(cfg)
-  let client_path = config.output_client(cfg)
+  let server_path = cfg.output_server
+  let client_path = cfg.output_client
   let server = #(
     server_path,
     list.append(shared_files, of_target(context.ServerTarget)),
   )
   let client_files = of_target(context.ClientTarget)
-  case config.mode(cfg) {
+  case cfg.mode {
     Server -> [server]
     Client -> [#(client_path, list.append(shared_files, client_files))]
     Both ->
@@ -80,12 +81,7 @@ fn normalise_dir(path: String) -> String {
 /// Ensure a directory exists, creating it if necessary.
 fn ensure_directory(path: String) -> Result(Nil, WriteError) {
   simplifile.create_directory_all(path)
-  |> result.map_error(fn(err) {
-    DirectoryCreateError(
-      path:,
-      detail: "Failed to create directory: " <> simplifile.describe_error(err),
-    )
-  })
+  |> result.map_error(fn(err) { CannotCreateDirectory(path:, reason: err) })
 }
 
 /// Write a list of generated files to a directory.
@@ -122,10 +118,7 @@ fn write_files(
         use _ <- result.try(
           simplifile.write(full_path, file.content)
           |> result.map_error(fn(err) {
-            FileWriteError(
-              path: full_path,
-              detail: "Failed to write file: " <> simplifile.describe_error(err),
-            )
+            CannotWriteFile(path: full_path, reason: err)
           }),
         )
         on_write(full_path)
@@ -143,6 +136,43 @@ fn parent_dir(path: String) -> Result(String, Nil) {
       Ok(string.join(list.reverse([first, ..rest]), "/"))
     _ -> Error(Nil)
   }
+}
+
+/// Every file the config writes paired with its destination path, in write
+/// order. When `mode = Both` and both outputs name the same directory, the
+/// shared files appear once.
+pub fn place(
+  files: List(GeneratedFile),
+  cfg: config.Config,
+) -> List(#(String, GeneratedFile)) {
+  placements(files, cfg)
+  |> list.flat_map(fn(placement) {
+    let #(dir, dir_files) = placement
+    list.map(dir_files, fn(f) { #(dir <> "/" <> f.path, f) })
+  })
+}
+
+/// Write each `#(path, content, write_mode)` entry, creating parent
+/// directories as needed. A `SkipIfExists` entry whose file already exists
+/// is left alone. Returns the written paths in order.
+pub fn write_placed(
+  entries: List(#(String, String, context.WriteMode)),
+) -> Result(List(String), WriteError) {
+  list.try_fold(entries, [], fn(written, entry) {
+    let #(path, content, write_mode) = entry
+    case write_mode, simplifile.is_file(path) {
+      context.SkipIfExists, Ok(True) -> Ok(written)
+      _, _ -> {
+        use _ <- result.try(ensure_directory(filepath.directory_name(path)))
+        use _ <- result.try(
+          simplifile.write(path, content)
+          |> result.map_error(fn(err) { CannotWriteFile(path:, reason: err) }),
+        )
+        Ok([path, ..written])
+      }
+    }
+  })
+  |> result.map(list.reverse)
 }
 
 /// Resolve generated files to their full output paths and content.
@@ -190,10 +220,10 @@ pub fn expected_paths(
 
 /// Return the output directories that would be written to for the given config.
 pub fn output_dirs(cfg: config.Config) -> List(String) {
-  case config.mode(cfg) {
-    Server -> [config.output_server(cfg)]
-    Client -> [config.output_client(cfg)]
-    Both -> [config.output_server(cfg), config.output_client(cfg)]
+  case cfg.mode {
+    Server -> [cfg.output_server]
+    Client -> [cfg.output_client]
+    Both -> [cfg.output_server, cfg.output_client]
   }
 }
 
@@ -215,20 +245,20 @@ pub fn owned_dirs(
     |> list.filter_map(fn(f) { parent_dir(f.path) })
     |> list.unique
   }
-  let server_sub_dirs = case config.handler_layout(cfg) {
+  let server_sub_dirs = case cfg.handler_layout {
     config.PerOperation ->
       list.unique(["handlers", ..sub_dirs(context.ServerTarget)])
     config.SingleFile -> sub_dirs(context.ServerTarget)
   }
-  let server_dirs = case config.mode(cfg) {
+  let server_dirs = case cfg.mode {
     Server | Both ->
-      list.map(server_sub_dirs, fn(d) { config.output_server(cfg) <> "/" <> d })
+      list.map(server_sub_dirs, fn(d) { cfg.output_server <> "/" <> d })
     Client -> []
   }
-  let client_dirs = case config.mode(cfg) {
+  let client_dirs = case cfg.mode {
     Client | Both ->
       list.map(sub_dirs(context.ClientTarget), fn(d) {
-        config.output_client(cfg) <> "/" <> d
+        cfg.output_client <> "/" <> d
       })
     Server -> []
   }
@@ -238,9 +268,15 @@ pub fn owned_dirs(
 /// Convert a write error to a human-readable string.
 pub fn error_to_string(error: WriteError) -> String {
   case error {
-    DirectoryCreateError(path:, detail:) ->
-      "Failed to create directory " <> path <> ": " <> detail
-    FileWriteError(path:, detail:) ->
-      "Failed to write file " <> path <> ": " <> detail
+    CannotCreateDirectory(path:, reason:) ->
+      "Failed to create directory "
+      <> path
+      <> ": Failed to create directory: "
+      <> simplifile.describe_error(reason)
+    CannotWriteFile(path:, reason:) ->
+      "Failed to write file "
+      <> path
+      <> ": Failed to write file: "
+      <> simplifile.describe_error(reason)
   }
 }

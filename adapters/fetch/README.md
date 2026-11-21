@@ -46,10 +46,7 @@ Gleam.
 
 ## Tests in the consumer
 
-For unit tests of code that calls a generated async client, prefer
-`oaspec/mock` over a real network. The adapter's `AsyncSend` shape
-matches `mock.AsyncSend`, so test code substitutes one for the other
-without touching the call sites.
+`fetch.send` is a `transport.AsyncSend`, so a test can pass a function that returns `transport.resolve(Ok(response))` with a fixed response instead.
 
 ## License
 

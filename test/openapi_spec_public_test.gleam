@@ -2,8 +2,9 @@ import gleam/dict
 import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
-import oaspec/openapi/schema
-import oaspec/openapi/spec
+import oaspec/internal/openapi/schema
+import oaspec/internal/openapi/spec
+import oaspec/openapi
 
 pub fn main() {
   gleeunit.main()
@@ -20,7 +21,7 @@ pub fn openapi_spec_public_module_exposes_core_types_test() {
   // Info: simple metadata record. Building it requires the `Info`
   // constructor to be visible from the public module.
   let info =
-    spec.Info(
+    openapi.Info(
       title: "smoke",
       description: None,
       version: "1.0.0",
@@ -33,8 +34,8 @@ pub fn openapi_spec_public_module_exposes_core_types_test() {
   // OpenApiSpec: top-level record, phantom-typed by `Unresolved`.
   // Pattern-matching the `info` field exercises both the OpenApiSpec
   // constructor and field access.
-  let api: spec.OpenApiSpec(spec.Unresolved) =
-    spec.OpenApiSpec(
+  let api: openapi.OpenApiSpec(openapi.Unresolved) =
+    openapi.OpenApiSpec(
       openapi: "3.1.0",
       info: info,
       paths: dict.new(),
@@ -47,14 +48,14 @@ pub fn openapi_spec_public_module_exposes_core_types_test() {
       json_schema_dialect: None,
     )
 
-  let spec.OpenApiSpec(info: parsed_info, ..) = api
+  let openapi.OpenApiSpec(info: parsed_info, ..) = api
   parsed_info.title
   |> should.equal("smoke")
 }
 
 pub fn openapi_spec_public_module_exposes_pathitem_and_operation_test() {
   let op =
-    spec.Operation(
+    openapi.Operation(
       operation_id: Some("getThing"),
       summary: None,
       description: None,
@@ -69,8 +70,8 @@ pub fn openapi_spec_public_module_exposes_pathitem_and_operation_test() {
       external_docs: None,
     )
 
-  let path_item: spec.PathItem(spec.Unresolved) =
-    spec.PathItem(
+  let path_item: openapi.PathItem(openapi.Unresolved) =
+    openapi.PathItem(
       summary: None,
       description: None,
       get: Some(op),
@@ -86,8 +87,8 @@ pub fn openapi_spec_public_module_exposes_pathitem_and_operation_test() {
     )
 
   case path_item.get {
-    Some(spec.Operation(operation_id: Some(id), ..)) -> id
-    Some(spec.Operation(operation_id: None, ..)) -> "unnamed"
+    Some(openapi.Operation(operation_id: Some(id), ..)) -> id
+    Some(openapi.Operation(operation_id: None, ..)) -> "unnamed"
     None -> "missing"
   }
   |> should.equal("getThing")
@@ -96,10 +97,10 @@ pub fn openapi_spec_public_module_exposes_pathitem_and_operation_test() {
 /// Helper: hide the concrete variant behind a function boundary so the
 /// caller's `case` is forced to handle both `Ref` and `Value` rather
 /// than the compiler narrowing it to the literal constructor.
-fn refor_id(is_ref: Bool) -> spec.RefOr(Int) {
+fn refor_id(is_ref: Bool) -> openapi.RefOr(Int) {
   case is_ref {
-    True -> spec.Ref("#/components/schemas/Thing")
-    False -> spec.Value(42)
+    True -> openapi.Ref("#/components/schemas/Thing")
+    False -> openapi.Value(42)
   }
 }
 
@@ -108,14 +109,14 @@ pub fn openapi_spec_public_module_exposes_refor_test() {
   // a concrete value. Both variants must be reachable from the public
   // module for runtime introspection to work.
   case refor_id(True) {
-    spec.Ref(name) -> name
-    spec.Value(_) -> "value"
+    openapi.Ref(name) -> name
+    openapi.Value(_) -> "value"
   }
   |> should.equal("#/components/schemas/Thing")
 
   case refor_id(False) {
-    spec.Ref(_) -> 0
-    spec.Value(v) -> v
+    openapi.Ref(_) -> 0
+    openapi.Value(v) -> v
   }
   |> should.equal(42)
 }
@@ -125,7 +126,7 @@ pub fn openapi_spec_public_module_exposes_parameter_test() {
   // for ParameterIn / ParameterPayload). This proves the entire
   // Parameter family is destructurable from outside `internal/`.
   let inline_schema =
-    schema.Inline(schema.StringSchema(
+    openapi.Inline(openapi.StringSchema(
       metadata: schema.default_metadata(),
       format: None,
       enum_values: [],
@@ -134,13 +135,13 @@ pub fn openapi_spec_public_module_exposes_parameter_test() {
       pattern: None,
     ))
 
-  let param: spec.Parameter(spec.Unresolved) =
-    spec.Parameter(
+  let param: openapi.Parameter(openapi.Unresolved) =
+    openapi.Parameter(
       name: "id",
-      in_: spec.InPath,
+      in_: openapi.InPath,
       description: None,
       required: True,
-      payload: spec.ParameterSchema(inline_schema),
+      payload: openapi.ParameterSchema(inline_schema),
       style: None,
       explode: None,
       deprecated: False,
@@ -149,10 +150,10 @@ pub fn openapi_spec_public_module_exposes_parameter_test() {
     )
 
   case param.in_ {
-    spec.InPath -> "path"
-    spec.InQuery -> "query"
-    spec.InHeader -> "header"
-    spec.InCookie -> "cookie"
+    openapi.InPath -> "path"
+    openapi.InQuery -> "query"
+    openapi.InHeader -> "header"
+    openapi.InCookie -> "cookie"
   }
   |> should.equal("path")
 

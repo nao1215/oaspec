@@ -7,11 +7,10 @@ import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
 import oaspec/internal/openapi/external_loader_planner as planner
-import oaspec/openapi/schema.{
-  type SchemaObject, BooleanSchema, Inline, IntegerSchema, Reference,
-}
-import oaspec/openapi/spec.{
-  type Components, type OpenApiSpec, Components, OpenApiSpec, Value,
+import oaspec/internal/openapi/schema
+import oaspec/openapi.{
+  type Components, type OpenApiSpec, type SchemaObject, BooleanSchema,
+  Components, Inline, IntegerSchema, OpenApiSpec, Reference, Value,
 }
 
 pub fn main() {
@@ -20,7 +19,7 @@ pub fn main() {
 
 // --- helpers --------------------------------------------------------
 
-fn empty_components() -> Components(spec.Unresolved) {
+fn empty_components() -> Components(openapi.Unresolved) {
   Components(
     schemas: dict.new(),
     parameters: dict.new(),
@@ -36,11 +35,11 @@ fn empty_components() -> Components(spec.Unresolved) {
 }
 
 fn make_spec(
-  components: option.Option(Components(spec.Unresolved)),
-) -> OpenApiSpec(spec.Unresolved) {
+  components: option.Option(Components(openapi.Unresolved)),
+) -> OpenApiSpec(openapi.Unresolved) {
   OpenApiSpec(
     openapi: "3.0.3",
-    info: spec.Info(
+    info: openapi.Info(
       title: "T",
       description: None,
       version: "1",
@@ -76,13 +75,13 @@ fn bool_schema() -> SchemaObject {
   BooleanSchema(metadata: schema.default_metadata())
 }
 
-fn make_param(name: String) -> spec.Parameter(spec.Unresolved) {
-  spec.Parameter(
+fn make_param(name: String) -> openapi.Parameter(openapi.Unresolved) {
+  openapi.Parameter(
     name: name,
-    in_: spec.InQuery,
+    in_: openapi.InQuery,
     description: None,
     required: False,
-    payload: spec.ParameterSchema(Inline(int_schema())),
+    payload: openapi.ParameterSchema(Inline(int_schema())),
     style: None,
     explode: None,
     deprecated: False,
@@ -91,12 +90,12 @@ fn make_param(name: String) -> spec.Parameter(spec.Unresolved) {
   )
 }
 
-fn make_request_body() -> spec.RequestBody(spec.Unresolved) {
-  spec.RequestBody(description: None, content: dict.new(), required: False)
+fn make_request_body() -> openapi.RequestBody(openapi.Unresolved) {
+  openapi.RequestBody(description: None, content: dict.new(), required: False)
 }
 
-fn make_response() -> spec.Response(spec.Unresolved) {
-  spec.Response(
+fn make_response() -> openapi.Response(openapi.Unresolved) {
+  openapi.Response(
     description: None,
     content: dict.new(),
     headers: dict.new(),
@@ -104,8 +103,8 @@ fn make_response() -> spec.Response(spec.Unresolved) {
   )
 }
 
-fn make_path_item() -> spec.PathItem(spec.Unresolved) {
-  spec.PathItem(
+fn make_path_item() -> openapi.PathItem(openapi.Unresolved) {
+  openapi.PathItem(
     summary: None,
     description: None,
     get: None,
@@ -424,7 +423,7 @@ pub fn find_external_parameter_inline_test() {
 
 pub fn find_external_parameter_chained_ref_errors_test() {
   let parameters =
-    dict.from_list([#("limit", spec.Ref("#/components/parameters/Other"))])
+    dict.from_list([#("limit", openapi.Ref("#/components/parameters/Other"))])
   let components = Components(..empty_components(), parameters: parameters)
   planner.find_external_parameter(
     make_spec(Some(components)),
@@ -484,7 +483,7 @@ pub fn find_external_response_inline_test() {
 
 pub fn find_external_response_chained_ref_errors_test() {
   let responses =
-    dict.from_list([#("OK", spec.Ref("#/components/responses/Other"))])
+    dict.from_list([#("OK", openapi.Ref("#/components/responses/Other"))])
   let components = Components(..empty_components(), responses: responses)
   planner.find_external_response(make_spec(Some(components)), "OK", "./a.yaml")
   |> should.be_error()

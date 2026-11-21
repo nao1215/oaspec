@@ -7,13 +7,12 @@ import gleam/string
 import gleeunit
 import gleeunit/should
 import oaspec/config
-import oaspec/generate
 import oaspec/internal/codegen/context
 import oaspec/internal/formatter
+import oaspec/internal/generate
+import oaspec/internal/openapi/parser
 import oaspec/internal/openapi/resolve
-import oaspec/internal/util/http
-import oaspec/openapi/parser
-import oaspec/openapi/spec
+import oaspec/openapi
 import simplifile
 
 pub fn main() {
@@ -44,15 +43,16 @@ fn golden_generate_with(
   // (which goes through `config.load`) line up with the snapshots
   // compared here.
   let cfg =
-    config.new(
+    config.Config(
       input: spec_path,
       output_server: "./golden_unused/api",
       output_client: "./golden_unused/api",
       package: "api",
       mode: mode,
       validate: True,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: layout,
     )
-    |> config.with_handler_layout(layout)
   let assert Ok(summary) = generate.generate(spec, cfg)
   summary.files
 }
@@ -314,11 +314,11 @@ pub fn golden_idempotency_test() {
 /// Circular component alias chain (A → B → A) should produce a resolve error.
 pub fn resolve_circular_component_alias_error_test() {
   let components =
-    spec.Components(
+    openapi.Components(
       schemas: dict.new(),
       parameters: dict.from_list([
-        #("A", spec.Ref("#/components/parameters/B")),
-        #("B", spec.Ref("#/components/parameters/A")),
+        #("A", openapi.Ref("#/components/parameters/B")),
+        #("B", openapi.Ref("#/components/parameters/A")),
       ]),
       request_bodies: dict.new(),
       responses: dict.new(),
@@ -330,9 +330,9 @@ pub fn resolve_circular_component_alias_error_test() {
       callbacks: dict.new(),
     )
   let test_spec =
-    spec.OpenApiSpec(
+    openapi.OpenApiSpec(
       openapi: "3.0.3",
-      info: spec.Info(
+      info: openapi.Info(
         title: "Test",
         description: None,
         version: "1.0.0",
@@ -367,10 +367,10 @@ pub fn resolve_circular_component_alias_error_test() {
 /// Unresolved $ref target in components should produce a resolve error.
 pub fn resolve_unresolved_ref_target_error_test() {
   let components =
-    spec.Components(
+    openapi.Components(
       schemas: dict.new(),
       parameters: dict.from_list([
-        #("Missing", spec.Ref("#/components/parameters/DoesNotExist")),
+        #("Missing", openapi.Ref("#/components/parameters/DoesNotExist")),
       ]),
       request_bodies: dict.new(),
       responses: dict.new(),
@@ -382,9 +382,9 @@ pub fn resolve_unresolved_ref_target_error_test() {
       callbacks: dict.new(),
     )
   let test_spec =
-    spec.OpenApiSpec(
+    openapi.OpenApiSpec(
       openapi: "3.0.3",
-      info: spec.Info(
+      info: openapi.Info(
         title: "Test",
         description: None,
         version: "1.0.0",
@@ -421,7 +421,7 @@ pub fn resolve_unresolved_ref_target_error_test() {
 /// resolve error when resolving inline refs in operations.
 pub fn resolve_wrong_kind_ref_in_parameter_position_error_test() {
   let components =
-    spec.Components(
+    openapi.Components(
       schemas: dict.new(),
       parameters: dict.new(),
       request_bodies: dict.new(),
@@ -434,12 +434,12 @@ pub fn resolve_wrong_kind_ref_in_parameter_position_error_test() {
       callbacks: dict.new(),
     )
   let operation =
-    spec.Operation(
+    openapi.Operation(
       operation_id: Some("getUser"),
       summary: None,
       description: None,
       tags: [],
-      parameters: [spec.Ref("#/components/schemas/SomeSchema")],
+      parameters: [openapi.Ref("#/components/schemas/SomeSchema")],
       request_body: None,
       responses: dict.new(),
       deprecated: False,
@@ -449,7 +449,7 @@ pub fn resolve_wrong_kind_ref_in_parameter_position_error_test() {
       external_docs: None,
     )
   let path_item =
-    spec.PathItem(
+    openapi.PathItem(
       summary: None,
       description: None,
       get: Some(operation),
@@ -464,9 +464,9 @@ pub fn resolve_wrong_kind_ref_in_parameter_position_error_test() {
       servers: [],
     )
   let test_spec =
-    spec.OpenApiSpec(
+    openapi.OpenApiSpec(
       openapi: "3.0.3",
-      info: spec.Info(
+      info: openapi.Info(
         title: "Test",
         description: None,
         version: "1.0.0",
@@ -475,7 +475,7 @@ pub fn resolve_wrong_kind_ref_in_parameter_position_error_test() {
         contact: None,
         license: None,
       ),
-      paths: dict.from_list([#("/users", spec.Value(path_item))]),
+      paths: dict.from_list([#("/users", openapi.Value(path_item))]),
       components: Some(components),
       servers: [],
       security: [],
@@ -502,7 +502,7 @@ pub fn resolve_wrong_kind_ref_in_parameter_position_error_test() {
 /// should produce a resolve error.
 pub fn resolve_wrong_kind_ref_in_request_body_position_error_test() {
   let components =
-    spec.Components(
+    openapi.Components(
       schemas: dict.new(),
       parameters: dict.new(),
       request_bodies: dict.new(),
@@ -515,13 +515,13 @@ pub fn resolve_wrong_kind_ref_in_request_body_position_error_test() {
       callbacks: dict.new(),
     )
   let operation =
-    spec.Operation(
+    openapi.Operation(
       operation_id: Some("createUser"),
       summary: None,
       description: None,
       tags: [],
       parameters: [],
-      request_body: Some(spec.Ref("#/components/responses/SomeResponse")),
+      request_body: Some(openapi.Ref("#/components/responses/SomeResponse")),
       responses: dict.new(),
       deprecated: False,
       security: None,
@@ -530,7 +530,7 @@ pub fn resolve_wrong_kind_ref_in_request_body_position_error_test() {
       external_docs: None,
     )
   let path_item =
-    spec.PathItem(
+    openapi.PathItem(
       summary: None,
       description: None,
       get: None,
@@ -545,9 +545,9 @@ pub fn resolve_wrong_kind_ref_in_request_body_position_error_test() {
       servers: [],
     )
   let test_spec =
-    spec.OpenApiSpec(
+    openapi.OpenApiSpec(
       openapi: "3.0.3",
-      info: spec.Info(
+      info: openapi.Info(
         title: "Test",
         description: None,
         version: "1.0.0",
@@ -556,7 +556,7 @@ pub fn resolve_wrong_kind_ref_in_request_body_position_error_test() {
         contact: None,
         license: None,
       ),
-      paths: dict.from_list([#("/users", spec.Value(path_item))]),
+      paths: dict.from_list([#("/users", openapi.Value(path_item))]),
       components: Some(components),
       servers: [],
       security: [],
@@ -582,7 +582,7 @@ pub fn resolve_wrong_kind_ref_in_request_body_position_error_test() {
 /// Unresolved $ref in inline path operation response should produce an error.
 pub fn resolve_unresolved_inline_response_ref_error_test() {
   let components =
-    spec.Components(
+    openapi.Components(
       schemas: dict.new(),
       parameters: dict.new(),
       request_bodies: dict.new(),
@@ -595,7 +595,7 @@ pub fn resolve_unresolved_inline_response_ref_error_test() {
       callbacks: dict.new(),
     )
   let operation =
-    spec.Operation(
+    openapi.Operation(
       operation_id: Some("getUser"),
       summary: None,
       description: None,
@@ -604,8 +604,8 @@ pub fn resolve_unresolved_inline_response_ref_error_test() {
       request_body: None,
       responses: dict.from_list([
         #(
-          http.Status(200),
-          spec.Ref("#/components/responses/NonExistentResponse"),
+          openapi.Status(200),
+          openapi.Ref("#/components/responses/NonExistentResponse"),
         ),
       ]),
       deprecated: False,
@@ -615,7 +615,7 @@ pub fn resolve_unresolved_inline_response_ref_error_test() {
       external_docs: None,
     )
   let path_item =
-    spec.PathItem(
+    openapi.PathItem(
       summary: None,
       description: None,
       get: Some(operation),
@@ -630,9 +630,9 @@ pub fn resolve_unresolved_inline_response_ref_error_test() {
       servers: [],
     )
   let test_spec =
-    spec.OpenApiSpec(
+    openapi.OpenApiSpec(
       openapi: "3.0.3",
-      info: spec.Info(
+      info: openapi.Info(
         title: "Test",
         description: None,
         version: "1.0.0",
@@ -641,7 +641,7 @@ pub fn resolve_unresolved_inline_response_ref_error_test() {
         contact: None,
         license: None,
       ),
-      paths: dict.from_list([#("/users", spec.Value(path_item))]),
+      paths: dict.from_list([#("/users", openapi.Value(path_item))]),
       components: Some(components),
       servers: [],
       security: [],
@@ -668,7 +668,7 @@ pub fn resolve_unresolved_inline_response_ref_error_test() {
 /// Unresolved path-level $ref pointing to missing pathItem should produce error.
 pub fn resolve_unresolved_path_item_ref_error_test() {
   let components =
-    spec.Components(
+    openapi.Components(
       schemas: dict.new(),
       parameters: dict.new(),
       request_bodies: dict.new(),
@@ -681,9 +681,9 @@ pub fn resolve_unresolved_path_item_ref_error_test() {
       callbacks: dict.new(),
     )
   let test_spec =
-    spec.OpenApiSpec(
+    openapi.OpenApiSpec(
       openapi: "3.0.3",
-      info: spec.Info(
+      info: openapi.Info(
         title: "Test",
         description: None,
         version: "1.0.0",
@@ -693,7 +693,7 @@ pub fn resolve_unresolved_path_item_ref_error_test() {
         license: None,
       ),
       paths: dict.from_list([
-        #("/users", spec.Ref("#/components/pathItems/MissingPathItem")),
+        #("/users", openapi.Ref("#/components/pathItems/MissingPathItem")),
       ]),
       components: Some(components),
       servers: [],
@@ -719,7 +719,7 @@ pub fn resolve_unresolved_path_item_ref_error_test() {
 /// should produce a resolve error.
 pub fn resolve_wrong_kind_path_item_ref_error_test() {
   let components =
-    spec.Components(
+    openapi.Components(
       schemas: dict.new(),
       parameters: dict.new(),
       request_bodies: dict.new(),
@@ -732,9 +732,9 @@ pub fn resolve_wrong_kind_path_item_ref_error_test() {
       callbacks: dict.new(),
     )
   let test_spec =
-    spec.OpenApiSpec(
+    openapi.OpenApiSpec(
       openapi: "3.0.3",
-      info: spec.Info(
+      info: openapi.Info(
         title: "Test",
         description: None,
         version: "1.0.0",
@@ -744,7 +744,7 @@ pub fn resolve_wrong_kind_path_item_ref_error_test() {
         license: None,
       ),
       paths: dict.from_list([
-        #("/users", spec.Ref("#/components/schemas/SomeSchema")),
+        #("/users", openapi.Ref("#/components/schemas/SomeSchema")),
       ]),
       components: Some(components),
       servers: [],
@@ -771,14 +771,14 @@ pub fn resolve_wrong_kind_path_item_ref_error_test() {
 /// Three-way circular alias chain (A → B → C → A) should produce a resolve error.
 pub fn resolve_three_way_circular_alias_error_test() {
   let components =
-    spec.Components(
+    openapi.Components(
       schemas: dict.new(),
       parameters: dict.new(),
       request_bodies: dict.new(),
       responses: dict.from_list([
-        #("A", spec.Ref("#/components/responses/B")),
-        #("B", spec.Ref("#/components/responses/C")),
-        #("C", spec.Ref("#/components/responses/A")),
+        #("A", openapi.Ref("#/components/responses/B")),
+        #("B", openapi.Ref("#/components/responses/C")),
+        #("C", openapi.Ref("#/components/responses/A")),
       ]),
       security_schemes: dict.new(),
       path_items: dict.new(),
@@ -788,9 +788,9 @@ pub fn resolve_three_way_circular_alias_error_test() {
       callbacks: dict.new(),
     )
   let test_spec =
-    spec.OpenApiSpec(
+    openapi.OpenApiSpec(
       openapi: "3.0.3",
-      info: spec.Info(
+      info: openapi.Info(
         title: "Test",
         description: None,
         version: "1.0.0",

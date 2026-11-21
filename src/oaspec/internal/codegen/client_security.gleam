@@ -4,7 +4,7 @@ import gleam/option.{Some}
 import gleam/string
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/util/naming
-import oaspec/openapi/spec
+import oaspec/openapi
 
 /// Render the OpenAPI security requirements for an operation as a Gleam
 /// list-of-`SecurityAlternative` literal that can be inlined into a
@@ -12,7 +12,7 @@ import oaspec/openapi/spec
 /// no security or when none of the listed schemes resolve.
 pub fn render_security_metadata(
   ctx: Context,
-  alternatives: List(spec.SecurityRequirement),
+  alternatives: List(openapi.SecurityRequirement),
 ) -> String {
   case alternatives {
     [] -> "[]"
@@ -33,7 +33,10 @@ pub fn render_security_metadata(
   }
 }
 
-fn render_alternative(ctx: Context, alt: spec.SecurityRequirement) -> String {
+fn render_alternative(
+  ctx: Context,
+  alt: openapi.SecurityRequirement,
+) -> String {
   let reqs =
     alt.schemes
     |> list.filter_map(fn(scheme_ref) { render_requirement(ctx, scheme_ref) })
@@ -45,25 +48,25 @@ fn render_alternative(ctx: Context, alt: spec.SecurityRequirement) -> String {
 
 fn render_requirement(
   ctx: Context,
-  scheme_ref: spec.SecuritySchemeRef,
+  scheme_ref: openapi.SecuritySchemeRef,
 ) -> Result(String, Nil) {
   case context.spec(ctx).components {
     Some(components) ->
       case dict.get(components.security_schemes, scheme_ref.scheme_name) {
-        Ok(spec.Value(scheme)) ->
+        Ok(openapi.Value(scheme)) ->
           case scheme {
-            spec.ApiKeyScheme(name: header_name, in_: spec.SchemeInHeader) ->
+            openapi.ApiKeyScheme(name: header_name, in_: openapi.SchemeInHeader) ->
               Ok(api_key(scheme_ref.scheme_name, "ApiKeyHeader", header_name))
-            spec.ApiKeyScheme(name: query_name, in_: spec.SchemeInQuery) ->
+            openapi.ApiKeyScheme(name: query_name, in_: openapi.SchemeInQuery) ->
               Ok(api_key(scheme_ref.scheme_name, "ApiKeyQuery", query_name))
-            spec.ApiKeyScheme(name: cookie_name, in_: spec.SchemeInCookie) ->
+            openapi.ApiKeyScheme(name: cookie_name, in_: openapi.SchemeInCookie) ->
               Ok(api_key(scheme_ref.scheme_name, "ApiKeyCookie", cookie_name))
-            spec.HttpScheme(scheme: prefix, ..) ->
+            openapi.HttpScheme(scheme: prefix, ..) ->
               Ok(http_authorization(
                 scheme_ref.scheme_name,
                 naming.capitalize(prefix),
               ))
-            spec.OAuth2Scheme(..) | spec.OpenIdConnectScheme(..) ->
+            openapi.OAuth2Scheme(..) | openapi.OpenIdConnectScheme(..) ->
               Ok(http_authorization(scheme_ref.scheme_name, "Bearer"))
             _ -> Error(Nil)
           }

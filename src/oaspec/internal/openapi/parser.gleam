@@ -6,6 +6,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/regexp
 import gleam/result
 import gleam/string
+import oaspec/internal/openapi/diagnostic
 import oaspec/internal/openapi/external_loader
 import oaspec/internal/openapi/external_loader_planner
 import oaspec/internal/openapi/location_index.{type LocationIndex}
@@ -18,24 +19,24 @@ import oaspec/internal/openapi/ref_validation
 import oaspec/internal/openapi/resolve
 import oaspec/internal/progress.{type Reporter}
 import oaspec/internal/util/http
-import oaspec/openapi/diagnostic.{type Diagnostic, NoSourceLoc, SourceLoc}
-import oaspec/openapi/schema.{type SchemaRef}
-import oaspec/openapi/spec.{
-  type Callback, type Components, type Contact, type Encoding, type ExternalDoc,
-  type Header, type Info, type License, type Link, type MediaType,
-  type OpenApiSpec, type Operation, type Parameter, type ParameterIn,
-  type PathItem, type RefOr, type RequestBody, type Resolved, type Response,
-  type SecurityRequirement, type Server, type ServerVariable, type Tag,
-  type Unresolved, Callback, Components, Contact, Encoding, ExternalDoc, Header,
-  Info, License, Link, MediaType, OpenApiSpec, Operation, Parameter, PathItem,
-  Ref, RequestBody, Response, SecurityRequirement, Server, ServerVariable, Tag,
-  Value,
+import oaspec/openapi.{
+  type Callback, type Components, type Contact, type Diagnostic, type Encoding,
+  type ExternalDoc, type Header, type Info, type License, type Link,
+  type MediaType, type OpenApiSpec, type Operation, type Parameter,
+  type ParameterIn, type PathItem, type RefOr, type RequestBody, type Resolved,
+  type Response, type SchemaRef, type SecurityRequirement, type Server,
+  type ServerVariable, type Tag, type Unresolved, Callback, Components, Contact,
+  Encoding, ExternalDoc, Header, Info, License, Link, MediaType, NoSourceLoc,
+  OpenApiSpec, Operation, Parameter, PathItem, Ref, RequestBody, Response,
+  SecurityRequirement, Server, ServerVariable, SourceLoc, Tag, Value,
 }
 import simplifile
 import yay
 
 /// Parse an OpenAPI spec from a file path.
-/// Supports both YAML (.yaml, .yml) and JSON (.json) files.
+/// Supports both YAML (.yaml, .yml) and JSON (.json) files. Every file read
+/// (the root document and each external `$ref` target) is held to
+/// `default_limits().max_input_bytes`.
 /// After parsing, resolves relative-file `$ref` values across schemas,
 /// parameters, request bodies, responses, and path items — including
 /// nested object/array properties and composition branches — by loading
@@ -95,6 +96,7 @@ fn parse_file_internal(
       )
     }),
   )
+  use _ <- result.try(enforce_input_byte_limit(content, default_limits()))
   progress.report(
     reporter,
     "read "
@@ -249,10 +251,9 @@ pub fn default_limits() -> ParseLimits {
 /// to be JSON.
 ///
 /// `parse_string` does **not** apply the DoS limits documented in
-/// `ParseLimits`. Reach for `parse_string_with_limits` when the input
-/// is attacker-controlled or sourced from an untrusted file system
-/// (admin-uploaded specs, contract-validation pipelines, CI runners
-/// over user-supplied specs).
+/// `ParseLimits`; the public `oaspec.parse_string` and `oaspec.parse_file`
+/// go through `parse_string_or_json_with_locations` and
+/// `parse_file_internal`, which apply `default_limits()`.
 ///
 /// **YAML 1.1 type coercion: parse_string vs parse_json_string.**
 /// yamerl applies YAML 1.1 implicit-type rules to scalars before they
@@ -289,7 +290,7 @@ pub fn parse_string(
 
 /// Same as `parse_string` but also returns the YAML `LocationIndex`
 /// built from the input. Caller-side companion to
-/// `parse_file_with_locations`.
+/// `parse_file_with_progress_and_locations`.
 pub fn parse_string_with_locations(
   content: String,
 ) -> Result(#(OpenApiSpec(Unresolved), LocationIndex), Diagnostic) {
@@ -328,6 +329,15 @@ pub fn parse_string_resolved(
   content: String,
 ) -> Result(OpenApiSpec(Resolved), Diagnostic) {
   use spec <- result.try(parse_string(content))
+  resolve_spec(spec)
+}
+
+/// Normalise OAS 3.1 patterns, resolve component aliases and check that
+/// every schema `$ref` resolves — everything `parse_string_resolved` does
+/// after parsing. Returns the first diagnostic on failure.
+pub fn resolve_spec(
+  spec: OpenApiSpec(Unresolved),
+) -> Result(OpenApiSpec(Resolved), Diagnostic) {
   let normalised = normalize.normalize(spec)
   use resolved <- result.try(
     resolve.resolve(normalised)
@@ -436,7 +446,8 @@ pub fn parse_json_string_with_locations(
 
 /// Auto-dispatch over `parse_string_with_locations` (YAML) and
 /// `parse_json_string_with_locations` (JSON) based on the first
-/// non-whitespace byte of `content`.
+/// non-whitespace byte of `content`. Content larger than
+/// `default_limits().max_input_bytes` is refused before parsing.
 ///
 /// `{` and `[` route to the JSON parser (orders of magnitude faster on
 /// large specs — see `parse_json_string`); anything else routes to
@@ -453,6 +464,7 @@ pub fn parse_json_string_with_locations(
 pub fn parse_string_or_json_with_locations(
   content: String,
 ) -> Result(#(OpenApiSpec(Unresolved), LocationIndex), Diagnostic) {
+  use _ <- result.try(enforce_input_byte_limit(content, default_limits()))
   case looks_like_json(content) {
     True -> parse_json_string_with_locations(content)
     False -> parse_string_with_locations(content)
@@ -649,7 +661,7 @@ fn parse_root(
 /// subtly or grossly incompatible with the generator.
 fn validate_openapi_version(
   version: String,
-  loc: diagnostic.SourceLoc,
+  loc: openapi.SourceLoc,
 ) -> Result(Nil, Diagnostic) {
   use <- bool.guard(is_supported_openapi_version(version), Ok(Nil))
   Error(diagnostic.invalid_value(
@@ -822,7 +834,7 @@ fn check_component_keys(
 /// Names are visited in sorted order so the reported scheme does not
 /// depend on Dict iteration order.
 fn validate_security_scheme_types(
-  schemes: Dict(String, RefOr(spec.SecurityScheme)),
+  schemes: Dict(String, RefOr(openapi.SecurityScheme)),
   is_3_0: Bool,
   index: LocationIndex,
 ) -> Result(Nil, Diagnostic) {
@@ -836,9 +848,10 @@ fn validate_security_scheme_types(
   |> list.sort(by: fn(left, right) { string.compare(left.0, right.0) })
   |> list.try_each(fn(entry) {
     case entry {
-      #(_, Value(spec.UnsupportedScheme(scheme_type: "mutualTLS"))) if !is_3_0 ->
-        Ok(Nil)
-      #(name, Value(spec.UnsupportedScheme(scheme_type:))) -> {
+      #(_, Value(openapi.UnsupportedScheme(scheme_type: "mutualTLS")))
+        if !is_3_0
+      -> Ok(Nil)
+      #(name, Value(openapi.UnsupportedScheme(scheme_type:))) -> {
         let scheme_path = "components.securitySchemes." <> name
         Error(diagnostic.invalid_value(
           path: scheme_path <> ".type",
@@ -968,7 +981,7 @@ fn inline_path_param_names(
     case p {
       Value(param) ->
         case param.in_ {
-          spec.InPath -> Ok(param.name)
+          openapi.InPath -> Ok(param.name)
           _ -> Error(Nil)
         }
       Ref(_) -> Error(Nil)
@@ -1658,7 +1671,7 @@ fn parse_responses_required(
   node: yay.Node,
   index: LocationIndex,
 ) -> Result(
-  dict.Dict(http.HttpStatusCode, RefOr(Response(Unresolved))),
+  dict.Dict(openapi.HttpStatusCode, RefOr(Response(Unresolved))),
   Diagnostic,
 ) {
   parse_responses(node, index)
@@ -1748,12 +1761,12 @@ fn check_unique_parameters(
   }
 }
 
-fn parameter_in_string(in_: spec.ParameterIn) -> String {
+fn parameter_in_string(in_: openapi.ParameterIn) -> String {
   case in_ {
-    spec.InPath -> "path"
-    spec.InQuery -> "query"
-    spec.InHeader -> "header"
-    spec.InCookie -> "cookie"
+    openapi.InPath -> "path"
+    openapi.InQuery -> "query"
+    openapi.InHeader -> "header"
+    openapi.InCookie -> "cookie"
   }
 }
 
@@ -1823,8 +1836,8 @@ fn parse_parameter(
       // missing-`required` case and the explicit
       // `required: false` case must reject.
       use required <- result.try(case in_, explicit_required {
-        spec.InPath, Some(True) -> Ok(True)
-        spec.InPath, _ ->
+        openapi.InPath, Some(True) -> Ok(True)
+        openapi.InPath, _ ->
           Error(diagnostic.invalid_value(
             path: "parameter." <> name,
             detail: "Path parameters must have required: true",
@@ -1867,9 +1880,9 @@ fn parse_parameter(
       let examples = parser_value.extract_map(node, "examples")
 
       let payload = case param_schema {
-        Ok(sr) -> spec.ParameterSchema(sr)
+        Ok(sr) -> openapi.ParameterSchema(sr)
         // nolint: thrown_away_error -- Nil error merely signals absence of parameter.schema; content fallback is intentional
-        Error(_) -> spec.ParameterContent(content)
+        Error(_) -> openapi.ParameterContent(content)
       }
 
       Ok(
@@ -1896,10 +1909,10 @@ fn parse_parameter_in(
   index: LocationIndex,
 ) -> Result(ParameterIn, Diagnostic) {
   case value {
-    "path" -> Ok(spec.InPath)
-    "query" -> Ok(spec.InQuery)
-    "header" -> Ok(spec.InHeader)
-    "cookie" -> Ok(spec.InCookie)
+    "path" -> Ok(openapi.InPath)
+    "query" -> Ok(openapi.InQuery)
+    "header" -> Ok(openapi.InHeader)
+    "cookie" -> Ok(openapi.InCookie)
     _ ->
       Error(diagnostic.invalid_value(
         path: "parameter.in",
@@ -1915,15 +1928,15 @@ fn parse_parameter_in(
 fn parse_parameter_style(
   value: String,
   index: LocationIndex,
-) -> Result(spec.ParameterStyle, Diagnostic) {
+) -> Result(openapi.ParameterStyle, Diagnostic) {
   case value {
-    "form" -> Ok(spec.FormStyle)
-    "simple" -> Ok(spec.SimpleStyle)
-    "deepObject" -> Ok(spec.DeepObjectStyle)
-    "matrix" -> Ok(spec.MatrixStyle)
-    "label" -> Ok(spec.LabelStyle)
-    "spaceDelimited" -> Ok(spec.SpaceDelimitedStyle)
-    "pipeDelimited" -> Ok(spec.PipeDelimitedStyle)
+    "form" -> Ok(openapi.FormStyle)
+    "simple" -> Ok(openapi.SimpleStyle)
+    "deepObject" -> Ok(openapi.DeepObjectStyle)
+    "matrix" -> Ok(openapi.MatrixStyle)
+    "label" -> Ok(openapi.LabelStyle)
+    "spaceDelimited" -> Ok(openapi.SpaceDelimitedStyle)
+    "pipeDelimited" -> Ok(openapi.PipeDelimitedStyle)
     _ ->
       Error(diagnostic.invalid_value(
         path: "parameter.style",
@@ -1939,11 +1952,11 @@ fn parse_parameter_style(
 fn parse_security_scheme_in(
   value: String,
   index: LocationIndex,
-) -> Result(spec.SecuritySchemeIn, Diagnostic) {
+) -> Result(openapi.SecuritySchemeIn, Diagnostic) {
   case value {
-    "header" -> Ok(spec.SchemeInHeader)
-    "query" -> Ok(spec.SchemeInQuery)
-    "cookie" -> Ok(spec.SchemeInCookie)
+    "header" -> Ok(openapi.SchemeInHeader)
+    "query" -> Ok(openapi.SchemeInQuery)
+    "cookie" -> Ok(openapi.SchemeInCookie)
     _ ->
       Error(diagnostic.invalid_value(
         path: "securityScheme.in",
@@ -2061,7 +2074,10 @@ fn parse_content(
 fn parse_responses(
   node: yay.Node,
   index: LocationIndex,
-) -> Result(Dict(http.HttpStatusCode, RefOr(Response(Unresolved))), Diagnostic) {
+) -> Result(
+  Dict(openapi.HttpStatusCode, RefOr(Response(Unresolved))),
+  Diagnostic,
+) {
   case yay.select_sugar(from: node, selector: "responses") {
     Ok(yay.NodeMap(entries)) -> {
       // Yamerl tolerates duplicate mapping keys, so two
@@ -2413,7 +2429,7 @@ pub fn parse_error_to_string(error: Diagnostic) -> String {
 fn parse_security_schemes_map(
   components_node: yay.Node,
   index: LocationIndex,
-) -> Result(Dict(String, RefOr(spec.SecurityScheme)), Diagnostic) {
+) -> Result(Dict(String, RefOr(openapi.SecurityScheme)), Diagnostic) {
   use _name, value_node <- parse_ref_or_map(
     components_node,
     "securitySchemes",
@@ -2442,7 +2458,7 @@ fn parse_path_items_map(
 fn parse_security_scheme(
   node: yay.Node,
   index: LocationIndex,
-) -> Result(spec.SecurityScheme, Diagnostic) {
+) -> Result(openapi.SecurityScheme, Diagnostic) {
   use type_str <- result.try(
     yay.extract_string(node, "type")
     |> result.map_error(parser_yay_error.missing_field_from_extraction(
@@ -2482,7 +2498,7 @@ fn parse_security_scheme(
         )),
       )
       case parse_security_scheme_in(in_str, index) {
-        Ok(in_) -> Ok(spec.ApiKeyScheme(name:, in_:))
+        Ok(in_) -> Ok(openapi.ApiKeyScheme(name:, in_:))
         Error(_) ->
           Error(diagnostic.invalid_value(
             path: "securityScheme.apiKey.in",
@@ -2508,12 +2524,12 @@ fn parse_security_scheme(
         )),
       )
       let bearer_format = parser_value.optional_string(node, "bearerFormat")
-      Ok(spec.HttpScheme(scheme:, bearer_format:))
+      Ok(openapi.HttpScheme(scheme:, bearer_format:))
     }
     "oauth2" -> {
       let description = parser_value.optional_string(node, "description")
       let flows = parse_oauth2_flows(node)
-      Ok(spec.OAuth2Scheme(description:, flows:))
+      Ok(openapi.OAuth2Scheme(description:, flows:))
     }
     "openIdConnect" -> {
       let description = parser_value.optional_string(node, "description")
@@ -2530,19 +2546,19 @@ fn parse_security_scheme(
           ),
         )),
       )
-      Ok(spec.OpenIdConnectScheme(open_id_connect_url:, description:))
+      Ok(openapi.OpenIdConnectScheme(open_id_connect_url:, description:))
     }
     _ ->
       // Keep the raw type so `validate_security_scheme_types` can tell
       // OAS 3.1 `mutualTLS` (valid, reported by capability_check as a
       // generator limitation) from a value outside the enum, which it
       // rejects once the `openapi` version is known.
-      Ok(spec.UnsupportedScheme(scheme_type: type_str))
+      Ok(openapi.UnsupportedScheme(scheme_type: type_str))
   }
 }
 
 /// Parse OAuth2 flows from a security scheme node.
-fn parse_oauth2_flows(node: yay.Node) -> dict.Dict(String, spec.OAuth2Flow) {
+fn parse_oauth2_flows(node: yay.Node) -> dict.Dict(String, openapi.OAuth2Flow) {
   case yay.select_sugar(from: node, selector: "flows") {
     Ok(yay.NodeMap(flow_entries)) ->
       list.fold(flow_entries, dict.new(), fn(acc, entry) {
@@ -2571,7 +2587,7 @@ fn parse_oauth2_flows(node: yay.Node) -> dict.Dict(String, spec.OAuth2Flow) {
             dict.insert(
               acc,
               flow_name,
-              spec.OAuth2Flow(
+              openapi.OAuth2Flow(
                 authorization_url:,
                 token_url:,
                 refresh_url:,
@@ -2665,7 +2681,7 @@ fn parse_security_requirement_object(
                     ),
                   ))
               })
-              Ok(spec.SecuritySchemeRef(scheme_name:, scopes:))
+              Ok(openapi.SecuritySchemeRef(scheme_name:, scopes:))
             }
             _ ->
               Error(diagnostic.invalid_value(

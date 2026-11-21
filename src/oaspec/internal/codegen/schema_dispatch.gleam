@@ -8,8 +8,9 @@
 /// types.gleam, decoders.gleam, client.gleam and guards.gleam share it.
 import gleam/option.{type Option, None, Some}
 import oaspec/internal/codegen/context.{type Context}
+import oaspec/internal/openapi/schema
 import oaspec/internal/util/naming
-import oaspec/openapi/schema.{
+import oaspec/openapi.{
   type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
   BooleanSchema, Inline, IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema,
   Reference, StringSchema,

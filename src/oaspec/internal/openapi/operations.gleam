@@ -1,10 +1,11 @@
 import gleam/dict
+import gleam/http.{type Method}
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
-import oaspec/openapi/spec.{
-  type HttpMethod, type OpenApiSpec, type Operation, type PathItem,
-  type Resolved,
+import oaspec/internal/openapi/spec
+import oaspec/openapi.{
+  type OpenApiSpec, type Operation, type PathItem, type Resolved,
 }
 
 /// Collect all operations from the spec with their IDs, paths, and methods.
@@ -17,7 +18,7 @@ import oaspec/openapi/spec.{
 /// re-running this traversal.
 pub fn collect_operations(
   resolved_spec: OpenApiSpec(Resolved),
-) -> List(#(String, Operation(Resolved), String, HttpMethod)) {
+) -> List(#(String, Operation(Resolved), String, Method)) {
   let paths =
     list.sort(dict.to_list(resolved_spec.paths), fn(a, b) {
       string.compare(a.0, b.0)
@@ -56,7 +57,7 @@ pub fn collect_operations(
         [] -> path_item.servers
       }
       let operation =
-        spec.Operation(
+        openapi.Operation(
           ..operation,
           parameters: merged_params,
           security: Some(effective_security),
@@ -81,16 +82,16 @@ pub fn collect_operations(
 /// get, post, put, delete, patch, head, options, trace.
 pub fn path_item_operations(
   item: PathItem(stage),
-) -> List(#(HttpMethod, Operation(stage))) {
+) -> List(#(Method, Operation(stage))) {
   [
-    #(spec.Get, item.get),
-    #(spec.Post, item.post),
-    #(spec.Put, item.put),
-    #(spec.Delete, item.delete),
-    #(spec.Patch, item.patch),
-    #(spec.Head, item.head),
-    #(spec.Options, item.options),
-    #(spec.Trace, item.trace),
+    #(http.Get, item.get),
+    #(http.Post, item.post),
+    #(http.Put, item.put),
+    #(http.Delete, item.delete),
+    #(http.Patch, item.patch),
+    #(http.Head, item.head),
+    #(http.Options, item.options),
+    #(http.Trace, item.trace),
   ]
   |> list.filter_map(fn(entry) {
     case entry.1 {

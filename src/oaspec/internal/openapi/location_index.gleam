@@ -2,7 +2,7 @@ import gleam/dict.{type Dict}
 import gleam/list
 import gleam/result
 import gleam/string
-import oaspec/openapi/diagnostic.{type SourceLoc, NoSourceLoc, SourceLoc}
+import oaspec/openapi.{type SourceLoc, NoSourceLoc, SourceLoc}
 
 /// An index mapping dotted JSON-pointer paths to source locations.
 /// Built by parsing YAML with yamerl (which preserves line/column),

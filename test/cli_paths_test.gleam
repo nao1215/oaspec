@@ -19,13 +19,15 @@ pub fn resolve_path_from_cwd_preserves_windows_drive_paths_test() {
 
 pub fn resolved_path_entries_include_active_outputs_for_both_mode_test() {
   let cfg =
-    config.new(
+    config.Config(
       input: "./openapi.yaml",
       output_server: "./gen/api",
       output_client: "./gen/api_client",
       package: "api",
       mode: config.Both,
       validate: True,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
 
   cli.resolved_path_entries("./oaspec.yaml", cfg, "/work/project")
@@ -39,13 +41,15 @@ pub fn resolved_path_entries_include_active_outputs_for_both_mode_test() {
 
 pub fn resolved_path_entries_omit_inactive_output_for_client_mode_test() {
   let cfg =
-    config.new(
+    config.Config(
       input: "./openapi.yaml",
       output_server: "./ignored/server",
       output_client: "./gen/api",
       package: "api",
       mode: config.Client,
       validate: False,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
 
   cli.resolved_path_entries("./oaspec.yaml", cfg, "/work/project")

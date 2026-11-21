@@ -3,7 +3,6 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
-import oaspec/config
 import oaspec/internal/codegen/allof_merge
 import oaspec/internal/codegen/codec_helpers
 import oaspec/internal/codegen/context.{
@@ -17,12 +16,12 @@ import oaspec/internal/openapi/resolver
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
 import oaspec/internal/util/string_extra as se
-import oaspec/openapi/schema.{
-  type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema,
-  BooleanSchema, Forbidden, Inline, IntegerSchema, NumberSchema, ObjectSchema,
-  OneOfSchema, Reference, StringSchema, Typed, Unspecified, Untyped,
+import oaspec/openapi.{
+  type Resolved, type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema,
+  ArraySchema, BooleanSchema, Forbidden, Inline, IntegerSchema, NumberSchema,
+  ObjectSchema, OneOfSchema, Reference, StringSchema, Typed, Unspecified,
+  Untyped, Value,
 }
-import oaspec/openapi/spec.{type Resolved, Value}
 
 /// Generate the `decode.gleam` module for the resolved spec.
 ///
@@ -117,7 +116,7 @@ fn generate_decoders(
   let base_imports = case needs_types {
     True ->
       list.append(base_imports, [
-        config.package(context.config(ctx)) <> "/types",
+        context.config(ctx).package <> "/types",
       ])
     False -> base_imports
   }
@@ -180,7 +179,7 @@ fn generate_anonymous_decoders(
 fn generate_anonymous_response_decoders(
   sb: se.StringBuilder,
   op_id: String,
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
   ctx: Context,
 ) -> se.StringBuilder {
   let responses = http.sort_response_entries(dict.to_list(operation.responses))
@@ -210,7 +209,7 @@ fn generate_anonymous_response_decoders(
           _ -> sb
         }
       }
-      spec.Ref(_) -> sb
+      openapi.Ref(_) -> sb
     }
   })
 }
@@ -219,7 +218,7 @@ fn generate_anonymous_response_decoders(
 fn generate_anonymous_request_body_decoder(
   sb: se.StringBuilder,
   op_id: String,
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
   ctx: Context,
 ) -> se.StringBuilder {
   case operation.request_body {
@@ -245,7 +244,7 @@ fn generate_anonymous_request_body_decoder(
         _ -> sb
       }
     }
-    Some(spec.Ref(_)) -> sb
+    Some(openapi.Ref(_)) -> sb
     None -> sb
   }
 }
@@ -272,7 +271,7 @@ fn collect_operation_inline_schemas(
                 _ -> Error(Nil)
               }
             })
-          spec.Ref(_) -> []
+          openapi.Ref(_) -> []
         }
       })
     let request_schemas = case operation.request_body {
@@ -492,7 +491,7 @@ fn generate_object_decoder(
   description: Option(String),
   properties: dict.Dict(String, SchemaRef),
   required: List(String),
-  additional_properties: schema.AdditionalProperties,
+  additional_properties: openapi.AdditionalProperties,
   ctx: Context,
 ) -> se.StringBuilder {
   let sb = maybe_doc_comment(sb, description)
@@ -1014,7 +1013,7 @@ fn generate_oneof_decoder(
   decoder_fn_name: String,
   description: Option(String),
   schemas: List(SchemaRef),
-  discriminator: Option(schema.Discriminator),
+  discriminator: Option(openapi.Discriminator),
 ) -> se.StringBuilder {
   // Only handle $ref variants (inline primitives blocked by validator)
   let all_refs =
@@ -1303,7 +1302,7 @@ fn generate_oneof_decoder(
 /// Given a ref_name like "Dog", find the mapping key that points to it.
 /// Falls back to ref_name if no explicit mapping exists.
 fn get_discriminator_value(
-  disc: schema.Discriminator,
+  disc: openapi.Discriminator,
   ref: String,
   ref_name: String,
 ) -> String {

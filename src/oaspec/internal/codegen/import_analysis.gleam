@@ -2,8 +2,9 @@ import gleam/dict
 import gleam/list
 import gleam/option.{Some}
 import oaspec/internal/codegen/context
-import oaspec/openapi/schema.{AllOfSchema, Inline, ObjectSchema, Reference}
-import oaspec/openapi/spec.{ParameterSchema, Value}
+import oaspec/openapi.{
+  AllOfSchema, Inline, ObjectSchema, ParameterSchema, Reference, Value,
+}
 
 /// Check if any operation has parameters with Reference schemas,
 /// or request body content with Reference/ObjectSchema/AllOfSchema.

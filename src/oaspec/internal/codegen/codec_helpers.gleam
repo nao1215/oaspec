@@ -7,7 +7,7 @@ import oaspec/internal/codegen/allof_merge
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/ir_build
 import oaspec/internal/codegen/schema_dispatch
-import oaspec/openapi/schema.{
+import oaspec/openapi.{
   type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema, BooleanSchema, Inline,
   IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema, StringSchema,
 }

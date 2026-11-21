@@ -1,15 +1,16 @@
 import gleam/string
 import gleeunit
 import gleeunit/should
+import oaspec/internal/openapi/diagnostic
 import oaspec/internal/openapi/diagnostic_format
-import oaspec/openapi/diagnostic
+import oaspec/openapi
 
 pub fn main() {
   gleeunit.main()
 }
 
 // ====================================================================
-// Issue #414: pin diagnostic.to_short_string and diagnostic.to_string
+// Issue #414: pin diagnostic.to_short_string and openapi.diagnostic_to_string
 // shape per code variant. These strings leak to the CLI and a format
 // regression was previously invisible to the test suite.
 // ====================================================================
@@ -24,7 +25,7 @@ pub fn to_short_string_yaml_error_with_loc_test() {
   let diag =
     diagnostic.yaml_error(
       detail: "unexpected token",
-      loc: diagnostic.SourceLoc(line: 4, column: 7),
+      loc: openapi.SourceLoc(line: 4, column: 7),
     )
   diagnostic.to_short_string(diag)
   |> should.equal("unexpected token (line 4, column 7)")
@@ -32,7 +33,7 @@ pub fn to_short_string_yaml_error_with_loc_test() {
 
 pub fn to_short_string_yaml_error_no_loc_test() {
   let diag =
-    diagnostic.yaml_error(detail: "empty document", loc: diagnostic.NoSourceLoc)
+    diagnostic.yaml_error(detail: "empty document", loc: openapi.NoSourceLoc)
   diagnostic.to_short_string(diag)
   |> should.equal("empty document")
 }
@@ -42,7 +43,7 @@ pub fn to_short_string_missing_field_test() {
     diagnostic.missing_field(
       path: "paths.~1pets.get",
       field: "responses",
-      loc: diagnostic.NoSourceLoc,
+      loc: openapi.NoSourceLoc,
     )
   let rendered = diagnostic.to_short_string(diag)
   rendered
@@ -56,7 +57,7 @@ pub fn to_short_string_invalid_value_test() {
     diagnostic.invalid_value(
       path: "paths.~1pets.post.requestBody",
       detail: "content type must be a string",
-      loc: diagnostic.NoSourceLoc,
+      loc: openapi.NoSourceLoc,
     )
   let rendered = diagnostic.to_short_string(diag)
   rendered
@@ -72,9 +73,9 @@ pub fn to_string_yaml_error_full_format_test() {
   let diag =
     diagnostic.yaml_error(
       detail: "boom",
-      loc: diagnostic.SourceLoc(line: 1, column: 2),
+      loc: openapi.SourceLoc(line: 1, column: 2),
     )
-  diagnostic.to_string(diag)
+  openapi.diagnostic_to_string(diag)
   |> should.equal("[Parse] Error: boom (line 1, column 2)")
 }
 
@@ -83,9 +84,9 @@ pub fn to_string_missing_field_includes_pointer_and_hint_test() {
     diagnostic.missing_field(
       path: "components.schemas.Pet",
       field: "type",
-      loc: diagnostic.NoSourceLoc,
+      loc: openapi.NoSourceLoc,
     )
-  let rendered = diagnostic.to_string(diag)
+  let rendered = openapi.diagnostic_to_string(diag)
   // Phase + severity + pointer + message + hint must all appear.
   rendered |> string.contains("[Parse] Error") |> should.be_true()
   rendered |> string.contains("at components.schemas.Pet") |> should.be_true()

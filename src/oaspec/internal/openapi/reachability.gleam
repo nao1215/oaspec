@@ -24,16 +24,14 @@
 import gleam/dict.{type Dict}
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import oaspec/openapi/schema.{
-  type Discriminator, type SchemaObject, type SchemaRef, AllOfSchema,
-  AnyOfSchema, ArraySchema, Forbidden, Inline, ObjectSchema, OneOfSchema,
-  Reference, Typed, Unspecified, Untyped,
-}
-import oaspec/openapi/spec.{
-  type Callback, type MediaType, type OpenApiSpec, type Operation,
-  type Parameter, type PathItem, type RefOr, type Resolved, type Response,
-  Callback, Components, OpenApiSpec, ParameterContent, ParameterSchema, Ref,
-  Value,
+import oaspec/internal/openapi/schema
+import oaspec/openapi.{
+  type Callback, type Discriminator, type MediaType, type OpenApiSpec,
+  type Operation, type Parameter, type PathItem, type RefOr, type Resolved,
+  type Response, type SchemaObject, type SchemaRef, AllOfSchema, AnyOfSchema,
+  ArraySchema, Callback, Components, Forbidden, Inline, ObjectSchema,
+  OneOfSchema, OpenApiSpec, ParameterContent, ParameterSchema, Ref, Reference,
+  Typed, Unspecified, Untyped, Value,
 }
 
 /// Set of reachable component schema names. Implemented as `Dict(_, Nil)`

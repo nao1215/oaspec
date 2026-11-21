@@ -1,56 +1,17 @@
+//// Builders, filters and renderers for `oaspec/openapi.Diagnostic`.
+
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import oaspec/config
 import oaspec/internal/openapi/diagnostic_format
-
-/// Pipeline phase that produced the diagnostic.
-pub type Phase {
-  PhaseParse
-  PhaseNormalize
-  PhaseResolve
-  PhaseCapabilityCheck
-  PhaseValidate
-  PhaseCodegen
+import oaspec/openapi.{
+  type Diagnostic, type Severity, type SourceLoc, type Target, Diagnostic,
+  NoSourceLoc, PhaseCapabilityCheck, PhaseParse, PhaseResolve, PhaseValidate,
+  SeverityError, SeverityWarning, SourceLoc, TargetBoth, TargetClient,
+  TargetServer,
 }
-
-/// Severity level for diagnostics.
-pub type Severity {
-  SeverityError
-  SeverityWarning
-}
-
-/// Target indicating which generation mode the issue applies to.
-pub type Target {
-  TargetBoth
-  TargetClient
-  TargetServer
-}
-
-/// Source location from YAML/JSON parsing.
-pub type SourceLoc {
-  SourceLoc(line: Int, column: Int)
-  NoSourceLoc
-}
-
-/// Unified diagnostic type for all pipeline phases.
-pub type Diagnostic {
-  Diagnostic(
-    code: String,
-    phase: Phase,
-    severity: Severity,
-    target: Target,
-    pointer: String,
-    source_loc: SourceLoc,
-    message: String,
-    hint: Option(String),
-  )
-}
-
-// ============================================================================
-// Convenience constructors for parse phase
-// ============================================================================
 
 pub fn file_error(detail detail: String) -> Diagnostic {
   Diagnostic(
@@ -78,10 +39,9 @@ pub fn yaml_error(detail detail: String, loc loc: SourceLoc) -> Diagnostic {
   )
 }
 
-/// Parser refused the input because it exceeded a configured DoS
-/// limit (see `parser.ParseLimits`). The message names the limit, the
-/// configured cap, and the actual value so callers can either bump
-/// the limit (when they trust the source) or reject the input.
+/// Builds the diagnostic for input that exceeds one of the parser's
+/// built-in size limits. The message names the limit, the cap and the
+/// actual value.
 pub fn parse_limit_exceeded(
   limit limit: String,
   configured configured: Int,
@@ -102,9 +62,7 @@ pub fn parse_limit_exceeded(
       <> int.to_string(actual)
       <> ". The input was refused before parsing to bound denial-of-service exposure.",
     hint: option.Some(
-      "If the source is trusted, raise '"
-      <> limit
-      <> "' via parser.ParseLimits and call parse_string_with_limits with the larger cap. Untrusted sources should keep the default cap.",
+      "Reduce the spec below the cap, for example by removing unused paths or components.",
     ),
   )
 }
@@ -171,10 +129,6 @@ pub fn duplicate_key(
   )
 }
 
-// ============================================================================
-// Convenience constructors for resolve phase
-// ============================================================================
-
 pub fn resolve_error(
   path path: String,
   detail detail: String,
@@ -193,15 +147,11 @@ pub fn resolve_error(
   )
 }
 
-// ============================================================================
-// Convenience constructors for capability_check phase
-// ============================================================================
-
-/// Capability checks now thread a YAML `SourceLoc` through
-/// every diagnostic. Pass `NoSourceLoc` only when the caller genuinely
-/// has no LocationIndex available (e.g. tests that bypass the parser
-/// path); production code always has one because it goes through
-/// `parser.parse_file_with_locations` / `generate.generate_with_locations`.
+/// Capability checks thread a YAML `SourceLoc` through every diagnostic.
+/// Pass `NoSourceLoc` only when the caller has no LocationIndex (tests that
+/// bypass the parser, or the library `oaspec.generate`); the CLI always has
+/// one because it goes through `parser.parse_file_with_progress_and_locations`
+/// and `generate.generate_with_progress_and_locations`.
 pub fn capability(
   path path: String,
   detail detail: String,
@@ -221,10 +171,6 @@ pub fn capability(
     hint: hint,
   )
 }
-
-// ============================================================================
-// Convenience constructors for validate phase
-// ============================================================================
 
 pub fn validation(
   path path: String,
@@ -299,10 +245,6 @@ pub fn validation_warning_both(
   )
 }
 
-// ============================================================================
-// Filtering
-// ============================================================================
-
 /// Filter to only errors (not warnings).
 pub fn errors_only(issues: List(Diagnostic)) -> List(Diagnostic) {
   list.filter(issues, fn(e) { e.severity == SeverityError })
@@ -325,52 +267,6 @@ pub fn filter_by_mode(
   }
 }
 
-// ============================================================================
-// Display
-// ============================================================================
-
-/// Convert a diagnostic to a human-readable string.
-pub fn to_string(d: Diagnostic) -> String {
-  let phase_str = case d.phase {
-    PhaseParse -> "Parse"
-    PhaseNormalize -> "Normalize"
-    PhaseResolve -> "Resolve"
-    PhaseCapabilityCheck -> "CapabilityCheck"
-    PhaseValidate -> "Validate"
-    PhaseCodegen -> "Codegen"
-  }
-  let severity_str = case d.severity {
-    SeverityError -> "Error"
-    SeverityWarning -> "Warning"
-  }
-  let loc_str = case d.source_loc {
-    SourceLoc(line:, column:) ->
-      " (line "
-      <> int.to_string(line)
-      <> ", column "
-      <> int.to_string(column)
-      <> ")"
-    NoSourceLoc -> ""
-  }
-  let pointer_str = case d.pointer {
-    "" -> ""
-    p -> " at " <> p
-  }
-  let hint_str = case d.hint {
-    Some(h) -> " " <> h
-    None -> ""
-  }
-  "["
-  <> phase_str
-  <> "] "
-  <> severity_str
-  <> pointer_str
-  <> ": "
-  <> d.message
-  <> loc_str
-  <> hint_str
-}
-
 /// Render a diagnostic with an editor-clickable `path:line:column:`
 /// prefix when the spec file path and a `SourceLoc` are both known.
 /// Falls back to plain `to_string` otherwise.
@@ -387,9 +283,9 @@ pub fn render(d: Diagnostic, file_path file_path: Option(String)) -> String {
       <> ":"
       <> int.to_string(column)
       <> ": "
-      <> to_string(d)
-    Some(path), NoSourceLoc -> path <> ": " <> to_string(d)
-    None, _ -> to_string(d)
+      <> openapi.diagnostic_to_string(d)
+    Some(path), NoSourceLoc -> path <> ": " <> openapi.diagnostic_to_string(d)
+    None, _ -> openapi.diagnostic_to_string(d)
   }
 }
 

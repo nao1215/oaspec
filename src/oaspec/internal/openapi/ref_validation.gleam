@@ -14,18 +14,17 @@ import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/set.{type Set}
+import oaspec/internal/openapi/diagnostic
 import oaspec/internal/openapi/operations
-import oaspec/openapi/diagnostic.{type Diagnostic, NoSourceLoc}
-import oaspec/openapi/schema.{
-  type AdditionalProperties, type SchemaObject, type SchemaRef, AllOfSchema,
-  AnyOfSchema, ArraySchema, Forbidden, Inline, ObjectSchema, OneOfSchema,
-  Reference, Typed, Unspecified, Untyped,
+import oaspec/internal/openapi/spec as openapi_spec
+import oaspec/openapi.{
+  type AdditionalProperties, type Diagnostic, type Header, type MediaType,
+  type OpenApiSpec, type Operation, type Parameter, type PathItem, type RefOr,
+  type RequestBody, type Resolved, type Response, type SchemaObject,
+  type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema, Forbidden, Inline,
+  NoSourceLoc, ObjectSchema, OneOfSchema, ParameterContent, ParameterSchema, Ref,
+  Reference, Typed, Unspecified, Untyped, Value,
 }
-import oaspec/openapi/spec.{
-  type Header, type MediaType, type OpenApiSpec, type Operation, type Parameter,
-  type PathItem, type RefOr, type RequestBody, type Resolved, type Response,
-  ParameterContent, ParameterSchema, Ref, Value,
-} as openapi_spec
 
 /// Walk every `SchemaRef` reachable from `spec` and verify each
 /// `Reference` resolves to a concrete schema in `components.schemas`

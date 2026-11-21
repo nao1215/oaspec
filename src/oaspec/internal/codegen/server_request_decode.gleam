@@ -6,13 +6,13 @@ import gleam/string
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/ir_build
 import oaspec/internal/codegen/operation_ir
+import oaspec/internal/openapi/spec
 import oaspec/internal/util/content_type
 import oaspec/internal/util/naming
-import oaspec/openapi/schema.{
-  type AdditionalProperties, type SchemaRef, Forbidden, Inline, ObjectSchema,
-  Reference, Typed, Unspecified, Untyped,
+import oaspec/openapi.{
+  type AdditionalProperties, type Resolved, type SchemaRef, Forbidden, Inline,
+  ObjectSchema, Reference, Typed, Unspecified, Untyped, Value,
 }
-import oaspec/openapi/spec.{type Resolved, Value}
 
 /// Expression that case-insensitively parses a string to Bool.
 /// Accepts "true"/"True"/"TRUE" etc. as True, everything else as False.
@@ -53,11 +53,11 @@ pub fn schema_ref_body_field_kind(
 
 pub fn body_field_kind(schema_ref: SchemaRef, ctx: Context) -> BodyFieldKind {
   case schema_ref {
-    Inline(schema.StringSchema(..)) -> BodyFieldString
-    Inline(schema.IntegerSchema(..)) -> BodyFieldInt
-    Inline(schema.NumberSchema(..)) -> BodyFieldFloat
-    Inline(schema.BooleanSchema(..)) -> BodyFieldBool
-    Inline(schema.ArraySchema(items:, ..)) ->
+    Inline(openapi.StringSchema(..)) -> BodyFieldString
+    Inline(openapi.IntegerSchema(..)) -> BodyFieldInt
+    Inline(openapi.NumberSchema(..)) -> BodyFieldFloat
+    Inline(openapi.BooleanSchema(..)) -> BodyFieldBool
+    Inline(openapi.ArraySchema(items:, ..)) ->
       case body_field_kind(items, ctx) {
         BodyFieldString -> BodyFieldStringArray
         BodyFieldInt -> BodyFieldIntArray
@@ -76,15 +76,15 @@ pub fn body_field_kind(schema_ref: SchemaRef, ctx: Context) -> BodyFieldKind {
 }
 
 fn body_field_kind_from_object(
-  schema_obj: schema.SchemaObject,
+  schema_obj: openapi.SchemaObject,
   ctx: Context,
 ) -> BodyFieldKind {
   case schema_obj {
-    schema.StringSchema(..) -> BodyFieldString
-    schema.IntegerSchema(..) -> BodyFieldInt
-    schema.NumberSchema(..) -> BodyFieldFloat
-    schema.BooleanSchema(..) -> BodyFieldBool
-    schema.ArraySchema(items:, ..) ->
+    openapi.StringSchema(..) -> BodyFieldString
+    openapi.IntegerSchema(..) -> BodyFieldInt
+    openapi.NumberSchema(..) -> BodyFieldFloat
+    openapi.BooleanSchema(..) -> BodyFieldBool
+    openapi.ArraySchema(items:, ..) ->
       case body_field_kind(items, ctx) {
         BodyFieldString -> BodyFieldStringArray
         BodyFieldInt -> BodyFieldIntArray
@@ -116,16 +116,16 @@ pub fn body_field_kind_needs_float(kind: BodyFieldKind) -> Bool {
 /// so the router can wrap it in a case expression for error handling.
 pub fn param_parse_expr(
   var_name: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
 ) -> String {
   case spec.parameter_schema(param) {
-    Some(Inline(schema.IntegerSchema(..))) -> {
+    Some(Inline(openapi.IntegerSchema(..))) -> {
       "int.parse(" <> var_name <> ")"
     }
-    Some(Inline(schema.NumberSchema(..))) -> {
+    Some(Inline(openapi.NumberSchema(..))) -> {
       "float.parse(" <> var_name <> ")"
     }
-    Some(Inline(schema.BooleanSchema(..))) -> {
+    Some(Inline(openapi.BooleanSchema(..))) -> {
       "{ let v = " <> var_name <> " " <> bool_parse_expr <> " }"
     }
     _ -> var_name
@@ -134,10 +134,10 @@ pub fn param_parse_expr(
 
 /// Return true when the parse expression returns a Result that the router
 /// must unwrap (int/float parsing). Bool and string params are always safe.
-pub fn param_needs_result_unwrap(param: spec.Parameter(Resolved)) -> Bool {
+pub fn param_needs_result_unwrap(param: openapi.Parameter(Resolved)) -> Bool {
   case spec.parameter_schema(param) {
-    Some(Inline(schema.IntegerSchema(..)))
-    | Some(Inline(schema.NumberSchema(..))) -> True
+    Some(Inline(openapi.IntegerSchema(..)))
+    | Some(Inline(openapi.NumberSchema(..))) -> True
     _ -> False
   }
 }
@@ -160,7 +160,7 @@ pub fn param_needs_result_unwrap(param: spec.Parameter(Resolved)) -> Bool {
 /// success — that's the variable name the helper returns here.
 pub fn query_required_expr(
   bound_var: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> String {
   query_required_expr_with_schema(
@@ -261,12 +261,12 @@ fn query_required_expr_with_schema(
   bound_var: String,
   schema_ref: Option(SchemaRef),
   explode: Option(Bool),
-  style: Option(spec.ParameterStyle),
+  style: Option(openapi.ParameterStyle),
   ctx: Context,
 ) -> String {
   let delim = operation_ir.delimiter_for_style(style)
   case schema_ref {
-    Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
+    Some(Inline(openapi.ArraySchema(items: Inline(openapi.StringSchema(..)), ..))) ->
       case explode {
         Some(False) ->
           "list.map(string.split("
@@ -276,14 +276,20 @@ fn query_required_expr_with_schema(
           <> "\"), fn(item) { string.trim(item) })"
         _ -> "list.map(" <> bound_var <> ", fn(item) { string.trim(item) })"
       }
-    Some(Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..))) ->
+    Some(Inline(openapi.ArraySchema(
+      items: Inline(openapi.IntegerSchema(..)),
+      ..,
+    ))) ->
       // The router opens a `case list.try_map(..., int.parse)` and binds
       // `<bound_var>_parsed_list` on Ok, so the value expression is just
       // that bound name.
       bound_var <> "_parsed_list"
-    Some(Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..))) ->
+    Some(Inline(openapi.ArraySchema(items: Inline(openapi.NumberSchema(..)), ..))) ->
       bound_var <> "_parsed_list"
-    Some(Inline(schema.ArraySchema(items: Inline(schema.BooleanSchema(..)), ..))) ->
+    Some(Inline(openapi.ArraySchema(
+      items: Inline(openapi.BooleanSchema(..)),
+      ..,
+    ))) ->
       case explode {
         Some(False) ->
           "list.map(string.split("
@@ -300,9 +306,9 @@ fn query_required_expr_with_schema(
           <> bool_parse_expr
           <> " })"
       }
-    Some(Inline(schema.IntegerSchema(..))) -> bound_var <> "_parsed"
-    Some(Inline(schema.NumberSchema(..))) -> bound_var <> "_parsed"
-    Some(Inline(schema.BooleanSchema(..))) ->
+    Some(Inline(openapi.IntegerSchema(..))) -> bound_var <> "_parsed"
+    Some(Inline(openapi.NumberSchema(..))) -> bound_var <> "_parsed"
+    Some(Inline(openapi.BooleanSchema(..))) ->
       "{ let v = " <> bound_var <> " " <> bool_parse_expr <> " }"
     Some(ref) ->
       case schema_ref_string_enum(ref, ctx) {
@@ -321,7 +327,7 @@ fn query_required_expr_with_schema(
 /// Generate expression for an optional query parameter.
 pub fn query_optional_expr(
   key: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> String {
   query_optional_expr_with_schema(
@@ -350,9 +356,9 @@ fn schema_ref_scalar_kind(
   ctx: Context,
 ) -> Option(ScalarKind) {
   case context.resolve_schema_ref(schema_ref, ctx) {
-    Ok(schema.IntegerSchema(..)) -> Some(IntegerScalar)
-    Ok(schema.NumberSchema(..)) -> Some(NumberScalar)
-    Ok(schema.BooleanSchema(..)) -> Some(BooleanScalar)
+    Ok(openapi.IntegerSchema(..)) -> Some(IntegerScalar)
+    Ok(openapi.NumberSchema(..)) -> Some(NumberScalar)
+    Ok(openapi.BooleanSchema(..)) -> Some(BooleanScalar)
     _ -> None
   }
 }
@@ -368,7 +374,7 @@ pub fn schema_ref_string_enum(
   case schema_ref {
     Reference(name: ref_name, ..) ->
       case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(schema.StringSchema(enum_values: values, ..)) ->
+        Ok(openapi.StringSchema(enum_values: values, ..)) ->
           case values {
             [_, ..] -> Some(#(naming.schema_to_type_name(ref_name), values))
             [] -> None
@@ -404,9 +410,12 @@ pub fn operations_have_enum_ref_params(
   })
 }
 
-fn parameter_is_enum_ref(p: spec.Parameter(Resolved), ctx: Context) -> Bool {
+fn parameter_is_enum_ref(p: openapi.Parameter(Resolved), ctx: Context) -> Bool {
   case p.in_, spec.parameter_schema(p) {
-    spec.InQuery, Some(s) | spec.InHeader, Some(s) | spec.InCookie, Some(s) ->
+    openapi.InQuery, Some(s)
+    | openapi.InHeader, Some(s)
+    | openapi.InCookie, Some(s)
+    ->
       case schema_ref_string_enum(s, ctx) {
         Some(_) -> True
         None -> False
@@ -465,7 +474,7 @@ fn query_optional_expr_with_schema(
   key: String,
   schema_ref: Option(SchemaRef),
   explode: Option(Bool),
-  style: Option(spec.ParameterStyle),
+  style: Option(openapi.ParameterStyle),
   ctx: Context,
 ) -> String {
   let delim = operation_ir.delimiter_for_style(style)
@@ -476,7 +485,7 @@ fn query_optional_expr_with_schema(
     // (`?tags=a&tags=b` keeps `b`), flat_maps the splits across them,
     // and filters out the empty strings produced by empty input or
     // trailing delimiters, so `?tags=` is `Some([])`, not `Some([""])`.
-    Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
+    Some(Inline(openapi.ArraySchema(items: Inline(openapi.StringSchema(..)), ..))) ->
       case explode {
         Some(False) ->
           "case dict.get(query, \""
@@ -489,7 +498,10 @@ fn query_optional_expr_with_schema(
           <> key
           <> "\") { Ok(vs) -> Some(list.map(vs, fn(item) { string.trim(item) })) _ -> None }"
       }
-    Some(Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..))) ->
+    Some(Inline(openapi.ArraySchema(
+      items: Inline(openapi.IntegerSchema(..)),
+      ..,
+    ))) ->
       case explode {
         Some(False) ->
           "case dict.get(query, \""
@@ -502,7 +514,7 @@ fn query_optional_expr_with_schema(
           <> key
           <> "\") { Ok(vs) -> Some(list.map(vs, fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } })) _ -> None }"
       }
-    Some(Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..))) ->
+    Some(Inline(openapi.ArraySchema(items: Inline(openapi.NumberSchema(..)), ..))) ->
       case explode {
         Some(False) ->
           "case dict.get(query, \""
@@ -515,7 +527,10 @@ fn query_optional_expr_with_schema(
           <> key
           <> "\") { Ok(vs) -> Some(list.map(vs, fn(item) { let trimmed = string.trim(item) case float.parse(trimmed) { Ok(n) -> n _ -> 0.0 } })) _ -> None }"
       }
-    Some(Inline(schema.ArraySchema(items: Inline(schema.BooleanSchema(..)), ..))) ->
+    Some(Inline(openapi.ArraySchema(
+      items: Inline(openapi.BooleanSchema(..)),
+      ..,
+    ))) ->
       case explode {
         Some(False) ->
           "case dict.get(query, \""
@@ -532,15 +547,15 @@ fn query_optional_expr_with_schema(
           <> bool_parse_expr
           <> " })) _ -> None }"
       }
-    Some(Inline(schema.IntegerSchema(..))) ->
+    Some(Inline(openapi.IntegerSchema(..))) ->
       "case dict.get(query, \""
       <> key
       <> "\") { Ok([v, ..]) -> { case int.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }"
-    Some(Inline(schema.NumberSchema(..))) ->
+    Some(Inline(openapi.NumberSchema(..))) ->
       "case dict.get(query, \""
       <> key
       <> "\") { Ok([v, ..]) -> { case float.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }"
-    Some(Inline(schema.BooleanSchema(..))) ->
+    Some(Inline(openapi.BooleanSchema(..))) ->
       "case dict.get(query, \""
       <> key
       <> "\") { Ok([v, ..]) -> Some("
@@ -593,7 +608,7 @@ fn query_optional_expr_with_schema(
 }
 
 fn deep_object_properties(
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> List(DeepObjectProperty) {
   let details = case spec.parameter_schema(param) {
@@ -622,7 +637,7 @@ fn deep_object_properties(
 }
 
 fn deep_object_type_name(
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   op_id: String,
 ) -> String {
   case spec.parameter_schema(param) {
@@ -639,7 +654,7 @@ fn deep_object_type_name(
 /// router must look it up into a Result and answer 400 when it is missing
 /// or does not parse.
 pub fn deep_object_has_required_properties(
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> Bool {
   list.any(deep_object_properties(param, ctx), fn(prop) { prop.required })
@@ -650,7 +665,7 @@ pub fn deep_object_has_required_properties(
 /// it and answers 400 on `Error`.
 pub fn deep_object_result_expr(
   key: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   op_id: String,
   ctx: Context,
 ) -> String {
@@ -670,7 +685,7 @@ pub fn deep_object_result_expr(
 /// has no required property.
 pub fn deep_object_required_expr(
   key: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   op_id: String,
   ctx: Context,
 ) -> String {
@@ -679,7 +694,7 @@ pub fn deep_object_required_expr(
 
 pub fn deep_object_optional_expr(
   key: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   op_id: String,
   ctx: Context,
 ) -> String {
@@ -692,7 +707,7 @@ pub fn deep_object_optional_expr(
 
 fn deep_object_presence_check(
   key: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> String {
   case deep_object_has_untyped_additional_properties(param, ctx) {
@@ -709,7 +724,7 @@ fn deep_object_presence_check(
 
 fn deep_object_constructor_result_expr(
   key: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   op_id: String,
   ctx: Context,
 ) -> String {
@@ -742,7 +757,7 @@ fn deep_object_binding(prop: DeepObjectProperty) -> String {
 /// inline.
 fn deep_object_constructor_expr(
   key: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   op_id: String,
   ctx: Context,
 ) -> String {
@@ -798,26 +813,26 @@ fn deep_object_constructor_expr(
 }
 
 pub fn deep_object_has_additional_properties(
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> Bool {
   case spec.parameter_schema(param) {
     Some(Reference(..) as schema_ref) ->
       case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(ObjectSchema(additional_properties: schema.Typed(_), ..)) -> True
-        Ok(ObjectSchema(additional_properties: schema.Untyped, ..)) -> True
+        Ok(ObjectSchema(additional_properties: openapi.Typed(_), ..)) -> True
+        Ok(ObjectSchema(additional_properties: openapi.Untyped, ..)) -> True
         _ -> False
       }
-    Some(Inline(ObjectSchema(additional_properties: schema.Typed(_), ..))) ->
+    Some(Inline(ObjectSchema(additional_properties: openapi.Typed(_), ..))) ->
       True
-    Some(Inline(ObjectSchema(additional_properties: schema.Untyped, ..))) ->
+    Some(Inline(ObjectSchema(additional_properties: openapi.Untyped, ..))) ->
       True
     _ -> False
   }
 }
 
 pub fn deep_object_has_untyped_additional_properties(
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> Bool {
   case spec.parameter_schema(param) {
@@ -831,7 +846,7 @@ pub fn deep_object_has_untyped_additional_properties(
 }
 
 pub fn deep_object_param_has_optional_fields(
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> Bool {
   use <- bool.guard(!operation_ir.is_deep_object_param(param, ctx), False)
@@ -839,7 +854,7 @@ pub fn deep_object_param_has_optional_fields(
 }
 
 pub fn deep_object_param_needs_string(
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> Bool {
   deep_object_param_needs(param, ctx, fn(prop) {
@@ -848,7 +863,7 @@ pub fn deep_object_param_needs_string(
 }
 
 pub fn deep_object_param_needs_int(
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> Bool {
   deep_object_param_needs(param, ctx, fn(prop) {
@@ -857,7 +872,7 @@ pub fn deep_object_param_needs_int(
 }
 
 pub fn deep_object_param_needs_float(
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> Bool {
   deep_object_param_needs(param, ctx, fn(prop) {
@@ -866,7 +881,7 @@ pub fn deep_object_param_needs_float(
 }
 
 fn deep_object_param_needs(
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
   ctx: Context,
   predicate: fn(DeepObjectProperty) -> Bool,
 ) -> Bool {
@@ -875,12 +890,12 @@ fn deep_object_param_needs(
 }
 
 pub fn request_body_uses_form_urlencoded(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
 ) -> Bool {
   dict.has_key(rb.content, "application/x-www-form-urlencoded")
 }
 
-pub fn request_body_uses_multipart(rb: spec.RequestBody(Resolved)) -> Bool {
+pub fn request_body_uses_multipart(rb: openapi.RequestBody(Resolved)) -> Bool {
   dict.has_key(rb.content, "multipart/form-data")
 }
 
@@ -888,12 +903,12 @@ pub fn request_body_uses_multipart(rb: spec.RequestBody(Resolved)) -> Bool {
 /// bytes, so the router takes `body: BitArray` instead of
 /// `body: String`. The single-arm dispatch (no other content types
 /// allowed alongside binary) is enforced by the validator.
-fn request_body_uses_octet_stream(rb: spec.RequestBody(Resolved)) -> Bool {
+fn request_body_uses_octet_stream(rb: openapi.RequestBody(Resolved)) -> Bool {
   dict.has_key(rb.content, "application/octet-stream")
 }
 
 pub fn operation_uses_form_urlencoded_body(
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
 ) -> Bool {
   case operation.request_body {
     Some(Value(rb)) -> request_body_uses_form_urlencoded(rb)
@@ -902,7 +917,7 @@ pub fn operation_uses_form_urlencoded_body(
 }
 
 pub fn operation_uses_multipart_body(
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
 ) -> Bool {
   case operation.request_body {
     Some(Value(rb)) -> request_body_uses_multipart(rb)
@@ -911,7 +926,7 @@ pub fn operation_uses_multipart_body(
 }
 
 pub fn operation_uses_octet_stream_body(
-  operation: spec.Operation(Resolved),
+  operation: openapi.Operation(Resolved),
 ) -> Bool {
   case operation.request_body {
     Some(Value(rb)) -> request_body_uses_octet_stream(rb)
@@ -946,7 +961,7 @@ fn object_properties_from_schema_ref(
 }
 
 fn form_urlencoded_body_properties(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   ctx: Context,
 ) -> List(DeepObjectProperty) {
   case dict.get(rb.content, "application/x-www-form-urlencoded") {
@@ -962,7 +977,7 @@ fn form_urlencoded_body_properties(
 }
 
 fn multipart_body_properties(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   ctx: Context,
 ) -> List(DeepObjectProperty) {
   case dict.get(rb.content, "multipart/form-data") {
@@ -994,7 +1009,7 @@ fn schema_ref_additional_properties(
 }
 
 fn body_additional_properties(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   content_type: String,
   ctx: Context,
 ) -> AdditionalProperties {
@@ -1017,7 +1032,7 @@ fn form_urlencoded_schema_ref_type_name(schema_ref: SchemaRef) -> String {
 }
 
 fn form_urlencoded_body_type_name(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   op_id: String,
 ) -> String {
   case dict.get(rb.content, "application/x-www-form-urlencoded") {
@@ -1027,14 +1042,14 @@ fn form_urlencoded_body_type_name(
           "types." <> naming.schema_to_type_name(name)
         Some(Inline(ObjectSchema(..))) ->
           "types." <> naming.schema_to_type_name(op_id) <> "Request"
-        Some(Inline(schema.StringSchema(..)))
-        | Some(Inline(schema.IntegerSchema(..)))
-        | Some(Inline(schema.NumberSchema(..)))
-        | Some(Inline(schema.BooleanSchema(..)))
-        | Some(Inline(schema.ArraySchema(..)))
-        | Some(Inline(schema.AllOfSchema(..)))
-        | Some(Inline(schema.OneOfSchema(..)))
-        | Some(Inline(schema.AnyOfSchema(..)))
+        Some(Inline(openapi.StringSchema(..)))
+        | Some(Inline(openapi.IntegerSchema(..)))
+        | Some(Inline(openapi.NumberSchema(..)))
+        | Some(Inline(openapi.BooleanSchema(..)))
+        | Some(Inline(openapi.ArraySchema(..)))
+        | Some(Inline(openapi.AllOfSchema(..)))
+        | Some(Inline(openapi.OneOfSchema(..)))
+        | Some(Inline(openapi.AnyOfSchema(..)))
         | None -> "String"
       }
     // nolint: thrown_away_error -- absence of the content type falls back to the raw body type
@@ -1043,7 +1058,7 @@ fn form_urlencoded_body_type_name(
 }
 
 fn multipart_body_type_name(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   op_id: String,
 ) -> String {
   case dict.get(rb.content, "multipart/form-data") {
@@ -1053,14 +1068,14 @@ fn multipart_body_type_name(
           "types." <> naming.schema_to_type_name(name)
         Some(Inline(ObjectSchema(..))) ->
           "types." <> naming.schema_to_type_name(op_id) <> "Request"
-        Some(Inline(schema.StringSchema(..)))
-        | Some(Inline(schema.IntegerSchema(..)))
-        | Some(Inline(schema.NumberSchema(..)))
-        | Some(Inline(schema.BooleanSchema(..)))
-        | Some(Inline(schema.ArraySchema(..)))
-        | Some(Inline(schema.AllOfSchema(..)))
-        | Some(Inline(schema.OneOfSchema(..)))
-        | Some(Inline(schema.AnyOfSchema(..)))
+        Some(Inline(openapi.StringSchema(..)))
+        | Some(Inline(openapi.IntegerSchema(..)))
+        | Some(Inline(openapi.NumberSchema(..)))
+        | Some(Inline(openapi.BooleanSchema(..)))
+        | Some(Inline(openapi.ArraySchema(..)))
+        | Some(Inline(openapi.AllOfSchema(..)))
+        | Some(Inline(openapi.OneOfSchema(..)))
+        | Some(Inline(openapi.AnyOfSchema(..)))
         | None -> "String"
       }
     // nolint: thrown_away_error -- absence of the content type falls back to the raw body type
@@ -1310,7 +1325,7 @@ fn form_urlencoded_object_optional_expr(
 }
 
 fn form_urlencoded_body_constructor_expr(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   op_id: String,
   ctx: Context,
 ) -> String {
@@ -1325,7 +1340,7 @@ fn form_urlencoded_body_constructor_expr(
 }
 
 pub fn form_urlencoded_body_has_optional_fields(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   ctx: Context,
 ) -> Bool {
   form_urlencoded_properties_have_optional_fields(
@@ -1336,7 +1351,7 @@ pub fn form_urlencoded_body_has_optional_fields(
 }
 
 pub fn form_urlencoded_body_needs_string(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   ctx: Context,
 ) -> Bool {
   form_urlencoded_properties_need_string(
@@ -1347,7 +1362,7 @@ pub fn form_urlencoded_body_needs_string(
 }
 
 pub fn form_urlencoded_body_needs_int(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   ctx: Context,
 ) -> Bool {
   form_urlencoded_properties_need_int(
@@ -1358,7 +1373,7 @@ pub fn form_urlencoded_body_needs_int(
 }
 
 pub fn form_urlencoded_body_needs_float(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   ctx: Context,
 ) -> Bool {
   form_urlencoded_properties_need_float(
@@ -1369,7 +1384,7 @@ pub fn form_urlencoded_body_needs_float(
 }
 
 pub fn form_urlencoded_body_has_nested_object(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   ctx: Context,
 ) -> Bool {
   list.any(form_urlencoded_body_properties(rb, ctx), fn(prop) {
@@ -1378,7 +1393,7 @@ pub fn form_urlencoded_body_has_nested_object(
 }
 
 fn multipart_body_constructor_expr(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   op_id: String,
   ctx: Context,
 ) -> String {
@@ -1389,7 +1404,7 @@ fn multipart_body_constructor_expr(
 /// bind every required field. A body without a required field has no
 /// cases, so its constructor can be used on its own.
 fn multipart_body_parts(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   op_id: String,
   ctx: Context,
 ) -> #(List(#(String, String)), String) {
@@ -1447,7 +1462,7 @@ fn multipart_body_parts(
 /// for an optional body) that builds the body record. The router binds it
 /// and answers 400 on `Error`. `None` for every other body.
 pub fn checked_body_result_expr(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   op_id: String,
   ctx: Context,
 ) -> Option(String) {
@@ -1506,14 +1521,14 @@ pub fn checked_body_result_expr(
 }
 
 pub fn multipart_body_has_optional_fields(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   ctx: Context,
 ) -> Bool {
   list.any(multipart_body_properties(rb, ctx), fn(prop) { !prop.required })
 }
 
 pub fn multipart_body_needs_int(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   ctx: Context,
 ) -> Bool {
   list.any(multipart_body_properties(rb, ctx), fn(prop) {
@@ -1525,7 +1540,7 @@ pub fn multipart_body_needs_int(
 }
 
 pub fn multipart_body_needs_float(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   ctx: Context,
 ) -> Bool {
   list.any(multipart_body_properties(rb, ctx), fn(prop) {
@@ -1620,8 +1635,8 @@ fn form_urlencoded_properties_need(
 
 pub fn query_schema_needs_string(schema_ref: Option(SchemaRef)) -> Bool {
   case schema_ref {
-    Some(Inline(schema.ArraySchema(..))) -> True
-    Some(Inline(schema.BooleanSchema(..))) -> True
+    Some(Inline(openapi.ArraySchema(..))) -> True
+    Some(Inline(openapi.BooleanSchema(..))) -> True
     _ -> False
   }
 }
@@ -1631,9 +1646,11 @@ pub fn query_schema_needs_int(
   ctx: Context,
 ) -> Bool {
   case schema_ref {
-    Some(Inline(schema.IntegerSchema(..))) -> True
-    Some(Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..))) ->
-      True
+    Some(Inline(openapi.IntegerSchema(..))) -> True
+    Some(Inline(openapi.ArraySchema(
+      items: Inline(openapi.IntegerSchema(..)),
+      ..,
+    ))) -> True
     // A `$ref` whose target is `type: integer` triggers
     // `int.parse` emission downstream, so the router needs the
     // `gleam/int` import too.
@@ -1651,8 +1668,8 @@ pub fn query_schema_needs_float(
   ctx: Context,
 ) -> Bool {
   case schema_ref {
-    Some(Inline(schema.NumberSchema(..))) -> True
-    Some(Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..))) ->
+    Some(Inline(openapi.NumberSchema(..))) -> True
+    Some(Inline(openapi.ArraySchema(items: Inline(openapi.NumberSchema(..)), ..))) ->
       True
     Some(Reference(..) as ref) ->
       case schema_ref_scalar_kind(ref, ctx) {
@@ -1825,7 +1842,7 @@ fn array_item_bool_parse(trim: Bool) -> String {
 /// params, binding `<bound_var>_parsed` on success.
 pub fn header_required_expr(
   bound_var: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
 ) -> String {
   single_value_required_expr(bound_var, spec.parameter_schema(param))
 }
@@ -1833,7 +1850,7 @@ pub fn header_required_expr(
 /// Generate expression for an optional header parameter.
 pub fn header_optional_expr(
   key: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
 ) -> String {
   let lookup = "dict.get(headers, \"" <> key <> "\")"
   single_value_optional_expr(lookup, "v", "_", spec.parameter_schema(param))
@@ -1846,7 +1863,7 @@ pub fn header_optional_expr(
 /// the router pre-binds `<bound_var>_parsed` for numeric scalar types.
 pub fn cookie_required_expr(
   bound_var: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
 ) -> String {
   single_value_required_expr(bound_var, spec.parameter_schema(param))
 }
@@ -1854,7 +1871,7 @@ pub fn cookie_required_expr(
 /// Generate expression for an optional cookie parameter.
 pub fn cookie_optional_expr(
   key: String,
-  param: spec.Parameter(Resolved),
+  param: openapi.Parameter(Resolved),
 ) -> String {
   let lookup = "cookie_lookup(headers, \"" <> key <> "\")"
   single_value_optional_expr(
@@ -1878,24 +1895,30 @@ fn single_value_required_expr(
   schema_ref: Option(SchemaRef),
 ) -> String {
   case schema_ref {
-    Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
+    Some(Inline(openapi.ArraySchema(items: Inline(openapi.StringSchema(..)), ..))) ->
       "list.map(string.split("
       <> bound_var
       <> ", \",\"), fn(item) { string.trim(item) })"
-    Some(Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..))) ->
+    Some(Inline(openapi.ArraySchema(
+      items: Inline(openapi.IntegerSchema(..)),
+      ..,
+    ))) ->
       // Router pre-parses to a List(Int) and binds <bound_var>_parsed_list.
       bound_var <> "_parsed_list"
-    Some(Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..))) ->
+    Some(Inline(openapi.ArraySchema(items: Inline(openapi.NumberSchema(..)), ..))) ->
       bound_var <> "_parsed_list"
-    Some(Inline(schema.ArraySchema(items: Inline(schema.BooleanSchema(..)), ..))) ->
+    Some(Inline(openapi.ArraySchema(
+      items: Inline(openapi.BooleanSchema(..)),
+      ..,
+    ))) ->
       "list.map(string.split("
       <> bound_var
       <> ", \",\"), fn(item) { "
       <> array_item_bool_parse(True)
       <> " })"
-    Some(Inline(schema.IntegerSchema(..))) -> bound_var <> "_parsed"
-    Some(Inline(schema.NumberSchema(..))) -> bound_var <> "_parsed"
-    Some(Inline(schema.BooleanSchema(..))) ->
+    Some(Inline(openapi.IntegerSchema(..))) -> bound_var <> "_parsed"
+    Some(Inline(openapi.NumberSchema(..))) -> bound_var <> "_parsed"
+    Some(Inline(openapi.BooleanSchema(..))) ->
       "{ let v = " <> bound_var <> " " <> bool_parse_expr <> " }"
     _ -> bound_var
   }
@@ -1909,7 +1932,7 @@ fn single_value_optional_expr(
   schema_ref: Option(SchemaRef),
 ) -> String {
   case schema_ref {
-    Some(Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..))) ->
+    Some(Inline(openapi.ArraySchema(items: Inline(openapi.StringSchema(..)), ..))) ->
       "case "
       <> lookup
       <> " { Ok("
@@ -1919,7 +1942,10 @@ fn single_value_optional_expr(
       <> ", \",\"), fn(item) { string.trim(item) })) "
       <> miss
       <> " -> None }"
-    Some(Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..))) ->
+    Some(Inline(openapi.ArraySchema(
+      items: Inline(openapi.IntegerSchema(..)),
+      ..,
+    ))) ->
       "case "
       <> lookup
       <> " { Ok("
@@ -1931,7 +1957,7 @@ fn single_value_optional_expr(
       <> " })) "
       <> miss
       <> " -> None }"
-    Some(Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..))) ->
+    Some(Inline(openapi.ArraySchema(items: Inline(openapi.NumberSchema(..)), ..))) ->
       "case "
       <> lookup
       <> " { Ok("
@@ -1943,7 +1969,10 @@ fn single_value_optional_expr(
       <> " })) "
       <> miss
       <> " -> None }"
-    Some(Inline(schema.ArraySchema(items: Inline(schema.BooleanSchema(..)), ..))) ->
+    Some(Inline(openapi.ArraySchema(
+      items: Inline(openapi.BooleanSchema(..)),
+      ..,
+    ))) ->
       "case "
       <> lookup
       <> " { Ok("
@@ -1955,7 +1984,7 @@ fn single_value_optional_expr(
       <> " })) "
       <> miss
       <> " -> None }"
-    Some(Inline(schema.IntegerSchema(..))) ->
+    Some(Inline(openapi.IntegerSchema(..))) ->
       "case "
       <> lookup
       <> " { Ok("
@@ -1965,7 +1994,7 @@ fn single_value_optional_expr(
       <> ") { Ok(n) -> Some(n) _ -> None } } "
       <> miss
       <> " -> None }"
-    Some(Inline(schema.NumberSchema(..))) ->
+    Some(Inline(openapi.NumberSchema(..))) ->
       "case "
       <> lookup
       <> " { Ok("
@@ -1975,7 +2004,7 @@ fn single_value_optional_expr(
       <> ") { Ok(n) -> Some(n) _ -> None } } "
       <> miss
       <> " -> None }"
-    Some(Inline(schema.BooleanSchema(..))) ->
+    Some(Inline(openapi.BooleanSchema(..))) ->
       "case "
       <> lookup
       <> " { Ok("
@@ -2000,7 +2029,7 @@ fn single_value_optional_expr(
 
 /// Generate the body decode expression for a request body.
 pub fn generate_body_decode_expr(
-  rb: spec.RequestBody(Resolved),
+  rb: openapi.RequestBody(Resolved),
   op_id: String,
   ctx: Context,
 ) -> String {

@@ -4,7 +4,7 @@ A minimal Gleam project that uses an oaspec-generated client for the
 Petstore OpenAPI spec at `test/fixtures/petstore.yaml`.
 
 This example is intentionally framework-free: it does not hit a real
-HTTP endpoint. The transport is a stub built with `oaspec/mock` that
+HTTP endpoint. The transport is a stub function that
 returns a canned JSON body, so the example runs without a live server,
 without network access, and without any HTTP adapter dependency. The
 focus is the contract between oaspec-generated code and `oaspec/transport`
@@ -19,8 +19,7 @@ for the exact swap.
 
 - Generating a client from an OpenAPI 3.x spec via `oaspec.yaml`.
 - Importing the generated client and response types.
-- Building a `transport.Send` value with `mock.from(...)` and a custom
-  request handler — the stub is the only piece swapped out when moving
+- Building a `transport.Send` value from a plain function — the stub is the only piece swapped out when moving
   to a real adapter.
 - Handling the typed response variants that oaspec generates for each
   operation.
@@ -101,8 +100,7 @@ on the transport: everything else (the typed `list_pets/3` call, the
 
 ```gleam
 // before — stubbed, no network
-import oaspec/mock
-let send = mock.from(stub_handler)
+let send = stub_handler
 
 // after — real BEAM HTTP via gleam_httpc
 import oaspec/httpc

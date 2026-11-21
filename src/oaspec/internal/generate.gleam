@@ -9,8 +9,10 @@ import oaspec/internal/codegen/guards
 import oaspec/internal/codegen/server
 import oaspec/internal/codegen/types
 import oaspec/internal/codegen/validate
+import oaspec/internal/config_check
 import oaspec/internal/openapi/capability_check
 import oaspec/internal/openapi/dedup
+import oaspec/internal/openapi/diagnostic
 import oaspec/internal/openapi/filter
 import oaspec/internal/openapi/hoist
 import oaspec/internal/openapi/location_index.{type LocationIndex}
@@ -18,8 +20,7 @@ import oaspec/internal/openapi/normalize
 import oaspec/internal/openapi/reachability
 import oaspec/internal/openapi/resolve
 import oaspec/internal/progress.{type Reporter}
-import oaspec/openapi/diagnostic.{type Diagnostic}
-import oaspec/openapi/spec.{type OpenApiSpec, type Unresolved}
+import oaspec/openapi.{type Diagnostic, type OpenApiSpec, type Unresolved}
 
 /// Result of a successful code generation run.
 pub type GenerationSummary {
@@ -87,7 +88,7 @@ fn prepare_context(
   // check / hoist / validate so every downstream stage sees only the
   // operations the user asked for. Empty filter is a no-op.
   let #(elapsed, spec) =
-    progress.timed(fn() { filter.apply(spec, config.include(cfg)) })
+    progress.timed(fn() { filter.apply(spec, cfg.include) })
   progress.report(
     reporter,
     "apply include filter (took " <> progress.format_ms(elapsed) <> ")",
@@ -97,7 +98,7 @@ fn prepare_context(
   let #(elapsed, capability_issues) =
     progress.timed(fn() {
       capability_check.check(spec, index)
-      |> diagnostic.filter_by_mode(config.mode(cfg))
+      |> diagnostic.filter_by_mode(cfg.mode)
     })
   progress.report(
     reporter,
@@ -124,7 +125,7 @@ fn prepare_context(
   // surviving set). Skipped when no filter is configured: the user
   // didn't ask to subset the API, so we present the spec as-authored
   // — dead component schemas left in the spec stay in the output.
-  let include_active = !config.include_is_empty(config.include(cfg))
+  let include_active = !config_check.include_is_empty(cfg.include)
   let #(elapsed, spec) =
     progress.timed(fn() {
       case include_active {
@@ -153,7 +154,7 @@ fn prepare_context(
   let #(elapsed, preserved_warnings) =
     progress.timed(fn() {
       capability_check.check_preserved(ctx, index)
-      |> diagnostic.filter_by_mode(config.mode(cfg))
+      |> diagnostic.filter_by_mode(cfg.mode)
     })
   progress.report(
     reporter,
@@ -164,7 +165,7 @@ fn prepare_context(
   let #(elapsed, validation_issues) =
     progress.timed(fn() {
       validate.validate(ctx)
-      |> diagnostic.filter_by_mode(config.mode(cfg))
+      |> diagnostic.filter_by_mode(cfg.mode)
     })
   progress.report(
     reporter,
@@ -190,9 +191,9 @@ fn prepare_context(
 ///
 /// Capability-check diagnostics from this entry point carry no source
 /// location information. Callers that already have a YAML
-/// `LocationIndex` (e.g. via `parser.parse_file_with_locations`)
-/// should prefer `generate_with_locations` so capability-check errors
-/// surface line/column for the offending spec node.
+/// `LocationIndex` (e.g. via `parser.parse_file_with_progress_and_locations`)
+/// should prefer `generate_with_progress_and_locations` so capability-check
+/// errors surface line/column for the offending spec node.
 pub fn generate(
   spec: OpenApiSpec(Unresolved),
   cfg: Config,
@@ -302,7 +303,7 @@ fn generate_all_files_with_progress(
       label: "generate guards",
       body: fn() { guards.generate(ctx) },
     )
-  let server_files = case config.mode(context.config(ctx)) {
+  let server_files = case context.config(ctx).mode {
     Server | Both ->
       progress.timed_stage(
         reporter: reporter,
@@ -311,7 +312,7 @@ fn generate_all_files_with_progress(
       )
     Client -> []
   }
-  let client_files = case config.mode(context.config(ctx)) {
+  let client_files = case context.config(ctx).mode {
     Client | Both ->
       progress.timed_stage(
         reporter: reporter,

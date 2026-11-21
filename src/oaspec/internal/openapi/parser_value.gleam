@@ -7,7 +7,7 @@
 import gleam/dict.{type Dict}
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import oaspec/internal/openapi/value.{
+import oaspec/openapi.{
   type JsonValue, JsonArray, JsonBool, JsonFloat, JsonInt, JsonNull, JsonObject,
   JsonString,
 }

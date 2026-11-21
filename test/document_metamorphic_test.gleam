@@ -28,8 +28,8 @@ import metamon
 import metamon/generator
 import metamon/generator/range
 import oaspec/config
-import oaspec/generate
-import oaspec/openapi/parser
+import oaspec/internal/generate
+import oaspec/internal/openapi/parser
 import simplifile
 import yay
 
@@ -51,13 +51,15 @@ fn generated(
 
 fn generate_files(spec) -> Result(List(#(String, String)), Nil) {
   let cfg =
-    config.new(
+    config.Config(
       input: "spec.yaml",
       output_server: "./out/api",
       output_client: "./out/api",
       package: "api",
       mode: config.Both,
       validate: True,
+      include: config.Include(tags: [], paths: []),
+      handler_layout: config.SingleFile,
     )
   case generate.generate(spec, cfg) {
     Ok(summary) ->
