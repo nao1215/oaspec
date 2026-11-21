@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.74.0] - 2026-11-22
+
 ### Breaking
 
 - The public API is four modules: `oaspec`, `oaspec/config`, `oaspec/openapi` and `oaspec/transport`. `oaspec/generate`, `oaspec/codegen/writer`, `oaspec/openapi/parser`, `oaspec/openapi/spec`, `oaspec/openapi/schema`, `oaspec/openapi/diagnostic` and `oaspec/mock` are gone.
