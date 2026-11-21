@@ -8,7 +8,6 @@ import oaspec/internal/codegen/allof_merge
 import oaspec/internal/codegen/client as client_gen
 import oaspec/internal/codegen/client_request
 import oaspec/internal/codegen/client_response
-import oaspec/internal/codegen/client_security
 import oaspec/internal/codegen/decoders
 import oaspec/internal/codegen/encoders
 import oaspec/internal/codegen/ir_build
@@ -19,6 +18,7 @@ import oaspec/internal/codegen/types as types_gen
 import oaspec/internal/openapi/hoist
 import oaspec/internal/util/content_type
 import oaspec/internal/util/http
+import oaspec/internal/util/naming
 import oaspec/openapi/parser
 import oaspec/openapi/schema
 import oaspec/openapi/spec
@@ -31,28 +31,28 @@ pub fn main() {
 // client_security tests
 // ===================================================================
 
-pub fn client_security_capitalize_first_normal_test() {
-  client_security.capitalize_first("bearer")
+pub fn naming_capitalize_normal_test() {
+  naming.capitalize("bearer")
   |> should.equal("Bearer")
 }
 
-pub fn client_security_capitalize_first_empty_test() {
-  client_security.capitalize_first("")
+pub fn naming_capitalize_empty_test() {
+  naming.capitalize("")
   |> should.equal("")
 }
 
-pub fn client_security_capitalize_first_single_char_test() {
-  client_security.capitalize_first("b")
+pub fn naming_capitalize_single_char_test() {
+  naming.capitalize("b")
   |> should.equal("B")
 }
 
-pub fn client_security_capitalize_first_already_upper_test() {
-  client_security.capitalize_first("Bearer")
+pub fn naming_capitalize_already_upper_test() {
+  naming.capitalize("Bearer")
   |> should.equal("Bearer")
 }
 
-pub fn client_security_capitalize_first_all_lower_test() {
-  client_security.capitalize_first("basic")
+pub fn naming_capitalize_all_lower_test() {
+  naming.capitalize("basic")
   |> should.equal("Basic")
 }
 

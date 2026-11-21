@@ -219,3 +219,42 @@ pub fn parser_rejects_non_string_ref_in_every_components_section_test() {
     |> should.be_true()
   })
 }
+
+pub fn parser_accepts_request_body_with_empty_content_test() {
+  let yaml =
+    "openapi: 3.0.0
+info:
+  title: x
+  version: '1.0'
+paths:
+  /p:
+    post:
+      operationId: p
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: ok
+"
+  let assert Ok(_) = parser.parse_string(yaml)
+}
+
+pub fn parser_rejects_request_body_without_content_test() {
+  let yaml =
+    "openapi: 3.0.0
+info:
+  title: x
+  version: '1.0'
+paths:
+  /p:
+    post:
+      operationId: p
+      requestBody:
+        required: true
+      responses:
+        '200':
+          description: ok
+"
+  let assert Error(d) = parser.parse_string(yaml)
+  d.code |> should.equal("missing_field")
+}

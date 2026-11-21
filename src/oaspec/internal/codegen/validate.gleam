@@ -5,6 +5,7 @@ import gleam/regexp
 import gleam/string
 import oaspec/config
 import oaspec/internal/codegen/context.{type Context}
+import oaspec/internal/codegen/schema_utils
 import oaspec/internal/util/content_type
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
@@ -103,7 +104,7 @@ fn group_operations_by_id(
   // same case-folded form.
   let reversed =
     list.fold(operations, dict.new(), fn(acc, entry) {
-      let #(op_id, _operation, path, method) = entry
+      let context.AnalyzedOperation(op_id, _operation, path, method) = entry
       let key = key_fn(op_id)
       let site = string.uppercase(spec.method_to_string(method)) <> " " <> path
       case dict.get(acc, key) {
@@ -153,7 +154,7 @@ fn validate_operations(
   operations: List(context.AnalyzedOperation),
 ) -> List(Diagnostic) {
   list.flat_map(operations, fn(op) {
-    let #(op_id, operation, path, _method) = op
+    let context.AnalyzedOperation(op_id, operation, path, _method) = op
     // All refs are guaranteed to be resolved by this point
     let resolved_params = list.map(operation.parameters, spec.unwrap_ref)
     let resolved_request_body = case operation.request_body {
@@ -328,7 +329,9 @@ fn validate_delimited_style(
     ]
   }
   let schema_errors = case
-    resolve_schema_object(spec.parameter_schema(param), ctx)
+    option.then(spec.parameter_schema(param), fn(r) {
+      context.resolve_schema_ref(r, ctx) |> option.from_result
+    })
   {
     Some(ArraySchema(..)) -> []
     _ -> [
@@ -351,7 +354,10 @@ fn validate_server_structured_param(
   param: spec.Parameter(Resolved),
   ctx: Context,
 ) -> List(Diagnostic) {
-  let schema_obj = resolve_schema_object(spec.parameter_schema(param), ctx)
+  let schema_obj =
+    option.then(spec.parameter_schema(param), fn(r) {
+      context.resolve_schema_ref(r, ctx) |> option.from_result
+    })
   // Bug fix: array parameters with non-primitive items panic in
   // both client and server codegen with "inline composite schema
   // reached to_string_fn after hoist" because `to_string_fn` has no
@@ -366,7 +372,7 @@ fn validate_server_structured_param(
     // composite fields). The server decoder still requires primitive
     // items, so the diagnostic remains gated to server mode.
     spec.InQuery, Some(ArraySchema(items:, ..)) ->
-      case array_items_resolve_primitive(items, ctx) {
+      case schema_utils.resolves_to_primitive(items, ctx) {
         True -> []
         False ->
           case config.mode(context.config(ctx)) {
@@ -383,7 +389,7 @@ fn validate_server_structured_param(
           }
       }
     spec.InHeader, Some(ArraySchema(items:, ..)) ->
-      case array_items_resolve_primitive(items, ctx) {
+      case schema_utils.resolves_to_primitive(items, ctx) {
         True -> []
         False -> [
           diagnostic.validation_error_both(
@@ -401,7 +407,7 @@ fn validate_server_structured_param(
     // emission), so a non-primitive item schema would panic in
     // `to_string_fn` for them too. Reject in both modes.
     spec.InCookie, Some(ArraySchema(items:, ..)) ->
-      case array_items_resolve_primitive(items, ctx) {
+      case schema_utils.resolves_to_primitive(items, ctx) {
         True -> []
         False -> [
           diagnostic.validation_error_both(
@@ -425,32 +431,6 @@ fn validate_server_structured_param(
   list.flatten([array_errors, deep_object_errors])
 }
 
-/// True iff `items` resolves to a primitive scalar shape (string,
-/// integer, number, boolean), whether the schema is inline or
-/// referenced through `$ref`. Hoist may have promoted an inline
-/// primitive into a component during preprocessing, so a
-/// `Reference` here is not automatically safe — we have to look at
-/// what the ref points at.
-fn array_items_resolve_primitive(items: SchemaRef, ctx: Context) -> Bool {
-  case items {
-    Inline(StringSchema(..))
-    | Inline(IntegerSchema(..))
-    | Inline(NumberSchema(..))
-    | Inline(BooleanSchema(..)) -> True
-    Reference(..) ->
-      case context.resolve_schema_ref(items, ctx) {
-        Ok(StringSchema(..))
-        | Ok(IntegerSchema(..))
-        | Ok(NumberSchema(..))
-        | Ok(BooleanSchema(..)) -> True
-        Ok(_) -> False
-        // nolint: thrown_away_error -- unresolved refs surface elsewhere; here we only need the primitive/non-primitive distinction
-        Error(_) -> False
-      }
-    _ -> False
-  }
-}
-
 fn validate_server_deep_object_param(
   path: String,
   param: spec.Parameter(Resolved),
@@ -459,7 +439,9 @@ fn validate_server_deep_object_param(
   case
     param.in_,
     param.style,
-    resolve_schema_object(spec.parameter_schema(param), ctx)
+    option.then(spec.parameter_schema(param), fn(r) {
+      context.resolve_schema_ref(r, ctx) |> option.from_result
+    })
   {
     spec.InQuery,
       Some(spec.DeepObjectStyle),
@@ -504,7 +486,7 @@ fn deep_object_server_leaf_supported(
     | Inline(ArraySchema(items: Inline(NumberSchema(..)), ..))
     | Inline(ArraySchema(items: Inline(BooleanSchema(..)), ..)) -> True
     Reference(..) ->
-      case resolve_schema_object(Some(schema_ref), ctx) {
+      case context.resolve_schema_ref(schema_ref, ctx) |> option.from_result {
         Some(StringSchema(..))
         | Some(IntegerSchema(..))
         | Some(NumberSchema(..))
@@ -552,7 +534,11 @@ fn validate_complex_param_schema(
       // invalid code (e.g., uri.percent_encode(filter.meta)).
       validate_deep_object_no_nested_objects(path, param, ctx)
     _ ->
-      case resolve_schema_object(spec.parameter_schema(param), ctx) {
+      case
+        option.then(spec.parameter_schema(param), fn(r) {
+          context.resolve_schema_ref(r, ctx) |> option.from_result
+        })
+      {
         Some(ObjectSchema(..))
         | Some(AllOfSchema(..))
         | Some(OneOfSchema(..))
@@ -603,12 +589,18 @@ fn validate_deep_object_no_nested_objects(
   case config.mode(context.config(ctx)) {
     config.Client -> []
     _ ->
-      case resolve_schema_object(spec.parameter_schema(param), ctx) {
+      case
+        option.then(spec.parameter_schema(param), fn(r) {
+          context.resolve_schema_ref(r, ctx) |> option.from_result
+        })
+      {
         Some(ObjectSchema(properties:, ..)) ->
           dict.to_list(properties)
           |> list.flat_map(fn(entry) {
             let #(prop_name, prop_ref) = entry
-            case resolve_schema_object(Some(prop_ref), ctx) {
+            case
+              context.resolve_schema_ref(prop_ref, ctx) |> option.from_result
+            {
               Some(ObjectSchema(..)) | Some(AllOfSchema(..)) -> []
               Some(OneOfSchema(..)) | Some(AnyOfSchema(..)) -> [
                 diagnostic.validation_error_server(
@@ -624,22 +616,6 @@ fn validate_deep_object_no_nested_objects(
           })
         _ -> []
       }
-  }
-}
-
-fn resolve_schema_object(
-  schema_ref: Option(SchemaRef),
-  ctx: Context,
-) -> Option(SchemaObject) {
-  case schema_ref {
-    Some(Inline(schema_obj)) -> Some(schema_obj)
-    Some(schema_ref) ->
-      case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(schema_obj) -> Some(schema_obj)
-        // nolint: thrown_away_error -- unresolved refs surface as absent; the ref error is reported elsewhere in the validator
-        Error(_) -> None
-      }
-    None -> None
   }
 }
 
@@ -730,7 +706,11 @@ fn validate_multipart_request_body_fields(
 ) -> List(Diagnostic) {
   case dict.get(content, "multipart/form-data") {
     Ok(media_type) ->
-      case resolve_schema_object(media_type.schema, ctx) {
+      case
+        option.then(media_type.schema, fn(r) {
+          context.resolve_schema_ref(r, ctx) |> option.from_result
+        })
+      {
         Some(ObjectSchema(properties:, ..)) ->
           dict.to_list(properties)
           |> list.flat_map(fn(entry) {
@@ -773,7 +753,11 @@ fn validate_form_urlencoded_schema(
 ) -> List(Diagnostic) {
   case dict.get(content, "application/x-www-form-urlencoded") {
     Ok(media_type) ->
-      case resolve_schema_object(media_type.schema, ctx) {
+      case
+        option.then(media_type.schema, fn(r) {
+          context.resolve_schema_ref(r, ctx) |> option.from_result
+        })
+      {
         Some(ObjectSchema(..)) -> []
         Some(_) -> [
           diagnostic.validation_error_both(
@@ -835,7 +819,11 @@ fn validate_server_form_urlencoded_request_body(
     dict.get(content, "application/x-www-form-urlencoded")
   {
     Ok(media_type) ->
-      case resolve_schema_object(media_type.schema, ctx) {
+      case
+        option.then(media_type.schema, fn(r) {
+          context.resolve_schema_ref(r, ctx) |> option.from_result
+        })
+      {
         Some(ObjectSchema(properties:, ..)) ->
           dict.to_list(properties)
           |> list.flat_map(fn(entry) {
@@ -896,13 +884,13 @@ fn form_urlencoded_server_field_supported(
   ctx: Context,
   depth: Int,
 ) -> Bool {
-  case resolve_schema_object(Some(schema_ref), ctx) {
+  case context.resolve_schema_ref(schema_ref, ctx) |> option.from_result {
     Some(StringSchema(..))
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
     | Some(BooleanSchema(..)) -> True
     Some(ArraySchema(items:, ..)) ->
-      case resolve_schema_object(Some(items), ctx) {
+      case context.resolve_schema_ref(items, ctx) |> option.from_result {
         Some(StringSchema(..))
         | Some(IntegerSchema(..))
         | Some(NumberSchema(..))
@@ -938,7 +926,7 @@ fn form_urlencoded_field_codegen_safe(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case resolve_schema_object(Some(schema_ref), ctx) {
+  case context.resolve_schema_ref(schema_ref, ctx) |> option.from_result {
     Some(StringSchema(..))
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
@@ -973,7 +961,7 @@ fn form_urlencoded_array_items_codegen_safe(
   items: SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case resolve_schema_object(Some(items), ctx) {
+  case context.resolve_schema_ref(items, ctx) |> option.from_result {
     Some(StringSchema(..))
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
@@ -1052,7 +1040,9 @@ fn validate_server_multipart_request_body(
             False -> []
           }
           let field_errors = case
-            resolve_schema_object(media_type.schema, ctx)
+            option.then(media_type.schema, fn(r) {
+              context.resolve_schema_ref(r, ctx) |> option.from_result
+            })
           {
             Some(ObjectSchema(properties:, ..)) ->
               dict.to_list(properties)
@@ -1085,7 +1075,7 @@ fn multipart_server_field_supported(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case resolve_schema_object(Some(schema_ref), ctx) {
+  case context.resolve_schema_ref(schema_ref, ctx) |> option.from_result {
     Some(StringSchema(..))
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
@@ -1100,7 +1090,7 @@ fn multipart_server_array_item_supported(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case resolve_schema_object(Some(schema_ref), ctx) {
+  case context.resolve_schema_ref(schema_ref, ctx) |> option.from_result {
     Some(StringSchema(..))
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
@@ -1113,7 +1103,7 @@ fn multipart_field_is_stringifiable(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case resolve_schema_object(Some(schema_ref), ctx) {
+  case context.resolve_schema_ref(schema_ref, ctx) |> option.from_result {
     Some(StringSchema(..))
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
@@ -1135,7 +1125,7 @@ fn multipart_field_array_item_supported(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case resolve_schema_object(Some(schema_ref), ctx) {
+  case context.resolve_schema_ref(schema_ref, ctx) |> option.from_result {
     Some(StringSchema(..))
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
@@ -1473,7 +1463,7 @@ fn validate_security_schemes(
 
   let operation_errors =
     list.flat_map(operations, fn(op) {
-      let #(op_id, operation, _path, _method) = op
+      let context.AnalyzedOperation(op_id, operation, _path, _method) = op
       case operation.security {
         Some(reqs) ->
           list.flat_map(reqs, fn(req) {

@@ -5,6 +5,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/set
 import gleam/string
+import oaspec/internal/openapi/resolver
 import oaspec/openapi/diagnostic.{type Diagnostic, NoSourceLoc}
 import oaspec/openapi/spec.{
   type Callback, type Components, type OpenApiSpec, type Operation,
@@ -246,7 +247,7 @@ fn resolve_alias(
     )),
   )
   let new_seen = set.insert(seen, ref)
-  let ref_name = extract_ref_name(ref)
+  let ref_name = resolver.ref_to_name(ref)
   case dict.get(entries, ref_name) {
     Ok(Value(value)) -> Ok(value)
     Ok(Ref(next_ref)) -> resolve_alias(entries, next_ref, context, new_seen)
@@ -266,14 +267,6 @@ fn resolve_alias(
   }
 }
 
-/// Extract the last segment of a $ref path.
-fn extract_ref_name(ref: String) -> String {
-  ref
-  |> string.split("/")
-  |> list.last
-  |> result.unwrap("unknown")
-}
-
 /// Validate that a $ref string points to the expected component kind.
 /// Returns Ok(name) if valid, Error(diagnostic) if wrong kind or external.
 fn validate_ref_kind(
@@ -283,7 +276,7 @@ fn validate_ref_kind(
 ) -> Result(String, Diagnostic) {
   use <- bool.guard(
     string.starts_with(ref_str, expected_prefix),
-    Ok(extract_ref_name(ref_str)),
+    Ok(resolver.ref_to_name(ref_str)),
   )
   Error(diagnostic.resolve_error(
     path: context_path,

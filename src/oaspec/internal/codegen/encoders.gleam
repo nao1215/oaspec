@@ -8,10 +8,8 @@
 //// extracted in #402 to close the follow-up flagged by #212.
 
 import gleam/bool
-import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
-import gleam/string
 import oaspec/config
 import oaspec/internal/codegen/allof_merge
 import oaspec/internal/codegen/codec_helpers
@@ -51,28 +49,10 @@ fn generate_encoders(
   ctx: Context,
   operations: List(context.AnalyzedOperation),
 ) -> String {
-  let schemas = case context.spec(ctx).components {
-    Some(components) ->
-      list.sort(dict.to_list(components.schemas), fn(a, b) {
-        string.compare(a.0, b.0)
-      })
-      |> list.filter(fn(entry) { !ir_build.is_internal_schema(entry.1) })
-    None -> []
-  }
+  let schemas = context.component_schemas(ctx)
 
   // Check if types module is needed
-  let needs_types =
-    list.any(schemas, fn(entry) {
-      let #(_, schema_ref) = entry
-      case schema_ref {
-        Inline(ObjectSchema(..))
-        | Inline(AllOfSchema(..))
-        | Inline(OneOfSchema(..))
-        | Inline(AnyOfSchema(..)) -> True
-        Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> True
-        _ -> False
-      }
-    })
+  let needs_types = codec_helpers.needs_types(schemas)
 
   // Check if dict/list modules are needed (for additionalProperties encoding)
   let needs_dict =
@@ -209,17 +189,7 @@ fn generate_inline_enum_encoders(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> se.StringBuilder {
-  let #(props, required) = case schema_ref {
-    Inline(ObjectSchema(properties:, required:, ..)) -> #(
-      ir_build.sorted_entries(properties),
-      required,
-    )
-    Inline(AllOfSchema(schemas:, ..)) -> {
-      let merged = allof_merge.merge_allof_schemas(schemas, ctx)
-      #(ir_build.sorted_entries(merged.properties), merged.required)
-    }
-    _ -> #([], [])
-  }
+  let #(props, required) = codec_helpers.object_properties(schema_ref, ctx)
   list.fold(props, sb, fn(sb, entry) {
     let #(prop_name, prop_ref) = entry
     case schema_utils.constant_property_value(prop_ref, prop_name, required) {
@@ -256,7 +226,7 @@ fn generate_anonymous_encoders(
   operations: List(context.AnalyzedOperation),
 ) -> se.StringBuilder {
   list.fold(operations, sb, fn(sb, op) {
-    let #(op_id, operation, _path, _method) = op
+    let context.AnalyzedOperation(op_id, operation, _path, _method) = op
     // Only requestBody inline schemas need encoders (for client body encoding)
     generate_anonymous_request_body_encoder(sb, op_id, operation, ctx)
   })

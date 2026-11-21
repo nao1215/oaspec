@@ -10,6 +10,7 @@ import oaspec/internal/openapi/external_loader
 import oaspec/internal/openapi/external_loader_planner
 import oaspec/internal/openapi/location_index.{type LocationIndex}
 import oaspec/internal/openapi/normalize
+import oaspec/internal/openapi/operations
 import oaspec/internal/openapi/parser_schema
 import oaspec/internal/openapi/parser_value
 import oaspec/internal/openapi/parser_yay_error
@@ -934,22 +935,7 @@ fn validate_path_item_params(
   // Operations inherit path-level parameters per OAS, so the
   // effective set for each operation is the union of both lists.
   let operations =
-    [
-      pi.get,
-      pi.put,
-      pi.post,
-      pi.delete,
-      pi.options,
-      pi.head,
-      pi.patch,
-      pi.trace,
-    ]
-    |> list.filter_map(fn(op) {
-      case op {
-        Some(o) -> Ok(o)
-        None -> Error(Nil)
-      }
-    })
+    operations.path_item_operations(pi) |> list.map(fn(entry) { entry.1 })
   case operations {
     [] ->
       cross_check_path_vs_params(
@@ -1141,17 +1127,8 @@ fn find_first_template_collision(
 }
 
 fn path_item_operation_ids(pi: PathItem(Unresolved)) -> List(String) {
-  [pi.get, pi.put, pi.post, pi.delete, pi.options, pi.head, pi.patch, pi.trace]
-  |> list.filter_map(fn(op) {
-    case op {
-      Some(o) ->
-        case o.operation_id {
-          Some(id) -> Ok(id)
-          None -> Error(Nil)
-        }
-      None -> Error(Nil)
-    }
-  })
+  operations.path_item_operations(pi)
+  |> list.filter_map(fn(entry) { option.to_result(entry.1.operation_id, Nil) })
 }
 
 /// Parse optional components section.
@@ -2012,19 +1989,22 @@ fn parse_request_body(
   let required = parser_value.bool_default(node, "required", False)
 
   // content is REQUIRED per OpenAPI spec
-  use content <- result.try(parse_required_content(node, context, index))
+  use content <- result.try(parse_content(node, context, True, index))
 
   Ok(RequestBody(description:, content:, required:))
 }
 
-/// Parse content map, requiring at least one entry for request bodies.
-fn parse_required_content(
+/// Parse the content map (media type -> schema) of a request body or a
+/// response. A request body (`required: True`) must declare `content`, which
+/// may be the empty map `content: {}`; a response may omit it.
+fn parse_content(
   node: yay.Node,
   context: String,
+  required: Bool,
   index: LocationIndex,
 ) -> Result(Dict(String, MediaType), Diagnostic) {
-  case yay.select_sugar(from: node, selector: "content") {
-    Ok(yay.NodeMap(entries)) -> {
+  case yay.select_sugar(from: node, selector: "content"), required {
+    Ok(yay.NodeMap(entries)), _ ->
       list.try_fold(entries, dict.new(), fn(acc, entry) {
         let #(key_node, value_node) = entry
         case key_node {
@@ -2060,8 +2040,7 @@ fn parse_required_content(
           _ -> Ok(acc)
         }
       })
-    }
-    _ ->
+    _, True ->
       Error(diagnostic.missing_field(
         path: context <> ".requestBody",
         field: "content",
@@ -2071,54 +2050,7 @@ fn parse_required_content(
           "content",
         ),
       ))
-  }
-}
-
-/// Parse content map (media type -> schema).
-fn parse_content(
-  node: yay.Node,
-  context: String,
-  index: LocationIndex,
-) -> Result(Dict(String, MediaType), Diagnostic) {
-  case yay.select_sugar(from: node, selector: "content") {
-    Ok(yay.NodeMap(entries)) -> {
-      list.try_fold(entries, dict.new(), fn(acc, entry) {
-        let #(key_node, value_node) = entry
-        case key_node {
-          yay.NodeStr(media_type_name) -> {
-            use mt_schema <- result.try(
-              case yay.select_sugar(from: value_node, selector: "schema") {
-                Ok(schema_node) -> {
-                  use sr <- result.try(parser_schema.parse_schema_ref(
-                    schema_node,
-                    context <> ".schema",
-                    index,
-                  ))
-                  Ok(Some(sr))
-                }
-                _ -> Ok(None)
-              },
-            )
-            let mt_example =
-              parser_value.extract_optional(value_node, "example")
-            let mt_examples = parser_value.extract_map(value_node, "examples")
-            use mt_encoding <- result.try(parse_encoding_map(value_node, index))
-            Ok(dict.insert(
-              acc,
-              media_type_name,
-              MediaType(
-                schema: mt_schema,
-                example: mt_example,
-                examples: mt_examples,
-                encoding: mt_encoding,
-              ),
-            ))
-          }
-          _ -> Ok(acc)
-        }
-      })
-    }
-    _ -> Ok(dict.new())
+    _, False -> Ok(dict.new())
   }
 }
 
@@ -2263,7 +2195,7 @@ fn parse_response(
         )),
       )
 
-      use content <- result.try(parse_content(node, "response", index))
+      use content <- result.try(parse_content(node, "response", False, index))
       use headers <- result.try(parse_headers_map(node, index))
       use links <- result.try(parse_links_map(node))
 

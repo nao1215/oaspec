@@ -56,14 +56,7 @@ fn generate_decoders(
   // The previous shape sorted the dict twice and filtered separately at
   // the second site, which both wasted work and risked the import header
   // disagreeing with what the second pass actually emits.
-  let schemas = case context.spec(ctx).components {
-    Some(components) ->
-      list.sort(dict.to_list(components.schemas), fn(a, b) {
-        string.compare(a.0, b.0)
-      })
-      |> list.filter(fn(entry) { !ir_build.is_internal_schema(entry.1) })
-    None -> []
-  }
+  let schemas = context.component_schemas(ctx)
 
   // Check if option module is needed (any schema with optional fields)
   let needs_option =
@@ -113,18 +106,7 @@ fn generate_decoders(
     })
 
   // Check if types module is needed (any non-primitive schema)
-  let needs_types =
-    list.any(schemas, fn(entry) {
-      let #(_, schema_ref) = entry
-      case schema_ref {
-        Inline(ObjectSchema(..))
-        | Inline(AllOfSchema(..))
-        | Inline(OneOfSchema(..))
-        | Inline(AnyOfSchema(..)) -> True
-        Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> True
-        _ -> False
-      }
-    })
+  let needs_types = codec_helpers.needs_types(schemas)
 
   let base_imports = case needs_dict {
     True -> ["gleam/dict", "gleam/dynamic/decode", "gleam/json"]
@@ -190,7 +172,7 @@ fn generate_anonymous_decoders(
   operations: List(context.AnalyzedOperation),
 ) -> se.StringBuilder {
   list.fold(operations, sb, fn(sb, op) {
-    let #(op_id, operation, _path, _method) = op
+    let context.AnalyzedOperation(op_id, operation, _path, _method) = op
     let sb = generate_anonymous_response_decoders(sb, op_id, operation, ctx)
     generate_anonymous_request_body_decoder(sb, op_id, operation, ctx)
   })
@@ -279,7 +261,7 @@ fn collect_operation_inline_schemas(
   operations: List(context.AnalyzedOperation),
 ) -> List(SchemaRef) {
   list.flat_map(operations, fn(op) {
-    let #(_op_id, operation, _path, _method) = op
+    let context.AnalyzedOperation(_op_id, operation, _path, _method) = op
     let response_schemas =
       list.flat_map(dict.to_list(operation.responses), fn(entry) {
         let #(_status, ref_or_response) = entry
@@ -330,17 +312,7 @@ fn generate_inline_enum_decoders(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> se.StringBuilder {
-  let #(props, required) = case schema_ref {
-    Inline(ObjectSchema(properties:, required:, ..)) -> #(
-      ir_build.sorted_entries(properties),
-      required,
-    )
-    Inline(AllOfSchema(schemas:, ..)) -> {
-      let merged = allof_merge.merge_allof_schemas(schemas, ctx)
-      #(ir_build.sorted_entries(merged.properties), merged.required)
-    }
-    _ -> #([], [])
-  }
+  let #(props, required) = codec_helpers.object_properties(schema_ref, ctx)
   list.fold(props, sb, fn(sb, entry) {
     let #(prop_name, prop_ref) = entry
     // Issue #309: a required inline single-value string-enum has no

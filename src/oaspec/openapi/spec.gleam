@@ -1,5 +1,6 @@
 import gleam/dict.{type Dict}
 import gleam/option.{type Option}
+import gleam/string
 import oaspec/internal/openapi/value.{type JsonValue}
 import oaspec/internal/util/http
 import oaspec/openapi/schema.{type SchemaRef}
@@ -361,14 +362,5 @@ pub fn method_to_string(method: HttpMethod) -> String {
 
 /// Convert HTTP method to lowercase string.
 pub fn method_to_lower(method: HttpMethod) -> String {
-  case method {
-    Get -> "get"
-    Post -> "post"
-    Put -> "put"
-    Delete -> "delete"
-    Patch -> "patch"
-    Head -> "head"
-    Options -> "options"
-    Trace -> "trace"
-  }
+  string.lowercase(method_to_string(method))
 }

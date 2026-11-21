@@ -1,19 +1,18 @@
 import gleam/dict
 import gleam/list
 import gleam/option.{Some}
+import oaspec/internal/codegen/context
 import oaspec/openapi/schema.{AllOfSchema, Inline, ObjectSchema, Reference}
-import oaspec/openapi/spec.{
-  type HttpMethod, type Operation, type Resolved, ParameterSchema, Value,
-}
+import oaspec/openapi/spec.{ParameterSchema, Value}
 
 /// Check if any operation has parameters with Reference schemas,
 /// or request body content with Reference/ObjectSchema/AllOfSchema.
 /// This determines whether the generated module needs to import the types module.
 pub fn operations_need_typed_schemas(
-  operations: List(#(String, Operation(Resolved), String, HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> Bool {
   list.any(operations, fn(op) {
-    let #(_, operation, _, _) = op
+    let context.AnalyzedOperation(_, operation, _, _) = op
     let has_ref_body = case operation.request_body {
       Some(Value(rb)) ->
         list.any(dict.to_list(rb.content), fn(ce) {
@@ -44,10 +43,10 @@ pub fn operations_need_typed_schemas(
 
 /// Check if any operation has optional (non-required) parameters.
 pub fn operations_have_optional_params(
-  operations: List(#(String, Operation(Resolved), String, HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> Bool {
   list.any(operations, fn(op) {
-    let #(_, operation, _, _) = op
+    let context.AnalyzedOperation(_, operation, _, _) = op
     list.any(operation.parameters, fn(ref_p) {
       case ref_p {
         Value(p) -> !p.required
@@ -59,10 +58,10 @@ pub fn operations_have_optional_params(
 
 /// Check if any operation has an optional (non-required) request body.
 pub fn operations_have_optional_body(
-  operations: List(#(String, Operation(Resolved), String, HttpMethod)),
+  operations: List(context.AnalyzedOperation),
 ) -> Bool {
   list.any(operations, fn(op) {
-    let #(_, operation, _, _) = op
+    let context.AnalyzedOperation(_, operation, _, _) = op
     case operation.request_body {
       Some(Value(rb)) -> !rb.required
       _ -> False

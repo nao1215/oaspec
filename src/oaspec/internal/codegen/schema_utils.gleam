@@ -7,8 +7,9 @@ import gleam/option.{type Option, None, Some}
 import gleam/set
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/openapi/schema.{
-  type SchemaObject, type SchemaRef, AllOfSchema, Forbidden, Inline,
-  ObjectSchema, OneOfSchema, Reference, StringSchema, Typed, Untyped,
+  type SchemaObject, type SchemaRef, AllOfSchema, ArraySchema, BooleanSchema,
+  Forbidden, Inline, IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema,
+  Reference, StringSchema, Typed, Untyped,
 }
 
 /// Whether `leaf` holds for the schema or for a schema it is built from:
@@ -309,5 +310,25 @@ pub fn filter_write_only_properties(
       )
     }
     _ -> schema_obj
+  }
+}
+
+/// True when `schema_ref` is, or is a `$ref` to, a string, integer, number
+/// or boolean schema.
+pub fn resolves_to_primitive(schema_ref: SchemaRef, ctx: Context) -> Bool {
+  case context.resolve_schema_ref(schema_ref, ctx) {
+    Ok(StringSchema(..))
+    | Ok(IntegerSchema(..))
+    | Ok(NumberSchema(..))
+    | Ok(BooleanSchema(..)) -> True
+    _ -> False
+  }
+}
+
+/// The items schema when `schema_ref` is, or is a `$ref` to, an array.
+pub fn array_items(schema_ref: SchemaRef, ctx: Context) -> Option(SchemaRef) {
+  case context.resolve_schema_ref(schema_ref, ctx) {
+    Ok(ArraySchema(items:, ..)) -> Some(items)
+    _ -> None
   }
 }

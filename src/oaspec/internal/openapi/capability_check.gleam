@@ -7,6 +7,7 @@ import oaspec/config
 import oaspec/internal/capability
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/openapi/location_index.{type LocationIndex}
+import oaspec/internal/openapi/operations
 import oaspec/internal/util/http
 import oaspec/openapi/diagnostic.{
   type Diagnostic, type SourceLoc, SeverityError, SeverityWarning, TargetBoth,
@@ -77,22 +78,14 @@ fn check_path_item_schemas(
   pi: spec.PathItem(Resolved),
   index: LocationIndex,
 ) -> List(Diagnostic) {
-  let method_ops = [
-    #("get", pi.get),
-    #("post", pi.post),
-    #("put", pi.put),
-    #("delete", pi.delete),
-    #("patch", pi.patch),
-    #("head", pi.head),
-    #("options", pi.options),
-    #("trace", pi.trace),
-  ]
-  list.flat_map(method_ops, fn(entry) {
-    let #(method, maybe_op) = entry
-    case maybe_op {
-      Some(op) -> check_operation_schemas(base_path <> "." <> method, op, index)
-      None -> []
-    }
+  operations.path_item_operations(pi)
+  |> list.flat_map(fn(entry) {
+    let #(method, op) = entry
+    check_operation_schemas(
+      base_path <> "." <> spec.method_to_lower(method),
+      op,
+      index,
+    )
   })
 }
 
@@ -296,7 +289,7 @@ fn capability_path_to_yaml(
     [first, ..rest] ->
       case
         list.find_map(operations, fn(op) {
-          let #(op_id, _, url, method) = op
+          let context.AnalyzedOperation(op_id, _, url, method) = op
           case op_id == first {
             True -> Ok(operation_yaml_prefix(url, method))
             False -> Error(Nil)
@@ -346,7 +339,7 @@ pub fn check_preserved(ctx: Context, index: LocationIndex) -> List(Diagnostic) {
   let ops = context.operations(ctx)
   let response_warnings =
     list.flat_map(ops, fn(op) {
-      let #(op_id, operation, _path, _method) = op
+      let context.AnalyzedOperation(op_id, operation, _path, _method) = op
       let entries = dict.to_list(operation.responses)
       list.flat_map(entries, fn(entry) {
         let #(status_code, ref_or) = entry
@@ -432,7 +425,7 @@ pub fn check_preserved(ctx: Context, index: LocationIndex) -> List(Diagnostic) {
     })
   let request_body_encoding_warnings =
     list.flat_map(ops, fn(op) {
-      let #(op_id, operation, _path, _method) = op
+      let context.AnalyzedOperation(op_id, operation, _path, _method) = op
       case operation.request_body {
         Some(Value(rb)) -> {
           let base_path = op_id <> ".requestBody"
@@ -577,7 +570,7 @@ pub fn check_preserved(ctx: Context, index: LocationIndex) -> List(Diagnostic) {
   }
   let operation_callback_warnings =
     list.filter_map(ops, fn(op) {
-      let #(op_id, operation, _path, _method) = op
+      let context.AnalyzedOperation(op_id, operation, _path, _method) = op
       case dict.is_empty(operation.callbacks) {
         True -> Error(Nil)
         False -> {

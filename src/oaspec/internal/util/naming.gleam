@@ -213,7 +213,7 @@ pub fn inline_enum_type_name(
   let base = schema_to_type_name(parent_name) <> schema_to_type_name(prop_name)
   case dict.has_key(component_type_names, base) {
     False -> base
-    True -> bump_inline_enum_suffix(base, 2, component_type_names)
+    True -> bump_numeric_suffix(base, 2, component_type_names)
   }
 }
 
@@ -251,7 +251,9 @@ fn bump_enum_variant_suffix(
   }
 }
 
-fn bump_inline_enum_suffix(
+/// `base` with the first numeric suffix, counting up from `suffix`, that is
+/// not in `taken`.
+fn bump_numeric_suffix(
   base: String,
   suffix: Int,
   taken: dict.Dict(String, Nil),
@@ -259,7 +261,7 @@ fn bump_inline_enum_suffix(
   let candidate = base <> int.to_string(suffix)
   case dict.has_key(taken, candidate) {
     False -> candidate
-    True -> bump_inline_enum_suffix(base, suffix + 1, taken)
+    True -> bump_numeric_suffix(base, suffix + 1, taken)
   }
 }
 
@@ -399,19 +401,7 @@ pub fn derived_function_name(
     !dict.has_key(operation_function_names, candidate),
     candidate,
   )
-  bump_derived_function_suffix(candidate, 2, operation_function_names)
-}
-
-fn bump_derived_function_suffix(
-  base: String,
-  suffix: Int,
-  taken: dict.Dict(String, Nil),
-) -> String {
-  let candidate = base <> int.to_string(suffix)
-  case dict.has_key(taken, candidate) {
-    False -> candidate
-    True -> bump_derived_function_suffix(base, suffix + 1, taken)
-  }
+  bump_numeric_suffix(candidate, 2, operation_function_names)
 }
 
 /// Convert an OpenAPI schema name to a valid Gleam type name.

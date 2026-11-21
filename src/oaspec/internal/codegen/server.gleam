@@ -66,7 +66,7 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
       ),
       ..list.append(
         list.map(operations, fn(op) {
-          let #(op_id, operation, _path, _method) = op
+          let context.AnalyzedOperation(op_id, operation, _path, _method) = op
           GeneratedFile(
             path: "handlers/"
               <> naming.operation_to_function_name(op_id)
@@ -125,7 +125,7 @@ fn generate_handlers(
 
   let sb =
     list.fold(operations, sb, fn(sb, op) {
-      let #(op_id, operation, _path, _method) = op
+      let context.AnalyzedOperation(op_id, operation, _path, _method) = op
       generate_handler(sb, op_id, operation)
     })
 
@@ -201,7 +201,7 @@ fn generate_per_operation_handlers_generated(
   let pkg = config.package(context.config(ctx))
   let handler_imports =
     list.map(operations, fn(op) {
-      let fn_name = naming.operation_to_function_name(op.0)
+      let fn_name = naming.operation_to_function_name(op.operation_id)
       pkg <> "/handlers/" <> fn_name <> " as " <> fn_name <> "_handler"
     })
   let sb =
@@ -215,7 +215,7 @@ fn generate_per_operation_handlers_generated(
     )
 
   list.fold(operations, sb, fn(sb, op) {
-    let #(op_id, operation, _path, _method) = op
+    let context.AnalyzedOperation(op_id, operation, _path, _method) = op
     let fn_name = naming.operation_to_function_name(op_id)
     generate_handler_delegator(sb, op_id, operation, fn_name <> "_handler")
   })
@@ -247,7 +247,7 @@ fn generate_handlers_generated(
 
   let sb =
     list.fold(operations, sb, fn(sb, op) {
-      let #(op_id, operation, _path, _method) = op
+      let context.AnalyzedOperation(op_id, operation, _path, _method) = op
       generate_handler_delegator(sb, op_id, operation, "handlers")
     })
 
@@ -461,7 +461,7 @@ String.",
 
   let sb =
     list.fold(operations, sb, fn(sb, op) {
-      let #(op_id, operation, path, method) = op
+      let context.AnalyzedOperation(op_id, operation, path, method) = op
       let fn_name = naming.operation_to_function_name(op_id)
       let method_str = spec.method_to_string(method)
       let path_pattern = path_to_pattern(path)
@@ -1255,7 +1255,7 @@ fn generate_response_conversion(
                 _ -> False
               }
               let content_entries = dict.to_list(response.content)
-              let header_specs = sorted_header_specs(response.headers)
+              let header_specs = router_ir.sorted_header_specs(response.headers)
               let has_headers = !list.is_empty(header_specs)
 
               case content_entries {
@@ -1273,132 +1273,52 @@ fn generate_response_conversion(
                     is_default: is_default,
                   )
                 [#(media_type_name, media_type)] ->
-                  case content_type.from_string(media_type_name) {
-                    content_type.ApplicationJson ->
-                      case media_type.schema {
-                        Some(_) -> {
-                          let encode_fn = get_encode_function(media_type.schema)
-                          emit_response_arm(
-                            sb,
-                            variant_name,
-                            status_int,
-                            has_data: True,
-                            has_headers: has_headers,
-                            body_expr: "TextBody(json.to_string("
-                              <> encode_fn
-                              <> "(data)))",
-                            content_type_header: Some(media_type_name),
-                            header_specs: header_specs,
-                            is_default: is_default,
-                          )
-                        }
-                        None ->
-                          emit_response_arm(
-                            sb,
-                            variant_name,
-                            status_int,
-                            has_data: False,
-                            has_headers: has_headers,
-                            body_expr: "EmptyBody",
-                            content_type_header: None,
-                            header_specs: header_specs,
-                            is_default: is_default,
-                          )
+                  case media_type.schema {
+                    None ->
+                      emit_response_arm(
+                        sb,
+                        variant_name,
+                        status_int,
+                        has_data: False,
+                        has_headers: has_headers,
+                        body_expr: "EmptyBody",
+                        content_type_header: None,
+                        header_specs: header_specs,
+                        is_default: is_default,
+                      )
+                    Some(_) -> {
+                      let body_expr = case
+                        content_type.from_string(media_type_name)
+                      {
+                        content_type.TextPlain
+                        | content_type.ApplicationXml
+                        | content_type.TextXml -> "TextBody(data)"
+                        // Binary responses thread bytes end-to-end via
+                        // `BytesBody(BitArray)`; `*/*` responses are handed
+                        // to the user as raw BitArray too. The matching
+                        // response_types variant carries `BitArray`.
+                        content_type.ApplicationOctetStream
+                        | content_type.Wildcard -> "BytesBody(data)"
+                        content_type.ApplicationJson
+                        | content_type.MultipartFormData
+                        | content_type.FormUrlEncoded
+                        | content_type.UnsupportedContentType(_) ->
+                          "TextBody(json.to_string("
+                          <> get_encode_function(media_type.schema)
+                          <> "(data)))"
                       }
-                    content_type.TextPlain
-                    | content_type.ApplicationXml
-                    | content_type.TextXml ->
-                      case media_type.schema {
-                        Some(_) ->
-                          emit_response_arm(
-                            sb,
-                            variant_name,
-                            status_int,
-                            has_data: True,
-                            has_headers: has_headers,
-                            body_expr: "TextBody(data)",
-                            content_type_header: Some(media_type_name),
-                            header_specs: header_specs,
-                            is_default: is_default,
-                          )
-                        None ->
-                          emit_response_arm(
-                            sb,
-                            variant_name,
-                            status_int,
-                            has_data: False,
-                            has_headers: has_headers,
-                            body_expr: "EmptyBody",
-                            content_type_header: None,
-                            header_specs: header_specs,
-                            is_default: is_default,
-                          )
-                      }
-                    content_type.ApplicationOctetStream
-                    | content_type.Wildcard ->
-                      // Issue #304: binary responses thread bytes end-to-end
-                      // via `BytesBody(BitArray)` instead of being smuggled
-                      // through `String`. The matching response_types
-                      // variant carries `BitArray` (see ir_build).
-                      // Issue #504: */* shares the same path — wildcard
-                      // responses are handed to the user as raw BitArray.
-                      case media_type.schema {
-                        Some(_) ->
-                          emit_response_arm(
-                            sb,
-                            variant_name,
-                            status_int,
-                            has_data: True,
-                            has_headers: has_headers,
-                            body_expr: "BytesBody(data)",
-                            content_type_header: Some(media_type_name),
-                            header_specs: header_specs,
-                            is_default: is_default,
-                          )
-                        None ->
-                          emit_response_arm(
-                            sb,
-                            variant_name,
-                            status_int,
-                            has_data: False,
-                            has_headers: has_headers,
-                            body_expr: "EmptyBody",
-                            content_type_header: None,
-                            header_specs: header_specs,
-                            is_default: is_default,
-                          )
-                      }
-                    _ ->
-                      case media_type.schema {
-                        Some(_) -> {
-                          let encode_fn = get_encode_function(media_type.schema)
-                          emit_response_arm(
-                            sb,
-                            variant_name,
-                            status_int,
-                            has_data: True,
-                            has_headers: has_headers,
-                            body_expr: "TextBody(json.to_string("
-                              <> encode_fn
-                              <> "(data)))",
-                            content_type_header: Some(media_type_name),
-                            header_specs: header_specs,
-                            is_default: is_default,
-                          )
-                        }
-                        None ->
-                          emit_response_arm(
-                            sb,
-                            variant_name,
-                            status_int,
-                            has_data: False,
-                            has_headers: has_headers,
-                            body_expr: "EmptyBody",
-                            content_type_header: None,
-                            header_specs: header_specs,
-                            is_default: is_default,
-                          )
-                      }
+                      emit_response_arm(
+                        sb,
+                        variant_name,
+                        status_int,
+                        has_data: True,
+                        has_headers: has_headers,
+                        body_expr: body_expr,
+                        content_type_header: Some(media_type_name),
+                        header_specs: header_specs,
+                        is_default: is_default,
+                      )
+                    }
                   }
                 // Multiple content types: variant wraps String.
                 // Use the first content type as default content-type header.
@@ -1425,56 +1345,6 @@ fn generate_response_conversion(
   }
 }
 
-/// Compact spec for a single declared response header, used to render
-/// the `headers:` slot of `ServerResponse` when issue #306 plumbing is
-/// active. The pair (header_name, field_name) keeps the wire-form name
-/// (e.g. "Pagination-Cursor") distinct from the Gleam record field
-/// (`pagination_cursor`); `field_type` decides how the value is
-/// stringified; `required` decides whether to emit a Some/None case.
-type HeaderSpec {
-  HeaderSpec(
-    header_name: String,
-    field_name: String,
-    field_type: String,
-    required: Bool,
-  )
-}
-
-fn sorted_header_specs(
-  headers: dict.Dict(String, spec.Header),
-) -> List(HeaderSpec) {
-  headers
-  |> dict.to_list
-  |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
-  |> list.map(fn(entry) {
-    let #(header_name, header) = entry
-    let field_name = naming.to_snake_case(header_name)
-    let field_type = response_header_field_type(header.schema)
-    HeaderSpec(
-      header_name: header_name,
-      field_name: field_name,
-      field_type: field_type,
-      required: header.required,
-    )
-  })
-}
-
-/// Mirror of `header_schema_to_type` in ir_build — kept here so the
-/// router emission and the response_types record stay in sync without a
-/// cross-module dependency on the IR layer.
-fn response_header_field_type(
-  schema_opt: option.Option(schema.SchemaRef),
-) -> String {
-  case schema_opt {
-    Some(Inline(schema.IntegerSchema(..))) -> "Int"
-    Some(Inline(schema.NumberSchema(..))) -> "Float"
-    Some(Inline(schema.BooleanSchema(..))) -> "Bool"
-    Some(Inline(schema.StringSchema(..))) -> "String"
-    Some(Reference(name:, ..)) -> "types." <> naming.schema_to_type_name(name)
-    _ -> "String"
-  }
-}
-
 /// Emit one arm of the response dispatch `case` block.
 ///
 /// Issue #306 introduces the headers plumbing: when `has_headers` is
@@ -1495,7 +1365,7 @@ fn emit_response_arm(
   has_headers has_headers: Bool,
   body_expr body_expr: String,
   content_type_header content_type_header: option.Option(String),
-  header_specs header_specs: List(HeaderSpec),
+  header_specs header_specs: List(router_ir.HeaderSpec),
   is_default is_default: Bool,
 ) -> se.StringBuilder {
   let pattern_args = case is_default, has_data, has_headers {
@@ -1540,7 +1410,7 @@ fn emit_response_arm(
 ///   regenerated routers stay deterministic.
 fn headers_slot_expr(
   content_type_header: option.Option(String),
-  header_specs: List(HeaderSpec),
+  header_specs: List(router_ir.HeaderSpec),
 ) -> String {
   let content_type_chunk = case content_type_header {
     Some(media_type_name) -> [
@@ -1580,7 +1450,7 @@ fn append_chunks(prefix: String, header_chunks: List(String)) -> String {
 /// Non-string types are stringified via `int.to_string` /
 /// `float.to_string` / `bool.to_string` (the necessary imports are
 /// added by the import-analysis pass).
-fn header_chunk_expr(spec: HeaderSpec) -> String {
+fn header_chunk_expr(spec: router_ir.HeaderSpec) -> String {
   let render_value = fn(value_expr: String) -> String {
     "[#(\""
     <> spec.header_name

@@ -90,7 +90,7 @@ fn generate_client(ctx: Context) -> String {
   // Operation functions
   let sb =
     list.fold(operations, sb, fn(sb, op) {
-      let #(op_id, operation, path, method) = op
+      let context.AnalyzedOperation(op_id, operation, path, method) = op
       generate_client_function(sb, op_id, operation, path, method, ctx)
     })
 
@@ -233,7 +233,7 @@ fn deep_object_properties_and_required(
 ) -> #(List(#(String, schema.SchemaRef)), List(String)) {
   case spec.parameter_schema(p) {
     Some(schema_ref) ->
-      case resolve_param_schema(schema_ref, ctx) {
+      case context.resolve_schema_ref(schema_ref, ctx) |> option.from_result {
         Some(schema.ObjectSchema(properties:, required:, ..)) -> #(
           ir_build.sorted_entries(properties),
           required,
@@ -244,28 +244,13 @@ fn deep_object_properties_and_required(
   }
 }
 
-fn resolve_param_schema(
-  schema_ref: schema.SchemaRef,
-  ctx: Context,
-) -> option.Option(schema.SchemaObject) {
-  case schema_ref {
-    schema.Inline(obj) -> Some(obj)
-    schema.Reference(..) ->
-      case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(obj) -> Some(obj)
-        // nolint: thrown_away_error -- broken refs surface elsewhere in the validator; the deepObject emitter just falls back to no expansion
-        Error(_) -> None
-      }
-  }
-}
-
 /// Returns `True` when the array's items resolve to a primitive
 /// (string / integer / number / boolean) shape — including a
 /// Reference whose component schema is a primitive (e.g. an enum
 /// alias). Anything else is treated as "complex" and routes through
 /// the JSON escape hatch.
 fn items_resolve_to_primitive(items: schema.SchemaRef, ctx: Context) -> Bool {
-  case resolve_param_schema(items, ctx) {
+  case context.resolve_schema_ref(items, ctx) |> option.from_result {
     Some(schema.StringSchema(..))
     | Some(schema.IntegerSchema(..))
     | Some(schema.NumberSchema(..))
@@ -288,7 +273,7 @@ fn emit_deep_object_property(
   // through a `Some(v_inner) -> [...] None -> query` case, so optional
   // properties of an outer that's already unwrapped to `v` still serialize
   // through `v.<prop>` access.
-  case resolve_param_schema(prop_ref, ctx) {
+  case context.resolve_schema_ref(prop_ref, ctx) |> option.from_result {
     Some(schema.ObjectSchema(properties: inner_props, ..)) ->
       emit_deep_object_nested_object(
         sb,
@@ -365,23 +350,7 @@ fn emit_deep_object_json_array_property(
     _ -> schema_dispatch.json_encoder_fn(items)
   }
   let value_expr = "json.to_string(json.array(v_inner, " <> item_encoder <> "))"
-  case is_required {
-    True ->
-      sb
-      |> se.indent(1, "let query = {")
-      |> se.indent(2, "let v_inner = " <> field_access)
-      |> se.indent(2, "[#(\"" <> key <> "\", " <> value_expr <> "), ..query]")
-      |> se.indent(1, "}")
-    False ->
-      sb
-      |> se.indent(1, "let query = case " <> field_access <> " {")
-      |> se.indent(
-        2,
-        "Some(v_inner) -> [#(\"" <> key <> "\", " <> value_expr <> "), ..query]",
-      )
-      |> se.indent(2, "None -> query")
-      |> se.indent(1, "}")
-  }
+  emit_deep_object_query_entry(sb, key, field_access, value_expr, is_required)
 }
 
 fn emit_deep_object_json_property(
@@ -397,23 +366,7 @@ fn emit_deep_object_json_property(
     _ -> schema_dispatch.json_encoder_expr(prop_ref, "v_inner")
   }
   let value_expr = "json.to_string(" <> inner <> ")"
-  case is_required {
-    True ->
-      sb
-      |> se.indent(1, "let query = {")
-      |> se.indent(2, "let v_inner = " <> field_access)
-      |> se.indent(2, "[#(\"" <> key <> "\", " <> value_expr <> "), ..query]")
-      |> se.indent(1, "}")
-    False ->
-      sb
-      |> se.indent(1, "let query = case " <> field_access <> " {")
-      |> se.indent(
-        2,
-        "Some(v_inner) -> [#(\"" <> key <> "\", " <> value_expr <> "), ..query]",
-      )
-      |> se.indent(2, "None -> query")
-      |> se.indent(1, "}")
-  }
+  emit_deep_object_query_entry(sb, key, field_access, value_expr, is_required)
 }
 
 fn emit_deep_object_primitive(
@@ -433,7 +386,9 @@ fn emit_deep_object_primitive(
   // installs everywhere else. The classification has to resolve
   // `$ref` items, since a `Reference(_)` to a primitive enum is
   // still safe to stringify with `encode.encode_<...>_to_string`.
-  let array_with_complex_items = case resolve_param_schema(prop_ref, ctx) {
+  let array_with_complex_items = case
+    context.resolve_schema_ref(prop_ref, ctx) |> option.from_result
+  {
     Some(schema.ArraySchema(items:, ..)) ->
       case items_resolve_to_primitive(items, ctx) {
         True -> None
@@ -488,23 +443,7 @@ fn emit_deep_object_primitive_inner(
     }
     _ -> schema_dispatch.schema_ref_to_string_expr(prop_ref, "v_inner", ctx)
   }
-  case is_required {
-    True ->
-      sb
-      |> se.indent(1, "let query = {")
-      |> se.indent(2, "let v_inner = " <> field_access)
-      |> se.indent(2, "[#(\"" <> key <> "\", " <> value_expr <> "), ..query]")
-      |> se.indent(1, "}")
-    False ->
-      sb
-      |> se.indent(1, "let query = case " <> field_access <> " {")
-      |> se.indent(
-        2,
-        "Some(v_inner) -> [#(\"" <> key <> "\", " <> value_expr <> "), ..query]",
-      )
-      |> se.indent(2, "None -> query")
-      |> se.indent(1, "}")
-  }
+  emit_deep_object_query_entry(sb, key, field_access, value_expr, is_required)
 }
 
 fn emit_deep_object_nested_object(
@@ -1453,6 +1392,33 @@ fn generate_form_urlencoded_body_emission(
       |> se.indent(1, "let body = case body {")
       |> se.indent(2, "Some(_) -> transport.TextBody(body_str)")
       |> se.indent(2, "None -> transport.EmptyBody")
+      |> se.indent(1, "}")
+  }
+}
+
+/// Prepend `#(key, value_expr)` to `query`, with `value_expr` reading the
+/// property through `v_inner`. An optional property adds the entry only
+/// when it is `Some`.
+fn emit_deep_object_query_entry(
+  sb: se.StringBuilder,
+  key: String,
+  field_access: String,
+  value_expr: String,
+  is_required: Bool,
+) -> se.StringBuilder {
+  let entry = "[#(\"" <> key <> "\", " <> value_expr <> "), ..query]"
+  case is_required {
+    True ->
+      sb
+      |> se.indent(1, "let query = {")
+      |> se.indent(2, "let v_inner = " <> field_access)
+      |> se.indent(2, entry)
+      |> se.indent(1, "}")
+    False ->
+      sb
+      |> se.indent(1, "let query = case " <> field_access <> " {")
+      |> se.indent(2, "Some(v_inner) -> " <> entry)
+      |> se.indent(2, "None -> query")
       |> se.indent(1, "}")
   }
 }

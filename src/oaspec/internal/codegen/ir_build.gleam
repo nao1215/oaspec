@@ -30,14 +30,7 @@ import oaspec/openapi/spec.{type Resolved, Value}
 
 /// Build an IR Module for the types.gleam file from component schemas.
 pub fn build_types_module(ctx: Context) -> Module {
-  let schemas = case context.spec(ctx).components {
-    Some(components) ->
-      list.sort(dict.to_list(components.schemas), fn(a, b) {
-        string.compare(a.0, b.0)
-      })
-      |> list.filter(fn(entry) { !is_internal_schema(entry.1) })
-    None -> []
-  }
+  let schemas = context.component_schemas(ctx)
 
   let imports = compute_imports(schemas, ctx)
 
@@ -75,7 +68,7 @@ pub fn build_request_types_module(ctx: Context) -> Module {
   let imports = compute_request_type_imports(operations, ctx)
   let declarations =
     list.filter_map(operations, fn(op) {
-      let #(op_id, operation, _path, _method) = op
+      let context.AnalyzedOperation(op_id, operation, _path, _method) = op
       request_type_decl(op_id, operation)
     })
   ir.module(header: "", imports: imports, declarations: declarations)
@@ -231,7 +224,7 @@ pub fn build_response_types_module(ctx: Context) -> Module {
   }
   let declarations =
     list.filter_map(operations, fn(op) {
-      let #(op_id, operation, _path, _method) = op
+      let context.AnalyzedOperation(op_id, operation, _path, _method) = op
       response_type_decl(op_id, operation)
     })
   ir.module_with_header_records(
@@ -247,7 +240,7 @@ fn build_response_header_records(
   operations: List(context.AnalyzedOperation),
 ) -> List(ir.ResponseHeaderRecord) {
   list.flat_map(operations, fn(op) {
-    let #(op_id, operation, _path, _method) = op
+    let context.AnalyzedOperation(op_id, operation, _path, _method) = op
     let type_name = naming.schema_to_type_name(op_id) <> "Response"
     let responses =
       http.sort_response_entries(dict.to_list(operation.responses))
@@ -282,18 +275,24 @@ fn build_response_header_records(
   })
 }
 
-/// Convert a header schema to a Gleam type string.
-/// Handles both inline primitive schemas and `$ref` references (#294).
-fn header_schema_to_type(
+/// The Gleam type of a response header field: a primitive for an inline
+/// primitive schema, the component type for a `$ref`, and `String` for
+/// every other shape.
+pub fn header_schema_to_type(
   schema_opt: option.Option(schema.SchemaRef),
 ) -> String {
   case schema_opt {
     Some(Inline(IntegerSchema(..))) -> "Int"
     Some(Inline(NumberSchema(..))) -> "Float"
     Some(Inline(BooleanSchema(..))) -> "Bool"
-    Some(Inline(StringSchema(..))) -> "String"
     Some(Reference(name:, ..)) -> "types." <> naming.schema_to_type_name(name)
-    _ -> "String"
+    Some(Inline(StringSchema(..)))
+    | Some(Inline(ArraySchema(..)))
+    | Some(Inline(ObjectSchema(..)))
+    | Some(Inline(AllOfSchema(..)))
+    | Some(Inline(OneOfSchema(..)))
+    | Some(Inline(AnyOfSchema(..)))
+    | None -> "String"
   }
 }
 
@@ -310,7 +309,7 @@ fn responses_need_types_import(
   operations: List(context.AnalyzedOperation),
 ) -> Bool {
   list.any(operations, fn(op) {
-    let #(_op_id, operation, _path, _method) = op
+    let context.AnalyzedOperation(_op_id, operation, _path, _method) = op
     let responses = dict.to_list(operation.responses)
     list.any(responses, fn(entry) {
       let #(_status_code, ref_or) = entry
@@ -898,12 +897,7 @@ fn schema_type_decls(
 fn anonymous_type_decls(ctx: Context) -> List(Declaration) {
   let operations = context.operations(ctx)
   list.flat_map(operations, fn(op) {
-    let #(op_id, operation, _path, _method): #(
-      String,
-      spec.Operation(Resolved),
-      String,
-      spec.HttpMethod,
-    ) = op
+    let context.AnalyzedOperation(op_id, operation, _path, _method) = op
     let response_decls = anonymous_response_type_decls(op_id, operation, ctx)
     let request_decls = anonymous_request_body_type_decls(op_id, operation, ctx)
     list.append(response_decls, request_decls)

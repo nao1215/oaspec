@@ -370,7 +370,7 @@ pub fn operations_have_enum_ref_params(
   ctx: Context,
 ) -> Bool {
   list.any(operations, fn(op) {
-    let #(_, operation, _, _) = op
+    let context.AnalyzedOperation(_, operation, _, _) = op
     list.any(operation.parameters, fn(ref_p) {
       case ref_p {
         Value(p) -> parameter_is_enum_ref(p, ctx)
@@ -957,13 +957,8 @@ fn multipart_body_properties(
 }
 
 fn schema_ref_resolves_to_object(schema_ref: SchemaRef, ctx: Context) -> Bool {
-  case schema_ref {
-    Inline(ObjectSchema(..)) -> True
-    Reference(..) as schema_ref ->
-      case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(ObjectSchema(..)) -> True
-        _ -> False
-      }
+  case context.resolve_schema_ref(schema_ref, ctx) {
+    Ok(ObjectSchema(..)) -> True
     _ -> False
   }
 }
@@ -972,13 +967,8 @@ fn schema_ref_additional_properties(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> AdditionalProperties {
-  case schema_ref {
-    Inline(ObjectSchema(additional_properties:, ..)) -> additional_properties
-    Reference(..) as schema_ref ->
-      case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(ObjectSchema(additional_properties:, ..)) -> additional_properties
-        _ -> Forbidden
-      }
+  case context.resolve_schema_ref(schema_ref, ctx) {
+    Ok(ObjectSchema(additional_properties:, ..)) -> additional_properties
     _ -> Forbidden
   }
 }
