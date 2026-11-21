@@ -789,6 +789,21 @@ fn generate_safe_request_and_dispatch(
     _ -> sb
   }
 
+  // A form or multipart body with a required field is built into a Result
+  // first, so a missing or invalid field answers 400.
+  let checked_body = case operation.request_body {
+    Some(Value(rb)) -> decode_helpers.checked_body_result_expr(rb, op_id, ctx)
+    _ -> None
+  }
+  let sb = case checked_body {
+    Some(result_expr) ->
+      sb
+      |> se.indent(3, "let body_result = " <> result_expr)
+      |> se.indent(3, "case body_result {")
+      |> se.indent(4, "Ok(checked_body) -> {")
+    None -> sb
+  }
+
   // Build request constructor
   let sb =
     sb
@@ -851,9 +866,10 @@ fn generate_safe_request_and_dispatch(
     })
 
   // Add body field
-  let sb = case needs_body_guard {
-    True -> sb |> se.indent(4, "body: decoded_body,")
-    False ->
+  let sb = case needs_body_guard, checked_body {
+    True, _ -> sb |> se.indent(4, "body: decoded_body,")
+    False, Some(_) -> sb |> se.indent(4, "body: checked_body,")
+    False, None ->
       case operation.request_body {
         Some(Value(rb)) -> {
           let body_expr =
@@ -874,6 +890,19 @@ fn generate_safe_request_and_dispatch(
       "let response = handlers_generated." <> fn_name <> "(app_state, request)",
     )
     |> generate_response_conversion(response_type_name, operation)
+
+  // Close the checked body case
+  let sb = case checked_body {
+    Some(_) ->
+      sb
+      |> se.indent(4, "}")
+      |> se.indent(
+        4,
+        "_ -> " <> problem_response_expr(400, "invalid request body"),
+      )
+      |> se.indent(3, "}")
+    None -> sb
+  }
 
   // Close guard validation (returns 422 with error details)
   let sb = case needs_guard_validation {

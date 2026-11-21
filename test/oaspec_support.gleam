@@ -11813,13 +11813,25 @@ pub fn server_form_urlencoded_body_is_parsed_case() {
   |> should.be_true()
   string.contains(content, "let form_body = parse_form_body(body)")
   |> should.be_true()
-  string.contains(content, "body: types.SubmitFormRequest(")
+  // Required fields are looked up into a Result first so a missing or
+  // unparseable field answers 400 instead of an empty string or zero.
+  string.contains(content, "let body_result = ")
+  |> should.be_true()
+  string.contains(content, "Ok(types.SubmitFormRequest(")
   |> should.be_true()
   string.contains(
     content,
-    "name: case dict.get(form_body, \"name\") { Ok([v, ..]) -> v _ -> \"\" }",
+    "case dict.get(form_body, \"name\") { Ok([body_name, ..]) -> ",
   )
   |> should.be_true()
+  string.contains(content, "name: body_name,")
+  |> should.be_true()
+  string.contains(content, "case body_result {")
+  |> should.be_true()
+  string.contains(content, "body: checked_body,")
+  |> should.be_true()
+  string.contains(content, "Ok([v, ..]) -> v _ -> \"\" }")
+  |> should.be_false()
   string.contains(
     content,
     "active: case dict.get(form_body, \"active\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
@@ -11832,7 +11844,7 @@ pub fn server_form_urlencoded_body_is_parsed_case() {
   |> should.be_true()
   string.contains(
     content,
-    "scores: case dict.get(form_body, \"scores\") { Ok(vs) -> list.map(vs, fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } }) _ -> [] }",
+    "case dict.get(form_body, \"scores\") { Ok(vs) -> case list.try_map(vs, fn(item) { int.parse(string.trim(item)) }) { Ok(body_scores) -> ",
   )
   |> should.be_true()
   string.contains(
@@ -11861,11 +11873,15 @@ pub fn server_nested_form_urlencoded_body_is_parsed_case() {
     list.find(files, fn(f) { f.path == "router.gleam" })
   let content = router_file.content
 
-  string.contains(content, "profile: types.SubmitNestedFormRequestProfile(")
+  // A nested object with a required field is checked too: the router
+  // binds it before building the outer record.
+  string.contains(content, "Ok(types.SubmitNestedFormRequestProfile(")
+  |> should.be_true()
+  string.contains(content, "profile: body_profile")
   |> should.be_true()
   string.contains(
     content,
-    "username: case dict.get(form_body, \"profile[username]\") { Ok([v, ..]) -> v _ -> \"\" }",
+    "case dict.get(form_body, \"profile[username]\") { Ok([body_username, ..]) -> ",
   )
   |> should.be_true()
   string.contains(
@@ -11909,12 +11925,14 @@ pub fn server_multipart_body_is_parsed_case() {
     "let multipart_body = parse_multipart_body(body, headers)",
   )
   |> should.be_true()
-  string.contains(content, "body: types.UploadMultipartRequest(")
+  string.contains(content, "Ok(types.UploadMultipartRequest(")
   |> should.be_true()
   string.contains(
     content,
-    "name: case dict.get(multipart_body, \"name\") { Ok([v, ..]) -> v _ -> \"\" }",
+    "case dict.get(multipart_body, \"name\") { Ok([body_name, ..]) -> ",
   )
+  |> should.be_true()
+  string.contains(content, "body: checked_body,")
   |> should.be_true()
   string.contains(
     content,
@@ -11971,14 +11989,18 @@ pub fn server_form_urlencoded_ref_fields_are_parsed_case() {
   |> should.be_true()
   string.contains(
     content,
-    "scores: case dict.get(form_body, \"scores\") { Ok(vs) -> list.map(vs, fn(item) { let trimmed = string.trim(item) case int.parse(trimmed) { Ok(n) -> n _ -> 0 } }) _ -> [] }",
+    "case dict.get(form_body, \"scores\") { Ok(vs) -> case list.try_map(vs, fn(item) { int.parse(string.trim(item)) }) { Ok(body_scores) -> ",
   )
   |> should.be_true()
-  string.contains(content, "profile: types.Profile(")
+  // A nested object with a required field is checked too: the router
+  // binds it before building the outer record.
+  string.contains(content, "Ok(types.Profile(")
+  |> should.be_true()
+  string.contains(content, "profile: body_profile")
   |> should.be_true()
   string.contains(
     content,
-    "username: case dict.get(form_body, \"profile[username]\") { Ok([v, ..]) -> v _ -> \"\" }",
+    "case dict.get(form_body, \"profile[username]\") { Ok([body_username, ..]) -> ",
   )
   |> should.be_true()
   string.contains(
@@ -12034,11 +12056,13 @@ pub fn server_multipart_enum_field_dispatches_to_variant_case() {
     list.find(files, fn(f) { f.path == "router.gleam" })
   let content = router_file.content
 
-  // Required enum field falls back to first variant on miss / unknown.
+  // A required enum field that is missing or unknown answers 400.
   string.contains(
     content,
-    "category: case dict.get(multipart_body, \"category\") { Ok([v, ..]) -> case v { \"logs\" -> types.CategoryLogs \"screenshots\" -> types.CategoryScreenshots \"configs\" -> types.CategoryConfigs _ -> types.CategoryLogs } _ -> types.CategoryLogs }",
+    "case dict.get(multipart_body, \"category\") { Ok([v, ..]) -> case case v { \"logs\" -> Ok(types.CategoryLogs) \"screenshots\" -> Ok(types.CategoryScreenshots) \"configs\" -> Ok(types.CategoryConfigs) _ -> Error(Nil) } { Ok(body_category) -> ",
   )
+  |> should.be_true()
+  string.contains(content, "category: body_category")
   |> should.be_true()
   // Optional enum field falls back to None on miss / unknown.
   string.contains(
@@ -12066,8 +12090,10 @@ pub fn server_form_urlencoded_enum_field_dispatches_to_variant_case() {
 
   string.contains(
     content,
-    "category: case dict.get(form_body, \"category\") { Ok([v, ..]) -> case v { \"logs\" -> types.CategoryLogs \"screenshots\" -> types.CategoryScreenshots \"configs\" -> types.CategoryConfigs _ -> types.CategoryLogs } _ -> types.CategoryLogs }",
+    "case dict.get(form_body, \"category\") { Ok([v, ..]) -> case case v { \"logs\" -> Ok(types.CategoryLogs) \"screenshots\" -> Ok(types.CategoryScreenshots) \"configs\" -> Ok(types.CategoryConfigs) _ -> Error(Nil) } { Ok(body_category) -> ",
   )
+  |> should.be_true()
+  string.contains(content, "category: body_category")
   |> should.be_true()
   string.contains(
     content,

@@ -522,6 +522,44 @@ pub fn main() {
 }
 GLEAM_EOF
 
+mkdir -p "$FORM_DIR/test"
+cat > "$FORM_DIR/test/form_test_test.gleam" << 'GLEAM_EOF'
+// A required form field that is missing or does not parse must answer
+// 400 instead of reaching the handler with "" or 0.
+
+import api/handlers
+import api/router
+import gleam/dict
+import gleeunit
+import gleeunit/should
+
+pub fn main() {
+  gleeunit.main()
+}
+
+fn post(body: String) {
+  let headers =
+    dict.from_list([#("content-type", "application/x-www-form-urlencoded")])
+  router.route(handlers.State, "POST", ["submit"], dict.new(), headers, body)
+}
+
+pub fn all_required_fields_returns_200_test() {
+  post("name=a&scores=1&scores=2").status |> should.equal(200)
+}
+
+pub fn missing_required_string_field_returns_400_test() {
+  post("scores=1").status |> should.equal(400)
+}
+
+pub fn missing_required_array_field_returns_400_test() {
+  post("name=a").status |> should.equal(400)
+}
+
+pub fn unparseable_required_array_item_returns_400_test() {
+  post("name=a&scores=x").status |> should.equal(400)
+}
+GLEAM_EOF
+
 cd "$FORM_DIR"
 gleam deps download
 
@@ -530,6 +568,12 @@ if gleam build --warnings-as-errors 2>&1; then
   info "PASS: Generated form-urlencoded server code compiles (warnings-as-errors)."
 else
   fail "Generated form-urlencoded server code failed to compile."
+fi
+
+if gleam test; then
+  info "PASS: Missing or invalid required form fields return 400."
+else
+  fail "Form-urlencoded required-field integration tests failed."
 fi
 
 rm -rf "$FORM_DIR"
@@ -592,6 +636,62 @@ pub fn main() {
 }
 GLEAM_EOF
 
+mkdir -p "$MULTI_DIR/test"
+cat > "$MULTI_DIR/test/multipart_test_test.gleam" << 'GLEAM_EOF'
+// A required multipart field that is missing must answer 400 instead of
+// reaching the handler with "".
+
+import api/handlers
+import api/router
+import gleam/dict
+import gleeunit
+import gleeunit/should
+
+pub fn main() {
+  gleeunit.main()
+}
+
+fn post(parts: List(#(String, String))) {
+  let body =
+    parts
+    |> list_fold("", fn(acc, part) {
+      acc
+      <> "--XBOUNDARY\r\nContent-Disposition: form-data; name=\""
+      <> part.0
+      <> "\"\r\n\r\n"
+      <> part.1
+      <> "\r\n"
+    })
+  let headers =
+    dict.from_list([
+      #("content-type", "multipart/form-data; boundary=XBOUNDARY"),
+    ])
+  router.route(
+    handlers.State,
+    "POST",
+    ["upload"],
+    dict.new(),
+    headers,
+    body <> "--XBOUNDARY--\r\n",
+  )
+}
+
+fn list_fold(items, acc, f) {
+  case items {
+    [] -> acc
+    [first, ..rest] -> list_fold(rest, f(acc, first), f)
+  }
+}
+
+pub fn required_field_present_returns_200_test() {
+  post([#("name", "a")]).status |> should.equal(200)
+}
+
+pub fn missing_required_field_returns_400_test() {
+  post([#("active", "true")]).status |> should.equal(400)
+}
+GLEAM_EOF
+
 cd "$MULTI_DIR"
 gleam deps download
 
@@ -600,6 +700,12 @@ if gleam build --warnings-as-errors 2>&1; then
   info "PASS: Generated multipart server code compiles (warnings-as-errors)."
 else
   fail "Generated multipart server code failed to compile."
+fi
+
+if gleam test; then
+  info "PASS: Missing required multipart fields return 400."
+else
+  fail "Multipart required-field integration tests failed."
 fi
 
 rm -rf "$MULTI_DIR"

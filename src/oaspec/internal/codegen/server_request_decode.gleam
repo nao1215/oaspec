@@ -173,34 +173,36 @@ pub fn query_required_expr(
 }
 
 /// Opening and closing text of the nested case that looks up one required
-/// deep-object property and binds it to `deep_<field>`. Any missing or
-/// unparseable value falls through to `Error(Nil)`.
-fn deep_object_required_field_case(
+/// field of a deep-object parameter or a form / multipart body in the
+/// `source` dict and binds it to `binding`. A missing or unparseable value
+/// falls through to `Error(Nil)`. `trim` trims array items before parsing.
+fn required_field_case(
   key: String,
+  source: String,
+  trim: Bool,
   binding: String,
   schema_ref: SchemaRef,
+  ctx: Context,
 ) -> #(String, String) {
-  let lookup = "case dict.get(query, \"" <> key <> "\") { "
+  let lookup = "case dict.get(" <> source <> ", \"" <> key <> "\") { "
   let fail = " _ -> Error(Nil) }"
+  let bind = " { Ok(" <> binding <> ") -> "
   let parse_case = fn(parse_expr) {
-    #(
-      lookup
-        <> "Ok([v, ..]) -> case "
-        <> parse_expr
-        <> " { Ok("
-        <> binding
-        <> ") -> ",
-      fail <> fail,
-    )
+    #(lookup <> "Ok([v, ..]) -> case " <> parse_expr <> bind, fail <> fail)
   }
   let parse_list_case = fn(parse_fn) {
+    let item = case trim {
+      True -> "string.trim(item)"
+      False -> "item"
+    }
     #(
       lookup
         <> "Ok(vs) -> case list.try_map(vs, fn(item) { "
         <> parse_fn
-        <> "(string.trim(item)) }) { Ok("
-        <> binding
-        <> ") -> ",
+        <> "("
+        <> item
+        <> ") })"
+        <> bind,
       fail <> fail,
     )
   }
@@ -210,26 +212,46 @@ fn deep_object_required_field_case(
       " }" <> fail,
     )
   }
-  case schema_ref {
-    Inline(schema.ArraySchema(items: Inline(schema.StringSchema(..)), ..)) ->
-      let_case("Ok(vs)", "list.map(vs, fn(item) { string.trim(item) })")
-    Inline(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..)) ->
-      parse_list_case("int.parse")
-    Inline(schema.ArraySchema(items: Inline(schema.NumberSchema(..)), ..)) ->
-      parse_list_case("float.parse")
-    Inline(schema.ArraySchema(items: Inline(schema.BooleanSchema(..)), ..)) ->
-      let_case(
-        "Ok(vs)",
-        "list.map(vs, fn(item) { let v = string.trim(item) "
-          <> bool_parse_expr
-          <> " })",
-      )
-    Inline(schema.IntegerSchema(..)) -> parse_case("int.parse(v)")
-    Inline(schema.NumberSchema(..)) -> parse_case("float.parse(v)")
-    Inline(schema.BooleanSchema(..)) ->
-      let_case("Ok([v, ..])", "{ " <> bool_parse_expr <> " }")
-    _ -> #(lookup <> "Ok([" <> binding <> ", ..]) -> ", fail)
+  case schema_ref_string_enum(schema_ref, ctx) {
+    Some(#(type_name, values)) ->
+      parse_case(enum_match_result_expr("v", type_name, values))
+    None ->
+      case body_field_kind(schema_ref, ctx) {
+        BodyFieldStringArray ->
+          case trim {
+            True ->
+              let_case("Ok(vs)", "list.map(vs, fn(item) { string.trim(item) })")
+            False -> let_case("Ok(vs)", "vs")
+          }
+        BodyFieldIntArray -> parse_list_case("int.parse")
+        BodyFieldFloatArray -> parse_list_case("float.parse")
+        BodyFieldBoolArray ->
+          let_case(
+            "Ok(vs)",
+            "list.map(vs, fn(item) { " <> array_item_bool_parse(trim) <> " })",
+          )
+        BodyFieldInt -> parse_case("int.parse(v)")
+        BodyFieldFloat -> parse_case("float.parse(v)")
+        BodyFieldBool ->
+          let_case("Ok([v, ..])", "{ " <> bool_parse_expr <> " }")
+        BodyFieldString | BodyFieldUnknown -> #(
+          lookup <> "Ok([" <> binding <> ", ..]) -> ",
+          fail,
+        )
+      }
   }
+}
+
+/// Wrap the record constructor `constructor` in the nested `cases` so it
+/// becomes `Ok(constructor)` only when every case matched.
+fn checked_constructor(
+  cases: List(#(String, String)),
+  constructor: String,
+) -> String {
+  let opening = cases |> list.map(fn(c) { c.0 }) |> string.concat
+  let closing =
+    cases |> list.reverse |> list.map(fn(c) { c.1 }) |> string.concat
+  opening <> "Ok(" <> constructor <> ")" <> closing
 }
 
 fn query_required_expr_with_schema(
@@ -692,17 +714,19 @@ fn deep_object_constructor_result_expr(
     deep_object_properties(param, ctx)
     |> list.filter(fn(prop) { prop.required })
     |> list.map(fn(prop) {
-      deep_object_required_field_case(
+      required_field_case(
         key <> "[" <> prop.name <> "]",
+        "query",
+        True,
         deep_object_binding(prop),
         prop.schema_ref,
+        ctx,
       )
     })
-  let opening = cases |> list.map(fn(c) { c.0 }) |> string.concat
-  let closing =
-    cases |> list.reverse |> list.map(fn(c) { c.1 }) |> string.concat
-  let constructor = deep_object_constructor_expr(key, param, op_id, ctx)
-  opening <> "Ok(" <> constructor <> ")" <> closing
+  checked_constructor(
+    cases,
+    deep_object_constructor_expr(key, param, op_id, ctx),
+  )
 }
 
 fn deep_object_binding(prop: DeepObjectProperty) -> String {
@@ -1056,14 +1080,161 @@ fn form_urlencoded_object_constructor_expr(
   ctx: Context,
   nesting_depth: Int,
 ) -> String {
-  let fields =
-    properties
-    |> list.map(fn(prop) {
-      let key = form_urlencoded_key(prefix, prop.name)
-      let value_expr = case
-        nesting_depth < 5 && schema_ref_resolves_to_object(prop.schema_ref, ctx),
-        prop.required
-      {
+  form_urlencoded_object_parts(
+    type_name,
+    prefix,
+    properties,
+    additional_properties,
+    ctx,
+    nesting_depth,
+  ).1
+}
+
+/// Expression of type `Result(T, Nil)` that builds the form object at
+/// `prefix`; `Error(Nil)` when a required field, at any nesting level,
+/// is missing or does not parse.
+fn form_urlencoded_object_result_expr(
+  type_name: String,
+  prefix: String,
+  properties: List(DeepObjectProperty),
+  additional_properties: AdditionalProperties,
+  ctx: Context,
+  nesting_depth: Int,
+) -> String {
+  let #(cases, constructor) =
+    form_urlencoded_object_parts(
+      type_name,
+      prefix,
+      properties,
+      additional_properties,
+      ctx,
+      nesting_depth,
+    )
+  checked_constructor(cases, constructor)
+}
+
+/// True when a field of the form object, at any nesting level, must be
+/// checked: a required primitive field, or a nested object that has one.
+fn form_urlencoded_properties_need_check(
+  properties: List(DeepObjectProperty),
+  ctx: Context,
+  nesting_depth: Int,
+) -> Bool {
+  list.any(properties, fn(prop) {
+    case
+      nesting_depth < 5 && schema_ref_resolves_to_object(prop.schema_ref, ctx)
+    {
+      True ->
+        form_urlencoded_properties_need_check(
+          object_properties_from_schema_ref(prop.schema_ref, ctx),
+          ctx,
+          nesting_depth + 1,
+        )
+      False -> prop.required
+    }
+  })
+}
+
+/// The record constructor of a form object and the nested cases that bind
+/// every field that must be checked (see
+/// `form_urlencoded_properties_need_check`). The other fields are looked
+/// up inline. An object without a field to check has no cases, so its
+/// constructor can be used on its own.
+fn form_urlencoded_object_parts(
+  type_name: String,
+  prefix: String,
+  properties: List(DeepObjectProperty),
+  additional_properties: AdditionalProperties,
+  ctx: Context,
+  nesting_depth: Int,
+) -> #(List(#(String, String)), String) {
+  let entries =
+    list.map(properties, fn(prop) {
+      form_urlencoded_field_parts(prefix, prop, ctx, nesting_depth)
+    })
+  let fields = entries |> list.map(fn(e) { e.1 }) |> string.join(", ")
+  let additional_props_suffix = case additional_properties {
+    // Forbidden and Unspecified both mean the generated record has no
+    // additional_properties field.
+    Forbidden | Unspecified -> ""
+    Typed(_) | Untyped -> ", additional_properties: dict.new()"
+  }
+  #(
+    list.flat_map(entries, fn(e) { e.0 }),
+    type_name <> "(" <> fields <> additional_props_suffix <> ")",
+  )
+}
+
+/// One field of a form object: the cases that bind it when it must be
+/// checked, and its `field: value` text.
+fn form_urlencoded_field_parts(
+  prefix: String,
+  prop: DeepObjectProperty,
+  ctx: Context,
+  nesting_depth: Int,
+) -> #(List(#(String, String)), String) {
+  let key = form_urlencoded_key(prefix, prop.name)
+  let binding = "body_" <> prop.field_name
+  let is_object =
+    nesting_depth < 5 && schema_ref_resolves_to_object(prop.schema_ref, ctx)
+  let nested_props = case is_object {
+    True -> object_properties_from_schema_ref(prop.schema_ref, ctx)
+    False -> []
+  }
+  let nested_checked =
+    is_object
+    && form_urlencoded_properties_need_check(
+      nested_props,
+      ctx,
+      nesting_depth + 1,
+    )
+  case nested_checked, !is_object && prop.required {
+    True, _ -> {
+      let nested =
+        form_urlencoded_object_result_expr(
+          form_urlencoded_schema_ref_type_name(prop.schema_ref),
+          key,
+          nested_props,
+          schema_ref_additional_properties(prop.schema_ref, ctx),
+          ctx,
+          nesting_depth + 1,
+        )
+      let result_expr = case prop.required {
+        True -> nested
+        False ->
+          "case "
+          <> form_object_presence_check(key, prop.schema_ref, ctx)
+          <> " { True -> case "
+          <> nested
+          <> " { Ok(value) -> Ok(Some(value)) _ -> Error(Nil) } False -> Ok(None) }"
+      }
+      #(
+        [
+          #(
+            "case " <> result_expr <> " { Ok(" <> binding <> ") -> ",
+            " _ -> Error(Nil) }",
+          ),
+        ],
+        prop.field_name <> ": " <> binding,
+      )
+    }
+    False, True -> #(
+      [
+        required_field_case(
+          key,
+          "form_body",
+          True,
+          binding,
+          prop.schema_ref,
+          ctx,
+        ),
+      ],
+      prop.field_name <> ": " <> binding,
+    )
+    False, False -> {
+      // Reached only for a nested object without a field to check or an
+      // optional primitive field.
+      let value_expr = case is_object, prop.required {
         True, True ->
           form_urlencoded_object_required_expr(
             key,
@@ -1078,21 +1249,24 @@ fn form_urlencoded_object_constructor_expr(
             ctx,
             nesting_depth + 1,
           )
-        False, True ->
-          form_body_required_expr_with_schema(key, Some(prop.schema_ref), ctx)
-        False, False ->
+        False, _ ->
           form_body_optional_expr_with_schema(key, Some(prop.schema_ref), ctx)
       }
-      prop.field_name <> ": " <> value_expr
-    })
-    |> string.join(", ")
-  let additional_props_suffix = case additional_properties {
-    // Forbidden and Unspecified both mean the generated record has no
-    // additional_properties field.
-    Forbidden | Unspecified -> ""
-    Typed(_) | Untyped -> ", additional_properties: dict.new()"
+      #([], prop.field_name <> ": " <> value_expr)
+    }
   }
-  type_name <> "(" <> fields <> additional_props_suffix <> ")"
+}
+
+fn form_object_presence_check(
+  prefix: String,
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> String {
+  let prop_names =
+    object_properties_from_schema_ref(schema_ref, ctx)
+    |> list.map(fn(prop) { "\"" <> prop.name <> "\"" })
+    |> string.join(", ")
+  "form_object_present(form_body, \"" <> prefix <> "\", [" <> prop_names <> "])"
 }
 
 fn form_urlencoded_object_required_expr(
@@ -1118,15 +1292,9 @@ fn form_urlencoded_object_optional_expr(
   nesting_depth: Int,
 ) -> String {
   let props = object_properties_from_schema_ref(schema_ref, ctx)
-  let prop_names =
-    props
-    |> list.map(fn(prop) { "\"" <> prop.name <> "\"" })
-    |> string.join(", ")
-  "case form_object_present(form_body, \""
-  <> prefix
-  <> "\", ["
-  <> prop_names
-  <> "]) { True -> Some("
+  "case "
+  <> form_object_presence_check(prefix, schema_ref, ctx)
+  <> " { True -> Some("
   <> form_urlencoded_object_constructor_expr(
     form_urlencoded_schema_ref_type_name(schema_ref),
     prefix,
@@ -1211,26 +1379,48 @@ fn multipart_body_constructor_expr(
   op_id: String,
   ctx: Context,
 ) -> String {
-  let fields =
+  multipart_body_parts(rb, op_id, ctx).1
+}
+
+/// The record constructor of a multipart body and the nested cases that
+/// bind every required field. A body without a required field has no
+/// cases, so its constructor can be used on its own.
+fn multipart_body_parts(
+  rb: spec.RequestBody(Resolved),
+  op_id: String,
+  ctx: Context,
+) -> #(List(#(String, String)), String) {
+  let entries =
     multipart_body_properties(rb, ctx)
     |> list.map(fn(prop) {
-      let value_expr = case prop.required {
-        True ->
-          multipart_body_required_expr_with_schema(
+      let binding = "body_" <> prop.field_name
+      case prop.required {
+        True -> #(
+          [
+            required_field_case(
+              prop.name,
+              "multipart_body",
+              False,
+              binding,
+              prop.schema_ref,
+              ctx,
+            ),
+          ],
+          prop.field_name <> ": " <> binding,
+        )
+        False -> #(
+          [],
+          prop.field_name
+            <> ": "
+            <> multipart_body_optional_expr_with_schema(
             prop.name,
             Some(prop.schema_ref),
             ctx,
-          )
-        False ->
-          multipart_body_optional_expr_with_schema(
-            prop.name,
-            Some(prop.schema_ref),
-            ctx,
-          )
+          ),
+        )
       }
-      prop.field_name <> ": " <> value_expr
     })
-    |> string.join(", ")
+  let fields = entries |> list.map(fn(e) { e.1 }) |> string.join(", ")
   let additional_props_suffix = case
     body_additional_properties(rb, "multipart/form-data", ctx)
   {
@@ -1239,11 +1429,77 @@ fn multipart_body_constructor_expr(
     Forbidden | Unspecified -> ""
     Typed(_) | Untyped -> ", additional_properties: dict.new()"
   }
-  multipart_body_type_name(rb, op_id)
-  <> "("
-  <> fields
-  <> additional_props_suffix
-  <> ")"
+  #(
+    list.flat_map(entries, fn(e) { e.0 }),
+    multipart_body_type_name(rb, op_id)
+      <> "("
+      <> fields
+      <> additional_props_suffix
+      <> ")",
+  )
+}
+
+/// For a form-urlencoded or multipart body with a field that must be
+/// checked, an expression of type `Result(T, Nil)` (`Result(Option(T), Nil)`
+/// for an optional body) that builds the body record. The router binds it
+/// and answers 400 on `Error`. `None` for every other body.
+pub fn checked_body_result_expr(
+  rb: spec.RequestBody(Resolved),
+  op_id: String,
+  ctx: Context,
+) -> Option(String) {
+  let result = case dict.to_list(rb.content) {
+    [#(ct_name, _)] ->
+      case content_type.from_string(ct_name) {
+        content_type.FormUrlEncoded -> {
+          let properties = form_urlencoded_body_properties(rb, ctx)
+          case form_urlencoded_properties_need_check(properties, ctx, 0) {
+            True ->
+              Some(form_urlencoded_object_result_expr(
+                form_urlencoded_body_type_name(rb, op_id),
+                "",
+                properties,
+                body_additional_properties(
+                  rb,
+                  "application/x-www-form-urlencoded",
+                  ctx,
+                ),
+                ctx,
+                0,
+              ))
+            False -> None
+          }
+        }
+        content_type.MultipartFormData ->
+          case
+            list.any(multipart_body_properties(rb, ctx), fn(prop) {
+              prop.required
+            })
+          {
+            True -> {
+              let #(cases, constructor) = multipart_body_parts(rb, op_id, ctx)
+              Some(checked_constructor(cases, constructor))
+            }
+            False -> None
+          }
+        content_type.ApplicationJson
+        | content_type.TextPlain
+        | content_type.ApplicationOctetStream
+        | content_type.ApplicationXml
+        | content_type.TextXml
+        | content_type.Wildcard
+        | content_type.UnsupportedContentType(_) -> None
+      }
+    _ -> None
+  }
+  use result <- option.map(result)
+  case rb.required {
+    True -> result
+    False ->
+      "case body { \"\" -> Ok(None) _ -> case "
+      <> result
+      <> " { Ok(value) -> Ok(Some(value)) _ -> Error(Nil) } }"
+  }
 }
 
 pub fn multipart_body_has_optional_fields(
@@ -1404,14 +1660,6 @@ pub fn query_schema_needs_float(
   }
 }
 
-fn form_body_required_expr_with_schema(
-  key: String,
-  schema_ref: Option(SchemaRef),
-  ctx: Context,
-) -> String {
-  body_required_expr(key, "form_body", True, schema_ref, ctx)
-}
-
 fn form_body_optional_expr_with_schema(
   key: String,
   schema_ref: Option(SchemaRef),
@@ -1420,52 +1668,12 @@ fn form_body_optional_expr_with_schema(
   body_optional_expr(key, "form_body", True, "_", schema_ref, ctx)
 }
 
-fn multipart_body_required_expr_with_schema(
-  key: String,
-  schema_ref: Option(SchemaRef),
-  ctx: Context,
-) -> String {
-  body_required_expr(key, "multipart_body", False, schema_ref, ctx)
-}
-
 fn multipart_body_optional_expr_with_schema(
   key: String,
   schema_ref: Option(SchemaRef),
   ctx: Context,
 ) -> String {
   body_optional_expr(key, "multipart_body", False, "_", schema_ref, ctx)
-}
-
-/// Inline string-enum dispatch for a required form/multipart body
-/// field. When the dict is missing the key, or the value
-/// is outside the spec's enum set, falls back to the first variant —
-/// mirroring the type-zero fallback used for primitive required body
-/// fields. The handler is responsible for any stricter
-/// validation.
-fn body_required_enum_expr(
-  lookup: String,
-  type_name: String,
-  values: List(String),
-) -> String {
-  let default = case values {
-    [first, ..] -> "types." <> type_name <> naming.to_pascal_case(first)
-    [] -> ""
-  }
-  let arms =
-    values
-    |> list.map(fn(v) {
-      "\"" <> v <> "\" -> types." <> type_name <> naming.to_pascal_case(v)
-    })
-    |> string.join(" ")
-  "case "
-  <> lookup
-  <> " { Ok([v, ..]) -> case v { "
-  <> arms
-  <> " _ -> "
-  <> default
-  <> " } _ -> "
-  <> default
-  <> " }"
 }
 
 /// Inline string-enum dispatch for an optional form/multipart body
@@ -1487,93 +1695,6 @@ fn body_optional_enum_expr(
   <> " -> None }"
 }
 
-/// Generate a required body field expression.
-/// `source` is the dict name (e.g., "form_body", "multipart_body").
-/// `trim_items` controls whether array items are trimmed (form_body) or
-/// used raw (multipart).
-///
-/// The emitted snippet falls back to a per-type default when the body
-/// dict is missing the key or the inner parse fails: the type-zero
-/// (empty string / 0 / 0.0 / False / empty list), so the handler can
-/// still answer rather than the process crashing. Validation of those defaults is
-/// the application's job.
-fn body_required_expr(
-  key: String,
-  source: String,
-  trim_items: Bool,
-  schema_ref: Option(SchemaRef),
-  ctx: Context,
-) -> String {
-  let lookup = "dict.get(" <> source <> ", \"" <> key <> "\")"
-  let base = "case " <> lookup <> " { Ok([v, ..]) -> v _ -> \"\" }"
-  // A `$ref`-typed string-enum field must dispatch to the
-  // generated sum-type variant. Without this branch the codegen falls
-  // through to `base` (raw String), which fails `gleam check` because
-  // the field's compile-time type is `types.<EnumName>`.
-  case
-    schema_ref
-    |> option.then(fn(ref) { schema_ref_string_enum(ref, ctx) })
-  {
-    Some(#(type_name, values)) ->
-      body_required_enum_expr(lookup, type_name, values)
-    None -> body_required_expr_kind(lookup, base, schema_ref, trim_items, ctx)
-  }
-}
-
-/// Existing per-`BodyFieldKind` dispatch for `body_required_expr`,
-/// extracted so the enum check above can short-circuit cleanly.
-fn body_required_expr_kind(
-  lookup: String,
-  base: String,
-  schema_ref: Option(SchemaRef),
-  trim_items: Bool,
-  ctx: Context,
-) -> String {
-  case schema_ref_body_field_kind(schema_ref, ctx) {
-    BodyFieldStringArray ->
-      case trim_items {
-        True ->
-          "case "
-          <> lookup
-          <> " { Ok(vs) -> list.map(vs, fn(item) { string.trim(item) }) _ -> [] }"
-        False -> "case " <> lookup <> " { Ok(vs) -> vs _ -> [] }"
-      }
-    BodyFieldIntArray ->
-      "case "
-      <> lookup
-      <> " { Ok(vs) -> list.map(vs, fn(item) { "
-      <> array_item_int_parse(trim_items)
-      <> " }) _ -> [] }"
-    BodyFieldFloatArray ->
-      "case "
-      <> lookup
-      <> " { Ok(vs) -> list.map(vs, fn(item) { "
-      <> array_item_float_parse(trim_items)
-      <> " }) _ -> [] }"
-    BodyFieldBoolArray ->
-      "case "
-      <> lookup
-      <> " { Ok(vs) -> list.map(vs, fn(item) { "
-      <> array_item_bool_parse(trim_items)
-      <> " }) _ -> [] }"
-    BodyFieldInt ->
-      "case "
-      <> lookup
-      <> " { Ok([v, ..]) -> case int.parse(v) { Ok(n) -> n _ -> 0 } _ -> 0 }"
-    BodyFieldFloat ->
-      "case "
-      <> lookup
-      <> " { Ok([v, ..]) -> case float.parse(v) { Ok(n) -> n _ -> 0.0 } _ -> 0.0 }"
-    BodyFieldBool ->
-      "case "
-      <> lookup
-      <> " { Ok([v, ..]) -> "
-      <> bool_parse_expr
-      <> " _ -> False }"
-    _ -> base
-  }
-}
-
 /// Generate an optional body field expression.
 /// `source` is the dict name, `miss` is the miss pattern ("_" or "Error(_)").
 fn body_optional_expr(
@@ -1585,7 +1706,7 @@ fn body_optional_expr(
   ctx: Context,
 ) -> String {
   let lookup = "dict.get(" <> source <> ", \"" <> key <> "\")"
-  // As in `body_required_expr`, a `$ref`-typed string-enum
+  // A `$ref`-typed string-enum
   // field needs string→variant dispatch. Without this branch the field
   // ends up as `Some(v)` where `v: String` clashes with the
   // `Option(types.<EnumName>)` slot.
