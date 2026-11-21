@@ -1393,27 +1393,31 @@ fn validate_schema_recursive(
         validate_schema_ref_recursive(path <> ".allOf", s_ref, ctx)
       })
 
-    StringSchema(pattern: Some(pattern), ..) ->
+    // Guards check the pattern only of a string that is not an enum.
+    StringSchema(pattern: Some(pattern), enum_values: [], ..) ->
       validate_pattern(path <> ".pattern", pattern)
 
     _ -> []
   }
 }
 
-/// The generated guard compiles `pattern` with gleam/regexp, so a pattern
-/// that does not compile is reported here instead of failing every request.
+/// The generated guard compiles `pattern` with gleam/regexp. OpenAPI
+/// patterns are ECMA-262, which the BEAM regex engine does not fully
+/// accept (it rejects `\u` escapes), so a pattern that does not compile
+/// here is a warning: the guard reports `invalidPattern` at run time.
 fn validate_pattern(path: String, pattern: String) -> List(Diagnostic) {
   case regexp.from_string(pattern) {
     Ok(_) -> []
     Error(regexp.CompileError(error:, ..)) -> [
-      diagnostic.validation_error_both(
+      diagnostic.validation_warning_both(
         path: path,
         detail: "pattern '"
           <> pattern
-          <> "' is not a valid regular expression: "
-          <> error,
+          <> "' does not compile with gleam/regexp: "
+          <> error
+          <> ". The generated validator rejects every value with invalidPattern on this target.",
         hint: Some(
-          "Fix the regular expression; the generated validator compiles it with gleam/regexp.",
+          "Fix the regular expression, or rewrite ECMA-only syntax such as \\u escapes in a form gleam/regexp accepts.",
         ),
       ),
     ]

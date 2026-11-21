@@ -21,7 +21,7 @@ within `Changed` / `Fixed` and stay as-is.
 - The generated server answers 400 when a required deepObject property is missing or does not parse, instead of calling the handler with `""`, `0`, `0.0`, `False` or `[]`.
 - The generated server answers 400 when a required `application/x-www-form-urlencoded` or `multipart/form-data` field, including one inside a nested form object, is missing or does not parse, instead of calling the handler with an empty value or the first enum variant.
 - `generate --check` formats the generated code in a directory under `TMPDIR`, `TEMP` or `TMP` instead of always `/tmp`, and stops with `Error: could not format the generated code for comparison: …` when a scratch file cannot be written, read or deleted or `gleam format` fails, instead of comparing unformatted code.
-- A string `pattern` that is not a valid regular expression is reported by `oaspec validate` and `oaspec generate` at the schema's `pattern` path, instead of making every request fail with `invalidPattern` at run time.
+- `oaspec validate` and `oaspec generate` warn about a string `pattern` that gleam/regexp cannot compile, at the schema's `pattern` path, since the generated validator then rejects every value with `invalidPattern` at run time. ECMA-only syntax such as `\u` escapes triggers the warning but does not stop generation.
 - Generated routers no longer declare an external on the private `gleam_stdlib` `identity` function for untyped deepObject `additionalProperties`; the values are built with `dynamic.list` and `dynamic.string`.
 
 ## [0.73.0] - 2026-11-19
