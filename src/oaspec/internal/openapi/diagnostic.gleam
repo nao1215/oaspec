@@ -39,10 +39,9 @@ pub fn yaml_error(detail detail: String, loc loc: SourceLoc) -> Diagnostic {
   )
 }
 
-/// Parser refused the input because it exceeded a configured DoS
-/// limit (see `parser.ParseLimits`). The message names the limit, the
-/// configured cap, and the actual value so callers can either bump
-/// the limit (when they trust the source) or reject the input.
+/// Builds the diagnostic for input that exceeds one of the parser's
+/// built-in size limits. The message names the limit, the cap and the
+/// actual value.
 pub fn parse_limit_exceeded(
   limit limit: String,
   configured configured: Int,
@@ -63,9 +62,7 @@ pub fn parse_limit_exceeded(
       <> int.to_string(actual)
       <> ". The input was refused before parsing to bound denial-of-service exposure.",
     hint: option.Some(
-      "If the source is trusted, raise '"
-      <> limit
-      <> "' via parser.ParseLimits and call parse_string_with_limits with the larger cap. Untrusted sources should keep the default cap.",
+      "Reduce the spec below the cap, for example by removing unused paths or components.",
     ),
   )
 }
