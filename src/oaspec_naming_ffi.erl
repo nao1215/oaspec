@@ -1,4 +1,4 @@
-%% Issue #405: persistent_term-backed memoization for the three
+%% Persistent_term-backed memoization for the three
 %% pre-compiled regexes used by `oaspec/internal/util/naming`. Without
 %% this, every `to_pascal_case/1` and `to_snake_case/1` call compiles
 %% the same three regexes from scratch — on a 10k-schema spec that's

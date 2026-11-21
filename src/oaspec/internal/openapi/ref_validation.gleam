@@ -8,12 +8,13 @@
 //// passes `resolve.resolve` unchanged. This module fills that gap so the
 //// new `parser.parse_string_resolved` entry point can surface the same
 //// diagnostics that codegen-side validation would, without dragging in
-//// a `Config` / `Context`. (#616)
+//// a `Config` / `Context`.
 
 import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/set.{type Set}
+import oaspec/internal/openapi/operations
 import oaspec/openapi/diagnostic.{type Diagnostic, NoSourceLoc}
 import oaspec/openapi/schema.{
   type AdditionalProperties, type SchemaObject, type SchemaRef, AllOfSchema,
@@ -24,7 +25,7 @@ import oaspec/openapi/spec.{
   type Header, type MediaType, type OpenApiSpec, type Operation, type Parameter,
   type PathItem, type RefOr, type RequestBody, type Resolved, type Response,
   ParameterContent, ParameterSchema, Ref, Value,
-}
+} as openapi_spec
 
 /// Walk every `SchemaRef` reachable from `spec` and verify each
 /// `Reference` resolves to a concrete schema in `components.schemas`
@@ -106,28 +107,14 @@ fn validate_path_item(
   context: String,
   spec: OpenApiSpec(Resolved),
 ) -> List(Diagnostic) {
-  let operations =
-    [
-      #("get", pi.get),
-      #("post", pi.post),
-      #("put", pi.put),
-      #("delete", pi.delete),
-      #("patch", pi.patch),
-      #("head", pi.head),
-      #("options", pi.options),
-      #("trace", pi.trace),
-    ]
-    |> list.filter_map(fn(pair) {
-      let #(method, op) = pair
-      case op {
-        Some(o) -> Ok(#(method, o))
-        None -> Error(Nil)
-      }
-    })
   let op_diags =
-    list.flat_map(operations, fn(pair) {
+    list.flat_map(operations.path_item_operations(pi), fn(pair) {
       let #(method, op) = pair
-      validate_operation(op, context <> "." <> method, spec)
+      validate_operation(
+        op,
+        context <> "." <> openapi_spec.method_to_lower(method),
+        spec,
+      )
     })
   let path_param_diags =
     validate_parameters(pi.parameters, context <> ".parameters", spec)
@@ -277,7 +264,7 @@ fn validate_media_type_map(
 /// catches `A.properties.next.$ref: A`–style loops that the pure
 /// `resolver.resolve_schema_ref` chain walker misses (it only follows
 /// `Reference -> Reference` aliases, not references that travel through
-/// inline composite schemas). (#616)
+/// inline composite schemas).
 fn validate_schema_ref(
   path: String,
   schema_ref: SchemaRef,

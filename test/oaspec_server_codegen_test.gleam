@@ -4,8 +4,10 @@ import gleeunit/should
 import oaspec/config
 import oaspec/generate
 import oaspec/internal/codegen/context
+import oaspec/internal/codegen/server as server_gen
 import oaspec/openapi/parser
 import oaspec_support as support
+import test_helpers
 
 pub fn server_param_and_body_codegen_test() {
   let _ = support.server_bool_path_param_case_insensitive_case()
@@ -202,5 +204,27 @@ pub fn router_skips_encode_import_for_primitive_json_responses_test() {
   generate_server_files("test/fixtures/petstore.yaml", config.SingleFile)
   |> file_content("router.gleam")
   |> string.contains("import api/encode")
+  |> should.be_true()
+}
+
+/// Path and query parameters named like the router's own variables
+/// (`filter_deep`, `checked_body`, `body_result`) must not be shadowed.
+pub fn server_router_variables_do_not_collide_with_parameters_test() {
+  let ctx =
+    test_helpers.make_ctx(
+      "test/fixtures/server_router_variable_collisions.yaml",
+    )
+  let assert Ok(router_file) =
+    list.find(server_gen.generate(ctx), fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  string.contains(content, "let filter__deep_result = ")
+  |> should.be_true()
+  string.contains(content, "filter: filter__deep,")
+  |> should.be_true()
+  string.contains(content, "filter_deep: filter_deep,")
+  |> should.be_true()
+  string.contains(content, "let body__result = ")
+  |> should.be_true()
+  string.contains(content, "body: checked__body,")
   |> should.be_true()
 }

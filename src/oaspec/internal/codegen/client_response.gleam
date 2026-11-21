@@ -2,7 +2,6 @@ import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
-import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/util/content_type
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
@@ -14,7 +13,7 @@ import oaspec/openapi/schema.{
 }
 import oaspec/openapi/spec.{type Resolved}
 
-/// Issue #483: the `default` response branch must capture the actual
+/// The `default` response branch must capture the actual
 /// runtime status code so the decoded `XxxResponseDefault(...)`
 /// variant can carry it through to the caller. For all non-default
 /// branches the case pattern is the matched status int (or guard
@@ -27,7 +26,7 @@ fn status_branch_pattern(status_code: http.HttpStatusCode) -> String {
   }
 }
 
-/// Issue #483: prepend the runtime status binding to a variant
+/// Prepend the runtime status binding to a variant
 /// constructor's argument list when the status code is `default`. For
 /// every other status the variant arity is unchanged.
 fn prepend_default_status(
@@ -44,7 +43,7 @@ fn prepend_default_status(
   }
 }
 
-/// Issue #387: assembled response-headers record. Tracks both the
+/// Assembled response-headers record. Tracks both the
 /// pre-statements (let bindings or `use` chains that extract each
 /// header field from `resp.headers`) and the final constructor
 /// expression that references those bound names.
@@ -73,7 +72,6 @@ pub fn generate_single_content_response(
   media_type_name: String,
   media_type: spec.MediaType,
   op_id: String,
-  ctx: Context,
   headers: Option(HeadersRecord),
 ) -> se.StringBuilder {
   case content_type.from_string(media_type_name) {
@@ -101,7 +99,7 @@ pub fn generate_single_content_response(
       case media_type.schema {
         Some(schema_ref) -> {
           let decode_expr =
-            get_response_decode_expr(schema_ref, op_id, status_code, ctx)
+            get_response_decode_expr(schema_ref, op_id, status_code)
           let sb =
             sb
             |> se.indent(2, status_branch_pattern(status_code) <> " -> {")
@@ -163,7 +161,7 @@ fn body_branch(
   |> se.indent(2, "}")
 }
 
-/// Issue #387: shared empty-body branch for status entries that have
+/// Shared empty-body branch for status entries that have
 /// no schema (e.g. 204 No Content) but may still carry a typed
 /// headers record. Emits a single-line `<status> -> Ok(...)` when the
 /// headers record has no pre-statements, or a multi-line block when
@@ -229,7 +227,7 @@ fn emit_pre_statements(
   }
 }
 
-/// Issue #387: when a response declares headers, the variant
+/// When a response declares headers, the variant
 /// constructor takes the body value followed by the typed headers
 /// record. This helper appends the headers expression to a body
 /// argument so callers do not need to know whether headers exist.
@@ -264,9 +262,6 @@ pub fn generate_multi_content_response(
   sb: se.StringBuilder,
   status_code: http.HttpStatusCode,
   variant_name: String,
-  _content_entries: List(#(String, spec.MediaType)),
-  _op_id: String,
-  _ctx: Context,
   headers: Option(HeadersRecord),
 ) -> se.StringBuilder {
   body_branch(sb, status_code, variant_name, "text", headers, fn(sb) {
@@ -274,13 +269,13 @@ pub fn generate_multi_content_response(
   })
 }
 
-/// Issue #387: build the typed-headers record for a response, or
+/// Build the typed-headers record for a response, or
 /// `None` if the response declares no headers. Returns a
 /// `HeadersRecord` carrying both the per-field extraction
 /// pre-statements and the final constructor expression that
 /// references the bound names.
 ///
-/// Header type plumbing (no longer scoped down to "String only"):
+/// Header type plumbing:
 ///   - Optional + String → `let <fn> = list.key_find(...) |> result.map(Some) |> result.unwrap(None)`
 ///   - Required + String → `use <fn> <- result.try(list.key_find(...) |> result.map_error(...))`
 ///   - Optional + Int / Float → same as String, plus `result.try(int.parse)` / `result.try(float.parse)`
@@ -334,7 +329,7 @@ pub fn build_headers_record(
 ///
 /// Composite shapes ($ref, object, array, allOf, oneOf, anyOf) are
 /// caught at validate time by `validate.validate_response_headers`
-/// (issue #552) and surface as a `Diagnostic` before codegen runs.
+/// and surface as a `Diagnostic` before codegen runs.
 /// Reaching them here therefore means the validator was bypassed or
 /// regressed — the panic is defensive and should never fire on a
 /// spec that went through the standard `parse_file → validate →
@@ -485,7 +480,6 @@ pub fn get_response_decode_expr(
   schema_ref: schema.SchemaRef,
   op_id: String,
   status_code: http.HttpStatusCode,
-  _ctx: Context,
 ) -> String {
   case schema_ref {
     Reference(name:, ..) -> {
@@ -494,9 +488,9 @@ pub fn get_response_decode_expr(
     Inline(schema.ArraySchema(items:, ..)) ->
       case items {
         Reference(name:, ..) -> {
-          // Issue #493 / CodeRabbit follow-up: parse with
-          // `decode.list(<schema>_decoder())` directly instead of
-          // calling the synthetic `decode_<schema>_list` wrapper.
+          // Parse with `decode.list(<schema>_decoder())` directly
+          // instead of calling the synthetic `decode_<schema>_list`
+          // wrapper.
           // The wrapper is only emitted for object schemas, so an
           // array of `$ref` to an enum / primitive / oneOf / anyOf
           // would otherwise reference a non-existent function.

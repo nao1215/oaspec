@@ -17,9 +17,9 @@ pub fn missing_field_with_hint(
   detail detail: String,
   path path: String,
   field field: String,
-  loc loc: SourceLoc,
+  location location: SourceLoc,
 ) -> Diagnostic {
-  let base = diagnostic.missing_field(path:, field:, loc:)
+  let base = diagnostic.missing_field(path:, field:, loc: location)
   Diagnostic(
     ..base,
     hint: Some("Check your OpenAPI spec structure. (" <> detail <> ")"),

@@ -12,9 +12,11 @@ import oaspec/config
 import oaspec/generate
 import oaspec/internal/codegen/context
 import oaspec/internal/formatter
+import oaspec/internal/openapi/location_index.{type LocationIndex}
 import oaspec/internal/progress
 import oaspec/openapi/diagnostic
 import oaspec/openapi/parser
+import oaspec/openapi/spec.{type OpenApiSpec, type Unresolved}
 import simplifile
 
 @external(erlang, "oaspec_ffi", "is_stdout_tty")
@@ -228,7 +230,7 @@ package: api
 
 # Output settings (optional). Defaults land inside ./src so a
 # freshly-generated project is buildable by `gleam build` without
-# any further config (#568):
+# any further config:
 #   server -> ./src/<package>
 #   client -> ./src/<package>_client (Both mode) or ./src/<package> (Client mode)
 # Override individual targets via output.server / output.client, or
@@ -240,7 +242,7 @@ package: api
 #   server: ./src/api             # Override server output path
 #   client: ./src/api_client      # Override client output path
 
-# Operation filter (optional, Issue #387). When set, codegen only
+# Operation filter (optional). When set, codegen only
 # emits operations whose tag list intersects `tags` OR whose path
 # matches one of `paths` (the two lists are unioned, not
 # intersected). Path patterns ending in `/**` match any path that
@@ -253,10 +255,11 @@ package: api
 #     - \"/users/{username}\"
 #     - \"/repos/**\"
 
-# Multi-target codegen (optional, Issue #387). When `targets:` is
+# Multi-target codegen (optional). When `targets:` is
 # set, the same input spec is generated once per entry, each with
 # its own `package`, `output`, and `include`. The top-level
-# `input`, `mode`, and `validate` are shared across every target.
+# `input`, `mode`, `validate`, and `handlers` are shared across every
+# target.
 # Targets whose output paths overlap are rejected at config-load
 # time. `--output` cannot be used with multi-target configs.
 # targets:
@@ -308,15 +311,14 @@ fn run_generate(
   io.println("oaspec v" <> context.version)
   io.println("Loading config from: " <> config_path)
 
-  // Issue #387: a config may declare multiple `targets:`. Each target
-  // produces its own package + output tree from the same input spec.
-  // The single-target legacy shape returns a 1-element list here.
-  use cfgs <- require(
+  // A config may declare multiple `targets:`. Each target produces its
+  // own package + output tree from the same input spec.
+  use #(first, rest) <- require(
     load_configs(config_path, mode_opt, output_opt),
     load_config_error_to_string,
   )
-  let cfgs =
-    list.map(cfgs, fn(c) {
+  let targets =
+    list.map([first, ..rest], fn(c) {
       case validate_mode {
         True -> config.with_validate(c, True)
         False -> c
@@ -327,78 +329,89 @@ fn run_generate(
   // directory — generated files would clobber each other and there
   // is no sensible default order.
   use _ <- require(
-    validate_no_target_overlap(cfgs),
+    validate_no_target_overlap(targets),
     load_config_error_to_string,
   )
 
-  print_resolved_paths_for_all(config_path, cfgs)
+  print_resolved_paths_for_all(config_path, targets)
 
-  // The input spec is shared across every target, so parse it once.
-  // `load_configs` rejects empty target lists at config-load time,
-  // so `cfgs` is guaranteed non-empty by the time we get here.
-  // nolint: assert_ok_pattern -- `load_configs` rejects empty target lists; reaching the empty branch would be an internal invariant violation.
-  let assert [first_cfg, ..] = cfgs
-  let shared_input = config.input(first_cfg)
-  io.println("Parsing OpenAPI spec: " <> shared_input)
-  let reporter = progress.stdout_with_elapsed()
-  use parsed <- require(
-    parser.parse_file_with_progress_and_locations(shared_input, reporter),
-    fn(e) { "Error: " <> parser.parse_error_to_string(e) },
+  // `generate_with_progress` re-runs every per-target stage (filter /
+  // hoist / dedup / validate / codegen) so each target sees only the
+  // operations its filter keeps.
+  use cfg, input <- for_each_target(targets)
+  use summary <- require(
+    generate.generate_with_progress_and_locations(
+      input.spec,
+      input.locations,
+      cfg,
+      input.reporter,
+    ),
+    format_generate_error_for(input.path),
   )
-  let #(spec, locations) = parsed
-
-  // Run codegen once per target. `generate_with_progress` re-runs
-  // every per-target stage (filter / hoist / dedup / validate /
-  // codegen) so each target sees only the operations its filter
-  // keeps. `parse` and `normalize` would be re-run too if we passed
-  // the same `OpenApiSpec(Unresolved)` value through the pipeline,
-  // but those stages are pure and cheap relative to codegen.
-  let multi_target = case cfgs {
-    [_, _, ..] -> True
-    _ -> False
+  io.println("Spec loaded: " <> summary.spec_title)
+  print_warnings_for(input.path, summary.warnings)
+  // `--check` already reports orphaned stubs as errors.
+  let layout_warnings = case check_mode {
+    True -> []
+    False -> handler_layout_warnings(summary.files, cfg)
   }
-  list.each(cfgs, fn(cfg) {
-    case multi_target {
-      True -> {
-        io.println("")
-        io.println("[target: " <> config.package(cfg) <> "]")
-      }
-      False -> Nil
+  list.each(layout_warnings, fn(w) { io.println_error("Warning: " <> w) })
+  case fail_on_warnings && { summary.warnings != [] || layout_warnings != [] } {
+    True -> {
+      io.println_error("")
+      io.println_error("Error: warnings present and --fail-on-warnings is set.")
+      halt(1)
     }
-    use summary <- require(
-      generate.generate_with_progress_and_locations(
-        spec,
-        locations,
-        cfg,
-        reporter,
-      ),
-      format_generate_error_for(shared_input),
-    )
-    io.println("Spec loaded: " <> summary.spec_title)
-    print_warnings_for(shared_input, summary.warnings)
-    // `--check` already reports orphaned stubs as errors.
-    let layout_warnings = case check_mode {
-      True -> []
-      False -> handler_layout_warnings(summary.files, cfg)
+    False -> Nil
+  }
+  case check_mode {
+    True -> run_check(summary.files, cfg)
+    False -> write_files(summary.files, cfg)
+  }
+}
+
+/// The input spec every target shares, parsed once.
+type ParsedInput {
+  ParsedInput(
+    path: String,
+    spec: OpenApiSpec(Unresolved),
+    locations: LocationIndex,
+    reporter: progress.Reporter,
+  )
+}
+
+/// Parse the input spec the targets share once, then call `run` for every
+/// target, printing a `[target: <package>]` header first when there is more
+/// than one target. The targets list is never empty: `load_configs` returns
+/// the first target separately.
+fn for_each_target(
+  targets: List(config.Config),
+  run: fn(config.Config, ParsedInput) -> Nil,
+) -> Nil {
+  case targets {
+    [] -> Nil
+    [first, ..rest] -> {
+      let path = config.input(first)
+      io.println("Parsing OpenAPI spec: " <> path)
+      let reporter = progress.stdout_with_elapsed()
+      use parsed <- require(
+        parser.parse_file_with_progress_and_locations(path, reporter),
+        fn(e) { "Error: " <> parser.parse_error_to_string(e) },
+      )
+      let #(spec, locations) = parsed
+      let input = ParsedInput(path:, spec:, locations:, reporter:)
+      list.each(targets, fn(cfg) {
+        case rest {
+          [] -> Nil
+          [_, ..] -> {
+            io.println("")
+            io.println("[target: " <> config.package(cfg) <> "]")
+          }
+        }
+        run(cfg, input)
+      })
     }
-    list.each(layout_warnings, fn(w) { io.println_error("Warning: " <> w) })
-    case
-      fail_on_warnings && { summary.warnings != [] || layout_warnings != [] }
-    {
-      True -> {
-        io.println_error("")
-        io.println_error(
-          "Error: warnings present and --fail-on-warnings is set.",
-        )
-        halt(1)
-      }
-      False -> Nil
-    }
-    case check_mode {
-      True -> run_check(summary.files, cfg)
-      False -> write_files(summary.files, cfg)
-    }
-  })
+  }
 }
 
 fn print_resolved_paths_for_all(
@@ -466,26 +479,26 @@ fn print_target_outputs(
   }
 }
 
-/// Issue #387: every active output path across every target must be
+/// Every active output path across every target must be
 /// unique. Two targets writing to the same directory would clobber
 /// each other on disk and surface random "wrong package" errors at
 /// the Gleam compiler level depending on which generate ran second.
 fn validate_no_target_overlap(
   cfgs: List(config.Config),
-) -> Result(Nil, LoadConfigError) {
+) -> Result(Nil, config.ConfigError) {
   let paths =
     cfgs
     |> list.flat_map(fn(cfg) { active_output_paths(cfg) })
-  find_duplicate_path(paths, [])
-  |> result.map_error(fn(err) {
-    let DuplicateOutputPath(path) = err
-    OutputValidationError(error: config.InvalidValue(
-      field: "targets",
-      detail: "two targets resolve to the same output directory '"
-        <> path
-        <> "' — give them distinct package or output paths so generated files do not clobber each other",
-    ))
-  })
+  case first_duplicate(paths, []) {
+    None -> Ok(Nil)
+    Some(path) ->
+      Error(config.InvalidValue(
+        field: "targets",
+        detail: "two targets resolve to the same output directory '"
+          <> path
+          <> "' — give them distinct package or output paths so generated files do not clobber each other",
+      ))
+  }
 }
 
 fn active_output_paths(cfg: config.Config) -> List(String) {
@@ -501,7 +514,7 @@ fn active_output_paths(cfg: config.Config) -> List(String) {
     // so a shared output directory does not clobber anything. Dedupe
     // intra-config to allow this case while still letting
     // `validate_no_target_overlap` reject cross-config (multi-target)
-    // collisions, which are the real footgun #387 was tracking.
+    // collisions.
     config.Both -> {
       let server_path = config.output_server(cfg)
       let client_path = config.output_client(cfg)
@@ -513,24 +526,17 @@ fn active_output_paths(cfg: config.Config) -> List(String) {
   }
 }
 
-/// Internal error from `find_duplicate_path/2`. Wrapping the offending
-/// path in a named record (rather than a bare String) keeps the
-/// linter happy and makes the failure mode explicit for any future
-/// caller that wants the path on its own.
-type DuplicateOutputPathError {
-  DuplicateOutputPath(path: String)
-}
-
-fn find_duplicate_path(
+/// The first path that appears twice, if any.
+fn first_duplicate(
   remaining: List(String),
   seen: List(String),
-) -> Result(Nil, DuplicateOutputPathError) {
+) -> Option(String) {
   case remaining {
-    [] -> Ok(Nil)
+    [] -> None
     [path, ..rest] ->
       case list.contains(seen, path) {
-        True -> Error(DuplicateOutputPath(path: path))
-        False -> find_duplicate_path(rest, [path, ..seen])
+        True -> Some(path)
+        False -> first_duplicate(rest, [path, ..seen])
       }
   }
 }
@@ -550,7 +556,6 @@ fn print_resolved_paths(config_path: String, cfg: config.Config) -> Nil {
   }
 }
 
-@internal
 pub fn resolved_path_entries(
   config_path: String,
   cfg: config.Config,
@@ -575,7 +580,6 @@ pub fn resolved_path_entries(
   list.append(base_entries, output_entries)
 }
 
-@internal
 pub fn resolve_path_from_cwd(path: String, cwd: String) -> String {
   let candidate = case path_is_absolute(path) {
     True -> path
@@ -736,7 +740,7 @@ fn find_orphans(dirs: List(String), expected: List(String)) -> List(String) {
   })
 }
 
-/// Issue #284: when the generated code imports a Gleam stdlib module
+/// When the generated code imports a Gleam stdlib module
 /// whose package is not a direct dep of the consumer's project (today,
 /// only `gleam/regexp` for pattern validation), `gleam build` warns
 /// about the transitive import and a future Gleam release turns this
@@ -764,7 +768,7 @@ fn print_dep_hints(files: List(context.GeneratedFile)) -> Nil {
 /// Check that generated code matches existing files on disk.
 /// Exits 0 if all files match, exits 1 if any differ, missing, or orphaned.
 ///
-/// Issue #247: user-owned `handlers.gleam` (`SkipIfExists`) is dropped from
+/// User-owned `handlers.gleam` (`SkipIfExists`) is dropped from
 /// the byte-comparison list (`resolve_paths` does that filtering) but kept in
 /// the expected-paths list so orphan detection still recognises it as a known
 /// generator output instead of flagging it as an orphan. A user-owned file
@@ -776,7 +780,10 @@ fn run_check(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
   let expected_paths = writer.expected_paths(files, cfg)
 
   // Format generated content via temp files before comparison
-  let resolved = format_resolved_content(resolved)
+  use resolved <- require(format_resolved_content(resolved), fn(e) {
+    "Error: could not format the generated code for comparison: "
+    <> check_format_error_to_string(e)
+  })
 
   // Check for missing or differing files
   let diffs =
@@ -824,55 +831,86 @@ fn run_check(files: List(context.GeneratedFile), cfg: config.Config) -> Nil {
   }
 }
 
-/// Format resolved content by writing to a temp directory, running gleam format,
-/// and reading back the formatted content.
+/// Format resolved content by writing it to a scratch directory under the
+/// OS temp directory, running gleam format there, and reading it back.
+/// A failure to create, write, format or read is returned so the check
+/// never compares unformatted code; deleting the directory is best-effort.
 fn format_resolved_content(
   resolved: List(#(String, String)),
-) -> List(#(String, String)) {
-  let temp_dir = "/tmp/oaspec_check_" <> unique_id()
-  case simplifile.create_directory_all(temp_dir) {
-    // nolint: thrown_away_error -- if temp dir cannot be created we fall back to unformatted content
-    Error(_) -> resolved
-    Ok(Nil) -> {
-      // Write each file to the temp directory with unique indexed names
-      let temp_entries =
-        list.index_map(resolved, fn(entry, idx) {
-          let #(original_path, content) = entry
-          let temp_path = temp_dir <> "/" <> int.to_string(idx) <> ".gleam"
-          // Best-effort temp write; formatter step falls back if anything failed
-          let _ignored_write = simplifile.write(temp_path, content)
-          #(original_path, temp_path)
-        })
+) -> Result(List(#(String, String)), CheckFormatError) {
+  let temp_dir = filepath.join(temp_dir(), "oaspec_check_" <> unique_id())
+  use _ <- result.try(
+    simplifile.create_directory_all(temp_dir)
+    |> result.map_error(ScratchFileFailed(
+      action: "create",
+      path: temp_dir,
+      error: _,
+    )),
+  )
+  let formatted = format_in_dir(resolved, temp_dir)
+  // Best-effort cleanup: the formatted content is already read back, so a
+  // scratch directory left behind does not affect the check.
+  let _ignored_delete = simplifile.delete(temp_dir)
+  formatted
+}
 
-      // Format all temp files
-      let temp_paths = list.map(temp_entries, fn(entry) { entry.1 })
-      let formatted_resolved = case formatter.format_files(temp_paths) {
-        Ok(Nil) -> {
-          list.map(temp_entries, fn(entry) {
-            let #(original_path, temp_path) = entry
-            case simplifile.read(temp_path) {
-              Ok(formatted) -> #(original_path, formatted)
-              // nolint: thrown_away_error -- unreadable temp file falls back to unformatted original content
-              Error(_) -> {
-                let content =
-                  list.find(resolved, fn(r) { r.0 == original_path })
-                  |> result.map(fn(r) { r.1 })
-                  |> result.unwrap("")
-                #(original_path, content)
-              }
-            }
-          })
-        }
-        // nolint: thrown_away_error -- formatter failure falls back to unformatted content
-        Error(_) -> resolved
-      }
+fn format_in_dir(
+  resolved: List(#(String, String)),
+  temp_dir: String,
+) -> Result(List(#(String, String)), CheckFormatError) {
+  use temp_entries <- result.try(
+    list.index_map(resolved, fn(entry, idx) {
+      #(entry, filepath.join(temp_dir, int.to_string(idx) <> ".gleam"))
+    })
+    |> list.try_map(fn(pair) {
+      let #(#(original_path, content), temp_path) = pair
+      simplifile.write(temp_path, content)
+      |> result.replace(#(original_path, temp_path))
+      |> result.map_error(ScratchFileFailed(
+        action: "write",
+        path: temp_path,
+        error: _,
+      ))
+    }),
+  )
+  use _ <- result.try(
+    formatter.format_files(list.map(temp_entries, fn(entry) { entry.1 }))
+    |> result.map_error(FormatterFailed),
+  )
+  list.try_map(temp_entries, fn(entry) {
+    let #(original_path, temp_path) = entry
+    simplifile.read(temp_path)
+    |> result.map(fn(formatted) { #(original_path, formatted) })
+    |> result.map_error(ScratchFileFailed(
+      action: "read",
+      path: temp_path,
+      error: _,
+    ))
+  })
+}
 
-      // Clean up temp directory; leaked temp dirs are not fatal
-      let _ignored_delete = simplifile.delete(temp_dir)
-      formatted_resolved
-    }
+/// Why `--check` could not format the generated code for comparison.
+type CheckFormatError {
+  ScratchFileFailed(action: String, path: String, error: simplifile.FileError)
+  FormatterFailed(formatter.FormatError)
+}
+
+fn check_format_error_to_string(error: CheckFormatError) -> String {
+  case error {
+    ScratchFileFailed(action:, path:, error:) ->
+      "cannot "
+      <> action
+      <> " "
+      <> path
+      <> ": "
+      <> simplifile.describe_error(error)
+    FormatterFailed(error) -> formatter.error_to_string(error)
   }
 }
+
+/// The OS temp directory: TMPDIR, TEMP or TMP, else the platform default.
+@external(erlang, "oaspec_ffi", "temp_dir")
+fn temp_dir() -> String
 
 /// Generate a unique ID string for temp directories.
 @external(erlang, "erlang", "unique_integer")
@@ -893,131 +931,83 @@ fn run_validate(config_path: String, mode_opt: Option(String)) -> Nil {
   io.println("oaspec v" <> context.version)
   io.println("Loading config from: " <> config_path)
 
-  use cfgs <- require(
+  use #(first, rest) <- require(
     load_configs(config_path, mode_opt, None),
     load_config_error_to_string,
   )
-
-  // `load_configs` rejects empty target lists; the destructure
-  // documents that invariant for any future reader.
-  // nolint: assert_ok_pattern -- `load_configs` rejects empty target lists; reaching the empty branch would be an internal invariant violation.
-  let assert [first_cfg, ..] = cfgs
-  let shared_input = config.input(first_cfg)
-  io.println("Parsing OpenAPI spec: " <> shared_input)
-  let reporter = progress.stdout_with_elapsed()
-  use parsed <- require(
-    parser.parse_file_with_progress_and_locations(shared_input, reporter),
-    fn(e) { "Error: " <> parser.parse_error_to_string(e) },
-  )
-  let #(spec, locations) = parsed
-
-  let multi_target = case cfgs {
-    [_, _, ..] -> True
-    _ -> False
-  }
-  list.each(cfgs, fn(cfg) {
-    case multi_target {
-      True -> {
-        io.println("")
-        io.println("[target: " <> config.package(cfg) <> "]")
-      }
-      False -> Nil
-    }
+  {
+    use cfg, input <- for_each_target([first, ..rest])
     use summary <- require(
       generate.validate_only_with_progress_and_locations(
-        spec,
-        locations,
+        input.spec,
+        input.locations,
         cfg,
-        reporter,
+        input.reporter,
       ),
-      format_generate_error_for(shared_input),
+      format_generate_error_for(input.path),
     )
     io.println("Spec loaded: " <> summary.spec_title)
-    print_warnings_for(shared_input, summary.warnings)
-  })
+    print_warnings_for(input.path, summary.warnings)
+  }
   io.println("")
   io.println("Validation passed.")
 }
 
-/// Errors surfaced while loading and validating the oaspec config.
-/// Wraps the underlying `config.ConfigError` so `load_config` can return a
-/// structured error type rather than a plain string.
-type LoadConfigError {
-  ConfigLoadError(error: config.ConfigError)
-  ModeParseError(error: config.ConfigError)
-  OutputValidationError(error: config.ConfigError)
+fn load_config_error_to_string(error: config.ConfigError) -> String {
+  "Error: " <> config.error_to_string(error)
 }
 
-/// Format a `LoadConfigError` into a user-facing message.
-fn load_config_error_to_string(error: LoadConfigError) -> String {
-  let detail = case error {
-    ConfigLoadError(error:) -> config.error_to_string(error)
-    ModeParseError(error:) -> config.error_to_string(error)
-    OutputValidationError(error:) -> config.error_to_string(error)
-  }
-  "Error: " <> detail
-}
-
-/// Pure config loading and validation pipeline. Issue #387: returns
-/// every target the config declares (1 for legacy single-target,
-/// N for multi-target). CLI overrides (`--mode`, `--output`) are
-/// applied uniformly to every target; `--output` over a multi-
-/// target config is rejected because each target already declares
-/// its own per-package output directory.
+/// Pure config loading and validation pipeline. Returns every target the
+/// config declares, the first one separately because a config always
+/// declares at least one. CLI overrides (`--mode`, `--output`) are applied
+/// uniformly to every target; `--output` over a multi-target config is
+/// rejected because each target already declares its own per-package
+/// output directory.
 fn load_configs(
   config_path: String,
   mode_opt: Option(String),
   output_opt: Option(String),
-) -> Result(List(config.Config), LoadConfigError) {
-  use cfgs <- result.try(
-    config.load_all(config_path)
-    |> result.map_error(ConfigLoadError),
-  )
-  use cfgs <- result.try(case mode_opt {
-    None -> Ok(cfgs)
-    Some(mode_str) ->
-      config.parse_mode(mode_str)
-      |> result.map(fn(parsed) {
-        list.map(cfgs, fn(c) { config.with_mode(c, parsed) })
-      })
-      |> result.map_error(ModeParseError)
+) -> Result(#(config.Config, List(config.Config)), config.ConfigError) {
+  use cfgs <- result.try(config.load_all(config_path))
+  use #(first, rest) <- result.try(case cfgs {
+    [first, ..rest] -> Ok(#(first, rest))
+    [] ->
+      Error(config.InvalidValue(
+        field: "targets",
+        detail: "must declare at least one target",
+      ))
   })
-  use cfgs <- result.try(case output_opt, cfgs {
-    None, _ -> Ok(cfgs)
-    Some(path), [single] -> Ok([config.with_output(single, Some(path))])
-    Some(_), [_, _, ..] ->
-      Error(
-        OutputValidationError(error: config.InvalidValue(
-          field: "--output",
-          detail: "cannot override the output directory for a multi-target config; each target already declares its own output (set per-target output: in oaspec.yaml or drop the --output flag)",
-        )),
+  use #(first, rest) <- result.try(case mode_opt {
+    None -> Ok(#(first, rest))
+    Some(mode_str) -> {
+      use parsed <- result.map(config.parse_mode(mode_str))
+      #(
+        config.with_mode(first, parsed),
+        list.map(rest, config.with_mode(_, parsed)),
       )
-    Some(_), [] ->
-      Error(
-        OutputValidationError(error: config.InvalidValue(
-          field: "targets",
-          detail: "must declare at least one target",
-        )),
-      )
+    }
+  })
+  use first <- result.try(case output_opt, rest {
+    None, _ -> Ok(first)
+    Some(path), [] -> Ok(config.with_output(first, Some(path)))
+    Some(_), [_, ..] ->
+      Error(config.InvalidValue(
+        field: "--output",
+        detail: "cannot override the output directory for a multi-target config; each target already declares its own output (set per-target output: in oaspec.yaml or drop the --output flag)",
+      ))
   })
   // Each target's own server/client paths must satisfy the per-
   // target invariants (basename matches package, src placement is
-  // safe). Run both validators on every target.
-  use _ <- result.try(
-    cfgs
-    |> list.try_map(fn(cfg) { validate_target_paths(cfg) })
-    |> result.map(fn(_) { Nil }),
-  )
-  Ok(cfgs)
+  // safe).
+  use _ <- result.try(list.try_each([first, ..rest], validate_target_paths))
+  Ok(#(first, rest))
 }
 
-fn validate_target_paths(cfg: config.Config) -> Result(Nil, LoadConfigError) {
-  use _ <- result.try(
-    config.validate_output_package_match(cfg)
-    |> result.map_error(OutputValidationError),
-  )
+fn validate_target_paths(
+  cfg: config.Config,
+) -> Result(Nil, config.ConfigError) {
+  use _ <- result.try(config.validate_output_package_match(cfg))
   config.validate_output_dir_layout(cfg)
-  |> result.map_error(OutputValidationError)
 }
 
 /// Unwrap a Result or print the error message and exit.
@@ -1038,10 +1028,10 @@ fn require(
 
 /// Format a GenerateError into a printable error message.
 ///
-/// Issue #411: each diagnostic is rendered with an editor-clickable
+/// Each diagnostic is rendered with an editor-clickable
 /// `path:line:column:` prefix when the spec file path and a `SourceLoc`
-/// are both known. Diagnostics without a `SourceLoc` keep the legacy
-/// short-string format so existing CLI output stays familiar.
+/// are both known. Diagnostics without a `SourceLoc` use the short-string
+/// format.
 fn format_generate_error_for(
   file_path: String,
 ) -> fn(generate.GenerateError) -> String {
@@ -1067,7 +1057,7 @@ fn format_generate_error_for(
 }
 
 /// Print warnings if any exist. Warnings are diagnostics, so they go to stderr
-/// to keep stdout reserved for requested output. Issue #411: see
+/// to keep stdout reserved for requested output. See
 /// `format_generate_error_for` for the rendering contract.
 fn print_warnings_for(
   file_path: String,

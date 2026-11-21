@@ -1,6 +1,7 @@
 import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/string
 import oaspec/config.{type Config}
 import oaspec/internal/openapi/operations
 import oaspec/internal/openapi/resolver
@@ -18,8 +19,14 @@ pub const version = "0.73.0"
 /// One analyzed operation: its `operationId` (synthesized when missing),
 /// the operation record with path-level parameters, security, and servers
 /// already merged in, the URL path it lives under, and the HTTP method.
-pub type AnalyzedOperation =
-  #(String, Operation(Resolved), String, HttpMethod)
+pub type AnalyzedOperation {
+  AnalyzedOperation(
+    operation_id: String,
+    operation: Operation(Resolved),
+    path: String,
+    method: HttpMethod,
+  )
+}
 
 /// Context for code generation, carrying all needed state.
 /// Only accepts a resolved spec — codegen must not operate on unresolved ASTs.
@@ -44,9 +51,14 @@ pub opaque type Context {
 /// effective servers, and synthesized operationIds) plus the component
 /// schema-resolution cache are computed once here so every codegen pass can
 /// read them via `operations/1` / `resolve_schema_ref/2` instead of
-/// rebuilding the same analysis at unrelated call sites (issue #371).
+/// rebuilding the same analysis at unrelated call sites.
 pub fn new(spec: OpenApiSpec(Resolved), config: Config) -> Context {
-  let analyzed = operations.collect_operations(spec)
+  let analyzed =
+    operations.collect_operations(spec)
+    |> list.map(fn(entry) {
+      let #(operation_id, operation, path, method) = entry
+      AnalyzedOperation(operation_id:, operation:, path:, method:)
+    })
   Context(
     spec:,
     config:,
@@ -127,11 +139,28 @@ pub fn operation_function_names(ctx: Context) -> dict.Dict(String, Nil) {
   ctx.operation_function_names
 }
 
+/// The component schemas codegen emits, sorted by name: every entry of
+/// `components.schemas` except the internal allOf helper schemas.
+pub fn component_schemas(ctx: Context) -> List(#(String, SchemaRef)) {
+  case ctx.spec.components {
+    Some(components) ->
+      dict.to_list(components.schemas)
+      |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
+      |> list.filter(fn(entry) {
+        case entry.1 {
+          Inline(obj) -> !schema.get_metadata(obj).internal
+          Reference(..) -> True
+        }
+      })
+    None -> []
+  }
+}
+
 fn build_operation_function_names(
   analyzed: List(AnalyzedOperation),
 ) -> dict.Dict(String, Nil) {
   list.fold(analyzed, dict.new(), fn(acc, entry) {
-    let #(op_id, _operation, _path, _method) = entry
+    let AnalyzedOperation(op_id, _operation, _path, _method) = entry
     dict.insert(acc, naming.operation_to_function_name(op_id), Nil)
   })
 }
@@ -182,7 +211,7 @@ pub type FileTarget {
 /// expected not to touch them and the generator clobbers any local
 /// changes on every run. `SkipIfExists` is for files the generator
 /// emits ONCE as a starting point, then leaves alone so the user can
-/// own the contents (Issue #247: the `handlers.gleam` and
+/// own the contents (the `handlers.gleam` and
 /// `handlers/<operation>.gleam` panic stubs).
 pub type WriteMode {
   Overwrite

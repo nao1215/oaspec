@@ -33,7 +33,7 @@
 ////     target that is itself an external ref is already inline by the
 ////     time we look it up.
 ////
-//// Out of scope (see issue #98 parent):
+//// Out of scope:
 ////   - alias chains longer than one hop inside the same file
 ////   - HTTP/HTTPS URLs
 ////
@@ -41,7 +41,7 @@
 //// to loop forever, but are now detected: `parser.parse_file`
 //// threads a visited-file stack through every recursive load and
 //// emits a dedicated `invalid_value` diagnostic that shows the cycle
-//// path instead of recursing indefinitely (issue #233).
+//// path instead of recursing indefinitely.
 ////
 //// Name collisions — when an external ref would overwrite an existing local
 //// schema, or when two external refs pull in the same fragment name from

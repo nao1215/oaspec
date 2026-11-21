@@ -97,10 +97,10 @@ pub fn parse_limit_exceeded(
     message: "Parser limit '"
       <> limit
       <> "' exceeded: configured cap "
-      <> int_to_string(configured)
+      <> int.to_string(configured)
       <> ", actual "
-      <> int_to_string(actual)
-      <> ". The input was refused before parsing to bound denial-of-service exposure (issue #553).",
+      <> int.to_string(actual)
+      <> ". The input was refused before parsing to bound denial-of-service exposure.",
     hint: option.Some(
       "If the source is trusted, raise '"
       <> limit
@@ -108,10 +108,6 @@ pub fn parse_limit_exceeded(
     ),
   )
 }
-
-@external(erlang, "erlang", "integer_to_binary")
-@external(javascript, "../oaspec_ffi.mjs", "integer_to_string")
-fn int_to_string(n: Int) -> String
 
 pub fn missing_field(
   path path: String,
@@ -147,7 +143,7 @@ pub fn invalid_value(
   )
 }
 
-/// Issue #573: a YAML mapping at `path` contains the same key twice.
+/// A YAML mapping at `path` contains the same key twice.
 /// yamerl tolerates duplicate mapping keys (only the last value
 /// survives), so this is the only signal users get that their spec
 /// silently dropped one of two definitions. Surfaced as a parse-phase
@@ -201,7 +197,7 @@ pub fn resolve_error(
 // Convenience constructors for capability_check phase
 // ============================================================================
 
-/// Issue #411: capability checks now thread a YAML `SourceLoc` through
+/// Capability checks now thread a YAML `SourceLoc` through
 /// every diagnostic. Pass `NoSourceLoc` only when the caller genuinely
 /// has no LocationIndex available (e.g. tests that bypass the parser
 /// path); production code always has one because it goes through
@@ -249,7 +245,7 @@ pub fn validation(
   )
 }
 
-/// Issue #416: severity / target shortcut builders for the common
+/// Severity / target shortcut builders for the common
 /// `validation` shapes used in `internal/codegen/validate`. The
 /// project review noted that the 5-field validation/5 constructor
 /// gets called 28+ times with the same severity / target pair on
@@ -379,7 +375,7 @@ pub fn to_string(d: Diagnostic) -> String {
 /// prefix when the spec file path and a `SourceLoc` are both known.
 /// Falls back to plain `to_string` otherwise.
 ///
-/// Issue #411: CI runs that process several specs need a breadcrumb to
+/// CI runs that process several specs need a breadcrumb to
 /// which file produced an error; editors recognise the `path:line:col:`
 /// prefix and let users jump straight to the offending YAML line.
 pub fn render(d: Diagnostic, file_path file_path: Option(String)) -> String {

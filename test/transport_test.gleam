@@ -461,8 +461,7 @@ pub fn with_default_headers_panics_on_invalid_value_test() {
   should.be_true(string.contains(message, "LF"))
 }
 
-@external(erlang, "oaspec_ffi", "capture_panic")
-@external(javascript, "../oaspec_ffi.mjs", "capture_panic")
+@external(erlang, "oaspec_test_helpers_ffi", "capture_panic")
 fn capture_panic(thunk: fn() -> Nil) -> #(Bool, String)
 
 // ---------------------------------------------------------------------------

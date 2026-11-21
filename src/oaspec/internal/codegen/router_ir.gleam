@@ -6,6 +6,8 @@ import oaspec/config
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/guards
 import oaspec/internal/codegen/import_analysis
+import oaspec/internal/codegen/ir_build
+import oaspec/internal/codegen/operation_ir
 import oaspec/internal/codegen/server_request_decode as decode_helpers
 import oaspec/internal/util/content_type
 import oaspec/internal/util/naming
@@ -51,21 +53,21 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
 
   let has_deep_object =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
-          Value(p) -> decode_helpers.is_deep_object_param(p, ctx)
+          Value(p) -> operation_ir.is_deep_object_param(p, ctx)
           _ -> False
         }
       })
     })
   let has_deep_object_with_ap =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
           Value(p) ->
-            decode_helpers.is_deep_object_param(p, ctx)
+            operation_ir.is_deep_object_param(p, ctx)
             && decode_helpers.deep_object_has_additional_properties(p, ctx)
           _ -> False
         }
@@ -73,11 +75,11 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
     })
   let needs_deep_object_present =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
           Value(p) ->
-            decode_helpers.is_deep_object_param(p, ctx)
+            operation_ir.is_deep_object_param(p, ctx)
             && !p.required
             && !decode_helpers.deep_object_has_untyped_additional_properties(
               p,
@@ -89,11 +91,11 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
     })
   let has_deep_object_untyped_ap =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
           Value(p) ->
-            decode_helpers.is_deep_object_param(p, ctx)
+            operation_ir.is_deep_object_param(p, ctx)
             && decode_helpers.deep_object_has_untyped_additional_properties(
               p,
               ctx,
@@ -104,15 +106,15 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
     })
   let has_form_urlencoded_body =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       decode_helpers.operation_uses_form_urlencoded_body(operation)
     })
   let has_multipart_body =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       decode_helpers.operation_uses_multipart_body(operation)
     })
-  // Issue #485: when any operation declares
+  // When any operation declares
   // `application/octet-stream` on its request body, the route
   // function takes `body: BitArray` instead of `body: String` so
   // arbitrary binary payloads round-trip without being forced
@@ -120,7 +122,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
   // request body keep the existing `body: String` signature.
   let has_binary_request_body =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       decode_helpers.operation_uses_octet_stream_body(operation)
     })
   // The route arms shadow `body` with the String conversion
@@ -130,13 +132,13 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
   let needs_bit_array_import =
     has_binary_request_body
     && list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       option.is_some(operation.request_body)
       && !decode_helpers.operation_uses_octet_stream_body(operation)
     })
   let has_nested_form_urlencoded_body =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       case operation.request_body {
         Some(Value(rb)) ->
           decode_helpers.form_urlencoded_body_has_nested_object(rb, ctx)
@@ -146,7 +148,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
 
   let needs_int =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
           Value(p) ->
@@ -169,7 +171,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
 
   let needs_float =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
           Value(p) ->
@@ -200,7 +202,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
     || has_multipart_body
     || has_deep_object_with_ap
     || list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
           Value(p) ->
@@ -228,7 +230,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
 
   let needs_cookie_lookup =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
           Value(p) -> p.in_ == spec.InCookie
@@ -244,7 +246,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
     || has_multipart_body
     || operations_have_response_headers(operations)
     || list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
           Value(p) ->
@@ -263,7 +265,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
     import_analysis.operations_have_optional_params(operations)
     || import_analysis.operations_have_optional_body(operations)
     || list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       let has_optional_deep_object_fields =
         list.any(operation.parameters, fn(ref_p) {
           case ref_p {
@@ -290,7 +292,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
 
   let json_response_schemas =
     list.flat_map(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.filter_map(dict.to_list(operation.responses), fn(entry) {
         let #(_, ref_or) = entry
         case ref_or {
@@ -321,7 +323,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
 
   let needs_decode =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       case operation.request_body {
         Some(Value(rb)) ->
           list.any(dict.to_list(rb.content), fn(entry) {
@@ -334,7 +336,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
 
   let uses_query =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
           Value(p) -> p.in_ == spec.InQuery
@@ -346,7 +348,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
   let uses_headers =
     has_multipart_body
     || list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
           Value(p) -> p.in_ == spec.InHeader || p.in_ == spec.InCookie
@@ -357,13 +359,13 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
 
   let uses_body =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       option.is_some(operation.request_body)
     })
 
   let has_params_ops =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       !list.is_empty(operation.parameters)
       || option.is_some(operation.request_body)
     })
@@ -374,7 +376,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
   let needs_guards =
     config.validate(context.config(ctx))
     && list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       operation_needs_guard_validation(operation, ctx)
     })
   let needs_json_for_guards = needs_guards
@@ -451,7 +453,7 @@ pub fn imports(requirements: RouterRequirements, ctx: Context) -> List(String) {
     True -> list.append(std_imports, ["gleam/dynamic"])
     False -> std_imports
   }
-  // Issue #485: when the route signature is `body: BitArray`
+  // When the route signature is `body: BitArray`
   // and at least one non-binary arm exists, every non-binary
   // arm shadows `body` with
   // `bit_array.to_string(body) |> result.unwrap("")`, so both
@@ -539,7 +541,7 @@ fn operations_have_response_headers(
   operations: List(context.AnalyzedOperation),
 ) -> Bool {
   list.any(operations, fn(op) {
-    let #(_, operation, _, _) = op
+    let context.AnalyzedOperation(_, operation, _, _) = op
     list.any(dict.to_list(operation.responses), fn(entry) {
       let #(_, ref_or) = entry
       case ref_or {
@@ -555,7 +557,7 @@ fn operations_have_response_header_of_type(
   type_name: String,
 ) -> Bool {
   list.any(operations, fn(op) {
-    let #(_, operation, _, _) = op
+    let context.AnalyzedOperation(_, operation, _, _) = op
     list.any(dict.to_list(operation.responses), fn(entry) {
       let #(_, ref_or) = entry
       case ref_or {
@@ -573,7 +575,7 @@ fn operations_have_optional_response_header(
   operations: List(context.AnalyzedOperation),
 ) -> Bool {
   list.any(operations, fn(op) {
-    let #(_, operation, _, _) = op
+    let context.AnalyzedOperation(_, operation, _, _) = op
     list.any(dict.to_list(operation.responses), fn(entry) {
       let #(_, ref_or) = entry
       case ref_or {
@@ -587,7 +589,9 @@ fn operations_have_optional_response_header(
   })
 }
 
-type HeaderSpec {
+/// One response header as the router emits it: the wire name, the record
+/// field, the field's Gleam type, and whether the header is required.
+pub type HeaderSpec {
   HeaderSpec(
     header_name: String,
     field_name: String,
@@ -596,7 +600,8 @@ type HeaderSpec {
   )
 }
 
-fn sorted_header_specs(
+/// The response headers sorted by name.
+pub fn sorted_header_specs(
   headers: dict.Dict(String, spec.Header),
 ) -> List(HeaderSpec) {
   headers
@@ -605,7 +610,7 @@ fn sorted_header_specs(
   |> list.map(fn(entry) {
     let #(header_name, header) = entry
     let field_name = naming.to_snake_case(header_name)
-    let field_type = response_header_field_type(header.schema)
+    let field_type = ir_build.header_schema_to_type(header.schema)
     HeaderSpec(
       header_name: header_name,
       field_name: field_name,
@@ -613,17 +618,4 @@ fn sorted_header_specs(
       required: header.required,
     )
   })
-}
-
-fn response_header_field_type(
-  schema_opt: option.Option(schema.SchemaRef),
-) -> String {
-  case schema_opt {
-    Some(Inline(schema.IntegerSchema(..))) -> "Int"
-    Some(Inline(schema.NumberSchema(..))) -> "Float"
-    Some(Inline(schema.BooleanSchema(..))) -> "Bool"
-    Some(Inline(schema.StringSchema(..))) -> "String"
-    Some(Reference(name:, ..)) -> "types." <> naming.schema_to_type_name(name)
-    _ -> "String"
-  }
 }

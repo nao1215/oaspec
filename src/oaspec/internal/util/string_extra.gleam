@@ -59,11 +59,6 @@ pub fn to_string(sb: StringTree) -> String {
   string_tree.to_string(sb)
 }
 
-/// Join a list of strings with a separator.
-pub fn join_with(items: List(String), separator: String) -> String {
-  string.join(items, separator)
-}
-
 /// Wrap a string in Gleam doc comment style.
 pub fn doc_comment(sb: StringTree, text: String) -> StringTree {
   case text {

@@ -1,4 +1,4 @@
--module(yaml_loc_ffi).
+-module(oaspec_yaml_loc_ffi).
 
 -export([build_location_index/1]).
 

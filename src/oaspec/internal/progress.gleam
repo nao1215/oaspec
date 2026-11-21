@@ -7,7 +7,7 @@
 ////
 //// Stages on the GitHub REST OpenAPI spec (~12 MB JSON, ~10k schemas)
 //// take long enough that without progress lines the user can't tell
-//// whether the process is hung or working — see issue #352.
+//// whether the process is hung or working.
 
 import gleam/int
 import gleam/io

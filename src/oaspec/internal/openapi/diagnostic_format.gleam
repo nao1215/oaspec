@@ -5,8 +5,7 @@
 //// only owns the CLI presentation transform.
 ////
 //// The function is deliberately spec-context free: it never looks a
-//// path up in a parsed spec. That is a larger follow-up; here the goal
-//// is simply to turn `paths.~1pets.get.parameters.0` into
+//// path up in a parsed spec; it only turns `paths.~1pets.get.parameters.0` into
 //// `GET /pets, parameter #0` so a reader does not need to know about
 //// JSON Pointer escape rules.
 

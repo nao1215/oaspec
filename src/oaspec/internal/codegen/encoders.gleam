@@ -2,16 +2,12 @@
 ////
 //// Split out of `decoders.gleam` so each module owns one direction of
 //// the codec pipeline — decoders produces `decode.gleam`, encoders
-//// produces `encode.gleam`. The shared traversal helpers
-//// (`escape_for_string_literal`, `list_at_or`, `qualified_schema_ref_type`,
-//// `schema_ref_has_bare_option_type`) live in `codec_helpers.gleam` —
-//// extracted in #402 to close the follow-up flagged by #212.
+//// produces `encode.gleam`. The helpers both share live in
+//// `codec_helpers.gleam`.
 
 import gleam/bool
-import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
-import gleam/string
 import oaspec/config
 import oaspec/internal/codegen/allof_merge
 import oaspec/internal/codegen/codec_helpers
@@ -51,28 +47,10 @@ fn generate_encoders(
   ctx: Context,
   operations: List(context.AnalyzedOperation),
 ) -> String {
-  let schemas = case context.spec(ctx).components {
-    Some(components) ->
-      list.sort(dict.to_list(components.schemas), fn(a, b) {
-        string.compare(a.0, b.0)
-      })
-      |> list.filter(fn(entry) { !ir_build.is_internal_schema(entry.1) })
-    None -> []
-  }
+  let schemas = context.component_schemas(ctx)
 
   // Check if types module is needed
-  let needs_types =
-    list.any(schemas, fn(entry) {
-      let #(_, schema_ref) = entry
-      case schema_ref {
-        Inline(ObjectSchema(..))
-        | Inline(AllOfSchema(..))
-        | Inline(OneOfSchema(..))
-        | Inline(AnyOfSchema(..)) -> True
-        Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> True
-        _ -> False
-      }
-    })
+  let needs_types = codec_helpers.needs_types(schemas)
 
   // Check if dict/list modules are needed (for additionalProperties encoding)
   let needs_dict =
@@ -95,7 +73,7 @@ fn generate_encoders(
       }
     })
 
-  // Issue #303: object schemas with at least one optional non-nullable
+  // Object schemas with at least one optional non-nullable
   // property emit `case value.<f> { option.None -> [] option.Some(x) -> ... }`
   // wrapped in `list.flatten([...])`. Both the option module and the list
   // module need to be imported for those modules to resolve.
@@ -126,7 +104,7 @@ fn generate_encoders(
     True, False -> ["gleam/dict", "gleam/json", "gleam/list"]
     _, _ -> ["gleam/json"]
   }
-  // Issue #387: a top-level encoder for a `nullable: true` primitive
+  // A top-level encoder for a `nullable: true` primitive
   // or array schema is generated with a bare `Option(...)` parameter
   // type. Bringing `type Option` into scope is only needed in that
   // case; the more common record-encoder path that uses
@@ -209,21 +187,11 @@ fn generate_inline_enum_encoders(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> se.StringBuilder {
-  let #(props, required) = case schema_ref {
-    Inline(ObjectSchema(properties:, required:, ..)) -> #(
-      ir_build.sorted_entries(properties),
-      required,
-    )
-    Inline(AllOfSchema(schemas:, ..)) -> {
-      let merged = allof_merge.merge_allof_schemas(schemas, ctx)
-      #(ir_build.sorted_entries(merged.properties), merged.required)
-    }
-    _ -> #([], [])
-  }
+  let #(props, required) = codec_helpers.object_properties(schema_ref, ctx)
   list.fold(props, sb, fn(sb, entry) {
     let #(prop_name, prop_ref) = entry
     case schema_utils.constant_property_value(prop_ref, prop_name, required) {
-      // Issue #309: a required inline single-value string-enum has no
+      // A required inline single-value string-enum has no
       // matching type in `types.gleam`, so generating an encoder for
       // it would reference a non-existent type. Skip it; the parent
       // object's encoder inlines the constant `json.string("...")`.
@@ -256,7 +224,7 @@ fn generate_anonymous_encoders(
   operations: List(context.AnalyzedOperation),
 ) -> se.StringBuilder {
   list.fold(operations, sb, fn(sb, op) {
-    let #(op_id, operation, _path, _method) = op
+    let context.AnalyzedOperation(op_id, operation, _path, _method) = op
     // Only requestBody inline schemas need encoders (for client body encoding)
     generate_anonymous_request_body_encoder(sb, op_id, operation, ctx)
   })
@@ -309,7 +277,7 @@ fn generate_encoder(
   case schema_ref {
     Inline(ObjectSchema(properties:, required:, additional_properties:, ..)) -> {
       // When additional_properties is Typed or Untyped we emit a `base_props`
-      // list and merge in dict entries; Forbidden and Unspecified (Issue #249)
+      // list and merge in dict entries; Forbidden and Unspecified
       // both go through `json.object([...])` directly with no AP merge.
       let has_ap = case additional_properties {
         Typed(_) | Untyped -> True
@@ -322,14 +290,8 @@ fn generate_encoder(
         dedup.dedup_property_names(list.map(all_props, fn(e) { e.0 }))
       // Build list of (prop_name, prop_ref, field_name) with readOnly filtered out
       let props_with_names =
-        list.index_map(all_props, fn(entry, idx) {
+        list.map2(all_props, all_deduped_names, fn(entry, field_name) {
           let #(prop_name, prop_ref) = entry
-          let field_name =
-            codec_helpers.list_at_or(
-              all_deduped_names,
-              idx,
-              naming.to_snake_case(prop_name),
-            )
           #(prop_name, prop_ref, field_name)
         })
         |> list.filter(fn(entry) {
@@ -387,7 +349,7 @@ fn generate_encoder(
           <> ") -> json.Json {",
         )
 
-      // Issue #303: a property that is in `properties` but not in `required`
+      // A property that is in `properties` but not in `required`
       // and is not `nullable: true` MUST be omitted entirely from the JSON
       // object when its `Option` field is `None` — emitting `"<key>": null`
       // is schema-invalid (only `nullable: true` allows null on the wire).
@@ -425,7 +387,7 @@ fn generate_encoder(
             False -> ","
           }
 
-          // Issue #309: a required inline single-value string-enum
+          // A required inline single-value string-enum
           // property is elided from the generated record; the wire
           // value is fixed at codegen time. Inline `json.string(...)`
           // here so the encoder never tries to read a field that does
@@ -449,7 +411,7 @@ fn generate_encoder(
               )
           }
 
-          // Issue #296: required+nullable properties have Gleam type
+          // Required+nullable properties have Gleam type
           // Option(T) and must use json.nullable, not the bare encoder.
           let is_nullable = schema_utils.schema_ref_is_nullable(prop_ref, ctx)
           let is_omittable = !is_required && !is_nullable
@@ -481,7 +443,7 @@ fn generate_encoder(
               )
             // Schema has at least one optional-non-nullable → list-of-lists.
             True, _, _, True -> {
-              // Issue #303: omit the key when the value is None.
+              // Omit the key when the value is None.
               // Re-derive the encoder expression with `x` substituted for
               // `value.<field>` so we encode the unwrapped Some value.
               let some_encoder_expr =
@@ -546,11 +508,9 @@ fn generate_encoder(
               "additional_properties",
               ctx,
             )
-          // Issue #320: each statement of the lambda body is emitted via
+          // Each statement of the lambda body is emitted via
           // a separate `se.indent` call rather than as embedded `\n`
-          // inside one string. The previous form was easy to misread
-          // (the older variant used `;` between statements, which the
-          // current Gleam parser rejects).
+          // inside one string, which keeps the statements readable.
           sb
           |> se.indent(1, close_props_list)
           |> se.indent(1, "let extra_props =")
@@ -614,13 +574,8 @@ fn generate_encoder(
 
       let component_type_names = context.component_type_names(ctx)
       let sb =
-        list.index_fold(enum_values, sb, fn(sb, value, idx) {
-          let variant_suffix =
-            codec_helpers.list_at_or(
-              enc_deduped_variants,
-              idx,
-              naming.to_pascal_case(value),
-            )
+        list.fold(list.zip(enum_values, enc_deduped_variants), sb, fn(sb, pair) {
+          let #(value, variant_suffix) = pair
           let variant =
             naming.dedup_enum_variant_name(
               naming.schema_to_type_name(type_name) <> variant_suffix,
@@ -665,13 +620,8 @@ fn generate_encoder(
         |> se.indent(1, "case value {")
 
       let sb =
-        list.index_fold(enum_values, sb, fn(sb, value, idx) {
-          let variant_suffix =
-            codec_helpers.list_at_or(
-              enc_deduped_variants,
-              idx,
-              naming.to_pascal_case(value),
-            )
+        list.fold(list.zip(enum_values, enc_deduped_variants), sb, fn(sb, pair) {
+          let #(value, variant_suffix) = pair
           let variant =
             naming.dedup_enum_variant_name(
               naming.schema_to_type_name(type_name) <> variant_suffix,
@@ -899,11 +849,11 @@ fn generate_encoder(
     }
 
     Inline(ArraySchema(metadata:, items:, ..)) -> {
-      // Issue #387: a top-level nullable array schema gets its type
+      // A top-level nullable array schema gets its type
       // alias rendered as `Option(List(T))`, so the encoder must accept
       // `Option(List(T))` and use `json.nullable(value, ...)` instead
       // of the bare `json.array(...)` it had been emitting.
-      let inner_type = codec_helpers.qualified_schema_ref_type(items, ctx)
+      let inner_type = codec_helpers.qualified_schema_ref_type(items)
       let list_type = "List(" <> inner_type <> ")"
       // Items dispatch through `json_encoder_fn_for_array_items` so the
       // parent schema name is never spliced into an inline-enum
@@ -957,7 +907,7 @@ fn generate_primitive_encoder(
 /// Convert a SchemaRef to a json.Json encoder expression.
 /// Returns an expression that produces json.Json (not String). `ctx`
 /// is threaded so inline-enum encoder names can be disambiguated
-/// against existing component schema names (Issue #492).
+/// against existing component schema names.
 fn schema_ref_to_json_encoder(
   value_expr: String,
   ref: SchemaRef,
@@ -1035,9 +985,9 @@ fn json_encoder_fn_for_array_items(
 
 /// Append `name` to `imports` if it isn't already there. Used by the
 /// import builder to keep the list deterministic when more than one
-/// codepath wants the same module (issue #303 wires `gleam/option` and
-/// `gleam/list` for optional-non-nullable encoding even when those
-/// modules were already pulled in by additionalProperties handling).
+/// codepath wants the same module (optional-non-nullable encoding needs
+/// `gleam/option` and `gleam/list` even when additionalProperties
+/// handling already pulled them in).
 fn ensure_import(imports: List(String), name: String) -> List(String) {
   use <- bool.guard(list.contains(imports, name), imports)
   list.append(imports, [name])

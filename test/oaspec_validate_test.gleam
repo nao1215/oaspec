@@ -1,4 +1,13 @@
+import gleam/list
+import gleam/string
+import gleeunit/should
+import oaspec/config
+import oaspec/generate
+import oaspec/internal/codegen/validate
+import oaspec/openapi/diagnostic
+import oaspec/openapi/parser
 import oaspec_support as support
+import test_helpers
 
 pub fn validator_core_acceptance_test() {
   let _ = support.validate_accepts_array_parameter_case()
@@ -107,4 +116,62 @@ pub fn validator_feature_fixtures_test() {
   let _ = support.validate_mixed_param_locations_case()
   let _ = support.validate_complex_discriminator_case()
   let _ = support.validate_optional_required_combinations_case()
+}
+
+fn pattern_spec(pattern: String) -> String {
+  "openapi: 3.0.3\n"
+  <> "info:\n  title: x\n  version: '1.0'\n"
+  <> "paths: {}\n"
+  <> "components:\n  schemas:\n"
+  <> "    Code:\n      type: object\n      properties:\n"
+  <> "        value:\n          type: string\n          pattern: '"
+  <> pattern
+  <> "'\n"
+}
+
+pub fn validate_warns_about_invalid_pattern_test() {
+  let assert Ok(spec) = parser.parse_string(pattern_spec("[a-"))
+  let errors = validate.validate(test_helpers.make_ctx_from_spec(spec))
+  let assert Ok(d) =
+    list.find(errors, fn(d) { string.contains(d.pointer, "pattern") })
+  string.contains(d.pointer, "components.schemas.Code.value")
+  |> should.be_true()
+  string.contains(d.message, "[a-") |> should.be_true()
+  d.severity |> should.equal(diagnostic.SeverityWarning)
+}
+
+/// `\u` escapes are valid ECMA-262, the dialect OpenAPI patterns use, but
+/// the BEAM regex engine rejects them. Generation must still succeed.
+pub fn generate_succeeds_with_ecma_unicode_escape_pattern_test() {
+  let assert Ok(spec) =
+    parser.parse_string(pattern_spec("^[\\u0020-\\u007E]*$"))
+  let assert Ok(summary) =
+    generate.generate(
+      spec,
+      config.new(
+        input: "test.yaml",
+        output_server: "./test_output/api",
+        output_client: "./test_output_client/api",
+        package: "api",
+        mode: config.Both,
+        validate: True,
+      ),
+    )
+  list.any(summary.warnings, fn(d) { string.contains(d.pointer, "pattern") })
+  |> should.be_true()
+}
+
+/// Guards never check the pattern of an enum, so it is not validated.
+pub fn validate_skips_pattern_of_string_enum_test() {
+  let yaml =
+    pattern_spec("[a-") <> "          enum:\n            - a\n            - b\n"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  validate.validate(test_helpers.make_ctx_from_spec(spec))
+  |> should.equal([])
+}
+
+pub fn validate_accepts_valid_pattern_test() {
+  let assert Ok(spec) = parser.parse_string(pattern_spec("^[a-z]+$"))
+  validate.validate(test_helpers.make_ctx_from_spec(spec))
+  |> should.equal([])
 }

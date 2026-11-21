@@ -18,13 +18,13 @@ pub fn missing_field_from_extraction(
   err: yay.ExtractionError,
   path path: String,
   field field: String,
-  loc loc: SourceLoc,
+  location location: SourceLoc,
 ) -> Diagnostic {
   parser_error.missing_field_with_hint(
     detail: yay.extraction_error_to_string(err),
     path:,
     field:,
-    loc:,
+    location:,
   )
 }
 
@@ -36,12 +36,12 @@ pub fn missing_field_from_selector(
   err: yay.SelectorError,
   path path: String,
   field field: String,
-  loc loc: SourceLoc,
+  location location: SourceLoc,
 ) -> Diagnostic {
   let detail = case err {
     yay.NodeNotFound(at:) ->
       "selector resolved up to segment " <> int.to_string(at)
     yay.SelectorParseError -> "selector parse error"
   }
-  parser_error.missing_field_with_hint(detail:, path:, field:, loc:)
+  parser_error.missing_field_with_hint(detail:, path:, field:, location:)
 }

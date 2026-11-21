@@ -27,58 +27,45 @@ pub fn write_all(
   cfg: config.Config,
   on_write: fn(String) -> Nil,
 ) -> Result(List(String), WriteError) {
-  // Separate files by their target kind (ADT-based, not filename matching)
-  let shared_files =
-    list.filter(files, fn(f) { f.target == context.SharedTarget })
-  let server_files =
-    list.filter(files, fn(f) { f.target == context.ServerTarget })
-  let client_files =
-    list.filter(files, fn(f) { f.target == context.ClientTarget })
+  placements(files, cfg)
+  |> list.try_fold([], fn(written, placement) {
+    let #(dir, dir_files) = placement
+    use _ <- result.try(ensure_directory(dir))
+    write_files(dir_files, dir, written, on_write)
+  })
+}
 
+/// Each output directory the config writes to, with the files that land in
+/// it in write order: the shared files, then the server or client files.
+/// When `mode = Both` and both outputs name the same directory, the shared
+/// files are placed only once.
+fn placements(
+  files: List(GeneratedFile),
+  cfg: config.Config,
+) -> List(#(String, List(GeneratedFile))) {
+  let of_target = fn(target) {
+    list.filter(files, fn(f) { f.target == target })
+  }
+  let shared_files = of_target(context.SharedTarget)
   let server_path = config.output_server(cfg)
   let client_path = config.output_client(cfg)
-  let mode = config.mode(cfg)
-
-  // When the server and client outputs resolve to the same directory
-  // under `mode = Both`, the shared files only need to be written
-  // once. Skipping the second pass on shared files (rather than
-  // post-deduping the written list) avoids double-firing `on_write`
-  // and double `simplifile.write` calls that the FS-race-condition
-  // surface in #548 calls out.
-  let server_and_client_overlap =
-    mode == Both && normalise_dir(server_path) == normalise_dir(client_path)
-  let written_files = []
-
-  use written_files <- result.try(case mode {
-    Server | Both -> {
-      use _ <- result.try(ensure_directory(server_path))
-      write_files(shared_files, server_path, written_files, on_write)
-      |> result.try(fn(w) {
-        write_files(server_files, server_path, w, on_write)
-      })
-    }
-    Client -> Ok(written_files)
-  })
-
-  use written_files <- result.try(case mode {
-    Client | Both -> {
-      use _ <- result.try(ensure_directory(client_path))
-      // Skip the shared-files re-write when the two output paths name
-      // the same directory; the server-side branch above already
-      // wrote them once.
-      let shared_for_client = case server_and_client_overlap {
-        True -> []
-        False -> shared_files
+  let server = #(
+    server_path,
+    list.append(shared_files, of_target(context.ServerTarget)),
+  )
+  let client_files = of_target(context.ClientTarget)
+  case config.mode(cfg) {
+    Server -> [server]
+    Client -> [#(client_path, list.append(shared_files, client_files))]
+    Both ->
+      case normalise_dir(server_path) == normalise_dir(client_path) {
+        True -> [server, #(client_path, client_files)]
+        False -> [
+          server,
+          #(client_path, list.append(shared_files, client_files)),
+        ]
       }
-      write_files(shared_for_client, client_path, written_files, on_write)
-      |> result.try(fn(w) {
-        write_files(client_files, client_path, w, on_write)
-      })
-    }
-    Server -> Ok(written_files)
-  })
-
-  Ok(written_files)
+  }
 }
 
 // Strip a single trailing slash so "out" and "out/" compare equal.
@@ -103,7 +90,7 @@ fn ensure_directory(path: String) -> Result(Nil, WriteError) {
 
 /// Write a list of generated files to a directory.
 ///
-/// Issue #247: files marked `SkipIfExists` (`handlers.gleam`, and
+/// Files marked `SkipIfExists` (`handlers.gleam`, and
 /// `handlers/<operation>.gleam` under `handlers: per_operation`) are
 /// written only on first generation. If the file already exists on disk,
 /// it is left alone — the user owns the contents and the generator must
@@ -161,12 +148,12 @@ fn parent_dir(path: String) -> Result(String, Nil) {
 /// Resolve generated files to their full output paths and content.
 /// Used by --check to compare against existing files without writing.
 ///
-/// Issue #247: `SkipIfExists` files (e.g. user-owned `handlers.gleam`)
+/// `SkipIfExists` files (e.g. user-owned `handlers.gleam`)
 /// are dropped from the result. `--check` is meant to flag drift in
 /// generator-owned files; user-edited files are expected to differ
 /// from the bootstrap stub and should not be reported as out-of-date.
 ///
-/// Issue #548: when `mode = Both` and `output_server` resolves to the
+/// When `mode = Both` and `output_server` resolves to the
 /// same directory as `output_client`, shared files appear once in
 /// the result, not twice — `--check` would otherwise compare the
 /// same file twice and double-count any drift.
@@ -174,41 +161,13 @@ pub fn resolve_paths(
   files: List(GeneratedFile),
   cfg: config.Config,
 ) -> List(#(String, String)) {
-  let files = list.filter(files, fn(f) { f.write_mode != context.SkipIfExists })
-  let shared_files =
-    list.filter(files, fn(f) { f.target == context.SharedTarget })
-  let server_files =
-    list.filter(files, fn(f) { f.target == context.ServerTarget })
-  let client_files =
-    list.filter(files, fn(f) { f.target == context.ClientTarget })
-
-  let server_path = config.output_server(cfg)
-  let client_path = config.output_client(cfg)
-  let mode = config.mode(cfg)
-  let server_and_client_overlap =
-    mode == Both && normalise_dir(server_path) == normalise_dir(client_path)
-
-  let server_entries = case mode {
-    Server | Both ->
-      list.map(list.append(shared_files, server_files), fn(f) {
-        #(server_path <> "/" <> f.path, f.content)
-      })
-    Client -> []
-  }
-
-  let shared_for_client = case server_and_client_overlap {
-    True -> []
-    False -> shared_files
-  }
-  let client_entries = case mode {
-    Client | Both ->
-      list.map(list.append(shared_for_client, client_files), fn(f) {
-        #(client_path <> "/" <> f.path, f.content)
-      })
-    Server -> []
-  }
-
-  list.append(server_entries, client_entries)
+  files
+  |> list.filter(fn(f) { f.write_mode != context.SkipIfExists })
+  |> placements(cfg)
+  |> list.flat_map(fn(placement) {
+    let #(dir, dir_files) = placement
+    list.map(dir_files, fn(f) { #(dir <> "/" <> f.path, f.content) })
+  })
 }
 
 /// Every file path the generator would write for the given config — including
@@ -216,46 +175,17 @@ pub fn resolve_paths(
 /// off the orphan list while still excluding it from byte-comparison drift
 /// reports (`resolve_paths` drops `SkipIfExists` entries).
 ///
-/// Same path-overlap dedup as `resolve_paths` (#548): shared files
+/// Same path-overlap dedup as `resolve_paths`: shared files
 /// appear once when the two output directories coincide.
 pub fn expected_paths(
   files: List(GeneratedFile),
   cfg: config.Config,
 ) -> List(String) {
-  let shared_files =
-    list.filter(files, fn(f) { f.target == context.SharedTarget })
-  let server_files =
-    list.filter(files, fn(f) { f.target == context.ServerTarget })
-  let client_files =
-    list.filter(files, fn(f) { f.target == context.ClientTarget })
-
-  let server_path = config.output_server(cfg)
-  let client_path = config.output_client(cfg)
-  let mode = config.mode(cfg)
-  let server_and_client_overlap =
-    mode == Both && normalise_dir(server_path) == normalise_dir(client_path)
-
-  let server_entries = case mode {
-    Server | Both ->
-      list.map(list.append(shared_files, server_files), fn(f) {
-        server_path <> "/" <> f.path
-      })
-    Client -> []
-  }
-
-  let shared_for_client = case server_and_client_overlap {
-    True -> []
-    False -> shared_files
-  }
-  let client_entries = case mode {
-    Client | Both ->
-      list.map(list.append(shared_for_client, client_files), fn(f) {
-        client_path <> "/" <> f.path
-      })
-    Server -> []
-  }
-
-  list.append(server_entries, client_entries)
+  placements(files, cfg)
+  |> list.flat_map(fn(placement) {
+    let #(dir, dir_files) = placement
+    list.map(dir_files, fn(f) { dir <> "/" <> f.path })
+  })
 }
 
 /// Return the output directories that would be written to for the given config.

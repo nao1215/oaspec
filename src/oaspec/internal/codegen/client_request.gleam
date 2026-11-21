@@ -218,7 +218,7 @@ pub fn to_str_for_optional_value(
 
 /// Get the Gleam type for a request body parameter.
 ///
-/// Issue #485: an `application/octet-stream` request body is raw
+/// An `application/octet-stream` request body is raw
 /// bytes — the README's mode-specific table promises `BitArray`,
 /// the client wraps it in `transport.BytesBody` (which expects
 /// `BitArray`), and forcing it through `String` means arbitrary
@@ -254,7 +254,6 @@ pub fn get_body_type(rb: spec.RequestBody(Resolved), op_id: String) -> String {
 pub fn get_body_encode_expr(
   rb: spec.RequestBody(Resolved),
   op_id: String,
-  _ctx: Context,
 ) -> String {
   let content_entries = ir_build.sorted_entries(rb.content)
   case content_entries {
@@ -340,7 +339,6 @@ pub fn generate_multipart_body(
             gleam_field,
             field_schema,
             is_required,
-            ctx,
           )
         MultipartBinaryKind ->
           emit_multipart_simple_field(
@@ -378,18 +376,13 @@ pub fn multipart_field_is_binary(
   field_schema: schema.SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case field_schema {
-    Inline(schema.StringSchema(format: Some("binary"), ..)) -> True
-    Reference(..) as schema_ref ->
-      case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(schema.StringSchema(format: Some("binary"), ..)) -> True
-        _ -> False
-      }
+  case context.resolve_schema_ref(field_schema, ctx) {
+    Ok(schema.StringSchema(format: Some("binary"), ..)) -> True
     _ -> False
   }
 }
 
-/// Issue #503: dispatch each multipart field by its high-level shape so
+/// Dispatch each multipart field by its high-level shape so
 /// the generator can emit per-element parts for arrays and a single
 /// JSON-encoded part for objects, while keeping the existing scalar /
 /// binary paths unchanged.
@@ -485,7 +478,7 @@ fn emit_multipart_simple_field(
   }
 }
 
-/// Issue #503: emit one multipart part per element of an array field,
+/// Emit one multipart part per element of an array field,
 /// folding the input list into the running `parts` accumulator. Each
 /// element shares the field name (`name="expand"` repeated) so the
 /// receiver assembles the array from the repeated parts. Optional
@@ -526,7 +519,7 @@ fn emit_multipart_array_field(
   }
 }
 
-/// Issue #503: emit a multipart part for an object field. Per OAS 3
+/// Emit a multipart part for an object field. Per OAS 3
 /// the default serialization is a single part with
 /// `Content-Type: application/json` carrying the JSON-encoded value.
 /// The encoder name is derived from the post-hoist schema reference;
@@ -539,14 +532,13 @@ fn emit_multipart_object_field(
   gleam_field: String,
   field_schema: schema.SchemaRef,
   is_required: Bool,
-  ctx: Context,
 ) -> se.StringBuilder {
   let part_header =
     "\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
     <> field_name
     <> "\\\"\\r\\nContent-Type: application/json\\r\\n\\r\\n\""
   let encoded_value = fn(input_expr: String) -> String {
-    multipart_object_encode_expr(field_schema, input_expr, ctx)
+    multipart_object_encode_expr(field_schema, input_expr)
   }
   case is_required {
     True ->
@@ -578,7 +570,6 @@ fn emit_multipart_object_field(
 fn multipart_object_encode_expr(
   field_schema: schema.SchemaRef,
   input_expr: String,
-  _ctx: Context,
 ) -> String {
   case field_schema {
     Reference(name:, ..) ->
@@ -655,13 +646,8 @@ fn schema_resolves_to_object(
   schema_ref: schema.SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case schema_ref {
-    Inline(schema.ObjectSchema(..)) -> True
-    Reference(..) ->
-      case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(schema.ObjectSchema(..)) -> True
-        _ -> False
-      }
+  case context.resolve_schema_ref(schema_ref, ctx) {
+    Ok(schema.ObjectSchema(..)) -> True
     _ -> False
   }
 }
@@ -671,31 +657,9 @@ fn schema_resolves_to_array(
   schema_ref: schema.SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case schema_ref {
-    Inline(schema.ArraySchema(..)) -> True
-    Reference(..) ->
-      case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(schema.ArraySchema(..)) -> True
-        _ -> False
-      }
+  case context.resolve_schema_ref(schema_ref, ctx) {
+    Ok(schema.ArraySchema(..)) -> True
     _ -> False
-  }
-}
-
-/// Resolve `schema_ref` to its ArraySchema items (post-`$ref`).
-/// Caller is expected to have already gated on `schema_resolves_to_array`.
-fn array_items_of(
-  schema_ref: schema.SchemaRef,
-  ctx: Context,
-) -> Option(schema.SchemaRef) {
-  case schema_ref {
-    Inline(schema.ArraySchema(items:, ..)) -> Some(items)
-    Reference(..) ->
-      case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(schema.ArraySchema(items:, ..)) -> Some(items)
-        _ -> None
-      }
-    _ -> None
   }
 }
 
@@ -793,7 +757,6 @@ fn emit_array_fold(
         element_key_expr,
         "item",
         items_schema,
-        True,
         indent_base + 1,
         "acc",
         // The hoist pass names array-of-object item schemas with an
@@ -810,7 +773,7 @@ fn emit_array_fold(
       // `<prefix>[<i>][<j>]=v`.
       let element_key_expr =
         key_prefix_quoted <> " <> \"[\" <> int.to_string(idx) <> \"]\""
-      case array_items_of(items_schema, ctx) {
+      case schema_utils.array_items(items_schema, ctx) {
         Some(inner_items) ->
           sb
           |> se.indent(
@@ -882,7 +845,6 @@ fn emit_form_object_recurse(
   key_prefix_quoted: String,
   accessor: String,
   schema_ref: schema.SchemaRef,
-  _is_required: Bool,
   indent_base: Int,
   parts_var: String,
   parent_path: String,
@@ -900,7 +862,7 @@ fn emit_form_object_recurse(
         let sub_key_quoted =
           key_prefix_quoted <> " <> \"[" <> prop_name <> "]\""
         let nested_parent = parent_path <> "_" <> prop_field
-        // Issue #309: a required inline single-value string-enum is
+        // A required inline single-value string-enum is
         // dropped from the record but still has to land on the wire,
         // so emit a literal `<key>=<value>` form part instead of
         // accessing `record.<prop>` (which no longer exists).
@@ -973,7 +935,6 @@ fn emit_form_field(
             key_prefix_quoted,
             accessor,
             schema_ref,
-            True,
             indent_base,
             parts_var,
             nested_parent,
@@ -991,7 +952,6 @@ fn emit_form_field(
             key_prefix_quoted,
             "obj",
             schema_ref,
-            True,
             indent_base + 2,
             "acc2",
             nested_parent,
@@ -1005,7 +965,7 @@ fn emit_form_field(
       }
     }
     _, True -> {
-      case array_items_of(schema_ref, ctx) {
+      case schema_utils.array_items(schema_ref, ctx) {
         Some(items) ->
           generate_form_indexed_array(
             sb,
@@ -1124,22 +1084,12 @@ fn generate_form_nested_object(
       let sub_accessor = accessor_prefix <> "." <> sub_field
       let sub_required = list.contains(required_fields, sub_name)
       // Check if sub-property is an object — need recursive bracket encoding
-      let is_sub_object = case sub_ref {
-        Inline(schema.ObjectSchema(..)) -> True
-        Reference(..) as sr ->
-          case context.resolve_schema_ref(sr, ctx) {
-            Ok(schema.ObjectSchema(..)) -> True
-            _ -> False
-          }
+      let is_sub_object = case context.resolve_schema_ref(sub_ref, ctx) {
+        Ok(schema.ObjectSchema(..)) -> True
         _ -> False
       }
-      let is_sub_array = case sub_ref {
-        Inline(schema.ArraySchema(..)) -> True
-        Reference(..) as sr ->
-          case context.resolve_schema_ref(sr, ctx) {
-            Ok(schema.ArraySchema(..)) -> True
-            _ -> False
-          }
+      let is_sub_array = case context.resolve_schema_ref(sub_ref, ctx) {
+        Ok(schema.ArraySchema(..)) -> True
         _ -> False
       }
       let sub_constant =
@@ -1193,7 +1143,7 @@ fn generate_form_nested_object(
           // bracket form (`<parent>[<sub>][<i>]=<v>` for primitive
           // items, `<parent>[<sub>][<i>][<prop>]=<v>` for object
           // items).
-          case array_items_of(sub_ref, ctx) {
+          case schema_utils.array_items(sub_ref, ctx) {
             Some(items_schema) ->
               generate_form_indexed_array(
                 sb,
@@ -1355,26 +1305,16 @@ fn emit_bracket_props(
         let prop_field = naming.to_snake_case(prop_name)
         let prop_accessor = accessor_prefix <> "." <> prop_field
         let prop_required = list.contains(required, prop_name)
-        let is_obj = case prop_ref {
-          Inline(schema.ObjectSchema(..)) -> True
-          Reference(..) as sr ->
-            case context.resolve_schema_ref(sr, ctx) {
-              Ok(schema.ObjectSchema(..)) -> True
-              _ -> False
-            }
+        let is_obj = case context.resolve_schema_ref(prop_ref, ctx) {
+          Ok(schema.ObjectSchema(..)) -> True
           _ -> False
         }
-        let is_arr = case prop_ref {
-          Inline(schema.ArraySchema(..)) -> True
-          Reference(..) as sr ->
-            case context.resolve_schema_ref(sr, ctx) {
-              Ok(schema.ArraySchema(..)) -> True
-              _ -> False
-            }
+        let is_arr = case context.resolve_schema_ref(prop_ref, ctx) {
+          Ok(schema.ArraySchema(..)) -> True
           _ -> False
         }
         let nested_parent = parent_path <> "_" <> prop_field
-        // Issue #309: a required inline single-value string-enum is
+        // A required inline single-value string-enum is
         // dropped from the record but still has to land on the wire.
         // Recurse the constant-property emission here so the bracket
         // path still produces `<key>[<prop>]=<constant>`.
@@ -1412,7 +1352,7 @@ fn emit_bracket_props(
                   ctx,
                 )
               _, True ->
-                case array_items_of(prop_ref, ctx) {
+                case schema_utils.array_items(prop_ref, ctx) {
                   Some(items_schema) ->
                     generate_form_indexed_array(
                       sb,
@@ -1495,7 +1435,6 @@ fn emit_bracket_props(
 fn form_field_json_encoder_expr(
   ref: schema.SchemaRef,
   value: String,
-  _ctx: Context,
 ) -> String {
   case ref {
     Inline(schema.StringSchema(..)) -> "json.string(" <> value <> ")"
@@ -1546,7 +1485,7 @@ fn form_field_json_encoder_fn(ref: schema.SchemaRef) -> String {
 /// would slip back into the bracket-index emitter and panic in
 /// `to_string_fn` after hoist.
 fn field_resolves_to_composite(ref: schema.SchemaRef, ctx: Context) -> Bool {
-  case resolve_schema_object(Some(ref), ctx) {
+  case context.resolve_schema_ref(ref, ctx) |> option.from_result {
     Some(schema.OneOfSchema(..))
     | Some(schema.AnyOfSchema(..))
     | Some(schema.AllOfSchema(..)) -> True
@@ -1559,22 +1498,6 @@ fn field_resolves_to_composite(ref: schema.SchemaRef, ctx: Context) -> Bool {
         field_resolves_to_composite(child_schema, ctx)
       })
     _ -> False
-  }
-}
-
-fn resolve_schema_object(
-  schema_ref: Option(schema.SchemaRef),
-  ctx: Context,
-) -> Option(schema.SchemaObject) {
-  case schema_ref {
-    Some(Inline(s)) -> Some(s)
-    Some(Reference(..) as ref) ->
-      case context.resolve_schema_ref(ref, ctx) {
-        Ok(s) -> Some(s)
-        // nolint: thrown_away_error -- unresolved refs cannot be classified; treat as non-composite and let downstream codegen fail loudly if it actually emits
-        Error(_) -> None
-      }
-    None -> None
   }
 }
 
@@ -1638,7 +1561,7 @@ pub fn generate_form_urlencoded_body(
       let #(field_name, field_schema) = prop
       let gleam_field = naming.to_snake_case(field_name)
       let is_required = list.contains(required_fields, field_name)
-      // Issue #309: a required inline single-value string-enum is
+      // A required inline single-value string-enum is
       // dropped from the generated record but still has to land on
       // the wire. Emit it as a literal `<field>=<value>` form part
       // so the field is sent without trying to read a body field
@@ -1678,22 +1601,12 @@ pub fn generate_form_urlencoded_body(
           }
         },
       )
-      let is_array = case field_schema {
-        Inline(schema.ArraySchema(..)) -> True
-        Reference(..) as sr ->
-          case context.resolve_schema_ref(sr, ctx) {
-            Ok(schema.ArraySchema(..)) -> True
-            _ -> False
-          }
+      let is_array = case context.resolve_schema_ref(field_schema, ctx) {
+        Ok(schema.ArraySchema(..)) -> True
         _ -> False
       }
-      let is_object = case field_schema {
-        Inline(schema.ObjectSchema(..)) -> True
-        Reference(..) as sr ->
-          case context.resolve_schema_ref(sr, ctx) {
-            Ok(schema.ObjectSchema(..)) -> True
-            _ -> False
-          }
+      let is_object = case context.resolve_schema_ref(field_schema, ctx) {
+        Ok(schema.ObjectSchema(..)) -> True
         _ -> False
       }
       // Top-level array of objects (Stripe `marketing_features` shape)
@@ -1702,7 +1615,7 @@ pub fn generate_form_urlencoded_body(
       // `form,explode` repeat shape (`<field>=<v>&<field>=<v>`) for
       // backwards compatibility.
       let array_items = case is_array {
-        True -> array_items_of(field_schema, ctx)
+        True -> schema_utils.array_items(field_schema, ctx)
         False -> None
       }
       let is_array_of_object = case array_items {
@@ -1722,8 +1635,7 @@ pub fn generate_form_urlencoded_body(
         let value_expr = "body." <> gleam_field
         case is_required {
           True -> {
-            let inner =
-              form_field_json_encoder_expr(field_schema, value_expr, ctx)
+            let inner = form_field_json_encoder_expr(field_schema, value_expr)
             sb
             |> se.indent(
               1,
@@ -1735,7 +1647,7 @@ pub fn generate_form_urlencoded_body(
             )
           }
           False -> {
-            let inner = form_field_json_encoder_expr(field_schema, "v", ctx)
+            let inner = form_field_json_encoder_expr(field_schema, "v")
             sb
             |> se.indent(
               1,
@@ -1894,15 +1806,10 @@ pub fn is_exploded_array_param(
   param: spec.Parameter(Resolved),
   ctx: Context,
 ) -> Bool {
-  let is_array = case param.payload {
-    ParameterSchema(Inline(schema.ArraySchema(..))) -> True
-    ParameterSchema(Reference(..) as sr) ->
-      case context.resolve_schema_ref(sr, ctx) {
-        Ok(schema.ArraySchema(..)) -> True
-        _ -> False
-      }
-    _ -> False
-  }
+  let is_array =
+    spec.parameter_schema(param)
+    |> option.then(schema_utils.array_items(_, ctx))
+    |> option.is_some
   case is_array {
     False -> False
     True -> operation_ir.effective_explode(param)
@@ -1916,15 +1823,10 @@ pub fn is_delimited_array_param(
   param: spec.Parameter(Resolved),
   ctx: Context,
 ) -> option.Option(String) {
-  let is_array = case param.payload {
-    ParameterSchema(Inline(schema.ArraySchema(..))) -> True
-    ParameterSchema(Reference(..) as sr) ->
-      case context.resolve_schema_ref(sr, ctx) {
-        Ok(schema.ArraySchema(..)) -> True
-        _ -> False
-      }
-    _ -> False
-  }
+  let is_array =
+    spec.parameter_schema(param)
+    |> option.then(schema_utils.array_items(_, ctx))
+    |> option.is_some
   // Use spec-default explode rules (false for pipe/space) so that omitting
   // `explode` yields the delimited path, matching OpenAPI semantics.
   let is_non_exploded = !operation_ir.effective_explode(param)
@@ -1945,15 +1847,12 @@ pub fn generate_delimited_array_query_param(
   joiner: String,
   ctx: Context,
 ) -> se.StringBuilder {
-  let item_to_str = case param.payload {
-    ParameterSchema(Inline(schema.ArraySchema(items:, ..))) ->
-      array_item_to_string_fn(items, ctx)
-    ParameterSchema(Reference(..) as sr) ->
-      case context.resolve_schema_ref(sr, ctx) {
-        Ok(schema.ArraySchema(items:, ..)) ->
-          array_item_to_string_fn(items, ctx)
-        _ -> "fn(x) { x }"
-      }
+  let item_to_str = case
+    spec.parameter_schema(param)
+    |> option.map(context.resolve_schema_ref(_, ctx))
+  {
+    Some(Ok(schema.ArraySchema(items:, ..))) ->
+      schema_dispatch.to_string_fn(items, ctx)
     _ -> "fn(x) { x }"
   }
   // Empty arrays produce no query entry, matching the exploded path.
@@ -2001,9 +1900,11 @@ pub fn generate_exploded_array_query_param(
   param_name: String,
   ctx: Context,
 ) -> se.StringBuilder {
-  let items_ref = array_items_ref(param, ctx)
+  let items_ref =
+    spec.parameter_schema(param)
+    |> option.then(schema_utils.array_items(_, ctx))
   let json_escape = case items_ref {
-    Some(items) -> !items_resolve_primitive(items, ctx)
+    Some(items) -> !schema_utils.resolves_to_primitive(items, ctx)
     None -> False
   }
   use <- bool.lazy_guard(json_escape, fn() {
@@ -2014,7 +1915,7 @@ pub fn generate_exploded_array_query_param(
   })
 
   let item_to_str = case items_ref {
-    Some(items) -> array_item_to_string_fn(items, ctx)
+    Some(items) -> schema_dispatch.to_string_fn(items, ctx)
     None -> "fn(x) { x }"
   }
   case param.required {
@@ -2043,44 +1944,11 @@ pub fn generate_exploded_array_query_param(
   }
 }
 
-fn array_items_ref(
-  param: spec.Parameter(Resolved),
-  ctx: Context,
-) -> Option(schema.SchemaRef) {
-  case param.payload {
-    ParameterSchema(Inline(schema.ArraySchema(items:, ..))) -> Some(items)
-    ParameterSchema(Reference(..) as sr) ->
-      case context.resolve_schema_ref(sr, ctx) {
-        Ok(schema.ArraySchema(items:, ..)) -> Some(items)
-        _ -> None
-      }
-    _ -> None
-  }
-}
-
-fn items_resolve_primitive(items: schema.SchemaRef, ctx: Context) -> Bool {
-  case items {
-    Inline(schema.StringSchema(..))
-    | Inline(schema.IntegerSchema(..))
-    | Inline(schema.NumberSchema(..))
-    | Inline(schema.BooleanSchema(..)) -> True
-    Reference(..) ->
-      case context.resolve_schema_ref(items, ctx) {
-        Ok(schema.StringSchema(..))
-        | Ok(schema.IntegerSchema(..))
-        | Ok(schema.NumberSchema(..))
-        | Ok(schema.BooleanSchema(..)) -> True
-        _ -> False
-      }
-    _ -> False
-  }
-}
-
 /// Emit an array query parameter whose items resolve to a non-
 /// primitive (object / array / composite) shape via the JSON escape
 /// hatch — the entire list is JSON-encoded into a single value
 /// (`<param>=<JSON array string>`). This matches the form-urlencoded
-/// composite path (PR #542) and keeps the generator from panicking
+/// composite path and keeps the generator from panicking
 /// in `to_string_fn` on non-primitive items.
 fn emit_json_array_query_param(
   sb: se.StringBuilder,
@@ -2120,18 +1988,4 @@ fn emit_json_array_query_param(
       |> se.indent(2, "None -> query")
       |> se.indent(1, "}")
   }
-}
-
-/// Check if a parameter uses deepObject style with an object schema.
-pub fn is_deep_object_param(
-  param: spec.Parameter(Resolved),
-  ctx: Context,
-) -> Bool {
-  operation_ir.is_deep_object_param(param, ctx)
-}
-
-/// Return a function expression that converts an array item to String.
-/// Used in generated code: `list.map(param, <fn>)`.
-fn array_item_to_string_fn(items: schema.SchemaRef, ctx: Context) -> String {
-  schema_dispatch.to_string_fn(items, ctx)
 }

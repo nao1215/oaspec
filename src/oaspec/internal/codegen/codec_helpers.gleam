@@ -1,23 +1,20 @@
 //// Helpers shared between `encoders.gleam` and `decoders.gleam`.
-////
-//// Issue #402: prior to extraction these four helpers were duplicated
-//// in both modules, with the doc comment on `encoders.gleam` flagging
-//// the duplication as a follow-up to #212. The bodies were
-//// byte-identical (modulo function names for the bare-Option pair), so
-//// keeping them in lock-step manually was a maintenance trap. This
-//// module owns the canonical implementations now.
 
 import gleam/string
+
+import gleam/list
+import oaspec/internal/codegen/allof_merge
 import oaspec/internal/codegen/context.{type Context}
+import oaspec/internal/codegen/ir_build
 import oaspec/internal/codegen/schema_dispatch
 import oaspec/openapi/schema.{
-  type SchemaRef, ArraySchema, BooleanSchema, Inline, IntegerSchema,
-  NumberSchema, StringSchema,
+  type SchemaRef, AllOfSchema, AnyOfSchema, ArraySchema, BooleanSchema, Inline,
+  IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema, StringSchema,
 }
 
 /// Escape a spec-derived string so it can be safely interpolated
 /// inside a generated Gleam string literal (e.g. `json.string("...")`).
-/// Constant property values from issue #309 land here — practical
+/// Constant property values land here — practical
 /// values are simple identifiers (`text`, `media`, …) but a spec
 /// could in principle declare an enum value containing `"` or `\`.
 pub fn escape_for_string_literal(value: String) -> String {
@@ -26,27 +23,16 @@ pub fn escape_for_string_literal(value: String) -> String {
   |> string.replace(each: "\"", with: "\\\"")
 }
 
-/// Get element at index from a list, or return a default.
-pub fn list_at_or(lst: List(String), idx: Int, default: String) -> String {
-  case lst, idx {
-    [], _ -> default
-    [head, ..], 0 -> head
-    [_, ..rest], n -> list_at_or(rest, n - 1, default)
-  }
-}
-
 /// Convert a SchemaRef to a qualified Gleam type string (with `types.`
-/// prefix for component refs). `_ctx` is currently unused but kept on
-/// the signature so future ref-resolving variants don't change the
-/// caller surface.
-pub fn qualified_schema_ref_type(ref: SchemaRef, _ctx: Context) -> String {
+/// prefix for component refs).
+pub fn qualified_schema_ref_type(ref: SchemaRef) -> String {
   case ref {
     Inline(schema) -> schema_dispatch.schema_type(schema)
     _ -> schema_dispatch.schema_ref_qualified_type(ref)
   }
 }
 
-/// Issue #387: True when the top-level codec for this schema would
+/// True when the top-level codec for this schema would
 /// emit a bare `Option(...)` wrapper at the surface (decoder declares
 /// `decode.Decoder(Option(...))`, encoder takes a bare `Option(...)`
 /// parameter). Only primitive / array component schemas with
@@ -62,5 +48,40 @@ pub fn schema_ref_has_bare_option_type(ref: SchemaRef) -> Bool {
     Inline(BooleanSchema(metadata:)) -> metadata.nullable
     Inline(ArraySchema(metadata:, ..)) -> metadata.nullable
     _ -> False
+  }
+}
+
+/// True when one of the component schemas is generated as a type in
+/// `types.gleam` (an object, a composite or a string enum), so the codec
+/// module has to import it.
+pub fn needs_types(schemas: List(#(String, SchemaRef))) -> Bool {
+  list.any(schemas, fn(entry) {
+    case entry.1 {
+      Inline(ObjectSchema(..))
+      | Inline(AllOfSchema(..))
+      | Inline(OneOfSchema(..))
+      | Inline(AnyOfSchema(..)) -> True
+      Inline(StringSchema(enum_values:, ..)) -> enum_values != []
+      _ -> False
+    }
+  })
+}
+
+/// The sorted properties and the required names of an inline object or
+/// allOf schema; empty for every other schema.
+pub fn object_properties(
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> #(List(#(String, SchemaRef)), List(String)) {
+  case schema_ref {
+    Inline(ObjectSchema(properties:, required:, ..)) -> #(
+      ir_build.sorted_entries(properties),
+      required,
+    )
+    Inline(AllOfSchema(schemas:, ..)) -> {
+      let merged = allof_merge.merge_allof_schemas(schemas, ctx)
+      #(ir_build.sorted_entries(merged.properties), merged.required)
+    }
+    _ -> #([], [])
   }
 }

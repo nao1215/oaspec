@@ -1,5 +1,3 @@
-import gleam/list
-
 /// Support level for an OpenAPI feature.
 pub type SupportLevel {
   /// Fully supported in parsing and code generation
@@ -295,9 +293,9 @@ pub fn registry() -> List(Capability) {
       "Operation-level and components.callbacks are parsed and preserved (including `$ref` to `#/components/callbacks/...`) but no code is generated for callback endpoints",
     ),
     Capability("xml", "scope", NotHandled, "XML annotations ignored"),
-    // operation-level and path-level server overrides are supported as of #96
-    // (generated clients resolve operation > path > top-level). They are no
-    // longer listed here — absence from the registry means Supported.
+    // Operation-level and path-level server overrides are supported
+    // (generated clients resolve operation > path > top-level); absence
+    // from the registry means Supported.
     Capability(
       "response headers",
       "scope",
@@ -306,9 +304,4 @@ pub fn registry() -> List(Capability) {
     ),
     Capability("encoding", "scope", ParsedNotUsed, "Parsed but no codegen"),
   ]
-}
-
-/// Get capabilities by level.
-pub fn by_level(level: SupportLevel) -> List(Capability) {
-  list.filter(registry(), fn(c) { c.level == level })
 }

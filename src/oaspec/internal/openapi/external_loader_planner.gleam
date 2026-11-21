@@ -8,7 +8,7 @@
 //// here. Splitting these responsibilities lets every diagnostic — local
 //// collision, cross-file collision, missing component, alias chain,
 //// chained external ref — be unit tested without staging fixture files
-//// on disk (issue #372).
+//// on disk.
 
 import filepath
 import gleam/bool
@@ -84,49 +84,14 @@ pub fn find_external_parameter(
   name: String,
   source_path: String,
 ) -> Result(Parameter(Unresolved), Diagnostic) {
-  case loaded.components {
-    Some(components) ->
-      case dict.get(components.parameters, name) {
-        Ok(spec.Value(p)) -> Ok(p)
-        Ok(spec.Ref(_)) ->
-          Error(diagnostic.validation(
-            severity: diagnostic.SeverityError,
-            target: diagnostic.TargetBoth,
-            path: source_path,
-            detail: "External parameter '"
-              <> name
-              <> "' in '"
-              <> source_path
-              <> "' is itself a $ref; chained external refs are not supported.",
-            hint: Some(
-              "Inline the parameter in the external file or flatten the ref chain.",
-            ),
-          ))
-        Error(Nil) ->
-          Error(diagnostic.validation(
-            severity: diagnostic.SeverityError,
-            target: diagnostic.TargetBoth,
-            path: source_path,
-            detail: "External file '"
-              <> source_path
-              <> "' has no components.parameters."
-              <> name,
-            hint: Some(
-              "Verify the ref path and that the referenced file defines the parameter.",
-            ),
-          ))
-      }
-    None ->
-      Error(diagnostic.validation(
-        severity: diagnostic.SeverityError,
-        target: diagnostic.TargetBoth,
-        path: source_path,
-        detail: "External file '" <> source_path <> "' has no components block.",
-        hint: Some(
-          "Add a components.parameters section to the referenced file.",
-        ),
-      ))
-  }
+  use components <- find_external_component(
+    loaded,
+    name,
+    source_path,
+    section: "parameters",
+    kind: "parameter",
+  )
+  components.parameters
 }
 
 /// Look up a request body by name in an external file's components.
@@ -135,49 +100,14 @@ pub fn find_external_request_body(
   name: String,
   source_path: String,
 ) -> Result(RequestBody(Unresolved), Diagnostic) {
-  case loaded.components {
-    Some(components) ->
-      case dict.get(components.request_bodies, name) {
-        Ok(spec.Value(rb)) -> Ok(rb)
-        Ok(spec.Ref(_)) ->
-          Error(diagnostic.validation(
-            severity: diagnostic.SeverityError,
-            target: diagnostic.TargetBoth,
-            path: source_path,
-            detail: "External request body '"
-              <> name
-              <> "' in '"
-              <> source_path
-              <> "' is itself a $ref; chained external refs are not supported.",
-            hint: Some(
-              "Inline the request body in the external file or flatten the ref chain.",
-            ),
-          ))
-        Error(Nil) ->
-          Error(diagnostic.validation(
-            severity: diagnostic.SeverityError,
-            target: diagnostic.TargetBoth,
-            path: source_path,
-            detail: "External file '"
-              <> source_path
-              <> "' has no components.requestBodies."
-              <> name,
-            hint: Some(
-              "Verify the ref path and that the referenced file defines the request body.",
-            ),
-          ))
-      }
-    None ->
-      Error(diagnostic.validation(
-        severity: diagnostic.SeverityError,
-        target: diagnostic.TargetBoth,
-        path: source_path,
-        detail: "External file '" <> source_path <> "' has no components block.",
-        hint: Some(
-          "Add a components.requestBodies section to the referenced file.",
-        ),
-      ))
-  }
+  use components <- find_external_component(
+    loaded,
+    name,
+    source_path,
+    section: "requestBodies",
+    kind: "request body",
+  )
+  components.request_bodies
 }
 
 /// Look up a response by name in an external file's components.
@@ -186,47 +116,14 @@ pub fn find_external_response(
   name: String,
   source_path: String,
 ) -> Result(Response(Unresolved), Diagnostic) {
-  case loaded.components {
-    Some(components) ->
-      case dict.get(components.responses, name) {
-        Ok(spec.Value(r)) -> Ok(r)
-        Ok(spec.Ref(_)) ->
-          Error(diagnostic.validation(
-            severity: diagnostic.SeverityError,
-            target: diagnostic.TargetBoth,
-            path: source_path,
-            detail: "External response '"
-              <> name
-              <> "' in '"
-              <> source_path
-              <> "' is itself a $ref; chained external refs are not supported.",
-            hint: Some(
-              "Inline the response in the external file or flatten the ref chain.",
-            ),
-          ))
-        Error(Nil) ->
-          Error(diagnostic.validation(
-            severity: diagnostic.SeverityError,
-            target: diagnostic.TargetBoth,
-            path: source_path,
-            detail: "External file '"
-              <> source_path
-              <> "' has no components.responses."
-              <> name,
-            hint: Some(
-              "Verify the ref path and that the referenced file defines the response.",
-            ),
-          ))
-      }
-    None ->
-      Error(diagnostic.validation(
-        severity: diagnostic.SeverityError,
-        target: diagnostic.TargetBoth,
-        path: source_path,
-        detail: "External file '" <> source_path <> "' has no components block.",
-        hint: Some("Add a components.responses section to the referenced file."),
-      ))
-  }
+  use components <- find_external_component(
+    loaded,
+    name,
+    source_path,
+    section: "responses",
+    kind: "response",
+  )
+  components.responses
 }
 
 /// Look up a path item by name in an external file's components.
@@ -235,46 +132,72 @@ pub fn find_external_path_item(
   name: String,
   source_path: String,
 ) -> Result(PathItem(Unresolved), Diagnostic) {
+  use components <- find_external_component(
+    loaded,
+    name,
+    source_path,
+    section: "pathItems",
+    kind: "path item",
+  )
+  components.path_items
+}
+
+/// Look up `name` in the `components.<section>` map that `entries` picks
+/// out of an external file. A missing components block, a missing entry and
+/// an entry that is itself a `$ref` are each reported as an error.
+fn find_external_component(
+  loaded: OpenApiSpec(Unresolved),
+  name: String,
+  source_path: String,
+  section section: String,
+  kind kind: String,
+  entries entries: fn(spec.Components(Unresolved)) ->
+    dict.Dict(String, spec.RefOr(a)),
+) -> Result(a, Diagnostic) {
+  let error = fn(detail, hint) {
+    Error(diagnostic.validation(
+      severity: diagnostic.SeverityError,
+      target: diagnostic.TargetBoth,
+      path: source_path,
+      detail:,
+      hint: Some(hint),
+    ))
+  }
   case loaded.components {
     Some(components) ->
-      case dict.get(components.path_items, name) {
-        Ok(spec.Value(pi)) -> Ok(pi)
+      case dict.get(entries(components), name) {
+        Ok(spec.Value(value)) -> Ok(value)
         Ok(spec.Ref(_)) ->
-          Error(diagnostic.validation(
-            severity: diagnostic.SeverityError,
-            target: diagnostic.TargetBoth,
-            path: source_path,
-            detail: "External path item '"
+          error(
+            "External "
+              <> kind
+              <> " '"
               <> name
               <> "' in '"
               <> source_path
               <> "' is itself a $ref; chained external refs are not supported.",
-            hint: Some(
-              "Inline the path item in the external file or flatten the ref chain.",
-            ),
-          ))
+            "Inline the "
+              <> kind
+              <> " in the external file or flatten the ref chain.",
+          )
         Error(Nil) ->
-          Error(diagnostic.validation(
-            severity: diagnostic.SeverityError,
-            target: diagnostic.TargetBoth,
-            path: source_path,
-            detail: "External file '"
+          error(
+            "External file '"
               <> source_path
-              <> "' has no components.pathItems."
+              <> "' has no components."
+              <> section
+              <> "."
               <> name,
-            hint: Some(
-              "Verify the ref path and that the referenced file defines the path item.",
-            ),
-          ))
+            "Verify the ref path and that the referenced file defines the "
+              <> kind
+              <> ".",
+          )
       }
     None ->
-      Error(diagnostic.validation(
-        severity: diagnostic.SeverityError,
-        target: diagnostic.TargetBoth,
-        path: source_path,
-        detail: "External file '" <> source_path <> "' has no components block.",
-        hint: Some("Add a components.pathItems section to the referenced file."),
-      ))
+      error(
+        "External file '" <> source_path <> "' has no components block.",
+        "Add a components." <> section <> " section to the referenced file.",
+      )
   }
 }
 

@@ -447,8 +447,8 @@ pub fn write_all_on_write_callback_fires_per_written_file_test() {
 fn make_operation(
   parameters: List(spec.RefOr(spec.Parameter(spec.Resolved))),
   request_body: option.Option(spec.RefOr(spec.RequestBody(spec.Resolved))),
-) -> #(String, spec.Operation(spec.Resolved), String, spec.HttpMethod) {
-  #(
+) -> context.AnalyzedOperation {
+  context.AnalyzedOperation(
     "testOp",
     spec.Operation(
       operation_id: Some("testOp"),

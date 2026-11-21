@@ -6,8 +6,9 @@ import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/guards
 import oaspec/internal/codegen/import_analysis
 import oaspec/internal/codegen/operation_ir
+import oaspec/internal/codegen/schema_utils
 import oaspec/internal/util/content_type as ct_util
-import oaspec/openapi/schema.{Inline, Reference}
+import oaspec/openapi/schema.{Inline}
 import oaspec/openapi/spec.{ParameterSchema, Value}
 
 /// Structured import / helper requirements for client generation.
@@ -39,7 +40,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
   let operations = context.operations(ctx)
   let all_params =
     list.flat_map(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.filter_map(operation.parameters, fn(ref_p) {
         case ref_p {
           Value(p) -> Ok(p)
@@ -76,7 +77,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     })
   let has_multi_content_response =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(dict.to_list(operation.responses), fn(entry) {
         let #(_, ref_or) = entry
         case ref_or {
@@ -88,7 +89,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
 
   let has_form_urlencoded =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       case operation.request_body {
         Some(Value(rb)) ->
           list.any(dict.to_list(rb.content), fn(ce) {
@@ -101,7 +102,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
 
   let has_multipart =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       case operation.request_body {
         Some(Value(rb)) ->
           list.any(dict.to_list(rb.content), fn(ce) {
@@ -112,7 +113,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
       }
     })
 
-  // Issue #503: a multipart body with `array` properties uses
+  // A multipart body with `array` properties uses
   // `list.fold(...)` to expand into per-element parts, and `object`
   // properties use `json.to_string(encode.encode_<schema>_json(...))`
   // to emit a JSON-bodied part. Surface those needs to the import
@@ -134,13 +135,13 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
   let has_multipart_optional_complex_field =
     multipart_has_optional_complex_field(operations, ctx)
 
-  // Issue #502: deepObject parameters expand each property into a
+  // DeepObject parameters expand each property into a
   // bracketed-bracketed query entry; optional outer or inner
   // properties wrap the emission in `Some(_) -> ... None -> query`
   // arms so the import set must carry the option constructors.
   let has_deep_object_param =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(operation.parameters, fn(rp) {
         case rp {
           Value(p) -> operation_ir.is_deep_object_param(p, ctx)
@@ -149,7 +150,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
       })
     })
 
-  // Issue #387: when any response declares `headers:`, the client
+  // When any response declares `headers:`, the client
   // assembles a typed headers record by calling `list.key_find` on
   // `resp.headers`. That makes `gleam/list` mandatory and (for any
   // optional header field) brings `Some`/`None` into the body of the
@@ -157,7 +158,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
   // the right shapes.
   let has_response_headers =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(dict.to_list(operation.responses), fn(entry) {
         let #(_, ref_or) = entry
         case ref_or {
@@ -168,7 +169,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     })
   let has_optional_response_headers =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(dict.to_list(operation.responses), fn(entry) {
         let #(_, ref_or) = entry
         case ref_or {
@@ -186,34 +187,28 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     has_form_urlencoded
     || has_multi_content_response
     || has_response_headers
-    // Issue #503: array fields fold the input via list.fold; object
+    // Array fields fold the input via list.fold; object
     // fields don't need list directly but other multipart paths might.
     || has_multipart_array_field
     || list.any(all_params, fn(p) { p.in_ == spec.InQuery })
     || list.any(all_params, fn(p) { p.in_ == spec.InCookie })
     || list.any(all_params, fn(p) { p.in_ == spec.InHeader })
     || list.any(all_params, fn(p) {
-      case p.payload {
-        ParameterSchema(Inline(schema.ArraySchema(..))) -> True
-        ParameterSchema(Reference(..) as sr) ->
-          case context.resolve_schema_ref(sr, ctx) {
-            Ok(schema.ArraySchema(..)) -> True
-            _ -> False
-          }
-        _ -> False
-      }
+      spec.parameter_schema(p)
+      |> option.then(schema_utils.array_items(_, ctx))
+      |> option.is_some
     })
 
   let needs_dyn_decode =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(dict.to_list(operation.responses), fn(entry) {
         let #(_, ref_or) = entry
         case ref_or {
           Value(response) ->
             list.any(dict.to_list(response.content), fn(ce) {
               let #(media_type_name, mt) = ce
-              // Issue #504: */* and application/octet-stream responses
+              // */* and application/octet-stream responses
               // decode through `bytes_body`, not `dyn_decode`, so they
               // must not pull the dynamic-decode import in even when
               // their inline schema is a primitive.
@@ -222,14 +217,9 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
                 ct_util.ApplicationOctetStream | ct_util.Wildcard -> False
                 _ ->
                   case mt.schema {
-                    // Issue #493 / CodeRabbit follow-up: array
-                    // responses keyed by `$ref` items also go
-                    // through `dyn_decode.list(...)` now (instead
-                    // of the synthetic `decode_<name>_list`
-                    // wrapper), so the import must fire for them
-                    // too. Without this, generated client code
-                    // references `dyn_decode.list` without
-                    // importing the module.
+                    // Array responses keyed by `$ref` items also go
+                    // through `dyn_decode.list(...)`, so the import
+                    // must fire for them too.
                     Some(Inline(schema.ArraySchema(items: _, ..))) -> True
                     Some(Inline(schema.StringSchema(..))) -> True
                     Some(Inline(schema.IntegerSchema(..))) -> True
@@ -246,7 +236,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
 
   let has_form_urlencoded_json_escape =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       case operation.request_body {
         Some(Value(rb)) ->
           list.any(dict.to_list(rb.content), fn(ce) {
@@ -262,24 +252,24 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
 
   // Query / header / cookie array params with non-primitive items
   // and deepObject params with composite sub-properties both emit
-  // `json.to_string(...)` from PR #543's residual-shapes fixes.
+  // `json.to_string(...)`.
   let has_param_json_escape =
     list.any(all_params, fn(p) { param_uses_json_escape(p, ctx) })
 
   let needs_json =
     needs_dyn_decode
-    // Issue #503: object multipart fields are JSON-encoded into one part,
+    // Object multipart fields are JSON-encoded into one part,
     // pulling in json.to_string + the per-schema encoder.
     || has_multipart_object_field
     || has_form_urlencoded_json_escape
     || has_param_json_escape
     || list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       case operation.request_body {
         Some(Value(rb)) ->
           list.any(dict.to_list(rb.content), fn(ce) {
             let #(ct_name, mt) = ce
-            // Issue #485: an `application/octet-stream` body is
+            // An `application/octet-stream` body is
             // wrapped via `transport.BytesBody`, not
             // `json.to_string`, so a `type: string, format: binary`
             // request body must not pull in `gleam/json`.
@@ -313,7 +303,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
   // appearing in client function SIGNATURES. Optional response
   // headers do not surface in signatures (only as `Some`/`None`
   // constructors inside function bodies), so they are not added
-  // here — Issue #387.
+  // here.
   let needs_option_type =
     import_analysis.operations_have_optional_params(operations)
     || import_analysis.operations_have_optional_body(operations)
@@ -321,10 +311,10 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     needs_option_type
     || has_optional_response_headers
     || any_operation_has_server(ctx)
-    // Issue #503: optional multipart object/array fields wrap the
+    // Optional multipart object/array fields wrap the
     // per-field emission in a `Some(v) -> ... None -> parts` arm.
     || has_multipart_optional_complex_field
-    // Issue #502: deepObject params unwrap optional outer / inner
+    // DeepObject params unwrap optional outer / inner
     // properties through `Some(...) -> ... None -> query`.
     || has_deep_object_param
   let needs_none_ctor =
@@ -334,12 +324,12 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     || has_multipart_optional_complex_field
     || has_deep_object_param
 
-  // Issue #387: typed response headers (`type: integer`, `type: number`)
+  // Typed response headers (`type: integer`, `type: number`)
   // are extracted via `int.parse` / `float.parse`, so we must import
   // those modules whenever any operation declares such a header.
   let has_int_response_header =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(dict.to_list(operation.responses), fn(entry) {
         let #(_, ref_or) = entry
         case ref_or {
@@ -357,7 +347,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     })
   let has_float_response_header =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(dict.to_list(operation.responses), fn(entry) {
         let #(_, ref_or) = entry
         case ref_or {
@@ -408,19 +398,15 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     has_int_response_header
     || has_form_urlencoded_int
     || list.any(all_params, fn(p) {
-      case p.payload {
-        ParameterSchema(Inline(schema.IntegerSchema(..))) -> True
-        ParameterSchema(Inline(schema.ArraySchema(
-          items: Inline(schema.IntegerSchema(..)),
-          ..,
-        ))) -> True
-        ParameterSchema(Reference(..) as sr) ->
-          case context.resolve_schema_ref(sr, ctx) {
-            Ok(schema.IntegerSchema(..)) -> True
-            Ok(schema.ArraySchema(items: Inline(schema.IntegerSchema(..)), ..)) ->
-              True
-            _ -> False
-          }
+      case
+        spec.parameter_schema(p)
+        |> option.map(context.resolve_schema_ref(_, ctx))
+      {
+        Some(Ok(schema.IntegerSchema(..)))
+        | Some(Ok(schema.ArraySchema(
+            items: Inline(schema.IntegerSchema(..)),
+            ..,
+          ))) -> True
         _ -> False
       }
     })
@@ -441,7 +427,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
   // the helper anyway leaves it defined-but-unreferenced.
   let needs_bytes_helper =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(dict.to_list(operation.responses), fn(entry) {
         let #(_, ref_or) = entry
         case ref_or {
@@ -461,7 +447,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
 
   let needs_text_helper =
     list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       list.any(dict.to_list(operation.responses), fn(entry) {
         let #(_, ref_or) = entry
         case ref_or {
@@ -487,7 +473,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
   let needs_guards =
     config.validate(context.config(ctx))
     && list.any(operations, fn(op) {
-      let #(_, operation, _, _) = op
+      let context.AnalyzedOperation(_, operation, _, _) = op
       case operation.request_body {
         Some(Value(rb)) -> {
           let content_entries = dict.to_list(rb.content)
@@ -527,7 +513,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
   )
 }
 
-/// Issue #503: predicate helpers for multipart object/array fields.
+/// Predicate helpers for multipart object/array fields.
 /// Detects whether any operation has a multipart/form-data body
 /// containing a property whose resolved schema matches `pred`.
 fn multipart_has_field(
@@ -536,7 +522,7 @@ fn multipart_has_field(
   pred: fn(schema.SchemaObject) -> Bool,
 ) -> Bool {
   list.any(operations, fn(op) {
-    let #(_, operation, _, _) = op
+    let context.AnalyzedOperation(_, operation, _, _) = op
     case operation.request_body {
       Some(Value(rb)) ->
         case dict.get(rb.content, "multipart/form-data") {
@@ -544,7 +530,9 @@ fn multipart_has_field(
             multipart_object_props(media_type.schema, ctx)
             |> list.any(fn(entry) {
               let #(_, prop_ref) = entry
-              case resolve_to_object(prop_ref, ctx) {
+              case
+                context.resolve_schema_ref(prop_ref, ctx) |> option.from_result
+              {
                 Some(s) -> pred(s)
                 None -> False
               }
@@ -562,19 +550,26 @@ fn multipart_has_optional_complex_field(
   ctx: Context,
 ) -> Bool {
   list.any(operations, fn(op) {
-    let #(_, operation, _, _) = op
+    let context.AnalyzedOperation(_, operation, _, _) = op
     case operation.request_body {
       Some(Value(rb)) ->
         case dict.get(rb.content, "multipart/form-data") {
           Ok(media_type) ->
-            case resolve_to_object(option_or_none(media_type.schema), ctx) {
+            case
+              option.then(media_type.schema, fn(r) {
+                context.resolve_schema_ref(r, ctx) |> option.from_result
+              })
+            {
               Some(schema.ObjectSchema(properties:, required:, ..)) ->
                 dict.to_list(properties)
                 |> list.any(fn(entry) {
                   let #(name, prop_ref) = entry
                   let is_optional = !list.contains(required, name)
                   is_optional
-                  && case resolve_to_object(prop_ref, ctx) {
+                  && case
+                    context.resolve_schema_ref(prop_ref, ctx)
+                    |> option.from_result
+                  {
                     Some(schema.ArraySchema(..)) -> True
                     Some(schema.ObjectSchema(..)) -> True
                     _ -> False
@@ -594,24 +589,13 @@ fn multipart_object_props(
   media_schema: Option(schema.SchemaRef),
   ctx: Context,
 ) -> List(#(String, schema.SchemaRef)) {
-  case resolve_to_object(option_or_none(media_schema), ctx) {
+  case
+    option.then(media_schema, fn(r) {
+      context.resolve_schema_ref(r, ctx) |> option.from_result
+    })
+  {
     Some(schema.ObjectSchema(properties:, ..)) -> dict.to_list(properties)
     _ -> []
-  }
-}
-
-fn resolve_to_object(
-  ref: schema.SchemaRef,
-  ctx: Context,
-) -> Option(schema.SchemaObject) {
-  case ref {
-    schema.Inline(s) -> Some(s)
-    schema.Reference(..) ->
-      case context.resolve_schema_ref(ref, ctx) {
-        Ok(s) -> Some(s)
-        // nolint: thrown_away_error -- unresolved refs are reported by the resolver; the import gate just falls back to "no match"
-        Error(_) -> None
-      }
   }
 }
 
@@ -635,7 +619,11 @@ fn form_body_uses_json_escape(mt: spec.MediaType, ctx: Context) -> Bool {
         None -> False
       }
     })
-  let composite = case resolve_to_object(option_or_none(mt.schema), ctx) {
+  let composite = case
+    option.then(mt.schema, fn(r) {
+      context.resolve_schema_ref(r, ctx) |> option.from_result
+    })
+  {
     Some(schema.ObjectSchema(properties:, ..)) ->
       dict.to_list(properties)
       |> list.any(fn(entry) {
@@ -659,17 +647,11 @@ fn param_uses_json_escape(
     spec.InQuery -> True
     _ -> False
   }
-  let array_items = case param.payload {
-    ParameterSchema(Inline(schema.ArraySchema(items:, ..))) -> Some(items)
-    ParameterSchema(Reference(..) as sr) ->
-      case context.resolve_schema_ref(sr, ctx) {
-        Ok(schema.ArraySchema(items:, ..)) -> Some(items)
-        _ -> None
-      }
-    _ -> None
-  }
+  let array_items =
+    spec.parameter_schema(param)
+    |> option.then(schema_utils.array_items(_, ctx))
   let array_with_non_primitive_items = case in_query, array_items {
-    True, Some(items) -> !items_resolve_primitive_local(items, ctx)
+    True, Some(items) -> !schema_utils.resolves_to_primitive(items, ctx)
     _, _ -> False
   }
   let deep_object_composite = case
@@ -677,7 +659,9 @@ fn param_uses_json_escape(
   {
     True ->
       case
-        resolve_to_object(option_or_none(spec.parameter_schema(param)), ctx)
+        option.then(spec.parameter_schema(param), fn(r) {
+          context.resolve_schema_ref(r, ctx) |> option.from_result
+        })
       {
         Some(schema.ObjectSchema(properties:, ..)) ->
           dict.to_list(properties)
@@ -692,27 +676,6 @@ fn param_uses_json_escape(
   array_with_non_primitive_items || deep_object_composite
 }
 
-fn items_resolve_primitive_local(
-  items: schema.SchemaRef,
-  ctx: Context,
-) -> Bool {
-  case items {
-    Inline(schema.StringSchema(..))
-    | Inline(schema.IntegerSchema(..))
-    | Inline(schema.NumberSchema(..))
-    | Inline(schema.BooleanSchema(..)) -> True
-    Reference(..) ->
-      case context.resolve_schema_ref(items, ctx) {
-        Ok(schema.StringSchema(..))
-        | Ok(schema.IntegerSchema(..))
-        | Ok(schema.NumberSchema(..))
-        | Ok(schema.BooleanSchema(..)) -> True
-        _ -> False
-      }
-    _ -> False
-  }
-}
-
 /// Returns True when any operation's `application/x-www-form-urlencoded`
 /// body has a primitive leaf (anywhere in the property tree) matching
 /// `pred`. The form-body emitter walks objects and arrays recursively,
@@ -724,14 +687,18 @@ fn form_body_has_primitive(
   pred: fn(schema.SchemaObject) -> Bool,
 ) -> Bool {
   list.any(operations, fn(op) {
-    let #(_, operation, _, _) = op
+    let context.AnalyzedOperation(_, operation, _, _) = op
     case operation.request_body {
       Some(Value(rb)) ->
         list.any(dict.to_list(rb.content), fn(ce) {
           let #(ct_name, mt) = ce
           case ct_util.from_string(ct_name) {
             ct_util.FormUrlEncoded ->
-              case resolve_to_object(option_or_none(mt.schema), ctx) {
+              case
+                option.then(mt.schema, fn(r) {
+                  context.resolve_schema_ref(r, ctx) |> option.from_result
+                })
+              {
                 Some(s) -> ref_contains_primitive(Inline(s), ctx, pred)
                 None -> False
               }
@@ -748,7 +715,7 @@ fn ref_contains_primitive(
   ctx: Context,
   pred: fn(schema.SchemaObject) -> Bool,
 ) -> Bool {
-  case resolve_to_object(ref, ctx) {
+  case context.resolve_schema_ref(ref, ctx) |> option.from_result {
     Some(s) ->
       case pred(s) {
         True -> True
@@ -770,7 +737,7 @@ fn ref_contains_primitive(
 }
 
 fn ref_contains_composite(ref: schema.SchemaRef, ctx: Context) -> Bool {
-  case resolve_to_object(ref, ctx) {
+  case context.resolve_schema_ref(ref, ctx) |> option.from_result {
     Some(schema.OneOfSchema(..))
     | Some(schema.AnyOfSchema(..))
     | Some(schema.AllOfSchema(..)) -> True
@@ -785,7 +752,7 @@ fn ref_contains_composite(ref: schema.SchemaRef, ctx: Context) -> Bool {
   }
 }
 
-/// Issue #519: predicate helper for deepObject query parameter
+/// Predicate helper for deepObject query parameter
 /// sub-properties. Detects whether any deepObject query parameter has
 /// a (recursively-nested) property whose resolved schema matches
 /// `pred`. The deepObject codegen path emits `int.to_string` /
@@ -798,7 +765,7 @@ fn deep_object_param_has_property(
   pred: fn(schema.SchemaObject) -> Bool,
 ) -> Bool {
   list.any(operations, fn(op) {
-    let #(_, operation, _, _) = op
+    let context.AnalyzedOperation(_, operation, _, _) = op
     list.any(operation.parameters, fn(rp) {
       case rp {
         Value(p) ->
@@ -807,7 +774,9 @@ fn deep_object_param_has_property(
             True ->
               case spec.parameter_schema(p) {
                 Some(ref) ->
-                  case resolve_to_object(ref, ctx) {
+                  case
+                    context.resolve_schema_ref(ref, ctx) |> option.from_result
+                  {
                     Some(obj) -> object_properties_match(obj, ctx, pred)
                     None -> False
                   }
@@ -834,28 +803,13 @@ fn object_properties_match(
     schema.ObjectSchema(properties:, ..) ->
       list.any(dict.to_list(properties), fn(entry) {
         let #(_, prop_ref) = entry
-        case resolve_to_object(prop_ref, ctx) {
+        case context.resolve_schema_ref(prop_ref, ctx) |> option.from_result {
           Some(prop_schema) ->
             pred(prop_schema) || object_properties_match(prop_schema, ctx, pred)
           None -> False
         }
       })
     _ -> False
-  }
-}
-
-fn option_or_none(ref: Option(schema.SchemaRef)) -> schema.SchemaRef {
-  case ref {
-    Some(r) -> r
-    None ->
-      schema.Inline(schema.ObjectSchema(
-        metadata: schema.default_metadata(),
-        properties: dict.new(),
-        required: [],
-        additional_properties: schema.Unspecified,
-        min_properties: option.None,
-        max_properties: option.None,
-      ))
   }
 }
 
@@ -941,7 +895,7 @@ pub fn imports(requirements: ClientRequirements, ctx: Context) -> List(String) {
 
 fn any_operation_has_server(ctx: Context) -> Bool {
   list.any(context.operations(ctx), fn(op) {
-    let #(_, operation, _, _) = op
+    let context.AnalyzedOperation(_, operation, _, _) = op
     case operation.servers {
       [] ->
         case context.spec(ctx).servers {
@@ -955,7 +909,7 @@ fn any_operation_has_server(ctx: Context) -> Bool {
 
 fn any_operation_has_no_server(ctx: Context) -> Bool {
   list.any(context.operations(ctx), fn(op) {
-    let #(_, operation, _, _) = op
+    let context.AnalyzedOperation(_, operation, _, _) = op
     case operation.servers {
       [] ->
         case context.spec(ctx).servers {

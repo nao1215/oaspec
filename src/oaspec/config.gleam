@@ -40,7 +40,7 @@ pub type HandlerLayout {
   PerOperation
 }
 
-/// Issue #387: subset filter for codegen. When non-empty, only
+/// Subset filter for codegen. When non-empty, only
 /// operations matching at least one of the listed `tags` or `paths`
 /// are kept; the others are dropped before capability check, hoist,
 /// and validate.
@@ -124,7 +124,7 @@ pub fn validate(cfg: Config) -> Bool {
   cfg.validate
 }
 
-/// Operation include filter (tags / paths). Issue #387.
+/// Operation include filter (tags / paths).
 pub fn include(cfg: Config) -> Include {
   cfg.include
 }
@@ -198,7 +198,7 @@ pub fn load(path: String) -> Result(Config, ConfigError) {
 /// sharing the top-level `input:`, `mode:`, `validate:`, and
 /// `handlers:` values.
 pub fn load_all(path: String) -> Result(List(Config), ConfigError) {
-  // Issue #524: yay's Erlang FFI for `parse_string` returns a raw
+  // Yay's Erlang FFI for `parse_string` returns a raw
   // `{yaml_error, Message, {Line, Col}}` tuple in some failure
   // modes, which doesn't structurally match either constructor of
   // `yay.YamlError`. The downstream `yaml_error_to_string` then
@@ -263,7 +263,7 @@ pub fn load_all(path: String) -> Result(List(Config), ConfigError) {
       ))
   })
 
-  // When `validate:` is omitted, the default is mode-dependent (issue #268).
+  // When `validate:` is omitted, the default is mode-dependent.
   // Server-mode codegen with `validate: false` lets schema-invalid input
   // (`minimum`, `maximum`, `pattern`, `minLength`, `maxLength` violations)
   // through to user handlers — security-adjacent and surprising. The
@@ -302,7 +302,7 @@ pub fn load_all(path: String) -> Result(List(Config), ConfigError) {
     },
   )
 
-  // Issue #387: when `targets:` is present, walk the sequence and
+  // When `targets:` is present, walk the sequence and
   // build one `Config` per item, each inheriting the shared
   // input/mode/validate values from the root. When absent, the root
   // itself is the implicit single target (legacy single-target
@@ -365,14 +365,13 @@ fn parse_target_node(
   // defaulted to `./gen`, which produced the worst-of-both first-
   // contact friction: the generator reported success but
   // `gleam build` could not see the generated modules until the
-  // user added an `output:` block. (Issue #568.)
+  // user added an `output:` block.
   //
   // The `_client` suffix is only needed in `Both` mode to
   // disambiguate the two output trees inside a single `<dir>`. In
   // client-only mode there is no server output to clash with, so
   // the default client output is just `<dir>/<package>` and the
-  // generated `import <package>/...` lines resolve correctly
-  // (Issue #262).
+  // generated `import <package>/...` lines resolve correctly.
   //
   // The unused field in single-mode configs (e.g. `output_server`
   // in client-only mode) is set to a sensible-looking placeholder
@@ -488,7 +487,7 @@ pub fn with_validate(config: Config, validate: Bool) -> Config {
   Config(..config, validate:)
 }
 
-/// Apply include-filter override (Issue #387). Useful for tests
+/// Apply include-filter override. Useful for tests
 /// that build a `Config` in memory.
 pub fn with_include(config: Config, include: Include) -> Config {
   Config(..config, include:)
@@ -506,7 +505,7 @@ pub fn with_handler_layout(
 /// Apply output base directory override.
 /// Derives server/client paths as <dir>/<package> and <dir>/<package>_client
 /// in `Both` mode. In client-only mode the client path drops the suffix
-/// (Issue #262) so generated `import <package>/...` lines resolve.
+/// so generated `import <package>/...` lines resolve.
 ///
 /// The suffix decision reads `config.mode` at call time, so apply
 /// `with_mode/2` before `with_output/2` if both overrides are needed —
@@ -532,11 +531,11 @@ pub fn with_output(config: Config, output: Option(String)) -> Config {
 /// Server output must end in `<package>` so generated imports such as
 /// `import <package>/types` resolve. Client output may end in either
 /// `<package>` (when client lives in its own project) or `<package>_client`
-/// (the new default since Issue #248 — both server and client share the same
+/// (the new default sinceboth server and client share the same
 /// `<dir>` and need distinct basenames). Anything else is a misconfigured
 /// package/output mismatch the user should be told about.
 ///
-/// Nested packages (Issue #387): a `package` containing `/` such as
+/// Nested packages: a `package` containing `/` such as
 /// `dco_check/github` declares an N-segment Gleam module path. The path
 /// tail compared against the package is N segments deep — the LAST N
 /// segments of the output path must equal the package's segments. The
@@ -654,7 +653,7 @@ fn suffix_last_segment(segments: List(String), suffix: String) -> List(String) {
 
 /// Validate the on-disk layout implied by `output.dir`.
 ///
-/// Issue #319: when `output.dir` is something like `./src/gen`, generated
+/// When `output.dir` is something like `./src/gen`, generated
 /// code lands at `src/gen/<pkg>/types.gleam` whose Gleam module path is
 /// `gen/<pkg>/types` — but oaspec emits `import <pkg>/types`, which the
 /// compiler can't resolve. Catch this at config time so the user sees a
@@ -667,7 +666,7 @@ fn suffix_last_segment(segments: List(String), suffix: String) -> List(String) {
 /// Gleam-project pattern). `src` in any other position is the
 /// foot-gun.
 ///
-/// Nested packages (Issue #387): for a package like `dco_check/github`
+/// Nested packages: for a package like `dco_check/github`
 /// the "package directory" is the last 2 path segments, and the rule
 /// applies to whatever sits BEFORE that pair. So `./src/dco_check/github`
 /// has parent chain `[src]` (immediate parent `src` → ok), and
@@ -763,7 +762,7 @@ fn yaml_error_to_string(error: yay.YamlError) -> String {
   }
 }
 
-/// Issue #524: detect a config path whose extension is clearly not
+/// Detect a config path whose extension is clearly not
 /// YAML so we can short-circuit with a friendly diagnostic before
 /// the YAML parser hits a shape mismatch and crashes. Returns the
 /// extension (lowercased, without the dot) when the file is plainly

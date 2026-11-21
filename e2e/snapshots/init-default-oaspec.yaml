@@ -29,7 +29,7 @@ package: api
 
 # Output settings (optional). Defaults land inside ./src so a
 # freshly-generated project is buildable by `gleam build` without
-# any further config (#568):
+# any further config:
 #   server -> ./src/<package>
 #   client -> ./src/<package>_client (Both mode) or ./src/<package> (Client mode)
 # Override individual targets via output.server / output.client, or
@@ -41,7 +41,7 @@ package: api
 #   server: ./src/api             # Override server output path
 #   client: ./src/api_client      # Override client output path
 
-# Operation filter (optional, Issue #387). When set, codegen only
+# Operation filter (optional). When set, codegen only
 # emits operations whose tag list intersects `tags` OR whose path
 # matches one of `paths` (the two lists are unioned, not
 # intersected). Path patterns ending in `/**` match any path that
@@ -54,10 +54,11 @@ package: api
 #     - "/users/{username}"
 #     - "/repos/**"
 
-# Multi-target codegen (optional, Issue #387). When `targets:` is
+# Multi-target codegen (optional). When `targets:` is
 # set, the same input spec is generated once per entry, each with
 # its own `package`, `output`, and `include`. The top-level
-# `input`, `mode`, and `validate` are shared across every target.
+# `input`, `mode`, `validate`, and `handlers` are shared across every
+# target.
 # Targets whose output paths overlap are rejected at config-load
 # time. `--output` cannot be used with multi-target configs.
 # targets:

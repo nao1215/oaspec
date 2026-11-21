@@ -29,6 +29,7 @@ pub fn operations_matches_direct_collect_test() {
   let cached = context.operations(ctx)
   let direct = operations.collect_operations(context.spec(ctx))
   cached
+  |> list.map(fn(op) { #(op.operation_id, op.operation, op.path, op.method) })
   |> should.equal(direct)
 }
 
@@ -44,7 +45,7 @@ pub fn operations_petstore_op_ids_test() {
   let ctx = test_helpers.make_ctx(petstore)
   let op_ids =
     context.operations(ctx)
-    |> list.map(fn(op) { op.0 })
+    |> list.map(fn(op) { op.operation_id })
   // petstore.yaml fixture defines operationIds explicitly, so the synthesizer
   // path is not exercised here — but we lock in the canonical set so any
   // accidental reshuffling shows up as a failed test.
@@ -60,7 +61,7 @@ pub fn operations_paths_are_sorted_test() {
   let ctx = test_helpers.make_ctx(petstore)
   let paths =
     context.operations(ctx)
-    |> list.map(fn(op) { op.2 })
+    |> list.map(fn(op) { op.path })
   // collect_operations sorts paths alphabetically before flat-mapping methods,
   // so the resulting path sequence must be non-decreasing.
   paths
@@ -74,15 +75,15 @@ pub fn operations_petstore_snapshot_test() {
     context.operations(ctx)
     |> list.map(fn(op) {
       #(
-        op.0,
-        spec.method_to_lower(op.3),
-        op.2,
-        list.length(op.1.parameters),
-        case op.1.request_body {
+        op.operation_id,
+        spec.method_to_lower(op.method),
+        op.path,
+        list.length(op.operation.parameters),
+        case op.operation.request_body {
           Some(_) -> True
           None -> False
         },
-        list.length(op.1.servers),
+        list.length(op.operation.servers),
       )
     })
 

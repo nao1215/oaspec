@@ -340,7 +340,7 @@ fn parse_typed_schema(
       let raw_maximum = parser_value.optional_int(node, "maximum")
       let numeric_excl_min = parser_value.optional_int(node, "exclusiveMinimum")
       let numeric_excl_max = parser_value.optional_int(node, "exclusiveMaximum")
-      // Issue #523: OAS 3.0 expresses exclusive bounds as a boolean
+      // OAS 3.0 expresses exclusive bounds as a boolean
       // companion to `minimum` / `maximum` (`exclusiveMinimum: true`
       // → `minimum` becomes a strict lower bound). OAS 3.1 expresses
       // them as a numeric value with no separate `minimum`. Accept
@@ -400,7 +400,7 @@ fn parse_typed_schema(
         parser_value.optional_float(node, "exclusiveMinimum")
       let numeric_excl_max =
         parser_value.optional_float(node, "exclusiveMaximum")
-      // Issue #523: OAS 3.0 boolean form for `exclusiveMinimum` /
+      // OAS 3.0 boolean form for `exclusiveMinimum` /
       // `exclusiveMaximum`. See the integer branch above.
       let bool_excl_min = parser_value.optional_bool(node, "exclusiveMinimum")
       let bool_excl_max = parser_value.optional_bool(node, "exclusiveMaximum")
@@ -499,7 +499,7 @@ fn parse_typed_schema(
           }
           // Per JSON Schema, absent additionalProperties still permits extra
           // keys at runtime, but we surface them in generated types only when
-          // the spec asks for them (true / schema). See Issue #249.
+          // the spec asks for them (true / schema).
           _ -> Ok(schema.Unspecified)
         },
       )
@@ -590,7 +590,7 @@ fn parse_discriminator(
       _,
       path: "schema",
       field: "discriminator",
-      loc: location_index.lookup_field(index, "schema", "discriminator"),
+      location: location_index.lookup_field(index, "schema", "discriminator"),
     )),
   )
 
@@ -600,7 +600,11 @@ fn parse_discriminator(
       _,
       path: "discriminator",
       field: "propertyName",
-      loc: location_index.lookup_field(index, "discriminator", "propertyName"),
+      location: location_index.lookup_field(
+        index,
+        "discriminator",
+        "propertyName",
+      ),
     )),
   )
 
@@ -612,10 +616,9 @@ fn parse_discriminator(
   Ok(Discriminator(property_name:, mapping:))
 }
 
-// Issue #589: helpers that catch schema constraint violations at parse
-// time. Pre-fix the parser silently stored values like `multipleOf: 0`
-// or `minLength: 10, maxLength: 5`, and downstream codegen emitted
-// guards that were never satisfied. Each helper returns Ok(Nil) when
+// Helpers that catch schema constraint violations at parse
+// time, such as `multipleOf: 0` or `minLength: 10, maxLength: 5`, for
+// which codegen would emit guards that are never satisfied. Each helper returns Ok(Nil) when
 // the constraint holds and surfaces an invalid_value diagnostic
 // otherwise.
 

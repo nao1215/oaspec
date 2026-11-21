@@ -25,7 +25,7 @@ pub type HttpStatusCode {
 /// Anything else — `'0'`, `'-1'`, `'1000'`, `'+200'`, the leading-zero form
 /// `'0200'`, integer overflow — is rejected here so the codegen does not
 /// emit dead Gleam decode arms for codes the HTTP layer cannot deliver and
-/// so `'0200'` does not silently collapse onto `'200'` (#587).
+/// so `'0200'` does not silently collapse onto `'200'`.
 pub fn parse_status_code(code: String) -> Result(HttpStatusCode, Nil) {
   case code {
     "default" -> Ok(DefaultStatus)
@@ -46,7 +46,7 @@ pub fn parse_status_code(code: String) -> Result(HttpStatusCode, Nil) {
 /// (`'0200'` → `Status(200)`) is therefore caught only on the string
 /// path; on the Int path we accept the value if it falls in range and
 /// rely on a separate "canonical YAML key" rule to surface stylistic
-/// concerns. (#587)
+/// concerns.
 pub fn http_status_from_int(n: Int) -> Result(HttpStatusCode, Nil) {
   use <- bool.guard(when: n < 100 || n > 599, return: Error(Nil))
   Ok(Status(n))
@@ -79,12 +79,10 @@ pub fn status_code_to_string(code: HttpStatusCode) -> String {
 /// Get a human-readable suffix for a given HTTP status code.
 /// Used to build anonymous type names like "ListPetsResponseOk".
 ///
-/// Issue #525: every code in the IANA HTTP Status Code Registry (and
-/// RFC 9110 §15) gets a semantic PascalCased reason-phrase suffix —
-/// previously only a handful of common codes (200, 201, 204, 400,
-/// 401, 403, 404, 409, 422, 500) were named, and the rest fell back
-/// to the numeric `Status<N>` form, which made the generated
-/// response variants inconsistent (200 → `Ok`, 202 → `Status202`).
+/// Every code in the IANA HTTP Status Code Registry (and
+/// RFC 9110 §15) gets a semantic PascalCased reason-phrase suffix, so
+/// the generated response variants are named consistently (200 → `Ok`,
+/// 202 → `Accepted`).
 pub fn status_code_suffix(code: HttpStatusCode) -> String {
   case code {
     // 1xx Informational
@@ -192,9 +190,10 @@ pub fn sort_response_entries(
   })
 }
 
-/// Convert an HttpStatusCode to an integer string for use in ServerResponse.
+/// The Gleam integer literal, as source text, for an HttpStatusCode in a
+/// generated ServerResponse.
 /// Range codes and DefaultStatus map to a representative status code.
-pub fn status_code_to_int(code: HttpStatusCode) -> String {
+pub fn status_code_to_int_literal(code: HttpStatusCode) -> String {
   case code {
     DefaultStatus -> "500"
     StatusRange(n) -> int.to_string(n * 100)

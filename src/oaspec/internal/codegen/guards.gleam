@@ -100,14 +100,7 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
 
 /// Build the structured guard module before rendering.
 pub fn build_module(ctx: Context) -> GuardModule {
-  let schemas = case context.spec(ctx).components {
-    Some(components) ->
-      list.sort(dict.to_list(components.schemas), fn(a, b) {
-        string.compare(a.0, b.0)
-      })
-      |> list.filter(fn(entry) { !ir_build.is_internal_schema(entry.1) })
-    None -> []
-  }
+  let schemas = context.component_schemas(ctx)
 
   // Determine which imports are needed based on constraint types present.
   // Generated guard functions use string/list.length for validation;
@@ -162,10 +155,7 @@ pub fn build_module(ctx: Context) -> GuardModule {
     list.any(schemas, fn(entry) {
       let #(name, schema_ref) = entry
       let guard_calls = collect_guard_calls(name, schema_ref, ctx)
-      list.any(guard_calls, fn(call) {
-        let #(_, _, is_required, _, _) = call
-        !is_required
-      })
+      list.any(guard_calls, fn(call) { !call.is_required })
     })
   // The bare `Option` type is needed only when a composite signature
   // actually contains `Option(...)` — separate from `needs_option`,
@@ -192,7 +182,7 @@ pub fn build_module(ctx: Context) -> GuardModule {
     False, _ -> imports
   }
 
-  // Issue #520: nested-composite and composite-list emissions use
+  // Nested-composite and composite-list emissions use
   // `list.append`/`list.reverse`/`list.fold` to merge inner failures
   // into the outer accumulator, so `gleam/list` becomes mandatory
   // whenever any schema has a Composite or CompositeList call —
@@ -203,8 +193,7 @@ pub fn build_module(ctx: Context) -> GuardModule {
       let #(name, schema_ref) = entry
       let guard_calls = collect_guard_calls(name, schema_ref, ctx)
       list.any(guard_calls, fn(call) {
-        let #(_, _, _, kind, _) = call
-        case kind {
+        case call.kind {
           Composite | CompositeList -> True
           Direct -> False
         }
@@ -571,7 +560,7 @@ fn maybe_one(value: Option(a)) -> List(a) {
 }
 
 // ---------------------------------------------------------------------------
-// #339: per-field validator de-duplication across allOf children.
+// Per-field validator de-duplication across allOf children.
 // ---------------------------------------------------------------------------
 
 /// Post-process a generated `guards.gleam` source string and collapse
@@ -611,7 +600,7 @@ fn collect_constraint_types(
 }
 
 /// Collect constraint types from a single schema ref.
-/// Issue #297: `seen` tracks visited $ref names to break circular references.
+/// `seen` tracks visited $ref names to break circular references.
 fn collect_schema_constraint_types(
   acc: ConstraintTypes,
   schema_ref: SchemaRef,
@@ -668,7 +657,7 @@ fn collect_schema_constraint_types_inner(
     | Ok(IntegerSchema(exclusive_maximum: Some(_), ..))
     | Ok(IntegerSchema(multiple_of: Some(_), ..)) ->
       ConstraintTypes(..acc, has_integer: True)
-    // Issue #521: a NumberSchema with both `minimum` and
+    // A NumberSchema with both `minimum` and
     // `multipleOf` declared was hitting the range arm first (because
     // pattern arms are tried top-down), which left
     // `has_float_multiple_of` False — the resulting `guards.gleam`
@@ -832,7 +821,13 @@ fn build_composite_guard_function(
       let gleam_type = composite_validator_type(name, schema_ref, ctx)
       let call_lines =
         list.flat_map(guard_calls, fn(call) {
-          let #(guard_fn, accessor, is_required, kind, extra_unwrap) = call
+          let GuardCall(
+            guard_fn:,
+            accessor:,
+            is_required:,
+            kind:,
+            extra_unwrap:,
+          ) = call
           case kind, is_required, extra_unwrap {
             Direct, True, _ -> [
               "  let errors = case " <> guard_fn <> "(" <> accessor <> ") {",
@@ -863,7 +858,7 @@ fn build_composite_guard_function(
               "    _ -> errors",
               "  }",
             ]
-            // Issue #520: nested-record validators return
+            // Nested-record validators return
             // `Result(_, List(ValidationFailure))`; merge their failure
             // list into the outer accumulator.
             Composite, True, _ -> [
@@ -890,7 +885,7 @@ fn build_composite_guard_function(
               "    _ -> errors",
               "  }",
             ]
-            // Issue #520: lists of validatable records are folded so
+            // Lists of validatable records are folded so
             // every element runs through the inner composite validator.
             CompositeList, True, _ -> [
               "  let errors = list.fold("
@@ -1013,7 +1008,7 @@ fn character_word(n: Int) -> String {
   }
 }
 
-// Issue #403: shared range-guard skeleton. The 7 build_*_guard_function
+// Shared range-guard skeleton. The 7 build_*_guard_function
 // helpers below differ only in: function-name suffix, docs phrase,
 // param / return type, the value-extraction prelude (e.g.
 // `let len = string.length(value)`), the variable that gets compared,
@@ -1389,7 +1384,7 @@ fn build_float_multiple_of_guard_function(
         ],
         param_decl: "value: Float",
         return_type: "Result(Float, ValidationFailure)",
-        // Issue #521: the prior expression
+        // The prior expression
         //   value -. float.truncate(value /. m |> int.to_float) *. m
         // was malformed — the `|> int.to_float` was applied to a
         // Float (the result of `value /. m`) instead of the Int
@@ -1564,15 +1559,21 @@ type GuardCallKind {
 
 /// A guard call with metadata about whether the field is optional and
 /// what shape its validator returns.
-/// `#(guard_fn_name, accessor_expr, is_required, kind, extra_unwrap)`.
 ///
 /// `extra_unwrap` is True when the accessor's runtime type is
 /// `Option(Option(T))` — i.e. the field is not in `required` AND
 /// references a `nullable: true` primitive (whose alias is itself
 /// `Option(T)`). The composite validator must peel both `Option`
 /// layers before calling the per-constraint validator.
-type GuardCall =
-  #(String, String, Bool, GuardCallKind, Bool)
+type GuardCall {
+  GuardCall(
+    guard_fn: String,
+    accessor: String,
+    is_required: Bool,
+    kind: GuardCallKind,
+    extra_unwrap: Bool,
+  )
+}
 
 /// Collect all guard function calls for a schema's constrained fields.
 fn collect_guard_calls(
@@ -1635,12 +1636,12 @@ fn collect_guard_calls_visiting(
           // validate at runtime anyway.
           case additional_properties {
             Typed(_) | Untyped -> [
-              #(
-                guard_function_name(name, "", "properties"),
-                "value.additional_properties",
-                True,
-                Direct,
-                False,
+              GuardCall(
+                guard_fn: guard_function_name(name, "", "properties"),
+                accessor: "value.additional_properties",
+                is_required: True,
+                kind: Direct,
+                extra_unwrap: False,
               ),
             ]
             _ -> []
@@ -1691,12 +1692,12 @@ fn collect_guard_calls_visiting(
         True, _, _ -> []
         False, None, None -> []
         False, _, _ -> [
-          #(
-            guard_function_name(name, "", "length"),
-            "value",
-            is_req,
-            Direct,
-            False,
+          GuardCall(
+            guard_fn: guard_function_name(name, "", "length"),
+            accessor: "value",
+            is_required: is_req,
+            kind: Direct,
+            extra_unwrap: False,
           ),
         ]
       }
@@ -1705,12 +1706,12 @@ fn collect_guard_calls_visiting(
         False, None -> calls
         False, Some(_) ->
           list.append(calls, [
-            #(
-              guard_function_name(name, "", "pattern"),
-              "value",
-              is_req,
-              Direct,
-              False,
+            GuardCall(
+              guard_fn: guard_function_name(name, "", "pattern"),
+              accessor: "value",
+              is_required: is_req,
+              kind: Direct,
+              extra_unwrap: False,
             ),
           ])
       }
@@ -1725,44 +1726,21 @@ fn collect_guard_calls_visiting(
       ..,
     )) -> {
       let is_req = !metadata.nullable
-      let calls = case minimum, maximum {
-        None, None -> []
-        _, _ -> [
-          #(
-            guard_function_name(name, "", "range"),
-            "value",
-            is_req,
-            Direct,
-            False,
-          ),
-        ]
-      }
-      let calls = case exclusive_minimum, exclusive_maximum {
-        None, None -> calls
-        _, _ ->
-          list.append(calls, [
-            #(
-              guard_function_name(name, "", "exclusive_range"),
-              "value",
-              is_req,
-              Direct,
-              False,
-            ),
-          ])
-      }
-      case multiple_of {
-        None -> calls
-        Some(_) ->
-          list.append(calls, [
-            #(
-              guard_function_name(name, "", "multiple_of"),
-              "value",
-              is_req,
-              Direct,
-              False,
-            ),
-          ])
-      }
+      numeric_guard_calls(
+        fn(suffix) {
+          GuardCall(
+            guard_fn: guard_function_name(name, "", suffix),
+            accessor: "value",
+            is_required: is_req,
+            kind: Direct,
+            extra_unwrap: False,
+          )
+        },
+        range: option.is_some(minimum) || option.is_some(maximum),
+        exclusive_range: option.is_some(exclusive_minimum)
+          || option.is_some(exclusive_maximum),
+        multiple_of: option.is_some(multiple_of),
+      )
     }
     Ok(NumberSchema(
       metadata:,
@@ -1774,67 +1752,44 @@ fn collect_guard_calls_visiting(
       ..,
     )) -> {
       let is_req = !metadata.nullable
-      let calls = case minimum, maximum {
-        None, None -> []
-        _, _ -> [
-          #(
-            guard_function_name(name, "", "range"),
-            "value",
-            is_req,
-            Direct,
-            False,
-          ),
-        ]
-      }
-      let calls = case exclusive_minimum, exclusive_maximum {
-        None, None -> calls
-        _, _ ->
-          list.append(calls, [
-            #(
-              guard_function_name(name, "", "exclusive_range"),
-              "value",
-              is_req,
-              Direct,
-              False,
-            ),
-          ])
-      }
-      case multiple_of {
-        None -> calls
-        Some(_) ->
-          list.append(calls, [
-            #(
-              guard_function_name(name, "", "multiple_of"),
-              "value",
-              is_req,
-              Direct,
-              False,
-            ),
-          ])
-      }
+      numeric_guard_calls(
+        fn(suffix) {
+          GuardCall(
+            guard_fn: guard_function_name(name, "", suffix),
+            accessor: "value",
+            is_required: is_req,
+            kind: Direct,
+            extra_unwrap: False,
+          )
+        },
+        range: option.is_some(minimum) || option.is_some(maximum),
+        exclusive_range: option.is_some(exclusive_minimum)
+          || option.is_some(exclusive_maximum),
+        multiple_of: option.is_some(multiple_of),
+      )
     }
     Ok(ArraySchema(metadata:, min_items:, max_items:, unique_items:, ..)) -> {
       let is_req = !metadata.nullable
       let length_calls = case min_items, max_items {
         None, None -> []
         _, _ -> [
-          #(
-            guard_function_name(name, "", "length"),
-            "value",
-            is_req,
-            Direct,
-            False,
+          GuardCall(
+            guard_fn: guard_function_name(name, "", "length"),
+            accessor: "value",
+            is_required: is_req,
+            kind: Direct,
+            extra_unwrap: False,
           ),
         ]
       }
       let unique_calls = case unique_items {
         True -> [
-          #(
-            guard_function_name(name, "", "unique"),
-            "value",
-            is_req,
-            Direct,
-            False,
+          GuardCall(
+            guard_fn: guard_function_name(name, "", "unique"),
+            accessor: "value",
+            is_required: is_req,
+            kind: Direct,
+            extra_unwrap: False,
           ),
         ]
         False -> []
@@ -1887,12 +1842,12 @@ fn collect_field_guard_calls(
         True, _, _ -> []
         False, None, None -> []
         False, _, _ -> [
-          #(
-            guard_function_name(schema_name, prop_name, "length"),
-            accessor,
-            is_required,
-            Direct,
-            extra_unwrap,
+          GuardCall(
+            guard_fn: guard_function_name(schema_name, prop_name, "length"),
+            accessor: accessor,
+            is_required: is_required,
+            kind: Direct,
+            extra_unwrap: extra_unwrap,
           ),
         ]
       }
@@ -1901,12 +1856,12 @@ fn collect_field_guard_calls(
         False, None -> calls
         False, Some(_) ->
           list.append(calls, [
-            #(
-              guard_function_name(schema_name, prop_name, "pattern"),
-              accessor,
-              is_required,
-              Direct,
-              extra_unwrap,
+            GuardCall(
+              guard_fn: guard_function_name(schema_name, prop_name, "pattern"),
+              accessor: accessor,
+              is_required: is_required,
+              kind: Direct,
+              extra_unwrap: extra_unwrap,
             ),
           ])
       }
@@ -1919,44 +1874,21 @@ fn collect_field_guard_calls(
       multiple_of:,
       ..,
     )) -> {
-      let calls = case minimum, maximum {
-        None, None -> []
-        _, _ -> [
-          #(
-            guard_function_name(schema_name, prop_name, "range"),
-            accessor,
-            is_required,
-            Direct,
-            extra_unwrap,
-          ),
-        ]
-      }
-      let calls = case exclusive_minimum, exclusive_maximum {
-        None, None -> calls
-        _, _ ->
-          list.append(calls, [
-            #(
-              guard_function_name(schema_name, prop_name, "exclusive_range"),
-              accessor,
-              is_required,
-              Direct,
-              extra_unwrap,
-            ),
-          ])
-      }
-      case multiple_of {
-        None -> calls
-        Some(_) ->
-          list.append(calls, [
-            #(
-              guard_function_name(schema_name, prop_name, "multiple_of"),
-              accessor,
-              is_required,
-              Direct,
-              extra_unwrap,
-            ),
-          ])
-      }
+      numeric_guard_calls(
+        fn(suffix) {
+          GuardCall(
+            guard_fn: guard_function_name(schema_name, prop_name, suffix),
+            accessor: accessor,
+            is_required: is_required,
+            kind: Direct,
+            extra_unwrap: extra_unwrap,
+          )
+        },
+        range: option.is_some(minimum) || option.is_some(maximum),
+        exclusive_range: option.is_some(exclusive_minimum)
+          || option.is_some(exclusive_maximum),
+        multiple_of: option.is_some(multiple_of),
+      )
     }
     Ok(NumberSchema(
       minimum:,
@@ -1966,71 +1898,48 @@ fn collect_field_guard_calls(
       multiple_of:,
       ..,
     )) -> {
-      let calls = case minimum, maximum {
-        None, None -> []
-        _, _ -> [
-          #(
-            guard_function_name(schema_name, prop_name, "range"),
-            accessor,
-            is_required,
-            Direct,
-            extra_unwrap,
-          ),
-        ]
-      }
-      let calls = case exclusive_minimum, exclusive_maximum {
-        None, None -> calls
-        _, _ ->
-          list.append(calls, [
-            #(
-              guard_function_name(schema_name, prop_name, "exclusive_range"),
-              accessor,
-              is_required,
-              Direct,
-              extra_unwrap,
-            ),
-          ])
-      }
-      case multiple_of {
-        None -> calls
-        Some(_) ->
-          list.append(calls, [
-            #(
-              guard_function_name(schema_name, prop_name, "multiple_of"),
-              accessor,
-              is_required,
-              Direct,
-              extra_unwrap,
-            ),
-          ])
-      }
+      numeric_guard_calls(
+        fn(suffix) {
+          GuardCall(
+            guard_fn: guard_function_name(schema_name, prop_name, suffix),
+            accessor: accessor,
+            is_required: is_required,
+            kind: Direct,
+            extra_unwrap: extra_unwrap,
+          )
+        },
+        range: option.is_some(minimum) || option.is_some(maximum),
+        exclusive_range: option.is_some(exclusive_minimum)
+          || option.is_some(exclusive_maximum),
+        multiple_of: option.is_some(multiple_of),
+      )
     }
     Ok(ArraySchema(items:, min_items:, max_items:, unique_items:, ..)) -> {
       let length_calls = case min_items, max_items {
         None, None -> []
         _, _ -> [
-          #(
-            guard_function_name(schema_name, prop_name, "length"),
-            accessor,
-            is_required,
-            Direct,
-            extra_unwrap,
+          GuardCall(
+            guard_fn: guard_function_name(schema_name, prop_name, "length"),
+            accessor: accessor,
+            is_required: is_required,
+            kind: Direct,
+            extra_unwrap: extra_unwrap,
           ),
         ]
       }
       let unique_calls = case unique_items {
         True -> [
-          #(
-            guard_function_name(schema_name, prop_name, "unique"),
-            accessor,
-            is_required,
-            Direct,
-            extra_unwrap,
+          GuardCall(
+            guard_fn: guard_function_name(schema_name, prop_name, "unique"),
+            accessor: accessor,
+            is_required: is_required,
+            kind: Direct,
+            extra_unwrap: extra_unwrap,
           ),
         ]
         False -> []
       }
-      // Issue #520: when the array's items are a `$ref` to a schema
+      // When the array's items are a `$ref` to a schema
       // that has its own composite validator, fold over the list and
       // run the inner validator on every element. Without this, an
       // out-of-range element in `Poll.options` (where each option has
@@ -2040,12 +1949,12 @@ fn collect_field_guard_calls(
         Reference(name: item_name, ..) ->
           case schema_has_validator_visiting(item_name, ctx, visiting) {
             True -> [
-              #(
-                "validate_" <> naming.to_snake_case(item_name),
-                accessor,
-                is_required,
-                CompositeList,
-                extra_unwrap,
+              GuardCall(
+                guard_fn: "validate_" <> naming.to_snake_case(item_name),
+                accessor: accessor,
+                is_required: is_required,
+                kind: CompositeList,
+                extra_unwrap: extra_unwrap,
               ),
             ]
             False -> []
@@ -2054,22 +1963,21 @@ fn collect_field_guard_calls(
       }
       list.flatten([length_calls, unique_calls, item_calls])
     }
-    // Issue #520: a property whose schema is a `$ref` to a record
+    // A property whose schema is a `$ref` to a record
     // type with its own composite validator should propagate that
-    // record's failures into the outer aggregator. Pre-fix,
-    // out-of-range nested fields slipped past `validate_<outer>`
-    // entirely.
+    // record's failures into the outer aggregator, so out-of-range
+    // nested fields do not slip past `validate_<outer>`.
     Ok(ObjectSchema(..)) ->
       case prop_ref {
         Reference(name: ref_name, ..) ->
           case schema_has_validator_visiting(ref_name, ctx, visiting) {
             True -> [
-              #(
-                "validate_" <> naming.to_snake_case(ref_name),
-                accessor,
-                is_required,
-                Composite,
-                extra_unwrap,
+              GuardCall(
+                guard_fn: "validate_" <> naming.to_snake_case(ref_name),
+                accessor: accessor,
+                is_required: is_required,
+                kind: Composite,
+                extra_unwrap: extra_unwrap,
               ),
             ]
             False -> []
@@ -2078,4 +1986,25 @@ fn collect_field_guard_calls(
       }
     _ -> []
   }
+}
+
+/// The range, exclusive-range and multiple-of guard calls of a numeric
+/// schema, in that order, each built by `call` from its name suffix.
+fn numeric_guard_calls(
+  call: fn(String) -> GuardCall,
+  range range: Bool,
+  exclusive_range exclusive_range: Bool,
+  multiple_of multiple_of: Bool,
+) -> List(GuardCall) {
+  [
+    #(range, "range"),
+    #(exclusive_range, "exclusive_range"),
+    #(multiple_of, "multiple_of"),
+  ]
+  |> list.filter_map(fn(entry) {
+    case entry.0 {
+      True -> Ok(call(entry.1))
+      False -> Error(Nil)
+    }
+  })
 }

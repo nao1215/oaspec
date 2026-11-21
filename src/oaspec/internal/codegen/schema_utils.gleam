@@ -1,14 +1,14 @@
-/// Shared schema analysis utilities used by types.gleam and ir_build.gleam.
-/// Extracted to break the import-cycle that previously forced ir_build.gleam
-/// to mirror these helpers from types.gleam.
+/// Shared schema analysis utilities used by types.gleam, ir_build.gleam
+/// and the other codegen modules.
 import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/set
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/openapi/schema.{
-  type SchemaObject, type SchemaRef, AllOfSchema, Forbidden, Inline,
-  ObjectSchema, OneOfSchema, Reference, StringSchema, Typed, Untyped,
+  type SchemaObject, type SchemaRef, AllOfSchema, ArraySchema, BooleanSchema,
+  Forbidden, Inline, IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema,
+  Reference, StringSchema, Typed, Untyped,
 }
 
 /// Whether `leaf` holds for the schema or for a schema it is built from:
@@ -176,7 +176,7 @@ pub fn schema_has_optional_fields(schema_ref: SchemaRef, ctx: Context) -> Bool {
   )
 }
 
-/// Issue #309: detect a property that is fully determined by the
+/// Detect a property that is fully determined by the
 /// schema — an inline string-enum with exactly one allowed value that
 /// the parent schema lists as required. Such a property is a constant
 /// marker on the wire (e.g. a `kind: type: string, enum: [text]`
@@ -309,5 +309,25 @@ pub fn filter_write_only_properties(
       )
     }
     _ -> schema_obj
+  }
+}
+
+/// True when `schema_ref` is, or is a `$ref` to, a string, integer, number
+/// or boolean schema.
+pub fn resolves_to_primitive(schema_ref: SchemaRef, ctx: Context) -> Bool {
+  case context.resolve_schema_ref(schema_ref, ctx) {
+    Ok(StringSchema(..))
+    | Ok(IntegerSchema(..))
+    | Ok(NumberSchema(..))
+    | Ok(BooleanSchema(..)) -> True
+    _ -> False
+  }
+}
+
+/// The items schema when `schema_ref` is, or is a `$ref` to, an array.
+pub fn array_items(schema_ref: SchemaRef, ctx: Context) -> Option(SchemaRef) {
+  case context.resolve_schema_ref(schema_ref, ctx) {
+    Ok(ArraySchema(items:, ..)) -> Some(items)
+    _ -> None
   }
 }

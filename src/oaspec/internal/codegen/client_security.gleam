@@ -1,21 +1,10 @@
-import gleam/bool
 import gleam/dict
 import gleam/list
 import gleam/option.{Some}
 import gleam/string
 import oaspec/internal/codegen/context.{type Context}
-import oaspec/openapi/spec.{type Resolved}
-
-/// Capitalize the first letter of a string. Used to render HTTP scheme
-/// prefixes like `Bearer` / `Basic` / `Digest` in the emitted security
-/// metadata.
-pub fn capitalize_first(value: String) -> String {
-  case string.pop_grapheme(value) {
-    Ok(#(first, rest)) -> string.uppercase(first) <> rest
-    // nolint: thrown_away_error -- empty string has no first grapheme; fall back to the original value
-    Error(_) -> value
-  }
-}
+import oaspec/internal/util/naming
+import oaspec/openapi/spec
 
 /// Render the OpenAPI security requirements for an operation as a Gleam
 /// list-of-`SecurityAlternative` literal that can be inlined into a
@@ -72,7 +61,7 @@ fn render_requirement(
             spec.HttpScheme(scheme: prefix, ..) ->
               Ok(http_authorization(
                 scheme_ref.scheme_name,
-                capitalize_first(prefix),
+                naming.capitalize(prefix),
               ))
             spec.OAuth2Scheme(..) | spec.OpenIdConnectScheme(..) ->
               Ok(http_authorization(scheme_ref.scheme_name, "Bearer"))
@@ -111,14 +100,4 @@ fn field_label(variant: String) -> String {
     "ApiKeyCookie" -> "cookie_name"
     _ -> "name"
   }
-}
-
-/// Wrap a value expression with `uri.percent_encode` unless the parameter
-/// declares `allowReserved: true`.
-pub fn maybe_percent_encode(
-  value_expr: String,
-  param: spec.Parameter(Resolved),
-) -> String {
-  use <- bool.guard(param.allow_reserved, value_expr)
-  "uri.percent_encode(" <> value_expr <> ")"
 }

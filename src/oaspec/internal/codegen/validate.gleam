@@ -5,6 +5,7 @@ import gleam/regexp
 import gleam/string
 import oaspec/config
 import oaspec/internal/codegen/context.{type Context}
+import oaspec/internal/codegen/schema_utils
 import oaspec/internal/util/content_type
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
@@ -19,7 +20,7 @@ import oaspec/openapi/spec.{type Resolved}
 /// Validate the parsed spec for unsupported patterns.
 /// Returns a list of errors; empty list means validation passed.
 ///
-/// operationId uniqueness is enforced here with a hard error (issue #237):
+/// operationId uniqueness is enforced here with a hard error:
 /// silently renaming duplicates would mutate the generated public API
 /// surface without telling the user, which is worse than failing the spec.
 pub fn validate(ctx: Context) -> List(Diagnostic) {
@@ -29,16 +30,10 @@ pub fn validate(ctx: Context) -> List(Diagnostic) {
   let schema_errors = validate_component_schemas(ctx)
   let schema_collision_errors = validate_unique_schema_names(ctx)
   let security_errors = validate_security_schemes(ctx, operations)
-  // Issue #493: the previous `validate_decode_list_collisions` check
-  // hard-rejected any spec that declared both `Foo` and `FooList` as
-  // component schemas, because the codegen would emit two
-  // `decode_foo_list` functions (a synthetic one for `List(Foo)` and
-  // the user's `FooList` decoder). Real-world specs (Kubernetes,
-  // Stripe) routinely use this naming, and the user does not own the
-  // upstream definitions. The codegen now disambiguates the synthetic
-  // name to `decode_foo_list_items` whenever `FooList` is also
-  // declared (see `naming.synthetic_list_suffix`), so this validator
-  // pass is no longer needed.
+  // A spec may declare both `Foo` and `FooList` (Kubernetes and Stripe
+  // do); the codegen names the synthetic `List(Foo)` decoder
+  // `decode_foo_list_items` in that case (see
+  // `naming.synthetic_list_suffix`), so no collision check is needed.
   list.flatten([
     op_errors,
     opid_errors,
@@ -97,13 +92,11 @@ fn group_operations_by_id(
   key_fn: fn(String) -> String,
 ) -> Dict(String, List(String)) {
   // Accumulate site lists in reverse (prepend is O(1)) then reverse each
-  // value once at the end. The previous `list.append(existing, [site])`
-  // shape was O(N²) on the number of duplicates per key, which matters
-  // when a large spec accidentally collides many operationIds under the
-  // same case-folded form.
+  // value once at the end, so a large spec that collides many
+  // operationIds under the same case-folded form stays O(N).
   let reversed =
     list.fold(operations, dict.new(), fn(acc, entry) {
-      let #(op_id, _operation, path, method) = entry
+      let context.AnalyzedOperation(op_id, _operation, path, method) = entry
       let key = key_fn(op_id)
       let site = string.uppercase(spec.method_to_string(method)) <> " " <> path
       case dict.get(acc, key) {
@@ -147,18 +140,13 @@ fn duplicate_function_name_diagnostic(
   )
 }
 
-/// Convert a validation error to a human-readable string.
-pub fn error_to_string(error: Diagnostic) -> String {
-  diagnostic.to_string(error)
-}
-
 /// Validate all operations for unsupported patterns.
 fn validate_operations(
   ctx: Context,
   operations: List(context.AnalyzedOperation),
 ) -> List(Diagnostic) {
   list.flat_map(operations, fn(op) {
-    let #(op_id, operation, path, _method) = op
+    let context.AnalyzedOperation(op_id, operation, path, _method) = op
     // All refs are guaranteed to be resolved by this point
     let resolved_params = list.map(operation.parameters, spec.unwrap_ref)
     let resolved_request_body = case operation.request_body {
@@ -245,6 +233,7 @@ fn validate_path_template_params(
 fn extract_path_template_names(path: String) -> List(String) {
   // nolint: assert_ok_pattern -- compile-time constant regex literal cannot fail to parse
   let assert Ok(re) = regexp.from_string("\\{([^}]+)\\}")
+    as "the path template placeholder regex literal compiles"
   regexp.scan(re, path)
   |> list.filter_map(fn(match) {
     case match.submatches {
@@ -301,13 +290,11 @@ fn validate_parameters(
     let complex_schema_errors = validate_complex_param_schema(path, p, ctx)
     let server_structured_param_errors =
       validate_server_structured_param(path, p, ctx)
-    let cookie_errors = validate_server_cookie_param(path, p, ctx)
     list.flatten([
       style_errors,
       content_errors,
       complex_schema_errors,
       server_structured_param_errors,
-      cookie_errors,
     ])
   })
 }
@@ -335,7 +322,9 @@ fn validate_delimited_style(
     ]
   }
   let schema_errors = case
-    resolve_schema_object(spec.parameter_schema(param), ctx)
+    option.then(spec.parameter_schema(param), fn(r) {
+      context.resolve_schema_ref(r, ctx) |> option.from_result
+    })
   {
     Some(ArraySchema(..)) -> []
     _ -> [
@@ -358,8 +347,11 @@ fn validate_server_structured_param(
   param: spec.Parameter(Resolved),
   ctx: Context,
 ) -> List(Diagnostic) {
-  let schema_obj = resolve_schema_object(spec.parameter_schema(param), ctx)
-  // Bug fix: array parameters with non-primitive items panic in
+  let schema_obj =
+    option.then(spec.parameter_schema(param), fn(r) {
+      context.resolve_schema_ref(r, ctx) |> option.from_result
+    })
+  // Array parameters with non-primitive items would panic in
   // both client and server codegen with "inline composite schema
   // reached to_string_fn after hoist" because `to_string_fn` has no
   // path for composite item types — even after hoist promotes the
@@ -369,11 +361,11 @@ fn validate_server_structured_param(
   let array_errors = case param.in_, schema_obj {
     // Query array parameters with non-primitive items take the JSON
     // escape hatch on the client side (`<param>=<JSON array string>`,
-    // the same shape PR #542 introduced for form-urlencoded
+    // the same shape used for form-urlencoded
     // composite fields). The server decoder still requires primitive
     // items, so the diagnostic remains gated to server mode.
     spec.InQuery, Some(ArraySchema(items:, ..)) ->
-      case array_items_resolve_primitive(items, ctx) {
+      case schema_utils.resolves_to_primitive(items, ctx) {
         True -> []
         False ->
           case config.mode(context.config(ctx)) {
@@ -390,7 +382,7 @@ fn validate_server_structured_param(
           }
       }
     spec.InHeader, Some(ArraySchema(items:, ..)) ->
-      case array_items_resolve_primitive(items, ctx) {
+      case schema_utils.resolves_to_primitive(items, ctx) {
         True -> []
         False -> [
           diagnostic.validation_error_both(
@@ -402,13 +394,13 @@ fn validate_server_structured_param(
           ),
         ]
       }
-    // CodeRabbit follow-up: cookie array params take the same
+    // Cookie array params take the same
     // exploded-array codegen path as query/header (see
     // `client_request.generate_exploded_array_query_param`-style
     // emission), so a non-primitive item schema would panic in
     // `to_string_fn` for them too. Reject in both modes.
     spec.InCookie, Some(ArraySchema(items:, ..)) ->
-      case array_items_resolve_primitive(items, ctx) {
+      case schema_utils.resolves_to_primitive(items, ctx) {
         True -> []
         False -> [
           diagnostic.validation_error_both(
@@ -424,38 +416,12 @@ fn validate_server_structured_param(
   }
   // The deepObject server-only constraint (primitive scalars /
   // primitive arrays only) stays gated to server mode — the client
-  // emitter handles nested objects post-#502.
+  // emitter handles nested objects.
   let deep_object_errors = case config.mode(context.config(ctx)) {
     config.Client -> []
     _ -> validate_server_deep_object_param(path, param, ctx)
   }
   list.flatten([array_errors, deep_object_errors])
-}
-
-/// True iff `items` resolves to a primitive scalar shape (string,
-/// integer, number, boolean), whether the schema is inline or
-/// referenced through `$ref`. Hoist may have promoted an inline
-/// primitive into a component during preprocessing, so a
-/// `Reference` here is not automatically safe — we have to look at
-/// what the ref points at.
-fn array_items_resolve_primitive(items: SchemaRef, ctx: Context) -> Bool {
-  case items {
-    Inline(StringSchema(..))
-    | Inline(IntegerSchema(..))
-    | Inline(NumberSchema(..))
-    | Inline(BooleanSchema(..)) -> True
-    Reference(..) ->
-      case context.resolve_schema_ref(items, ctx) {
-        Ok(StringSchema(..))
-        | Ok(IntegerSchema(..))
-        | Ok(NumberSchema(..))
-        | Ok(BooleanSchema(..)) -> True
-        Ok(_) -> False
-        // nolint: thrown_away_error -- unresolved refs surface elsewhere; here we only need the primitive/non-primitive distinction
-        Error(_) -> False
-      }
-    _ -> False
-  }
 }
 
 fn validate_server_deep_object_param(
@@ -466,7 +432,9 @@ fn validate_server_deep_object_param(
   case
     param.in_,
     param.style,
-    resolve_schema_object(spec.parameter_schema(param), ctx)
+    option.then(spec.parameter_schema(param), fn(r) {
+      context.resolve_schema_ref(r, ctx) |> option.from_result
+    })
   {
     spec.InQuery,
       Some(spec.DeepObjectStyle),
@@ -496,11 +464,9 @@ fn deep_object_server_leaf_supported(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> Bool {
-  // Issue #502: client-mode codegen now expands nested object
-  // properties into bracketed-bracketed query keys, but server-mode
-  // decoding still requires primitive scalars / primitive arrays.
-  // Lifting the server constraint requires a router decoder rewrite
-  // and is tracked as a separate follow-up.
+  // Client-mode codegen expands nested object properties into
+  // bracketed-bracketed query keys, but server-mode decoding requires
+  // primitive scalars / primitive arrays.
   case schema_ref {
     Inline(StringSchema(..))
     | Inline(IntegerSchema(..))
@@ -511,7 +477,7 @@ fn deep_object_server_leaf_supported(
     | Inline(ArraySchema(items: Inline(NumberSchema(..)), ..))
     | Inline(ArraySchema(items: Inline(BooleanSchema(..)), ..)) -> True
     Reference(..) ->
-      case resolve_schema_object(Some(schema_ref), ctx) {
+      case context.resolve_schema_ref(schema_ref, ctx) |> option.from_result {
         Some(StringSchema(..))
         | Some(IntegerSchema(..))
         | Some(NumberSchema(..))
@@ -524,14 +490,6 @@ fn deep_object_server_leaf_supported(
       }
     _ -> False
   }
-}
-
-fn validate_server_cookie_param(
-  _path: String,
-  _param: spec.Parameter(Resolved),
-  _ctx: Context,
-) -> List(Diagnostic) {
-  []
 }
 
 /// Check if a parameter has a complex schema (object, oneOf, allOf, anyOf)
@@ -554,7 +512,7 @@ fn validate_server_cookie_param(
 /// primitives and for shallow `object` schemas with primitive
 /// properties — the two shapes that show up in practice. Spec
 /// authors who need true deepObject serialization should still
-/// declare `style: deepObject` explicitly. (issue #352)
+/// declare `style: deepObject` explicitly.
 fn validate_complex_param_schema(
   path: String,
   param: spec.Parameter(Resolved),
@@ -567,7 +525,11 @@ fn validate_complex_param_schema(
       // invalid code (e.g., uri.percent_encode(filter.meta)).
       validate_deep_object_no_nested_objects(path, param, ctx)
     _ ->
-      case resolve_schema_object(spec.parameter_schema(param), ctx) {
+      case
+        option.then(spec.parameter_schema(param), fn(r) {
+          context.resolve_schema_ref(r, ctx) |> option.from_result
+        })
+      {
         Some(ObjectSchema(..))
         | Some(AllOfSchema(..))
         | Some(OneOfSchema(..))
@@ -602,11 +564,11 @@ fn validate_complex_param_schema(
 }
 
 /// Validate that a deepObject parameter has no unsupported property
-/// shapes. Issue #502: an object-typed property is allowed (encoded
+/// shapes. an object-typed property is allowed (encoded
 /// as `parent[outer][inner]=value` and modeled as `Dict(String, String)`
 /// in the generated client). Composite properties (`oneOf` / `anyOf` /
 /// `allOf`) take the JSON escape hatch — `parent[<prop>]=<JSON
-/// string>` — the same shape PR #542 introduced for form-urlencoded
+/// string>` — the same shape used for form-urlencoded
 /// composite fields, on the client side. The server decoder does
 /// not yet handle the JSON-escaped form, so the diagnostic stays
 /// gated to server mode.
@@ -618,12 +580,18 @@ fn validate_deep_object_no_nested_objects(
   case config.mode(context.config(ctx)) {
     config.Client -> []
     _ ->
-      case resolve_schema_object(spec.parameter_schema(param), ctx) {
+      case
+        option.then(spec.parameter_schema(param), fn(r) {
+          context.resolve_schema_ref(r, ctx) |> option.from_result
+        })
+      {
         Some(ObjectSchema(properties:, ..)) ->
           dict.to_list(properties)
           |> list.flat_map(fn(entry) {
             let #(prop_name, prop_ref) = entry
-            case resolve_schema_object(Some(prop_ref), ctx) {
+            case
+              context.resolve_schema_ref(prop_ref, ctx) |> option.from_result
+            {
               Some(ObjectSchema(..)) | Some(AllOfSchema(..)) -> []
               Some(OneOfSchema(..)) | Some(AnyOfSchema(..)) -> [
                 diagnostic.validation_error_server(
@@ -639,22 +607,6 @@ fn validate_deep_object_no_nested_objects(
           })
         _ -> []
       }
-  }
-}
-
-fn resolve_schema_object(
-  schema_ref: Option(SchemaRef),
-  ctx: Context,
-) -> Option(SchemaObject) {
-  case schema_ref {
-    Some(Inline(schema_obj)) -> Some(schema_obj)
-    Some(schema_ref) ->
-      case context.resolve_schema_ref(schema_ref, ctx) {
-        Ok(schema_obj) -> Some(schema_obj)
-        // nolint: thrown_away_error -- unresolved refs surface as absent; the ref error is reported elsewhere in the validator
-        Error(_) -> None
-      }
-    None -> None
   }
 }
 
@@ -745,7 +697,11 @@ fn validate_multipart_request_body_fields(
 ) -> List(Diagnostic) {
   case dict.get(content, "multipart/form-data") {
     Ok(media_type) ->
-      case resolve_schema_object(media_type.schema, ctx) {
+      case
+        option.then(media_type.schema, fn(r) {
+          context.resolve_schema_ref(r, ctx) |> option.from_result
+        })
+      {
         Some(ObjectSchema(properties:, ..)) ->
           dict.to_list(properties)
           |> list.flat_map(fn(entry) {
@@ -788,7 +744,11 @@ fn validate_form_urlencoded_schema(
 ) -> List(Diagnostic) {
   case dict.get(content, "application/x-www-form-urlencoded") {
     Ok(media_type) ->
-      case resolve_schema_object(media_type.schema, ctx) {
+      case
+        option.then(media_type.schema, fn(r) {
+          context.resolve_schema_ref(r, ctx) |> option.from_result
+        })
+      {
         Some(ObjectSchema(..)) -> []
         Some(_) -> [
           diagnostic.validation_error_both(
@@ -817,8 +777,8 @@ fn validate_server_form_urlencoded_request_body(
   content_keys: List(String),
   ctx: Context,
 ) -> List(Diagnostic) {
-  // Bug fix: nested arrays inside a form-urlencoded body's nested
-  // objects panic the client codegen too — `generate_form_nested_object`
+  // Nested arrays inside a form-urlencoded body's nested
+  // objects would panic the client codegen too — `generate_form_nested_object`
   // routes them through `multipart_field_to_string_fn`, which calls
   // `to_string_fn` on an Inline ArraySchema and hits the
   // "inline schema reached to_string_fn after hoist" panic. Reject
@@ -850,7 +810,11 @@ fn validate_server_form_urlencoded_request_body(
     dict.get(content, "application/x-www-form-urlencoded")
   {
     Ok(media_type) ->
-      case resolve_schema_object(media_type.schema, ctx) {
+      case
+        option.then(media_type.schema, fn(r) {
+          context.resolve_schema_ref(r, ctx) |> option.from_result
+        })
+      {
         Some(ObjectSchema(properties:, ..)) ->
           dict.to_list(properties)
           |> list.flat_map(fn(entry) {
@@ -858,13 +822,12 @@ fn validate_server_form_urlencoded_request_body(
             // Client codegen accepts every shape this predicate
             // green-lights — primitives, primitive arrays at any
             // depth, nested objects at any depth, arrays of objects.
-            // The server decoder is more constrained: it still
-            // requires shallow primitive-leaf shapes. Until the
-            // server-side helpers catch up, surface a server-only
-            // diagnostic for the shapes the client now handles but
-            // the server doesn't.
+            // The server decoder is more constrained: it requires
+            // shallow primitive-leaf shapes, so surface a server-only
+            // diagnostic for the shapes the client handles but the
+            // server doesn't.
             let client_safe =
-              form_urlencoded_field_codegen_safe(field_schema, ctx, 0)
+              form_urlencoded_field_codegen_safe(field_schema, ctx)
             let server_safe =
               form_urlencoded_server_field_supported(field_schema, ctx, 0)
             case client_safe, server_safe {
@@ -911,13 +874,13 @@ fn form_urlencoded_server_field_supported(
   ctx: Context,
   depth: Int,
 ) -> Bool {
-  case resolve_schema_object(Some(schema_ref), ctx) {
+  case context.resolve_schema_ref(schema_ref, ctx) |> option.from_result {
     Some(StringSchema(..))
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
     | Some(BooleanSchema(..)) -> True
     Some(ArraySchema(items:, ..)) ->
-      case resolve_schema_object(Some(items), ctx) {
+      case context.resolve_schema_ref(items, ctx) |> option.from_result {
         Some(StringSchema(..))
         | Some(IntegerSchema(..))
         | Some(NumberSchema(..))
@@ -952,9 +915,8 @@ fn form_urlencoded_server_field_supported(
 fn form_urlencoded_field_codegen_safe(
   schema_ref: SchemaRef,
   ctx: Context,
-  _depth: Int,
 ) -> Bool {
-  case resolve_schema_object(Some(schema_ref), ctx) {
+  case context.resolve_schema_ref(schema_ref, ctx) |> option.from_result {
     Some(StringSchema(..))
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
@@ -965,7 +927,7 @@ fn form_urlencoded_field_codegen_safe(
       dict.to_list(properties)
       |> list.all(fn(entry) {
         let #(_, child_schema) = entry
-        form_urlencoded_field_codegen_safe(child_schema, ctx, 0)
+        form_urlencoded_field_codegen_safe(child_schema, ctx)
       })
     Some(OneOfSchema(..)) | Some(AnyOfSchema(..)) | Some(AllOfSchema(..)) ->
       True
@@ -989,7 +951,7 @@ fn form_urlencoded_array_items_codegen_safe(
   items: SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case resolve_schema_object(Some(items), ctx) {
+  case context.resolve_schema_ref(items, ctx) |> option.from_result {
     Some(StringSchema(..))
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
@@ -1000,7 +962,7 @@ fn form_urlencoded_array_items_codegen_safe(
       dict.to_list(properties)
       |> list.all(fn(entry) {
         let #(_, child_schema) = entry
-        form_urlencoded_field_codegen_safe(child_schema, ctx, 0)
+        form_urlencoded_field_codegen_safe(child_schema, ctx)
       })
     Some(OneOfSchema(..)) | Some(AnyOfSchema(..)) | Some(AllOfSchema(..)) ->
       True
@@ -1023,7 +985,7 @@ fn validate_server_request_body_content_types(
           && key != "multipart/form-data"
           && key != "application/octet-stream"
           && key != "text/plain"
-          // Issue #504: */* lands in the same lane as
+          // */* lands in the same lane as
           // application/octet-stream — raw bytes through the server's
           // body parameter — so server codegen accepts it too.
           && key != "*/*"
@@ -1068,7 +1030,9 @@ fn validate_server_multipart_request_body(
             False -> []
           }
           let field_errors = case
-            resolve_schema_object(media_type.schema, ctx)
+            option.then(media_type.schema, fn(r) {
+              context.resolve_schema_ref(r, ctx) |> option.from_result
+            })
           {
             Some(ObjectSchema(properties:, ..)) ->
               dict.to_list(properties)
@@ -1101,7 +1065,7 @@ fn multipart_server_field_supported(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case resolve_schema_object(Some(schema_ref), ctx) {
+  case context.resolve_schema_ref(schema_ref, ctx) |> option.from_result {
     Some(StringSchema(..))
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
@@ -1116,7 +1080,7 @@ fn multipart_server_array_item_supported(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case resolve_schema_object(Some(schema_ref), ctx) {
+  case context.resolve_schema_ref(schema_ref, ctx) |> option.from_result {
     Some(StringSchema(..))
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
@@ -1129,12 +1093,12 @@ fn multipart_field_is_stringifiable(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case resolve_schema_object(Some(schema_ref), ctx) {
+  case context.resolve_schema_ref(schema_ref, ctx) |> option.from_result {
     Some(StringSchema(..))
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
     | Some(BooleanSchema(..)) -> True
-    // Issue #503: arrays of primitives are emitted as repeated parts
+    // Arrays of primitives are emitted as repeated parts
     // (`name=v1`, `name=v2`, ...) per the OAS 3 multipart serialization
     // rules, and objects are emitted as a single part with
     // `Content-Type: application/json` carrying the JSON-encoded value.
@@ -1151,7 +1115,7 @@ fn multipart_field_array_item_supported(
   schema_ref: SchemaRef,
   ctx: Context,
 ) -> Bool {
-  case resolve_schema_object(Some(schema_ref), ctx) {
+  case context.resolve_schema_ref(schema_ref, ctx) |> option.from_result {
     Some(StringSchema(..))
     | Some(IntegerSchema(..))
     | Some(NumberSchema(..))
@@ -1207,13 +1171,12 @@ fn validate_responses(
   })
 }
 
-// Issue #552: codegen's response-header extractor (`classify_header_schema`
+// Codegen's response-header extractor (`classify_header_schema`
 // in `client_response.gleam`) only knows how to emit code for inline
 // String / Int / Float / Bool. Composite shapes ($ref, object, array,
-// allOf, oneOf, anyOf) used to panic in codegen, taking the whole
-// process down on a syntactically valid spec. Catch those shapes here
-// at validate time and surface a Diagnostic instead — the codegen
-// path now defensively panics with an "unreachable" message that
+// allOf, oneOf, anyOf) would panic in codegen on a syntactically valid
+// spec. Catch those shapes here at validate time and surface a
+// Diagnostic instead — the codegen path defensively panics with an "unreachable" message that
 // should never actually fire if validation ran.
 fn validate_response_headers(
   response_path: String,
@@ -1234,7 +1197,7 @@ fn validate_response_headers(
             <> kind
             <> ". oaspec can only emit typed extraction for inline String, Integer, Number, and Boolean schemas today.",
           hint: Some(
-            "Replace the header schema with an inline { type: string }, { type: integer }, { type: number }, or { type: boolean }, or remove the header from the spec if it is not part of the typed contract. Track issue #387 if you need typed extraction for this shape.",
+            "Replace the header schema with an inline { type: string }, { type: integer }, { type: number }, or { type: boolean }, or remove the header from the spec if it is not part of the typed contract.",
           ),
         ),
       ]
@@ -1263,7 +1226,7 @@ fn unsupported_header_schema_kind(
 
 /// Validate component schemas recursively.
 /// Detect schema names that differ only in case and would collide when
-/// mapped to the same Gleam type name via `schema_to_type_name` (#293).
+/// mapped to the same Gleam type name via `schema_to_type_name`.
 fn validate_unique_schema_names(ctx: Context) -> List(Diagnostic) {
   let schemas = case context.spec(ctx).components {
     Some(components) -> dict.keys(components.schemas)
@@ -1430,7 +1393,34 @@ fn validate_schema_recursive(
         validate_schema_ref_recursive(path <> ".allOf", s_ref, ctx)
       })
 
+    // Guards check the pattern only of a string that is not an enum.
+    StringSchema(pattern: Some(pattern), enum_values: [], ..) ->
+      validate_pattern(path <> ".pattern", pattern)
+
     _ -> []
+  }
+}
+
+/// The generated guard compiles `pattern` with gleam/regexp. OpenAPI
+/// patterns are ECMA-262, which the BEAM regex engine does not fully
+/// accept (it rejects `\u` escapes), so a pattern that does not compile
+/// here is a warning: the guard reports `invalidPattern` at run time.
+fn validate_pattern(path: String, pattern: String) -> List(Diagnostic) {
+  case regexp.from_string(pattern) {
+    Ok(_) -> []
+    Error(regexp.CompileError(error:, ..)) -> [
+      diagnostic.validation_warning_both(
+        path: path,
+        detail: "pattern '"
+          <> pattern
+          <> "' does not compile with gleam/regexp: "
+          <> error
+          <> ". The generated validator rejects every value with invalidPattern on this target.",
+        hint: Some(
+          "Fix the regular expression, or rewrite ECMA-only syntax such as \\u escapes in a form gleam/regexp accepts.",
+        ),
+      ),
+    ]
   }
 }
 
@@ -1466,7 +1456,7 @@ fn validate_security_schemes(
 
   let operation_errors =
     list.flat_map(operations, fn(op) {
-      let #(op_id, operation, _path, _method) = op
+      let context.AnalyzedOperation(op_id, operation, _path, _method) = op
       case operation.security {
         Some(reqs) ->
           list.flat_map(reqs, fn(req) {

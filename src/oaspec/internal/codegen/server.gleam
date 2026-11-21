@@ -9,6 +9,7 @@ import oaspec/internal/codegen/context.{
   type Context, type GeneratedFile, GeneratedFile,
 }
 import oaspec/internal/codegen/guards
+import oaspec/internal/codegen/operation_ir
 import oaspec/internal/codegen/router_ir
 import oaspec/internal/codegen/runtime_snippets
 import oaspec/internal/codegen/server_request_decode as decode_helpers
@@ -22,7 +23,7 @@ import oaspec/openapi/spec.{type Resolved, Value}
 
 /// Generate server stub files.
 ///
-/// Issue #247 splits the handler surface in two:
+/// The handler surface is split in two:
 ///
 /// - `handlers.gleam` carries user-editable panic stubs and is emitted
 ///   only on first generation (`SkipIfExists`). Re-running
@@ -65,7 +66,7 @@ pub fn generate(ctx: Context) -> List(GeneratedFile) {
       ),
       ..list.append(
         list.map(operations, fn(op) {
-          let #(op_id, operation, _path, _method) = op
+          let context.AnalyzedOperation(op_id, operation, _path, _method) = op
           GeneratedFile(
             path: "handlers/"
               <> naming.operation_to_function_name(op_id)
@@ -124,15 +125,14 @@ fn generate_handlers(
 
   let sb =
     list.fold(operations, sb, fn(sb, op) {
-      let #(op_id, operation, _path, _method) = op
-      generate_handler(sb, op_id, operation, ctx)
+      let context.AnalyzedOperation(op_id, operation, _path, _method) = op
+      generate_handler(sb, op_id, operation)
     })
 
   // Callbacks are parsed and resolved but NOT emitted as handler stubs.
-  // The previous stubs had the shape `fn(...) -> String` with no request
-  // type, no response type, and no execution path — more misleading than
-  // useful. Callback support is now documented as parsed-but-not-codegen
-  // until a typed codegen story exists (see issue #117).
+  // A stub without request type, response type or execution path would
+  // mislead more than help, so callbacks are documented as
+  // parsed-but-not-codegen.
   se.to_string(sb)
 }
 
@@ -185,7 +185,7 @@ fn generate_operation_handler(
       [pkg <> "/response_types"],
     ]),
   )
-  |> generate_handler(op_id, operation, ctx)
+  |> generate_handler(op_id, operation)
   |> se.to_string()
 }
 
@@ -200,7 +200,7 @@ fn generate_per_operation_handlers_generated(
   let pkg = config.package(context.config(ctx))
   let handler_imports =
     list.map(operations, fn(op) {
-      let fn_name = naming.operation_to_function_name(op.0)
+      let fn_name = naming.operation_to_function_name(op.operation_id)
       pkg <> "/handlers/" <> fn_name <> " as " <> fn_name <> "_handler"
     })
   let sb =
@@ -214,7 +214,7 @@ fn generate_per_operation_handlers_generated(
     )
 
   list.fold(operations, sb, fn(sb, op) {
-    let #(op_id, operation, _path, _method) = op
+    let context.AnalyzedOperation(op_id, operation, _path, _method) = op
     let fn_name = naming.operation_to_function_name(op_id)
     generate_handler_delegator(sb, op_id, operation, fn_name <> "_handler")
   })
@@ -228,7 +228,7 @@ fn has_handler_params(operation: spec.Operation(Resolved)) -> Bool {
 
 /// Generate `handlers_generated.gleam`, a sealed delegator that the
 /// router imports. Each operation forwards to `handlers.<op_name>(req)`.
-/// Issue #247: this file carries the `// DO NOT EDIT` banner and is
+/// This file carries the `// DO NOT EDIT` banner and is
 /// always overwritten so router/handler wiring stays in sync with the
 /// spec without touching the user's `handlers.gleam`.
 fn generate_handlers_generated(
@@ -246,7 +246,7 @@ fn generate_handlers_generated(
 
   let sb =
     list.fold(operations, sb, fn(sb, op) {
-      let #(op_id, operation, _path, _method) = op
+      let context.AnalyzedOperation(op_id, operation, _path, _method) = op
       generate_handler_delegator(sb, op_id, operation, "handlers")
     })
 
@@ -300,7 +300,6 @@ fn generate_handler(
   sb: se.StringBuilder,
   op_id: String,
   operation: spec.Operation(Resolved),
-  _ctx: Context,
 ) -> se.StringBuilder {
   let fn_name = naming.operation_to_function_name(op_id)
   let request_type = naming.schema_to_type_name(op_id) <> "Request"
@@ -368,8 +367,8 @@ fn generate_router(
   //
   // `ResponseBody` keeps text and binary payloads distinct end-to-end so a
   // spec that declares `application/octet-stream` or `image/*` responses
-  // round-trips real bytes instead of being smuggled through `String`
-  // (issue #304). Framework adapters pattern-match on the variant to call
+  // round-trips real bytes instead of being smuggled through `String`.
+  // Framework adapters pattern-match on the variant to call
   // their text- or bytes-shaped response constructor.
   let sb =
     sb
@@ -429,7 +428,7 @@ String.",
     False -> sb
   }
 
-  // Generate route function. Issue #264 threads `app_state: handlers.State`
+  // Generate route function. It threads `app_state: handlers.State`
   // through to handler delegators. The argument is named `app_state` (not
   // `state`) because OpenAPI specs occasionally have a parameter named
   // `state` (e.g. OAuth2 flows), which would otherwise shadow the route
@@ -445,7 +444,7 @@ String.",
       <> ": Dict(String, String), "
       <> route_arg_name("body", requirements.uses_body)
       <> case requirements.has_binary_request_body {
-        // Issue #485: when any operation declares
+        // When any operation declares
         // `application/octet-stream` on its request body, the
         // router signature takes raw bytes instead of String so
         // arbitrary binary payloads round-trip without going
@@ -461,7 +460,7 @@ String.",
 
   let sb =
     list.fold(operations, sb, fn(sb, op) {
-      let #(op_id, operation, path, method) = op
+      let context.AnalyzedOperation(op_id, operation, path, method) = op
       let fn_name = naming.operation_to_function_name(op_id)
       let method_str = spec.method_to_string(method)
       let path_pattern = path_to_pattern(path)
@@ -470,7 +469,7 @@ String.",
         !list.is_empty(operation.parameters)
         || option.is_some(operation.request_body)
 
-      // Issue #485: when the route signature is `body: BitArray`
+      // When the route signature is `body: BitArray`
       // (because some other operation in this spec declares
       // `application/octet-stream`), every non-binary arm needs to
       // shadow `body` with the String conversion at the top so the
@@ -493,7 +492,7 @@ String.",
         _, _, _ -> arm_sb
       }
       arm_sb
-      |> generate_route_body(op_id, fn_name, operation, path, has_params, ctx)
+      |> generate_route_body(op_id, fn_name, operation, has_params, ctx)
       |> se.indent(2, "}")
     })
 
@@ -529,7 +528,6 @@ fn generate_route_body(
   op_id: String,
   fn_name: String,
   operation: spec.Operation(Resolved),
-  path: String,
   has_params: Bool,
   ctx: Context,
 ) -> se.StringBuilder {
@@ -544,7 +542,7 @@ fn generate_route_body(
         3,
         "let response = handlers_generated." <> fn_name <> "(app_state)",
       )
-      |> generate_response_conversion(response_type_name, operation, ctx)
+      |> generate_response_conversion(response_type_name, operation)
     }
     True -> {
       // Has parameters: validate inputs, construct request, call handler
@@ -556,7 +554,6 @@ fn generate_route_body(
         op_id,
         fn_name,
         operation,
-        path,
         ctx,
       )
     }
@@ -574,7 +571,6 @@ fn generate_safe_request_and_dispatch(
   op_id: String,
   fn_name: String,
   operation: spec.Operation(Resolved),
-  _path: String,
   ctx: Context,
 ) -> se.StringBuilder {
   let params =
@@ -593,16 +589,20 @@ fn generate_safe_request_and_dispatch(
       p.in_ == spec.InPath && decode_helpers.param_needs_result_unwrap(p)
     })
 
-  // Required query / header / cookie params. Issue #263: each of these
-  // becomes its own enclosing case expression so that a missing value
-  // returns 400 instead of crashing the BEAM via `let assert`. Deep
-  // object query params keep their legacy `let assert`-based path for
-  // now (tracked separately).
+  // Required query / header / cookie params, and deep-object query params
+  // with a required property. Each becomes its own enclosing case
+  // expression so that a missing or invalid value returns 400.
   let required_query_params =
     list.filter(params, fn(p) {
       p.in_ == spec.InQuery
       && p.required
-      && !decode_helpers.is_deep_object_param(p, ctx)
+      && !operation_ir.is_deep_object_param(p, ctx)
+    })
+  let checked_deep_object_params =
+    list.filter(params, fn(p) {
+      p.in_ == spec.InQuery
+      && operation_ir.is_deep_object_param(p, ctx)
+      && decode_helpers.deep_object_has_required_properties(p, ctx)
     })
   let required_header_params =
     list.filter(params, fn(p) { p.in_ == spec.InHeader && p.required })
@@ -645,11 +645,29 @@ fn generate_safe_request_and_dispatch(
     })
 
   // Open numeric-parse cases for required query params (scalar int/float
-  // and explode=true int/float arrays, plus `$ref` to string-enum schemas
-  // per issue #305). Bool / string don't need this.
+  // and explode=true int/float arrays, plus `$ref` to string-enum schemas).
+  // Bool / string don't need this.
   let sb =
     list.fold(required_query_params, sb, fn(sb, p) {
       query_required_open_parse_case(sb, p, ctx)
+    })
+
+  // Open result cases for deep-object params with a required property.
+  // `<param>__deep` cannot collide with a parameter variable (see the
+  // checked body below).
+  let sb =
+    list.fold(checked_deep_object_params, sb, fn(sb, p) {
+      let var_name = naming.to_snake_case(p.name) <> "__deep"
+      sb
+      |> se.indent(
+        3,
+        "let "
+          <> var_name
+          <> "_result = "
+          <> decode_helpers.deep_object_result_expr(p.name, p, op_id, ctx),
+      )
+      |> se.indent(3, "case " <> var_name <> "_result {")
+      |> se.indent(4, "Ok(" <> var_name <> ") -> {")
     })
 
   // Open lookup cases for required header params.
@@ -698,11 +716,10 @@ fn generate_safe_request_and_dispatch(
   }
 
   // Check if guard validation should be emitted for this body.
-  // Issue #292: guard validation currently only fires for $ref schemas
+  // Guard validation currently only fires for $ref schemas
   // because guards.gleam generates validators keyed by component name.
   // Inline request body schemas with constraints are decoded but NOT
-  // guard-validated; extending guards.gleam to synthesise validators for
-  // anonymous inline schemas is tracked as a follow-up.
+  // guard-validated.
   let needs_guard_validation =
     config.validate(context.config(ctx))
     && needs_body_guard
@@ -774,6 +791,23 @@ fn generate_safe_request_and_dispatch(
     _ -> sb
   }
 
+  // A form or multipart body with a required field is built into a Result
+  // first, so a missing or invalid field answers 400. The router's own
+  // variables contain `__`, which `naming.to_snake_case` never produces, so
+  // they cannot collide with a parameter variable.
+  let checked_body = case operation.request_body {
+    Some(Value(rb)) -> decode_helpers.checked_body_result_expr(rb, op_id, ctx)
+    _ -> None
+  }
+  let sb = case checked_body {
+    Some(result_expr) ->
+      sb
+      |> se.indent(3, "let body__result = " <> result_expr)
+      |> se.indent(3, "case body__result {")
+      |> se.indent(4, "Ok(checked__body) -> {")
+    None -> sb
+  }
+
   // Build request constructor
   let sb =
     sb
@@ -797,7 +831,15 @@ fn generate_safe_request_and_dispatch(
         spec.InQuery -> {
           let key = param.name
           let raw_var = naming.to_snake_case(param.name) <> "_raw"
-          case decode_helpers.is_deep_object_param(param, ctx), param.required {
+          let is_deep_object = operation_ir.is_deep_object_param(param, ctx)
+          let checked_deep_object =
+            is_deep_object
+            && decode_helpers.deep_object_has_required_properties(param, ctx)
+          use <- bool.guard(
+            checked_deep_object,
+            naming.to_snake_case(param.name) <> "__deep",
+          )
+          case is_deep_object, param.required {
             True, True ->
               decode_helpers.deep_object_required_expr(key, param, op_id, ctx)
             True, False ->
@@ -828,9 +870,10 @@ fn generate_safe_request_and_dispatch(
     })
 
   // Add body field
-  let sb = case needs_body_guard {
-    True -> sb |> se.indent(4, "body: decoded_body,")
-    False ->
+  let sb = case needs_body_guard, checked_body {
+    True, _ -> sb |> se.indent(4, "body: decoded_body,")
+    False, Some(_) -> sb |> se.indent(4, "body: checked__body,")
+    False, None ->
       case operation.request_body {
         Some(Value(rb)) -> {
           let body_expr =
@@ -850,7 +893,20 @@ fn generate_safe_request_and_dispatch(
       3,
       "let response = handlers_generated." <> fn_name <> "(app_state, request)",
     )
-    |> generate_response_conversion(response_type_name, operation, ctx)
+    |> generate_response_conversion(response_type_name, operation)
+
+  // Close the checked body case
+  let sb = case checked_body {
+    Some(_) ->
+      sb
+      |> se.indent(4, "}")
+      |> se.indent(
+        4,
+        "_ -> " <> problem_response_expr(400, "invalid request body"),
+      )
+      |> se.indent(3, "}")
+    None -> sb
+  }
 
   // Close guard validation (returns 422 with error details)
   let sb = case needs_guard_validation {
@@ -879,8 +935,8 @@ fn generate_safe_request_and_dispatch(
   }
 
   // Close required-param case expressions in LIFO (reverse) order:
-  // cookie parse, cookie lookup, header parse, header lookup, query parse,
-  // query lookup, then finally the path int/float parse cases. The
+  // cookie parse, cookie lookup, header parse, header lookup, deep object,
+  // query parse, query lookup, then finally the path int/float parse cases. The
   // catch-all `_ ->` arm covers `Ok([])` (empty query lists) along with
   // `Error(_)` so all failure modes return 400.
   let sb =
@@ -895,6 +951,10 @@ fn generate_safe_request_and_dispatch(
     })
   let sb =
     list.fold(required_header_params, sb, fn(sb, _p) { close_lookup_case(sb) })
+  let sb =
+    list.fold(checked_deep_object_params, sb, fn(sb, _p) {
+      close_lookup_case(sb)
+    })
   let sb =
     list.fold(required_query_params, sb, fn(sb, p) {
       close_query_required_parse_case(sb, p, ctx)
@@ -972,7 +1032,7 @@ fn query_required_open_parse_case(
       |> se.indent(4, "Ok(" <> raw_var <> "_parsed_list) -> {")
     }
     Some(ref) ->
-      // Issue #305: required `$ref` to a string-enum schema needs the
+      // Required `$ref` to a string-enum schema needs the
       // same Result-based open/close scaffolding as int / float so an
       // unknown enum value falls through to the `_ -> 400` arm in
       // `close_single_value_required_parse_case` below.
@@ -1055,7 +1115,7 @@ fn close_query_required_parse_case(
         ..,
       ))) -> close(sb)
     Some(ref) ->
-      // Issue #305: matches the open emitted in
+      // Matches the open emitted in
       // `query_required_open_parse_case` for required `$ref` to string
       // enum schemas.
       case decode_helpers.schema_ref_string_enum(ref, ctx) {
@@ -1067,9 +1127,8 @@ fn close_query_required_parse_case(
 }
 
 /// For headers / cookies, open a numeric parse case if the param schema is a
-/// scalar Integer/Number. (Header/cookie array parsing is currently a single
-/// inline `list.map(string.split(...))` expression and stays unsafe; that's
-/// out of scope for the Issue #263 fix and tracked separately.)
+/// scalar Integer/Number. Header/cookie arrays are parsed by a single inline
+/// `list.map(string.split(...))` expression and get no parse case.
 fn single_value_required_open_parse_case(
   sb: se.StringBuilder,
   p: spec.Parameter(Resolved),
@@ -1138,7 +1197,7 @@ fn close_single_value_required_parse_case(
         ..,
       ))) -> close(sb)
     Some(ref) ->
-      // Issue #305: matches the open emitted in
+      // Matches the open emitted in
       // `query_required_open_parse_case` for required `$ref` to string
       // enum schemas. Non-enum refs fall through unchanged.
       case decode_helpers.schema_ref_string_enum(ref, ctx) {
@@ -1154,7 +1213,7 @@ fn close_single_value_required_parse_case(
 /// router-side error-emit site so clients receive a structured JSON
 /// response instead of plain `Bad Request` / `Not Found` text — a
 /// schema-conformant default for specs that declare 4xx responses with
-/// `application/problem+json` content (issue #307).
+/// `application/problem+json` content.
 ///
 /// The body is emitted as a literal JSON string at codegen time —
 /// stable, allocation-free, and safe to embed because `detail` is a
@@ -1194,7 +1253,6 @@ fn generate_response_conversion(
   sb: se.StringBuilder,
   response_type_name: String,
   operation: spec.Operation(Resolved),
-  ctx: Context,
 ) -> se.StringBuilder {
   let responses = http.sort_response_entries(dict.to_list(operation.responses))
 
@@ -1215,8 +1273,8 @@ fn generate_response_conversion(
             Value(response) -> {
               let variant_name =
                 response_type_name <> http.status_code_suffix(status_code)
-              let status_int = http.status_code_to_int(status_code)
-              // Issue #483: the OpenAPI `default` response is the only
+              let status_int = http.status_code_to_int_literal(status_code)
+              // The OpenAPI `default` response is the only
               // status whose generated variant carries a runtime status
               // code (`Foo(Int [, body] [, headers])`). The router
               // pattern grows a `status` binding and uses it as the
@@ -1227,7 +1285,7 @@ fn generate_response_conversion(
                 _ -> False
               }
               let content_entries = dict.to_list(response.content)
-              let header_specs = sorted_header_specs(response.headers)
+              let header_specs = router_ir.sorted_header_specs(response.headers)
               let has_headers = !list.is_empty(header_specs)
 
               case content_entries {
@@ -1245,134 +1303,52 @@ fn generate_response_conversion(
                     is_default: is_default,
                   )
                 [#(media_type_name, media_type)] ->
-                  case content_type.from_string(media_type_name) {
-                    content_type.ApplicationJson ->
-                      case media_type.schema {
-                        Some(_) -> {
-                          let encode_fn =
-                            get_encode_function(media_type.schema, ctx)
-                          emit_response_arm(
-                            sb,
-                            variant_name,
-                            status_int,
-                            has_data: True,
-                            has_headers: has_headers,
-                            body_expr: "TextBody(json.to_string("
-                              <> encode_fn
-                              <> "(data)))",
-                            content_type_header: Some(media_type_name),
-                            header_specs: header_specs,
-                            is_default: is_default,
-                          )
-                        }
-                        None ->
-                          emit_response_arm(
-                            sb,
-                            variant_name,
-                            status_int,
-                            has_data: False,
-                            has_headers: has_headers,
-                            body_expr: "EmptyBody",
-                            content_type_header: None,
-                            header_specs: header_specs,
-                            is_default: is_default,
-                          )
+                  case media_type.schema {
+                    None ->
+                      emit_response_arm(
+                        sb,
+                        variant_name,
+                        status_int,
+                        has_data: False,
+                        has_headers: has_headers,
+                        body_expr: "EmptyBody",
+                        content_type_header: None,
+                        header_specs: header_specs,
+                        is_default: is_default,
+                      )
+                    Some(_) -> {
+                      let body_expr = case
+                        content_type.from_string(media_type_name)
+                      {
+                        content_type.TextPlain
+                        | content_type.ApplicationXml
+                        | content_type.TextXml -> "TextBody(data)"
+                        // Binary responses thread bytes end-to-end via
+                        // `BytesBody(BitArray)`; `*/*` responses are handed
+                        // to the user as raw BitArray too. The matching
+                        // response_types variant carries `BitArray`.
+                        content_type.ApplicationOctetStream
+                        | content_type.Wildcard -> "BytesBody(data)"
+                        content_type.ApplicationJson
+                        | content_type.MultipartFormData
+                        | content_type.FormUrlEncoded
+                        | content_type.UnsupportedContentType(_) ->
+                          "TextBody(json.to_string("
+                          <> get_encode_function(media_type.schema)
+                          <> "(data)))"
                       }
-                    content_type.TextPlain
-                    | content_type.ApplicationXml
-                    | content_type.TextXml ->
-                      case media_type.schema {
-                        Some(_) ->
-                          emit_response_arm(
-                            sb,
-                            variant_name,
-                            status_int,
-                            has_data: True,
-                            has_headers: has_headers,
-                            body_expr: "TextBody(data)",
-                            content_type_header: Some(media_type_name),
-                            header_specs: header_specs,
-                            is_default: is_default,
-                          )
-                        None ->
-                          emit_response_arm(
-                            sb,
-                            variant_name,
-                            status_int,
-                            has_data: False,
-                            has_headers: has_headers,
-                            body_expr: "EmptyBody",
-                            content_type_header: None,
-                            header_specs: header_specs,
-                            is_default: is_default,
-                          )
-                      }
-                    content_type.ApplicationOctetStream
-                    | content_type.Wildcard ->
-                      // Issue #304: binary responses thread bytes end-to-end
-                      // via `BytesBody(BitArray)` instead of being smuggled
-                      // through `String`. The matching response_types
-                      // variant carries `BitArray` (see ir_build).
-                      // Issue #504: */* shares the same path — wildcard
-                      // responses are handed to the user as raw BitArray.
-                      case media_type.schema {
-                        Some(_) ->
-                          emit_response_arm(
-                            sb,
-                            variant_name,
-                            status_int,
-                            has_data: True,
-                            has_headers: has_headers,
-                            body_expr: "BytesBody(data)",
-                            content_type_header: Some(media_type_name),
-                            header_specs: header_specs,
-                            is_default: is_default,
-                          )
-                        None ->
-                          emit_response_arm(
-                            sb,
-                            variant_name,
-                            status_int,
-                            has_data: False,
-                            has_headers: has_headers,
-                            body_expr: "EmptyBody",
-                            content_type_header: None,
-                            header_specs: header_specs,
-                            is_default: is_default,
-                          )
-                      }
-                    _ ->
-                      case media_type.schema {
-                        Some(_) -> {
-                          let encode_fn =
-                            get_encode_function(media_type.schema, ctx)
-                          emit_response_arm(
-                            sb,
-                            variant_name,
-                            status_int,
-                            has_data: True,
-                            has_headers: has_headers,
-                            body_expr: "TextBody(json.to_string("
-                              <> encode_fn
-                              <> "(data)))",
-                            content_type_header: Some(media_type_name),
-                            header_specs: header_specs,
-                            is_default: is_default,
-                          )
-                        }
-                        None ->
-                          emit_response_arm(
-                            sb,
-                            variant_name,
-                            status_int,
-                            has_data: False,
-                            has_headers: has_headers,
-                            body_expr: "EmptyBody",
-                            content_type_header: None,
-                            header_specs: header_specs,
-                            is_default: is_default,
-                          )
-                      }
+                      emit_response_arm(
+                        sb,
+                        variant_name,
+                        status_int,
+                        has_data: True,
+                        has_headers: has_headers,
+                        body_expr: body_expr,
+                        content_type_header: Some(media_type_name),
+                        header_specs: header_specs,
+                        is_default: is_default,
+                      )
+                    }
                   }
                 // Multiple content types: variant wraps String.
                 // Use the first content type as default content-type header.
@@ -1399,64 +1375,14 @@ fn generate_response_conversion(
   }
 }
 
-/// Compact spec for a single declared response header, used to render
-/// the `headers:` slot of `ServerResponse` when issue #306 plumbing is
-/// active. The pair (header_name, field_name) keeps the wire-form name
-/// (e.g. "Pagination-Cursor") distinct from the Gleam record field
-/// (`pagination_cursor`); `field_type` decides how the value is
-/// stringified; `required` decides whether to emit a Some/None case.
-type HeaderSpec {
-  HeaderSpec(
-    header_name: String,
-    field_name: String,
-    field_type: String,
-    required: Bool,
-  )
-}
-
-fn sorted_header_specs(
-  headers: dict.Dict(String, spec.Header),
-) -> List(HeaderSpec) {
-  headers
-  |> dict.to_list
-  |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
-  |> list.map(fn(entry) {
-    let #(header_name, header) = entry
-    let field_name = naming.to_snake_case(header_name)
-    let field_type = response_header_field_type(header.schema)
-    HeaderSpec(
-      header_name: header_name,
-      field_name: field_name,
-      field_type: field_type,
-      required: header.required,
-    )
-  })
-}
-
-/// Mirror of `header_schema_to_type` in ir_build — kept here so the
-/// router emission and the response_types record stay in sync without a
-/// cross-module dependency on the IR layer.
-fn response_header_field_type(
-  schema_opt: option.Option(schema.SchemaRef),
-) -> String {
-  case schema_opt {
-    Some(Inline(schema.IntegerSchema(..))) -> "Int"
-    Some(Inline(schema.NumberSchema(..))) -> "Float"
-    Some(Inline(schema.BooleanSchema(..))) -> "Bool"
-    Some(Inline(schema.StringSchema(..))) -> "String"
-    Some(Reference(name:, ..)) -> "types." <> naming.schema_to_type_name(name)
-    _ -> "String"
-  }
-}
-
 /// Emit one arm of the response dispatch `case` block.
 ///
-/// Issue #306 introduces the headers plumbing: when `has_headers` is
+/// When `has_headers` is
 /// True the variant pattern grows an `hdrs` binding and the headers
 /// list is materialised via `list.flatten` so spec-declared response
 /// headers are appended to the implicit `content-type` tuple.
 ///
-/// Issue #483: when `is_default` is True the variant pattern grows a
+/// When `is_default` is True the variant pattern grows a
 /// leading `status` binding and the outgoing `ServerResponse.status`
 /// uses that bound value instead of the precomputed `status_int`. The
 /// `Foo(Int [, body] [, headers])` shape comes from `VariantDefault`
@@ -1469,7 +1395,7 @@ fn emit_response_arm(
   has_headers has_headers: Bool,
   body_expr body_expr: String,
   content_type_header content_type_header: option.Option(String),
-  header_specs header_specs: List(HeaderSpec),
+  header_specs header_specs: List(router_ir.HeaderSpec),
   is_default is_default: Bool,
 ) -> se.StringBuilder {
   let pattern_args = case is_default, has_data, has_headers {
@@ -1514,7 +1440,7 @@ fn emit_response_arm(
 ///   regenerated routers stay deterministic.
 fn headers_slot_expr(
   content_type_header: option.Option(String),
-  header_specs: List(HeaderSpec),
+  header_specs: List(router_ir.HeaderSpec),
 ) -> String {
   let content_type_chunk = case content_type_header {
     Some(media_type_name) -> [
@@ -1554,7 +1480,7 @@ fn append_chunks(prefix: String, header_chunks: List(String)) -> String {
 /// Non-string types are stringified via `int.to_string` /
 /// `float.to_string` / `bool.to_string` (the necessary imports are
 /// added by the import-analysis pass).
-fn header_chunk_expr(spec: HeaderSpec) -> String {
+fn header_chunk_expr(spec: router_ir.HeaderSpec) -> String {
   let render_value = fn(value_expr: String) -> String {
     "[#(\""
     <> spec.header_name
@@ -1588,10 +1514,7 @@ fn stringify_header_value(field_type: String, value_expr: String) -> String {
 }
 
 /// Get the encode function name for a schema reference.
-fn get_encode_function(
-  schema_ref: option.Option(schema.SchemaRef),
-  _ctx: Context,
-) -> String {
+fn get_encode_function(schema_ref: option.Option(schema.SchemaRef)) -> String {
   case schema_ref {
     Some(Reference(name:, ..)) -> {
       "encode.encode_" <> naming.to_snake_case(name) <> "_json"
@@ -1611,20 +1534,26 @@ fn get_encode_function(
         Inline(schema.BooleanSchema(..)) ->
           "fn(items) { json.array(items, json.bool) }"
         // Inline non-primitive items (e.g. nested ArraySchema, anonymous
-        // ObjectSchema) at the top level of a response are not yet hoisted
-        // into reusable encoders. Falling back to the previous "json.string"
-        // shape would emit code that fails to compile against List(_); emit a
-        // homogeneous String array instead so the call still type-checks even
-        // when the items are not actually strings. Once such schemas get a
-        // hoist + per-item encoder, replace this branch.
-        _ -> "fn(items) { json.array(items, json.string) }"
+        // ObjectSchema) at the top level of a response have no reusable
+        // encoder. A homogeneous String array keeps the call type-checking
+        // against List(_), where a bare "json.string" would not compile.
+        Inline(schema.ArraySchema(..))
+        | Inline(schema.ObjectSchema(..))
+        | Inline(schema.AllOfSchema(..))
+        | Inline(schema.OneOfSchema(..))
+        | Inline(schema.AnyOfSchema(..)) ->
+          "fn(items) { json.array(items, json.string) }"
       }
     }
-    Some(Inline(schema.StringSchema(..))) -> "json.string"
     Some(Inline(schema.IntegerSchema(..))) -> "json.int"
     Some(Inline(schema.NumberSchema(..))) -> "json.float"
     Some(Inline(schema.BooleanSchema(..))) -> "json.bool"
-    _ -> "json.string"
+    Some(Inline(schema.StringSchema(..)))
+    | Some(Inline(schema.ObjectSchema(..)))
+    | Some(Inline(schema.AllOfSchema(..)))
+    | Some(Inline(schema.OneOfSchema(..)))
+    | Some(Inline(schema.AnyOfSchema(..)))
+    | None -> "json.string"
   }
 }
 
@@ -1646,7 +1575,7 @@ fn path_to_pattern(path: String) -> String {
       }
     })
 
-  "[" <> se.join_with(patterns, ", ") <> "]"
+  "[" <> string.join(patterns, ", ") <> "]"
 }
 
 /// Check if a path segment is a parameter.

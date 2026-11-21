@@ -1,5 +1,5 @@
 //// Component schema reachability pruning for the OpenAPI generation
-//// pipeline (Issue #501).
+//// pipeline.
 ////
 //// `filter.apply` drops operations the user does not want, but it
 //// leaves `spec.components.schemas` untouched on purpose so that

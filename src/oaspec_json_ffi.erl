@@ -4,7 +4,7 @@
 %% loader feeds every input through yamerl regardless of extension,
 %% which is fine for hand-written YAML specs (a few hundred KB) but is
 %% catastrophically slow on large JSON specs — yamerl stalls or
-%% crashes on the 12 MB GitHub REST OpenAPI bundle (issue #352).
+%% crashes on the 12 MB GitHub REST OpenAPI bundle.
 %%
 %% This module bypasses yamerl entirely for `.json` input by calling
 %% the OTP 27 `json` module's streaming decoder. Each value is wrapped

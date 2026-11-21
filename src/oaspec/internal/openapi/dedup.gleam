@@ -15,7 +15,7 @@ import oaspec/openapi/spec.{type OpenApiSpec, Components, OpenApiSpec}
 /// Scope is intentionally limited: operationId / function-name uniqueness is
 /// enforced by `oaspec/internal/codegen/validate.gleam` with a hard error, not by a
 /// silent rename, because renaming mutates the generated public API surface
-/// without telling the user (see issue #237). Property name and enum variant
+/// without telling the user. Property name and enum variant
 /// deduplication is done at codegen time via dedup_property_names/1 and
 /// dedup_enum_variants/1 to preserve JSON wire names.
 pub fn dedup(spec: OpenApiSpec(stage)) -> OpenApiSpec(stage) {

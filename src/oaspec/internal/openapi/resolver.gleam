@@ -21,7 +21,7 @@ pub fn ref_to_name(ref: String) -> String {
   ref
   |> string.split("/")
   |> list.last
-  |> result.unwrap("Unknown")
+  |> result.unwrap(ref)
 }
 
 /// Resolve a SchemaRef to a SchemaObject, looking up $ref in components.

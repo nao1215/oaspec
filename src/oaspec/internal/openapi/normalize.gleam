@@ -186,9 +186,8 @@ fn normalize_schema_ref(ref: SchemaRef) -> SchemaRef {
 fn normalize_schema(schema_obj: SchemaObject) -> SchemaObject {
   // 1. const_value -> single-value enum (string const only).
   // Non-string const (bool, int, float, object, array, null) cannot be
-  // represented as a Gleam enum, so flag it as unsupported. Previously
-  // the const was silently dropped and codegen emitted a bare
-  // `pub type BoolConst = Bool` that lost the const restriction (#238).
+  // represented as a Gleam enum, so flag it as unsupported rather than
+  // emit a bare `pub type BoolConst = Bool` that loses the restriction.
   let schema_obj = case schema_obj {
     StringSchema(metadata: meta, ..) ->
       case meta.const_value {
@@ -210,7 +209,7 @@ fn normalize_schema(schema_obj: SchemaObject) -> SchemaObject {
   // 2. raw_type with multiple types -> oneOf. If the primary schema
   // carried type-specific constraints (pattern, minLength, minimum,
   // enum, etc.) the `make_typed_schema` rewrite would silently drop
-  // them when it builds bare variants, so flag it instead (#238).
+  // them when it builds bare variants, so flag it instead.
   let schema_obj = case schema.get_metadata(schema_obj).raw_type {
     Some(types) ->
       case list.length(types) > 1 {
