@@ -1,4 +1,10 @@
+import gleam/list
+import gleam/string
+import gleeunit/should
+import oaspec/internal/codegen/validate
+import oaspec/openapi/parser
 import oaspec_support as support
+import test_helpers
 
 pub fn validator_core_acceptance_test() {
   let _ = support.validate_accepts_array_parameter_case()
@@ -107,4 +113,31 @@ pub fn validator_feature_fixtures_test() {
   let _ = support.validate_mixed_param_locations_case()
   let _ = support.validate_complex_discriminator_case()
   let _ = support.validate_optional_required_combinations_case()
+}
+
+fn pattern_spec(pattern: String) -> String {
+  "openapi: 3.0.3\n"
+  <> "info:\n  title: x\n  version: '1.0'\n"
+  <> "paths: {}\n"
+  <> "components:\n  schemas:\n"
+  <> "    Code:\n      type: object\n      properties:\n"
+  <> "        value:\n          type: string\n          pattern: '"
+  <> pattern
+  <> "'\n"
+}
+
+pub fn validate_rejects_invalid_pattern_test() {
+  let assert Ok(spec) = parser.parse_string(pattern_spec("[a-"))
+  let errors = validate.validate(test_helpers.make_ctx_from_spec(spec))
+  let assert Ok(d) =
+    list.find(errors, fn(d) { string.contains(d.pointer, "pattern") })
+  string.contains(d.pointer, "components.schemas.Code.value")
+  |> should.be_true()
+  string.contains(d.message, "[a-") |> should.be_true()
+}
+
+pub fn validate_accepts_valid_pattern_test() {
+  let assert Ok(spec) = parser.parse_string(pattern_spec("^[a-z]+$"))
+  validate.validate(test_helpers.make_ctx_from_spec(spec))
+  |> should.equal([])
 }

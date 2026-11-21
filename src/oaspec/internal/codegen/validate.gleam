@@ -1430,7 +1430,30 @@ fn validate_schema_recursive(
         validate_schema_ref_recursive(path <> ".allOf", s_ref, ctx)
       })
 
+    StringSchema(pattern: Some(pattern), ..) ->
+      validate_pattern(path <> ".pattern", pattern)
+
     _ -> []
+  }
+}
+
+/// The generated guard compiles `pattern` with gleam/regexp, so a pattern
+/// that does not compile is reported here instead of failing every request.
+fn validate_pattern(path: String, pattern: String) -> List(Diagnostic) {
+  case regexp.from_string(pattern) {
+    Ok(_) -> []
+    Error(regexp.CompileError(error:, ..)) -> [
+      diagnostic.validation_error_both(
+        path: path,
+        detail: "pattern '"
+          <> pattern
+          <> "' is not a valid regular expression: "
+          <> error,
+        hint: Some(
+          "Fix the regular expression; the generated validator compiles it with gleam/regexp.",
+        ),
+      ),
+    ]
   }
 }
 
