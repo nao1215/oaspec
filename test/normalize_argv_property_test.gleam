@@ -1,4 +1,4 @@
-//// metamon property tests for `oaspec.normalize_argv`. Pin the
+//// metamon property tests for `cli.normalize_argv`. Pin the
 //// algebraic invariants the function is documented to hold so a
 //// future refactor (or a new value-flag added to `cli.value_flag_names`)
 //// surfaces a regression here instead of breaking the CLI for end
@@ -10,7 +10,6 @@ import metamon
 import metamon/generator
 import metamon/generator/range
 import metamon/relation
-import oaspec
 import oaspec/internal/cli
 
 // ---------- argv generators ----------
@@ -91,16 +90,16 @@ pub fn normalize_argv_idempotent_test() {
   let mr =
     metamon.idempotency_of(
       name: "normalize_argv_idempotent",
-      of: oaspec.normalize_argv,
+      of: cli.normalize_argv,
     )
-  metamon.forall_morph(argv_gen(), mr, oaspec.normalize_argv)
+  metamon.forall_morph(argv_gen(), mr, cli.normalize_argv)
 }
 
 // 2. Length non-increasing: each pair-collapse turns two argv elements
 //    into one, and no other shape grows the list.
 pub fn normalize_argv_length_non_increasing_test() {
   metamon.forall(argv_gen(), fn(args) {
-    list.length(oaspec.normalize_argv(args)) <= list.length(args)
+    list.length(cli.normalize_argv(args)) <= list.length(args)
   })
 }
 
@@ -108,7 +107,7 @@ pub fn normalize_argv_length_non_increasing_test() {
 //    return the input bit-for-bit when there is nothing to collapse.
 pub fn normalize_argv_passthrough_when_no_value_flags_test() {
   metamon.forall(argv_without_value_flags_gen(), fn(args) {
-    oaspec.normalize_argv(args) == args
+    cli.normalize_argv(args) == args
   })
 }
 
@@ -119,8 +118,8 @@ pub fn normalize_argv_value_flag_equivalence_test() {
     generator.tuple2(value_flag_gen(), value_token_gen()),
     fn(pair) {
       let #(flag, value) = pair
-      oaspec.normalize_argv([flag, value])
-      == oaspec.normalize_argv([flag <> "=" <> value])
+      cli.normalize_argv([flag, value])
+      == cli.normalize_argv([flag <> "=" <> value])
     },
   )
 }
@@ -131,7 +130,7 @@ pub fn normalize_argv_value_flag_equivalence_test() {
 //    flag" error. This is the round-trip end of property 4.
 pub fn normalize_argv_output_has_no_unjoined_value_flag_pairs_test() {
   metamon.forall(argv_gen(), fn(args) {
-    let normalised = oaspec.normalize_argv(args)
+    let normalised = cli.normalize_argv(args)
     !contains_unjoined_value_flag_pair(normalised)
   })
 }
@@ -171,8 +170,8 @@ fn is_value_token(arg: String) -> Bool {
 pub fn normalize_argv_appending_bool_flag_commutes_test() {
   metamon.forall(generator.tuple2(argv_gen(), bool_flag_gen()), fn(pair) {
     let #(args, bool_flag) = pair
-    oaspec.normalize_argv(list.append(args, [bool_flag]))
-    == list.append(oaspec.normalize_argv(args), [bool_flag])
+    cli.normalize_argv(list.append(args, [bool_flag]))
+    == list.append(cli.normalize_argv(args), [bool_flag])
   })
 }
 

@@ -7,8 +7,8 @@ import oaspec/internal/codegen/guards
 import oaspec/internal/codegen/router_ir
 import oaspec/internal/openapi/dedup
 import oaspec/internal/openapi/hoist
+import oaspec/internal/openapi/parser
 import oaspec/internal/openapi/resolve
-import oaspec/openapi/parser
 
 const guard_integration_spec =
   "

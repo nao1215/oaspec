@@ -2,10 +2,10 @@ import gleam/list
 import gleam/string
 import gleeunit/should
 import oaspec/config
-import oaspec/generate
 import oaspec/internal/codegen/context
 import oaspec/internal/codegen/server as server_gen
-import oaspec/openapi/parser
+import oaspec/internal/generate
+import oaspec/internal/openapi/parser
 import oaspec_support as support
 import test_helpers
 

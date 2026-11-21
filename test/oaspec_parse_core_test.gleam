@@ -1,7 +1,7 @@
 import gleam/list
 import gleam/string
 import gleeunit/should
-import oaspec/openapi/parser
+import oaspec/internal/openapi/parser
 import oaspec_support as support
 
 pub fn parser_smoke_test() {

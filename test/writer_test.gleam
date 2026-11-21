@@ -5,10 +5,10 @@ import gleam/option.{None, Some}
 import gleam/string
 import gleeunit
 import gleeunit/should
-import oaspec/codegen/writer
 import oaspec/config
 import oaspec/internal/codegen/context
 import oaspec/internal/codegen/import_analysis
+import oaspec/internal/codegen/writer
 import oaspec/internal/openapi/schema
 import oaspec/openapi
 import simplifile
@@ -108,19 +108,25 @@ pub fn output_dirs_both_mode_test() {
 }
 
 pub fn error_to_string_directory_create_error_test() {
-  writer.error_to_string(writer.DirectoryCreateError(
+  writer.error_to_string(writer.CannotCreateDirectory(
     path: "/tmp/out",
-    detail: "permission denied",
+    reason: simplifile.Eacces,
   ))
-  |> should.equal("Failed to create directory /tmp/out: permission denied")
+  |> should.equal(
+    "Failed to create directory /tmp/out: Failed to create directory: "
+    <> simplifile.describe_error(simplifile.Eacces),
+  )
 }
 
 pub fn error_to_string_file_write_error_test() {
-  writer.error_to_string(writer.FileWriteError(
+  writer.error_to_string(writer.CannotWriteFile(
     path: "/tmp/out/types.gleam",
-    detail: "disk full",
+    reason: simplifile.Enospc,
   ))
-  |> should.equal("Failed to write file /tmp/out/types.gleam: disk full")
+  |> should.equal(
+    "Failed to write file /tmp/out/types.gleam: Failed to write file: "
+    <> simplifile.describe_error(simplifile.Enospc),
+  )
 }
 
 // ===================================================================

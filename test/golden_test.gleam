@@ -7,12 +7,12 @@ import gleam/string
 import gleeunit
 import gleeunit/should
 import oaspec/config
-import oaspec/generate
 import oaspec/internal/codegen/context
 import oaspec/internal/formatter
+import oaspec/internal/generate
+import oaspec/internal/openapi/parser
 import oaspec/internal/openapi/resolve
 import oaspec/openapi
-import oaspec/openapi/parser
 import simplifile
 
 pub fn main() {

@@ -327,6 +327,15 @@ pub fn parse_string_resolved(
   content: String,
 ) -> Result(OpenApiSpec(Resolved), Diagnostic) {
   use spec <- result.try(parse_string(content))
+  resolve_spec(spec)
+}
+
+/// Normalise OAS 3.1 patterns, resolve component aliases and check that
+/// every schema `$ref` resolves — everything `parse_string_resolved` does
+/// after parsing. Returns the first diagnostic on failure.
+pub fn resolve_spec(
+  spec: OpenApiSpec(Unresolved),
+) -> Result(OpenApiSpec(Resolved), Diagnostic) {
   let normalised = normalize.normalize(spec)
   use resolved <- result.try(
     resolve.resolve(normalised)

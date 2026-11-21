@@ -1,4 +1,5 @@
 import filepath
+import gleam/bool
 import gleam/int
 import gleam/io
 import gleam/list
@@ -7,17 +8,17 @@ import gleam/order
 import gleam/result
 import gleam/string
 import glint
-import oaspec/codegen/writer
 import oaspec/config
-import oaspec/generate
 import oaspec/internal/codegen/context
+import oaspec/internal/codegen/writer
 import oaspec/internal/config_check
 import oaspec/internal/formatter
+import oaspec/internal/generate
 import oaspec/internal/openapi/diagnostic
 import oaspec/internal/openapi/location_index.{type LocationIndex}
+import oaspec/internal/openapi/parser
 import oaspec/internal/progress
 import oaspec/openapi.{type OpenApiSpec, type Unresolved}
-import oaspec/openapi/parser
 import simplifile
 
 @external(erlang, "oaspec_ffi", "is_stdout_tty")
@@ -1090,3 +1091,44 @@ fn print_warnings_for(
 /// Exit the process with a status code.
 @external(erlang, "erlang", "halt")
 fn halt(code: Int) -> Nil
+
+/// Translate `--name value` into `--name=value` for the value-bearing long
+/// options listed in `value_flag_names`. glint 1.x only accepts the
+/// `=`-joined form, so users who reach for the GNU `--name value` convention
+/// (or who copy commands from `git`/`gh`/`cargo` muscle memory) hit
+/// `invalid flag '<name>'`. The normalisation happens before glint sees the
+/// argv so existing `--name=value` callers are unaffected, and so unknown
+/// flags still surface from glint with their original error.
+///
+/// Other shapes are passed through untouched:
+/// - `--name=value`: already canonical (the name has `=` in it, so no match)
+/// - `--bool-flag`: not in the value-bearing list
+/// - `--name -other`: a `-`-prefixed value is treated as the next flag, so
+///   the original (broken) call is preserved and glint reports it as before
+pub fn normalize_argv(arguments: List(String)) -> List(String) {
+  do_normalize(arguments, [])
+}
+
+fn do_normalize(arguments: List(String), acc: List(String)) -> List(String) {
+  case arguments {
+    [] -> list.reverse(acc)
+    [arg, value, ..rest] -> {
+      use <- bool.lazy_guard(
+        !{ is_value_long_flag(arg) && value_is_value(value) },
+        fn() { do_normalize([value, ..rest], [arg, ..acc]) },
+      )
+      do_normalize(rest, [arg <> "=" <> value, ..acc])
+    }
+    [single, ..rest] -> do_normalize(rest, [single, ..acc])
+  }
+}
+
+fn is_value_long_flag(arg: String) -> Bool {
+  use <- bool.guard(!string.starts_with(arg, "--"), False)
+  let name = string.drop_start(arg, 2)
+  list.contains(value_flag_names, name)
+}
+
+fn value_is_value(arg: String) -> Bool {
+  !string.starts_with(arg, "-")
+}

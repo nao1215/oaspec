@@ -7,7 +7,6 @@ import gleam/string
 import gleeunit
 import gleeunit/should
 import oaspec/config
-import oaspec/generate
 import oaspec/internal/capability
 import oaspec/internal/codegen/client as client_gen
 import oaspec/internal/codegen/context
@@ -21,6 +20,7 @@ import oaspec/internal/codegen/server as server_gen
 import oaspec/internal/codegen/types
 import oaspec/internal/codegen/validate
 import oaspec/internal/config_check
+import oaspec/internal/generate
 import oaspec/internal/openapi/capability_check
 import oaspec/internal/openapi/dedup
 import oaspec/internal/openapi/diagnostic
@@ -28,6 +28,7 @@ import oaspec/internal/openapi/filter
 import oaspec/internal/openapi/hoist
 import oaspec/internal/openapi/location_index
 import oaspec/internal/openapi/normalize
+import oaspec/internal/openapi/parser
 import oaspec/internal/openapi/reachability
 import oaspec/internal/openapi/resolve
 import oaspec/internal/openapi/resolver
@@ -38,7 +39,6 @@ import oaspec/internal/util/content_type
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
 import oaspec/openapi.{Diagnostic, NoSourceLoc, SourceLoc}
-import oaspec/openapi/parser
 import simplifile
 
 pub fn main() {

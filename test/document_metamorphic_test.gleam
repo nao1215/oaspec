@@ -28,8 +28,8 @@ import metamon
 import metamon/generator
 import metamon/generator/range
 import oaspec/config
-import oaspec/generate
-import oaspec/openapi/parser
+import oaspec/internal/generate
+import oaspec/internal/openapi/parser
 import simplifile
 import yay
 

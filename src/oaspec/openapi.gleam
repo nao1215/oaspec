@@ -498,8 +498,18 @@ pub type Diagnostic {
 /// ## Examples
 ///
 /// ```gleam
-/// openapi.diagnostic_to_string(diagnostic)
-/// // -> "[Parse] Error at info: Missing required field: title Check your OpenAPI spec structure."
+/// openapi.Diagnostic(
+///   code: "missing_field",
+///   phase: openapi.PhaseParse,
+///   severity: openapi.SeverityError,
+///   target: openapi.TargetBoth,
+///   pointer: "info",
+///   source_loc: openapi.SourceLoc(line: 3, column: 3),
+///   message: "Missing required field: title",
+///   hint: None,
+/// )
+/// |> openapi.diagnostic_to_string
+/// // -> "[Parse] Error at info: Missing required field: title (line 3, column 3)"
 /// ```
 ///
 pub fn diagnostic_to_string(d: Diagnostic) -> String {
