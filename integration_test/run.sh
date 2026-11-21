@@ -237,6 +237,7 @@ target = "erlang"
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
 oaspec = { path = "../.." }
 
 [dev-dependencies]
@@ -384,6 +385,7 @@ target = "erlang"
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
 oaspec = { path = "../.." }
 
 [dev-dependencies]
@@ -441,6 +443,7 @@ target = "erlang"
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
 oaspec = { path = "../.." }
 
 [dev-dependencies]
@@ -944,6 +947,7 @@ target = "erlang"
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
 oaspec = { path = "../.." }
 
 [dev-dependencies]
@@ -1584,6 +1588,7 @@ target = "erlang"
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
 oaspec = { path = "../.." }
 
 [dev-dependencies]
@@ -2595,6 +2600,7 @@ target = "erlang"
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
 oaspec = { path = "../.." }
 
 [dev-dependencies]
@@ -2734,6 +2740,7 @@ target = "erlang"
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
 oaspec = { path = "../.." }
 TOML_EOF
 
@@ -2811,6 +2818,7 @@ target = "erlang"
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
 oaspec = { path = "../.." }
 
 [dev-dependencies]
@@ -2907,6 +2915,7 @@ target = "erlang"
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
 oaspec = { path = "../.." }
 
 [dev-dependencies]
@@ -2966,6 +2975,7 @@ target = "erlang"
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
 oaspec = { path = "../.." }
 
 [dev-dependencies]
@@ -3025,6 +3035,7 @@ target = "erlang"
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
 oaspec = { path = "../.." }
 
 [dev-dependencies]
@@ -3085,6 +3096,7 @@ target = "erlang"
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
 oaspec = { path = "../.." }
 
 [dev-dependencies]

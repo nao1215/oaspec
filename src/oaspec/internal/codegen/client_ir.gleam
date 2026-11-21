@@ -836,6 +836,12 @@ pub fn imports(requirements: ClientRequirements, ctx: Context) -> List(String) {
     config.package(context.config(ctx)) <> "/decode",
     config.package(context.config(ctx)) <> "/response_types",
   ]
+  // Request literals name their method as `http.Get` etc., so gleam/http is
+  // only imported when the client has an operation to build.
+  let base_imports = case context.operations(ctx) {
+    [] -> base_imports
+    _ -> ["gleam/http", ..base_imports]
+  }
   let base_imports = case requirements.needs_int {
     True -> ["gleam/int", ..base_imports]
     False -> base_imports

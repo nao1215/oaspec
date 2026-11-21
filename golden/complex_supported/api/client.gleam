@@ -5,6 +5,7 @@ import api/encode
 import api/request_types
 import api/response_types
 import api/types
+import gleam/http
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -122,7 +123,7 @@ pub fn build_get_required_params_request(
   let body = transport.EmptyBody
   Ok(
     transport.Request(
-      method: transport.Get,
+      method: http.Get,
       base_url: Some(default_base_url()),
       path: path,
       query: query,
@@ -219,7 +220,7 @@ pub fn build_post_search_request(
   }
   Ok(
     transport.Request(
-      method: transport.Post,
+      method: http.Post,
       base_url: Some(default_base_url()),
       path: path,
       query: query,
@@ -303,7 +304,7 @@ pub fn build_get_user_request(
   let body = transport.EmptyBody
   Ok(
     transport.Request(
-      method: transport.Get,
+      method: http.Get,
       base_url: Some(default_base_url()),
       path: path,
       query: query,
@@ -401,7 +402,7 @@ pub fn build_post_webhook_request(
   }
   Ok(
     transport.Request(
-      method: transport.Post,
+      method: http.Post,
       base_url: Some(default_base_url()),
       path: path,
       query: query,

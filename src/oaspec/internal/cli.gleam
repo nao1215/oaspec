@@ -740,29 +740,34 @@ fn find_orphans(dirs: List(String), expected: List(String)) -> List(String) {
   })
 }
 
-/// When the generated code imports a Gleam stdlib module
-/// whose package is not a direct dep of the consumer's project (today,
-/// only `gleam/regexp` for pattern validation), `gleam build` warns
-/// about the transitive import and a future Gleam release turns this
-/// into a hard error. Print an actionable hint so the user adds the
-/// missing dep — we deliberately do not rewrite the consumer's
-/// `gleam.toml` because modifying user-managed config invisibly is
-/// surprising.
+/// When the generated code imports a module whose package is not a direct
+/// dep of the consumer's project (`gleam/regexp` for pattern validation,
+/// `gleam/http` for request methods in the client), `gleam build` warns
+/// about the transitive import and a future Gleam release turns this into
+/// a hard error. Print an actionable hint so the user adds the missing dep
+/// — we deliberately do not rewrite the consumer's `gleam.toml` because
+/// modifying user-managed config invisibly is surprising.
 fn print_dep_hints(files: List(context.GeneratedFile)) -> Nil {
-  let needs_regexp =
-    list.any(files, fn(f) { string.contains(f.content, "import gleam/regexp") })
-  case needs_regexp {
-    True -> {
-      io.println("")
-      io.println(
-        "Note: generated code imports gleam/regexp for pattern validation.",
-      )
-      io.println(
-        "      Run 'gleam add gleam_regexp' in your project before 'gleam build'.",
-      )
-    }
-    False -> Nil
-  }
+  [
+    #("gleam/regexp", "gleam_regexp", "pattern validation"),
+    #("gleam/http", "gleam_http", "request methods"),
+  ]
+  |> list.filter(fn(dep) {
+    let #(module, _, _) = dep
+    list.any(files, fn(f) { string.contains(f.content, "import " <> module) })
+  })
+  |> list.each(fn(dep) {
+    let #(module, package, purpose) = dep
+    io.println("")
+    io.println(
+      "Note: generated code imports " <> module <> " for " <> purpose <> ".",
+    )
+    io.println(
+      "      Run 'gleam add "
+      <> package
+      <> "' in your project before 'gleam build'.",
+    )
+  })
 }
 
 /// Check that generated code matches existing files on disk.

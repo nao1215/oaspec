@@ -23,9 +23,7 @@ pub fn main() -> Nil {
   // Public client runtime: build a credentials value and a fake
   // `transport.Send`. These are the public types JS-side users of
   // generated clients would reach for first.
-  let _credentials =
-    transport.credentials()
-    |> transport.with_bearer_token("BearerAuth", "test-token")
+  let _credentials = [transport.BearerToken("BearerAuth", "test-token")]
   let _send = mock.text(200, "{}")
 
   io.println("oaspec js_smoke: ok")

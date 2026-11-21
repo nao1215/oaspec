@@ -1,3 +1,4 @@
+import gleam/http
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
@@ -5,7 +6,7 @@ import gleeunit/should
 import oaspec/mock
 import oaspec/transport.{
   type Request, type Response, type TransportError, ApiKeyCookie, ApiKeyHeader,
-  ApiKeyQuery, BytesBody, EmptyBody, Get, HttpAuthorization, Request, Response,
+  ApiKeyQuery, BytesBody, EmptyBody, HttpAuthorization, Request, Response,
   SecurityAlternative, TextBody,
 }
 
@@ -15,7 +16,7 @@ import oaspec/transport.{
 
 fn empty_request() -> Request {
   Request(
-    method: Get,
+    method: http.Get,
     base_url: None,
     path: "/pets",
     query: [],
@@ -84,13 +85,6 @@ fn list_join(items: List(String), sep: String) -> String {
   }
 }
 
-fn method_to_string(method: transport.Method) -> String {
-  // Defer to the public helper so the dual list (test helper +
-  // production helper) cannot drift apart on a future Method
-  // variant addition.
-  transport.method_to_wire(method)
-}
-
 // ---------------------------------------------------------------------------
 // with_base_url
 // ---------------------------------------------------------------------------
@@ -125,21 +119,25 @@ pub fn with_base_url_async_send_test() {
 }
 
 // ---------------------------------------------------------------------------
-// with_default_header
+// with_default_headers: one header
 // ---------------------------------------------------------------------------
 
-pub fn with_default_header_injects_when_missing_test() {
+pub fn with_default_headers_single_injects_when_missing_test() {
   let send =
-    transport.with_default_header(echo_to_response(), "x-trace-id", "abc-123")
+    transport.with_default_headers(echo_to_response(), [
+      #("x-trace-id", "abc-123"),
+    ])
   let assert Ok(resp) = send(empty_request())
   resp.headers
   |> list.key_find("x-trace-id")
   |> should.equal(Ok("abc-123"))
 }
 
-pub fn with_default_header_preserves_explicit_test() {
+pub fn with_default_headers_single_preserves_explicit_test() {
   let send =
-    transport.with_default_header(echo_to_response(), "X-Trace-Id", "default")
+    transport.with_default_headers(echo_to_response(), [
+      #("X-Trace-Id", "default"),
+    ])
   let req = Request(..empty_request(), headers: [#("x-trace-id", "explicit")])
   let assert Ok(resp) = send(req)
   resp.headers
@@ -233,209 +231,71 @@ pub fn with_default_headers_first_wins_preserves_order_for_others_test() {
   kept |> should.equal([#("X-A", "a"), #("X-B", "b")])
 }
 
-// Pin the wrapper-form composition rule: when two with_default_header
-// wrappers target the same name, the OUTERMOST wrapper (the one most
-// recently piped in) wins, because the request reaches it first. This
-// is the inverse of the list-form rule above (#555).
-pub fn with_default_header_outermost_wrapper_wins_for_same_name_test() {
-  let send =
-    echo_to_response()
-    |> transport.with_default_header(name: "X-Trace", value: "v1")
-    |> transport.with_default_header(name: "X-Trace", value: "v2")
-  let assert Ok(resp) = send(empty_request())
-  resp.headers
-  |> list.key_find("X-Trace")
-  |> should.equal(Ok("v2"))
-}
-
-pub fn with_default_header_outermost_wins_is_case_insensitive_test() {
-  // Same composition rule, but the inner wrapper uses a lower-case
-  // name. The outer wrapper still wins because the request reaches it
-  // first; the inner wrapper sees the already-set header and skips.
-  let send =
-    echo_to_response()
-    |> transport.with_default_header(name: "x-trace", value: "v1")
-    |> transport.with_default_header(name: "X-Trace", value: "v2")
-  let assert Ok(resp) = send(empty_request())
-  resp.headers
-  |> list.key_find("X-Trace")
-  |> should.equal(Ok("v2"))
-  // Lower-case duplicate must not slip in under a different key.
-  resp.headers
-  |> list.key_find("x-trace")
-  |> should.equal(Error(Nil))
-}
-
-pub fn with_default_header_explicit_request_header_beats_all_wrappers_test() {
-  // An explicit request header beats every wrapper layer regardless
-  // of how many with_default_header calls are stacked above it.
-  let send =
-    echo_to_response()
-    |> transport.with_default_header(name: "X-Trace", value: "wrapper-1")
-    |> transport.with_default_header(name: "X-Trace", value: "wrapper-2")
-  let req = Request(..empty_request(), headers: [#("X-Trace", "explicit")])
-  let assert Ok(resp) = send(req)
-  resp.headers
-  |> list.key_find("X-Trace")
-  |> should.equal(Ok("explicit"))
-}
-
-// Method.Other(String) + smart constructor (#554).
-
-pub fn method_to_wire_round_trips_known_verbs_test() {
-  // The nine RFC 9110 §9 verbs canonicalise to their uppercase
-  // RFC spelling.
-  transport.method_to_wire(transport.Get) |> should.equal("GET")
-  transport.method_to_wire(transport.Post) |> should.equal("POST")
-  transport.method_to_wire(transport.Put) |> should.equal("PUT")
-  transport.method_to_wire(transport.Delete) |> should.equal("DELETE")
-  transport.method_to_wire(transport.Patch) |> should.equal("PATCH")
-  transport.method_to_wire(transport.Head) |> should.equal("HEAD")
-  transport.method_to_wire(transport.Options) |> should.equal("OPTIONS")
-  transport.method_to_wire(transport.Trace) |> should.equal("TRACE")
-  transport.method_to_wire(transport.Connect) |> should.equal("CONNECT")
-}
-
-pub fn method_to_wire_passes_through_other_verbatim_test() {
-  // Other(s) returns s as-is. The smart constructor is responsible
-  // for case normalisation; bare Other("propfind") would round-trip
-  // as lowercase, which the tchar charset permits but RFC 9110 §9.1
-  // says is case-sensitive.
-  transport.method_to_wire(transport.Other("PROPFIND"))
-  |> should.equal("PROPFIND")
-  transport.method_to_wire(transport.Other("propfind"))
-  |> should.equal("propfind")
-}
-
-pub fn method_from_string_routes_known_verbs_case_insensitive_test() {
-  let assert Ok(transport.Get) = transport.method_from_string("GET")
-  let assert Ok(transport.Get) = transport.method_from_string("get")
-  let assert Ok(transport.Post) = transport.method_from_string("Post")
-  let assert Ok(transport.Connect) = transport.method_from_string("CONNECT")
-}
-
-pub fn method_from_string_uppercases_other_verbs_test() {
-  let assert Ok(transport.Other("PROPFIND")) =
-    transport.method_from_string("PROPFIND")
-  let assert Ok(transport.Other("PROPFIND")) =
-    transport.method_from_string("propfind")
-  let assert Ok(transport.Other("MKCOL")) =
-    transport.method_from_string("mkcol")
-  let assert Ok(transport.Other("PURGE")) =
-    transport.method_from_string("purge")
-}
-
-pub fn method_from_string_rejects_empty_test() {
-  case transport.method_from_string("") {
-    Error(transport.InvalidMethod(detail)) ->
-      should.be_true(string.contains(detail, "empty"))
-    Ok(_) -> should.fail()
-  }
-}
-
-pub fn method_from_string_rejects_separator_bytes_test() {
-  // Slash is in the separators set per RFC 9110 §5.6.2 — rejected.
-  case transport.method_from_string("HELLO/WORLD") {
-    Error(transport.InvalidMethod(detail)) ->
-      should.be_true(string.contains(detail, "tchar"))
-    Ok(_) -> should.fail()
-  }
-}
-
-pub fn method_from_string_rejects_whitespace_test() {
-  case transport.method_from_string("HE LLO") {
-    Error(transport.InvalidMethod(_)) -> Nil
-    Ok(_) -> should.fail()
-  }
-}
-
-pub fn method_from_string_round_trips_via_to_wire_test() {
-  // from_string → to_wire → from_string must be idempotent for any
-  // valid input. Pin the round-trip on the canonical verbs and a
-  // representative WebDAV verb.
-  list.each(["GET", "propfind", "MKCOL", "purge"], fn(input) {
-    let assert Ok(method) = transport.method_from_string(input)
-    let wire = transport.method_to_wire(method)
-    let assert Ok(method2) = transport.method_from_string(wire)
-    should.equal(method, method2)
-  })
-}
-
 // Header value validation: CRLF / NUL injection (#546).
 
-pub fn with_default_header_panics_on_cr_in_value_test() {
+pub fn with_default_headers_single_panics_on_cr_in_value_test() {
   let #(panicked, message) =
     capture_panic(fn() {
       let _ =
-        transport.with_default_header(
-          send: echo_to_response(),
-          name: "X-Trace-Id",
-          value: "abc\r\nX-Smuggled: yes",
-        )
+        transport.with_default_headers(send: echo_to_response(), headers: [
+          #("X-Trace-Id", "abc\r\nX-Smuggled: yes"),
+        ])
       Nil
     })
   should.be_true(panicked)
   should.be_true(string.contains(
     message,
-    "oaspec.transport.with_default_header",
+    "oaspec.transport.with_default_headers",
   ))
   should.be_true(string.contains(message, "CR"))
 }
 
-pub fn with_default_header_panics_on_lf_in_value_test() {
+pub fn with_default_headers_single_panics_on_lf_in_value_test() {
   let #(panicked, message) =
     capture_panic(fn() {
       let _ =
-        transport.with_default_header(
-          send: echo_to_response(),
-          name: "X-Trace-Id",
-          value: "abc\nX-Smuggled: yes",
-        )
+        transport.with_default_headers(send: echo_to_response(), headers: [
+          #("X-Trace-Id", "abc\nX-Smuggled: yes"),
+        ])
       Nil
     })
   should.be_true(panicked)
   should.be_true(string.contains(message, "LF"))
 }
 
-pub fn with_default_header_panics_on_nul_in_value_test() {
+pub fn with_default_headers_single_panics_on_nul_in_value_test() {
   let #(panicked, message) =
     capture_panic(fn() {
       let _ =
-        transport.with_default_header(
-          send: echo_to_response(),
-          name: "X-Trace-Id",
-          value: "abc\u{0000}def",
-        )
+        transport.with_default_headers(send: echo_to_response(), headers: [
+          #("X-Trace-Id", "abc\u{0000}def"),
+        ])
       Nil
     })
   should.be_true(panicked)
   should.be_true(string.contains(message, "NUL"))
 }
 
-pub fn with_default_header_panics_on_cr_in_name_test() {
+pub fn with_default_headers_single_panics_on_cr_in_name_test() {
   let #(panicked, message) =
     capture_panic(fn() {
       let _ =
-        transport.with_default_header(
-          send: echo_to_response(),
-          name: "X-Bad\r\nInjected",
-          value: "ok",
-        )
+        transport.with_default_headers(send: echo_to_response(), headers: [
+          #("X-Bad\r\nInjected", "ok"),
+        ])
       Nil
     })
   should.be_true(panicked)
   should.be_true(string.contains(message, "header name"))
 }
 
-pub fn with_default_header_accepts_printable_ascii_test() {
+pub fn with_default_headers_single_accepts_printable_ascii_test() {
   // Tab (\t) is allowed inside header values per RFC 9112 — only CR,
   // LF, and NUL are forbidden. All other printable ASCII passes.
   let send =
-    transport.with_default_header(
-      send: echo_to_response(),
-      name: "X-Trace-Id",
-      value: "abc-123 ~!@#$%^&*()_+\t",
-    )
+    transport.with_default_headers(send: echo_to_response(), headers: [
+      #("X-Trace-Id", "abc-123 ~!@#$%^&*()_+\t"),
+    ])
   let assert Ok(resp) = send(empty_request())
   resp.headers
   |> list.key_find("X-Trace-Id")
@@ -469,9 +329,7 @@ fn capture_panic(thunk: fn() -> Nil) -> #(Bool, String)
 // ---------------------------------------------------------------------------
 
 pub fn with_security_bearer_token_test() {
-  let creds =
-    transport.credentials()
-    |> transport.with_bearer_token("BearerAuth", "tok-abc")
+  let creds = [transport.BearerToken("BearerAuth", "tok-abc")]
   let send = transport.with_security(echo_to_response(), creds)
   let req = with_security_alts([HttpAuthorization("BearerAuth", "Bearer")])
   let assert Ok(resp) = send(req)
@@ -481,9 +339,7 @@ pub fn with_security_bearer_token_test() {
 }
 
 pub fn with_security_basic_auth_test() {
-  let creds =
-    transport.credentials()
-    |> transport.with_basic_auth("BasicAuth", "dXNlcjpwYXNz")
+  let creds = [transport.BasicAuth("BasicAuth", "dXNlcjpwYXNz")]
   let send = transport.with_security(echo_to_response(), creds)
   let req = with_security_alts([HttpAuthorization("BasicAuth", "Basic")])
   let assert Ok(resp) = send(req)
@@ -493,9 +349,7 @@ pub fn with_security_basic_auth_test() {
 }
 
 pub fn with_security_digest_auth_test() {
-  let creds =
-    transport.credentials()
-    |> transport.with_digest_auth("DigestAuth", "digest-value")
+  let creds = [transport.DigestAuth("DigestAuth", "digest-value")]
   let send = transport.with_security(echo_to_response(), creds)
   let req = with_security_alts([HttpAuthorization("DigestAuth", "Digest")])
   let assert Ok(resp) = send(req)
@@ -509,9 +363,7 @@ pub fn with_security_digest_auth_test() {
 // ---------------------------------------------------------------------------
 
 pub fn with_security_api_key_header_test() {
-  let creds =
-    transport.credentials()
-    |> transport.with_api_key("ApiKeyAuth", "key-123")
+  let creds = [transport.ApiKey("ApiKeyAuth", "key-123")]
   let send = transport.with_security(echo_to_response(), creds)
   let req = with_security_alts([ApiKeyHeader("ApiKeyAuth", "X-API-Key")])
   let assert Ok(resp) = send(req)
@@ -521,9 +373,7 @@ pub fn with_security_api_key_header_test() {
 }
 
 pub fn with_security_api_key_query_test() {
-  let creds =
-    transport.credentials()
-    |> transport.with_api_key("ApiKeyAuth", "key-q")
+  let creds = [transport.ApiKey("ApiKeyAuth", "key-q")]
   let send = transport.with_security(echo_query_send(), creds)
   let req =
     Request(
@@ -536,9 +386,7 @@ pub fn with_security_api_key_query_test() {
 }
 
 pub fn with_security_api_key_cookie_merges_test() {
-  let creds =
-    transport.credentials()
-    |> transport.with_api_key("ApiKeyAuth", "k")
+  let creds = [transport.ApiKey("ApiKeyAuth", "k")]
   let send = transport.with_security(echo_to_response(), creds)
   let req =
     Request(
@@ -557,9 +405,7 @@ pub fn with_security_api_key_cookie_merges_test() {
 
 pub fn with_security_or_picks_first_satisfiable_test() {
   // Only the second alternative (ApiKey) is satisfiable.
-  let creds =
-    transport.credentials()
-    |> transport.with_api_key("ApiKeyAuth", "k")
+  let creds = [transport.ApiKey("ApiKeyAuth", "k")]
   let send = transport.with_security(echo_to_response(), creds)
   let req =
     Request(..empty_request(), security: [
@@ -576,10 +422,10 @@ pub fn with_security_or_picks_first_satisfiable_test() {
 }
 
 pub fn with_security_and_applies_all_test() {
-  let creds =
-    transport.credentials()
-    |> transport.with_bearer_token("BearerAuth", "tok")
-    |> transport.with_api_key("ApiKeyAuth", "k")
+  let creds = [
+    transport.BearerToken("BearerAuth", "tok"),
+    transport.ApiKey("ApiKeyAuth", "k"),
+  ]
   let send = transport.with_security(echo_to_response(), creds)
   let req =
     Request(..empty_request(), security: [
@@ -598,7 +444,7 @@ pub fn with_security_and_applies_all_test() {
 }
 
 pub fn with_security_no_match_passes_through_test() {
-  let creds = transport.credentials()
+  let creds = []
   let send = transport.with_security(echo_to_response(), creds)
   let req = with_security_alts([HttpAuthorization("BearerAuth", "Bearer")])
   let assert Ok(resp) = send(req)
@@ -608,9 +454,7 @@ pub fn with_security_no_match_passes_through_test() {
 }
 
 pub fn with_security_query_appends_to_existing_test() {
-  let creds =
-    transport.credentials()
-    |> transport.with_api_key("ApiKeyAuth", "k1")
+  let creds = [transport.ApiKey("ApiKeyAuth", "k1")]
   let send = transport.with_security(echo_query_send(), creds)
   let req =
     Request(
@@ -727,7 +571,7 @@ pub fn mock_from_inspects_request_test() {
     mock.from(fn(req) {
       Ok(Response(
         status: 200,
-        headers: [#("x-method", method_to_string(req.method))],
+        headers: [#("x-method", http.method_to_string(req.method))],
         body: TextBody(req.path),
       ))
     })
@@ -744,7 +588,7 @@ pub fn mock_from_async_inspects_request_test() {
       transport.resolve(
         Ok(Response(
           status: 200,
-          headers: [#("x-method", method_to_string(req.method))],
+          headers: [#("x-method", http.method_to_string(req.method))],
           body: TextBody(req.path),
         )),
       )
@@ -785,9 +629,11 @@ pub fn async_map_try_short_circuits_error_test() {
 // against `AsyncSend`, not just sync `Send`. `with_base_url` is
 // already covered above; mirror the rest.
 
-pub fn with_default_header_async_send_test() {
+pub fn with_default_headers_single_async_send_test() {
   let send =
-    transport.with_default_header(echo_to_async_response(), "x-trace", "abc")
+    transport.with_default_headers(echo_to_async_response(), [
+      #("x-trace", "abc"),
+    ])
   transport.run(send(empty_request()), fn(result) {
     let assert Ok(resp) = result
     resp.headers
@@ -814,9 +660,7 @@ pub fn with_default_headers_async_send_test() {
 }
 
 pub fn with_security_async_send_test() {
-  let creds =
-    transport.credentials()
-    |> transport.with_bearer_token("BearerAuth", "tok-async")
+  let creds = [transport.BearerToken("BearerAuth", "tok-async")]
   let send = transport.with_security(echo_to_async_response(), creds)
   let req = with_security_alts([HttpAuthorization("BearerAuth", "Bearer")])
   transport.run(send(req), fn(result) {

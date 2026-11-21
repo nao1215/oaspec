@@ -10,6 +10,7 @@ internal_modules = ["oaspec/internal/**"]
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
 glint = ">= 1.0.0 and < 2.0.0"
 simplifile = ">= 2.0.0 and < 3.0.0"
 yay = ">= 2.0.0 and < 3.0.0"
@@ -83,7 +84,7 @@ unwrap_used = "error"
 # functions and ignore their heterogeneous return values; lint the case bodies
 # themselves rather than forcing every wrapper call to pattern-match.
 "test/oaspec_*_test.gleam" = ["discarded_result"]
-# transport_test exercises with_default_header*'s panic surface via
+# transport_test exercises with_default_headers' panic surface via
 # capture_panic; the unused wrapper return value (a fn(Request) -> a)
 # is intentional — the test only cares whether construction panicked
 # before the fn was returned.

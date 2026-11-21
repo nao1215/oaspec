@@ -12,6 +12,7 @@ packages = [
   { name = "glance", version = "7.0.0", build_tools = ["gleam"], requirements = ["gleam_stdlib", "glexer"], otp_app = "glance", source = "hex", outer_checksum = "EA52986965408D43003A1760E41457493EB96098DE193E6AD8646930EC190CB9" },
   { name = "gleam_community_ansi", version = "1.5.0", build_tools = ["gleam"], requirements = ["gleam_community_colour", "gleam_regexp", "gleam_stdlib"], otp_app = "gleam_community_ansi", source = "hex", outer_checksum = "B5AA433AF84313E23FDF90CCFF752B9380FE9FFCE02B2949D49B7AACCC77B16D" },
   { name = "gleam_community_colour", version = "2.0.4", build_tools = ["gleam"], requirements = ["gleam_json", "gleam_stdlib"], otp_app = "gleam_community_colour", source = "hex", outer_checksum = "6DB4665555D7D2B27F0EA32EF47E8BEBC4303821765F9C73D483F38EE24894F0" },
+  { name = "gleam_http", version = "4.5.0", build_tools = ["gleam"], requirements = ["gleam_stdlib", "splitter"], otp_app = "gleam_http", source = "hex", outer_checksum = "38D7E5698759D44F21436F365259F7015104F6FAFA23181CD0B2BB0E5B67BE2B" },
   { name = "gleam_json", version = "3.1.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_json", source = "hex", outer_checksum = "44FDAA8847BE8FC48CA7A1C089706BD54BADCC4C45B237A992EDDF9F2CDB2836" },
   { name = "gleam_regexp", version = "1.1.1", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_regexp", source = "hex", outer_checksum = "9C215C6CA84A5B35BB934A9B61A9A306EC743153BE2B0425A0D032E477B062A9" },
   { name = "gleam_stdlib", version = "1.1.0", build_tools = ["gleam"], requirements = [], otp_app = "gleam_stdlib", source = "hex", outer_checksum = "E191E535492DDFE6A6499E96C89A40D9BDF2B7F1DADD4D6BEDABE34027E5B1EA" },
@@ -32,6 +33,7 @@ packages = [
 [requirements]
 argv = { version = ">= 1.0.0 and < 2.0.0" }
 filepath = { version = ">= 1.1.0 and < 2.0.0" }
+gleam_http = { version = ">= 4.0.0 and < 5.0.0" }
 gleam_json = { version = ">= 3.0.0 and < 4.0.0" }
 gleam_regexp = { version = ">= 1.0.0 and < 2.0.0" }
 gleam_stdlib = { version = ">= 0.44.0 and < 2.0.0" }

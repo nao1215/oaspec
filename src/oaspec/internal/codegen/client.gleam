@@ -530,16 +530,16 @@ fn emit_simple_query_param(
   }
 }
 
-fn http_method_to_transport(method: spec.HttpMethod) -> String {
+fn http_method_expr(method: spec.HttpMethod) -> String {
   case method {
-    spec.Get -> "transport.Get"
-    spec.Post -> "transport.Post"
-    spec.Put -> "transport.Put"
-    spec.Delete -> "transport.Delete"
-    spec.Patch -> "transport.Patch"
-    spec.Head -> "transport.Head"
-    spec.Options -> "transport.Options"
-    spec.Trace -> "transport.Trace"
+    spec.Get -> "http.Get"
+    spec.Post -> "http.Post"
+    spec.Put -> "http.Put"
+    spec.Delete -> "http.Delete"
+    spec.Patch -> "http.Patch"
+    spec.Head -> "http.Head"
+    spec.Options -> "http.Options"
+    spec.Trace -> "http.Trace"
   }
 }
 
@@ -1238,7 +1238,7 @@ fn generate_build_body(
   let security_literal =
     client_security.render_security_metadata(ctx, effective_security)
 
-  let http_method = http_method_to_transport(method)
+  let http_method = http_method_expr(method)
 
   // Assemble the request literal.
   let sb =
