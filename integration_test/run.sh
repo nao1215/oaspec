@@ -1616,6 +1616,65 @@ rm -rf "$KW_CLIENT_DIR"
 info "Reserved-keyword integration tests passed."
 
 # -------------------------------------------------------
+# Step 14a: parameters named after modules the generated code uses
+# -------------------------------------------------------
+# A parameter bound as `http`, `transport`, `list` or `option` would
+# shadow the module of that name inside the generated client and server
+# bodies (`http.Get`, `transport.Request`, `list.reverse(query)`), so the
+# generator escapes those names. Build both sides with warnings as errors.
+info "Testing parameters named after generated-module aliases..."
+ALIAS_DIR="$SCRIPT_DIR/module_alias_params_test"
+rm -rf "$ALIAS_DIR"
+mkdir -p "$ALIAS_DIR/src"
+
+cat > "$ALIAS_DIR/oaspec.yaml" << 'YAML_EOF'
+input: test/fixtures/module_alias_params.yaml
+mode: both
+output:
+  server: ./integration_test/module_alias_params_test/src/api
+  client: ./integration_test/module_alias_params_test/src/api_client
+package: api
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate --config="$ALIAS_DIR/oaspec.yaml"
+
+cat > "$ALIAS_DIR/gleam.toml" << 'TOML_EOF'
+name = "module_alias_params_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
+oaspec = { path = "../.." }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$ALIAS_DIR/src/module_alias_params_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$ALIAS_DIR"
+gleam deps download
+
+verify_generated_format src/api_client
+if gleam build --warnings-as-errors 2>&1; then
+  info "PASS: Generated code with module-alias parameter names compiles (warnings-as-errors)."
+else
+  fail "Generated code with module-alias parameter names failed to compile."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$ALIAS_DIR"
+
+# -------------------------------------------------------
 # Step 14b: `handlers: per_operation` output compiles
 # -------------------------------------------------------
 # The fixture's operationIds collide with the other generated module

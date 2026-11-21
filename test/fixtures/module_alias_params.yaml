@@ -1,0 +1,39 @@
+openapi: 3.0.3
+info:
+  title: Module alias parameter names
+  version: 1.0.0
+paths:
+  /search/{list}:
+    get:
+      operationId: search
+      parameters:
+        - name: list
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: http
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: transport
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: option
+          in: header
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  string:
+                    type: string
