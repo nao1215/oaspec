@@ -11754,6 +11754,12 @@ pub fn server_deep_object_params_are_parsed_case() {
     list.find(files, fn(f) { f.path == "router.gleam" })
   let content = router_file.content
 
+  // Untyped additionalProperties are converted with the public dynamic
+  // API, not an identity FFI into gleam_stdlib.
+  string.contains(content, "@external") |> should.be_false()
+  string.contains(content, "dynamic.list(list.map(values, dynamic.string))")
+  |> should.be_true()
+
   string.contains(content, "import api/types")
   |> should.be_true()
   string.contains(content, "Ok(types.SearchItemsParamFilter(")

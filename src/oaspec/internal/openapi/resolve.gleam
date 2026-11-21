@@ -23,14 +23,91 @@ pub fn resolve(
   Ok(coerce_stage(resolved))
 }
 
-/// Safe phantom type cast — `stage` has no runtime representation, so
-/// `coerce_stage` is the identity function under a different phantom
-/// label. Declared as a target-specific external so the cast is a true
-/// no-op on both BEAM and JavaScript runtimes (avoids the cost of a
-/// destructure-and-rebuild that pure Gleam would otherwise require).
-@external(erlang, "gleam_stdlib", "identity")
-@external(javascript, "../gleam_stdlib/gleam_stdlib.mjs", "identity")
-fn coerce_stage(spec: OpenApiSpec(a)) -> OpenApiSpec(b)
+/// Relabel the stage phantom type. `stage` has no runtime representation,
+/// so this rebuilds the stage-typed records with the same contents.
+fn coerce_stage(spec: OpenApiSpec(a)) -> OpenApiSpec(b) {
+  spec.OpenApiSpec(
+    ..spec,
+    paths: restage_dict(spec.paths, restage_path_item),
+    components: option.map(spec.components, restage_components),
+    webhooks: restage_dict(spec.webhooks, restage_path_item),
+  )
+}
+
+fn restage_components(components: Components(a)) -> Components(b) {
+  Components(
+    ..components,
+    parameters: restage_dict(components.parameters, restage_parameter),
+    request_bodies: restage_dict(
+      components.request_bodies,
+      restage_request_body,
+    ),
+    responses: restage_dict(components.responses, restage_response),
+    path_items: restage_dict(components.path_items, restage_path_item),
+    callbacks: restage_dict(components.callbacks, restage_callback),
+  )
+}
+
+fn restage_path_item(item: PathItem(a)) -> PathItem(b) {
+  PathItem(
+    ..item,
+    get: option.map(item.get, restage_operation),
+    post: option.map(item.post, restage_operation),
+    put: option.map(item.put, restage_operation),
+    delete: option.map(item.delete, restage_operation),
+    patch: option.map(item.patch, restage_operation),
+    head: option.map(item.head, restage_operation),
+    options: option.map(item.options, restage_operation),
+    trace: option.map(item.trace, restage_operation),
+    parameters: list.map(item.parameters, restage_ref_or(_, restage_parameter)),
+  )
+}
+
+fn restage_operation(operation: Operation(a)) -> Operation(b) {
+  Operation(
+    ..operation,
+    parameters: list.map(operation.parameters, restage_ref_or(
+      _,
+      restage_parameter,
+    )),
+    request_body: option.map(operation.request_body, restage_ref_or(
+      _,
+      restage_request_body,
+    )),
+    responses: restage_dict(operation.responses, restage_response),
+    callbacks: restage_dict(operation.callbacks, restage_callback),
+  )
+}
+
+fn restage_callback(callback: Callback(a)) -> Callback(b) {
+  Callback(entries: restage_dict(callback.entries, restage_path_item))
+}
+
+fn restage_parameter(param: Parameter(a)) -> Parameter(b) {
+  spec.Parameter(..param, name: param.name)
+}
+
+fn restage_request_body(body: RequestBody(a)) -> RequestBody(b) {
+  spec.RequestBody(..body, required: body.required)
+}
+
+fn restage_response(response: Response(a)) -> Response(b) {
+  spec.Response(..response, description: response.description)
+}
+
+fn restage_dict(
+  entries: Dict(k, RefOr(a)),
+  restage: fn(a) -> b,
+) -> Dict(k, RefOr(b)) {
+  dict.map_values(entries, fn(_key, value) { restage_ref_or(value, restage) })
+}
+
+fn restage_ref_or(value: RefOr(a), restage: fn(a) -> b) -> RefOr(b) {
+  case value {
+    Ref(ref) -> Ref(ref)
+    Value(inner) -> Value(restage(inner))
+  }
+}
 
 /// Internal resolve that preserves the input stage parameter.
 fn resolve_internal(

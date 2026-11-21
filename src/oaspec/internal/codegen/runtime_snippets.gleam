@@ -43,11 +43,12 @@ fn deep_object_additional_properties(query: Dict(String, List(String)), prefix: 
 
 "
 
-/// Type-safe identity coercion used when `deepObject` parameters have
-/// untyped `additionalProperties` (Dynamic value type).
+/// Converts the raw values of untyped deep-object `additionalProperties`
+/// into `Dynamic` lists of strings.
 pub const coerce_dict: String =
-  "@external(erlang, \"gleam_stdlib\", \"identity\")
-fn coerce_dict(value: Dict(String, List(String))) -> Dict(String, dynamic.Dynamic)
+  "fn coerce_dict(value: Dict(String, List(String))) -> Dict(String, dynamic.Dynamic) {
+  dict.map_values(value, fn(_key, values) { dynamic.list(list.map(values, dynamic.string)) })
+}
 
 "
 
