@@ -1,9 +1,6 @@
-// JavaScript-target counterparts for the helpers exposed in
-// oaspec_ffi.erl. Only functions actually called from cross-target
-// Gleam modules need a JS implementation; the BEAM-only CLI helpers
-// (find_executable, run_executable, is_stdout_tty, no_color_set) are
-// not declared with a JS @external and therefore do not need a JS
-// version here.
+// JavaScript-target counterparts for the helpers in oaspec_ffi.erl that
+// cross-target Gleam modules call. The BEAM-only CLI helpers have no JS
+// @external and so no JS version here.
 
 export function monotonic_ms() {
   // performance.now() is monotonic (unaffected by system clock changes)
@@ -17,29 +14,4 @@ export function monotonic_ms() {
       ? performance.now()
       : Date.now();
   return Math.trunc(ms);
-}
-
-// Format an integer as a decimal string. Mirrors `erlang:integer_to_binary/1`
-// for cross-target use in places where `gleam/int.to_string` is not in
-// scope (e.g. inside diagnostic constructors).
-export function integer_to_string(n) {
-  return String(n);
-}
-
-// Run a thunk and report (panicked, message) to the caller. Mirrors
-// the BEAM implementation in `oaspec_ffi.erl`. Used by tests that
-// exercise functions which intentionally panic on invalid input.
-export function capture_panic(thunk) {
-  try {
-    thunk();
-    return [false, ""];
-  } catch (error) {
-    let message;
-    if (error && typeof error === "object" && error.message) {
-      message = error.message;
-    } else {
-      message = String(error);
-    }
-    return [true, message];
-  }
 }

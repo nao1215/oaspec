@@ -83,5 +83,5 @@ pub fn lookup_with_ancestor(index: LocationIndex, path: String) -> SourceLoc {
   }
 }
 
-@external(erlang, "yaml_loc_ffi", "build_location_index")
+@external(erlang, "oaspec_yaml_loc_ffi", "build_location_index")
 fn do_build(content: String) -> Result(List(#(String, #(Int, Int))), Nil)

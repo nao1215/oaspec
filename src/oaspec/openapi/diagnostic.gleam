@@ -97,9 +97,9 @@ pub fn parse_limit_exceeded(
     message: "Parser limit '"
       <> limit
       <> "' exceeded: configured cap "
-      <> int_to_string(configured)
+      <> int.to_string(configured)
       <> ", actual "
-      <> int_to_string(actual)
+      <> int.to_string(actual)
       <> ". The input was refused before parsing to bound denial-of-service exposure (issue #553).",
     hint: option.Some(
       "If the source is trusted, raise '"
@@ -108,10 +108,6 @@ pub fn parse_limit_exceeded(
     ),
   )
 }
-
-@external(erlang, "erlang", "integer_to_binary")
-@external(javascript, "../oaspec_ffi.mjs", "integer_to_string")
-fn int_to_string(n: Int) -> String
 
 pub fn missing_field(
   path path: String,
