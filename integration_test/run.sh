@@ -1270,6 +1270,186 @@ rm -rf "$DEEP_DIR"
 info "DeepObject params integration tests passed."
 
 # -------------------------------------------------------
+# Step 13b: required boolean fields reject values other than true / false
+# -------------------------------------------------------
+info "Testing required boolean deepObject / form fields..."
+
+BOOL_DIR="$SCRIPT_DIR/required_bool_test"
+rm -rf "$BOOL_DIR"
+mkdir -p "$BOOL_DIR/src/api" "$BOOL_DIR/test"
+
+cat > "$BOOL_DIR/required_bool.yaml" << 'YAML_EOF'
+openapi: "3.0.3"
+info:
+  title: Required Bool Test API
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: search
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          required: true
+          schema:
+            type: object
+            required: [active]
+            properties:
+              active:
+                type: boolean
+      responses:
+        "200":
+          description: ok
+  /submit:
+    post:
+      operationId: submit
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [active, flags]
+              properties:
+                active:
+                  type: boolean
+                flags:
+                  type: array
+                  items:
+                    type: boolean
+      responses:
+        "200":
+          description: ok
+YAML_EOF
+
+cat > "$BOOL_DIR/oaspec-bool.yaml" << 'YAML_EOF'
+input: ./integration_test/required_bool_test/required_bool.yaml
+output:
+  server: ./integration_test/required_bool_test/src/api
+package: api
+validate: false
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$BOOL_DIR/oaspec-bool.yaml" \
+  --mode=server
+
+cat > "$BOOL_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
+import api/request_types
+import api/response_types
+
+pub type State {
+  State
+}
+
+pub fn search(state: State, req: request_types.SearchRequest) -> response_types.SearchResponse {
+  let _ = state
+  let _ = req
+  response_types.SearchResponseOk
+}
+
+pub fn submit(state: State, req: request_types.SubmitRequest) -> response_types.SubmitResponse {
+  let _ = state
+  let _ = req
+  response_types.SubmitResponseOk
+}
+GLEAM_EOF
+
+cat > "$BOOL_DIR/gleam.toml" << 'TOML_EOF'
+name = "required_bool_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$BOOL_DIR/src/required_bool_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cat > "$BOOL_DIR/test/required_bool_test_test.gleam" << 'GLEAM_EOF'
+// A required boolean field accepts true / false in any case and answers
+// 400 for any other value instead of reading it as False.
+
+import api/handlers
+import api/router
+import gleam/dict
+import gleeunit
+import gleeunit/should
+
+pub fn main() {
+  gleeunit.main()
+}
+
+fn search(active: String) {
+  let query = dict.from_list([#("filter[active]", [active])])
+  router.route(handlers.State, "GET", ["search"], query, dict.new(), "")
+}
+
+fn submit(body: String) {
+  let headers =
+    dict.from_list([#("content-type", "application/x-www-form-urlencoded")])
+  router.route(handlers.State, "POST", ["submit"], dict.new(), headers, body)
+}
+
+pub fn deep_object_true_returns_200_test() {
+  search("TRUE").status |> should.equal(200)
+}
+
+pub fn deep_object_false_returns_200_test() {
+  search("false").status |> should.equal(200)
+}
+
+pub fn deep_object_unparseable_bool_returns_400_test() {
+  search("maybe").status |> should.equal(400)
+}
+
+pub fn form_bools_return_200_test() {
+  submit("active=true&flags=false&flags=True").status |> should.equal(200)
+}
+
+pub fn form_unparseable_bool_returns_400_test() {
+  submit("active=maybe&flags=true").status |> should.equal(400)
+}
+
+pub fn form_unparseable_bool_array_item_returns_400_test() {
+  submit("active=true&flags=true&flags=maybe").status |> should.equal(400)
+}
+GLEAM_EOF
+
+cd "$BOOL_DIR"
+gleam deps download
+
+verify_generated_format src/api
+if gleam build --warnings-as-errors 2>&1; then
+  info "PASS: Required boolean field server code compiles (warnings-as-errors)."
+else
+  fail "Required boolean field server code failed to compile."
+fi
+
+if gleam test; then
+  info "PASS: Unparseable required booleans return 400."
+else
+  fail "Required boolean integration tests failed."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$BOOL_DIR"
+
+info "Required boolean integration tests passed."
+
+# -------------------------------------------------------
 # Step 14: Generate reserved-keyword spec and verify it compiles
 # -------------------------------------------------------
 # Guards the escape pipeline in src/oaspec/util/naming.gleam against

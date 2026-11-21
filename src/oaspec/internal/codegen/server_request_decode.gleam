@@ -190,7 +190,7 @@ fn required_field_case(
   let parse_case = fn(parse_expr) {
     #(lookup <> "Ok([v, ..]) -> case " <> parse_expr <> bind, fail <> fail)
   }
-  let parse_list_case = fn(parse_fn) {
+  let parse_list_case = fn(parse_item) {
     let item = case trim {
       True -> "string.trim(item)"
       False -> "item"
@@ -198,10 +198,8 @@ fn required_field_case(
     #(
       lookup
         <> "Ok(vs) -> case list.try_map(vs, fn(item) { "
-        <> parse_fn
-        <> "("
-        <> item
-        <> ") })"
+        <> parse_item(item)
+        <> " })"
         <> bind,
       fail <> fail,
     )
@@ -223,23 +221,28 @@ fn required_field_case(
               let_case("Ok(vs)", "list.map(vs, fn(item) { string.trim(item) })")
             False -> let_case("Ok(vs)", "vs")
           }
-        BodyFieldIntArray -> parse_list_case("int.parse")
-        BodyFieldFloatArray -> parse_list_case("float.parse")
-        BodyFieldBoolArray ->
-          let_case(
-            "Ok(vs)",
-            "list.map(vs, fn(item) { " <> array_item_bool_parse(trim) <> " })",
-          )
+        BodyFieldIntArray ->
+          parse_list_case(fn(item) { "int.parse(" <> item <> ")" })
+        BodyFieldFloatArray ->
+          parse_list_case(fn(item) { "float.parse(" <> item <> ")" })
+        BodyFieldBoolArray -> parse_list_case(bool_result_expr)
         BodyFieldInt -> parse_case("int.parse(v)")
         BodyFieldFloat -> parse_case("float.parse(v)")
-        BodyFieldBool ->
-          let_case("Ok([v, ..])", "{ " <> bool_parse_expr <> " }")
+        BodyFieldBool -> parse_case(bool_result_expr("v"))
         BodyFieldString | BodyFieldUnknown -> #(
           lookup <> "Ok([" <> binding <> ", ..]) -> ",
           fail,
         )
       }
   }
+}
+
+/// `Ok(True)` / `Ok(False)` for `true` / `false` in any case, `Error(Nil)`
+/// for any other value of the String expression `value`.
+fn bool_result_expr(value: String) -> String {
+  "case string.lowercase("
+  <> value
+  <> ") { \"true\" -> Ok(True) \"false\" -> Ok(False) _ -> Error(Nil) }"
 }
 
 /// Wrap the record constructor `constructor` in the nested `cases` so it
