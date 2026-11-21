@@ -1,3 +1,7 @@
+import gleam/list
+import gleam/string
+import gleeunit/should
+import oaspec/openapi/parser
 import oaspec_support as support
 
 pub fn parser_smoke_test() {
@@ -194,4 +198,24 @@ pub fn parser_error_regression_test() {
   let _ = support.error_duplicate_operation_id_parses_case()
   let _ = support.error_missing_path_param_case()
   let _ = support.error_response_no_description_case()
+}
+
+pub fn parser_rejects_non_string_ref_in_every_components_section_test() {
+  [
+    "parameters", "requestBodies", "responses", "securitySchemes", "pathItems",
+    "callbacks",
+  ]
+  |> list.each(fn(section) {
+    let yaml =
+      "openapi: 3.0.0\n"
+      <> "info:\n  title: x\n  version: '1.0'\n"
+      <> "paths: {}\n"
+      <> "components:\n  "
+      <> section
+      <> ":\n    Entry:\n      $ref: 123\n"
+    let assert Error(d) = parser.parse_string(yaml)
+    d.code |> should.equal("invalid_value")
+    string.contains(d.pointer, "components." <> section <> ".Entry")
+    |> should.be_true()
+  })
 }

@@ -2348,39 +2348,65 @@ fn parse_components(
 }
 
 /// Parse `components.callbacks`: each entry is a named reusable callback
-/// object. Returns an empty dict if the section is missing. `$ref` values
-/// are preserved so chains like `components.callbacks.foo.$ref: ...`
-/// stay as references.
+/// object. `$ref` values are preserved so chains like
+/// `components.callbacks.foo.$ref: ...` stay as references.
 fn parse_components_callbacks_map(
   components_node: yay.Node,
   index: LocationIndex,
 ) -> Result(Dict(String, RefOr(Callback(Unresolved))), Diagnostic) {
-  case yay.select_sugar(from: components_node, selector: "callbacks") {
+  use name, value_node <- parse_ref_or_map(
+    components_node,
+    "callbacks",
+    False,
+    index,
+  )
+  parse_callback_object(
+    value_node,
+    "components.callbacks." <> name,
+    None,
+    index,
+  )
+  |> result.map(Value)
+}
+
+/// Parse one `components.<section>` map whose entries are either a `$ref`
+/// or an inline object. A `$ref` must be a string; any other `$ref` value
+/// is rejected. Returns an empty dict when the section is absent.
+fn parse_ref_or_map(
+  components_node: yay.Node,
+  section: String,
+  unique_keys: Bool,
+  index: LocationIndex,
+  parse_value: fn(String, yay.Node) -> Result(RefOr(a), Diagnostic),
+) -> Result(Dict(String, RefOr(a)), Diagnostic) {
+  let section_path = "components." <> section
+  case yay.select_sugar(from: components_node, selector: section) {
     Ok(yay.NodeMap(entries)) -> {
+      use _ <- result.try(case unique_keys {
+        True ->
+          check_unique_yaml_keys(entries: entries, path: section_path, index:)
+        False -> Ok(Nil)
+      })
       list.try_fold(entries, dict.new(), fn(acc, entry) {
         let #(key_node, value_node) = entry
         case key_node {
           yay.NodeStr(name) -> {
+            let entry_path = section_path <> "." <> name
             case yay.extract_optional_string(value_node, "$ref") {
               Ok(Some(ref_str)) -> Ok(dict.insert(acc, name, Ref(ref_str)))
               Ok(None) -> {
-                use callback <- result.try(parse_callback_object(
-                  value_node,
-                  "components.callbacks." <> name,
-                  None,
-                  index,
-                ))
-                Ok(dict.insert(acc, name, Value(callback)))
+                use value <- result.try(parse_value(name, value_node))
+                Ok(dict.insert(acc, name, value))
               }
               Error(_) ->
                 Error(diagnostic.invalid_value(
-                  path: "components.callbacks." <> name <> ".$ref",
-                  detail: "`$ref` under a reusable callback must be a string pointing at '#/components/callbacks/...'.",
-                  loc: location_index.lookup_field(
-                    index,
-                    "components.callbacks." <> name,
-                    "$ref",
-                  ),
+                  path: entry_path <> ".$ref",
+                  detail: "`$ref` under "
+                    <> section_path
+                    <> " must be a string pointing at '#/"
+                    <> string.replace(section_path, ".", "/")
+                    <> "/...'.",
+                  loc: location_index.lookup_field(index, entry_path, "$ref"),
                 ))
             }
           }
@@ -2423,26 +2449,13 @@ fn parse_parameters_map(
   components_node: yay.Node,
   index: LocationIndex,
 ) -> Result(Dict(String, RefOr(Parameter(Unresolved))), Diagnostic) {
-  case yay.select_sugar(from: components_node, selector: "parameters") {
-    Ok(yay.NodeMap(entries)) -> {
-      list.try_fold(entries, dict.new(), fn(acc, entry) {
-        let #(key_node, value_node) = entry
-        case key_node {
-          yay.NodeStr(name) -> {
-            case yay.extract_optional_string(value_node, "$ref") {
-              Ok(Some(ref_str)) -> Ok(dict.insert(acc, name, Ref(ref_str)))
-              _ -> {
-                use param <- result.try(parse_parameter(value_node, None, index))
-                Ok(dict.insert(acc, name, param))
-              }
-            }
-          }
-          _ -> Ok(acc)
-        }
-      })
-    }
-    _ -> Ok(dict.new())
-  }
+  use _name, value_node <- parse_ref_or_map(
+    components_node,
+    "parameters",
+    False,
+    index,
+  )
+  parse_parameter(value_node, None, index)
 }
 
 /// Parse the requestBodies map from components.
@@ -2450,65 +2463,29 @@ fn parse_request_bodies_map(
   components_node: yay.Node,
   index: LocationIndex,
 ) -> Result(Dict(String, RefOr(RequestBody(Unresolved))), Diagnostic) {
-  case yay.select_sugar(from: components_node, selector: "requestBodies") {
-    Ok(yay.NodeMap(entries)) -> {
-      list.try_fold(entries, dict.new(), fn(acc, entry) {
-        let #(key_node, value_node) = entry
-        case key_node {
-          yay.NodeStr(name) -> {
-            case yay.extract_optional_string(value_node, "$ref") {
-              Ok(Some(ref_str)) -> Ok(dict.insert(acc, name, Ref(ref_str)))
-              _ -> {
-                use rb <- result.try(parse_request_body(
-                  value_node,
-                  "components.requestBodies." <> name,
-                  index,
-                ))
-                Ok(dict.insert(acc, name, Value(rb)))
-              }
-            }
-          }
-          _ -> Ok(acc)
-        }
-      })
-    }
-    _ -> Ok(dict.new())
-  }
+  use name, value_node <- parse_ref_or_map(
+    components_node,
+    "requestBodies",
+    False,
+    index,
+  )
+  parse_request_body(value_node, "components.requestBodies." <> name, index)
+  |> result.map(Value)
 }
 
-/// Parse the responses map from components.
+/// Parse the responses map from components. Duplicate response names are
+/// rejected instead of letting the later one overwrite the earlier one.
 fn parse_responses_map(
   components_node: yay.Node,
   index: LocationIndex,
 ) -> Result(Dict(String, RefOr(Response(Unresolved))), Diagnostic) {
-  case yay.select_sugar(from: components_node, selector: "responses") {
-    Ok(yay.NodeMap(entries)) -> {
-      // Issue #573: same duplicate-key concern as `parse_responses` —
-      // duplicate component names would silently overwrite without this
-      // check.
-      use _ <- result.try(check_unique_yaml_keys(
-        entries: entries,
-        path: "components.responses",
-        index: index,
-      ))
-      list.try_fold(entries, dict.new(), fn(acc, entry) {
-        let #(key_node, value_node) = entry
-        case key_node {
-          yay.NodeStr(name) -> {
-            case yay.extract_optional_string(value_node, "$ref") {
-              Ok(Some(ref_str)) -> Ok(dict.insert(acc, name, Ref(ref_str)))
-              _ -> {
-                use resp <- result.try(parse_response(value_node, None, index))
-                Ok(dict.insert(acc, name, resp))
-              }
-            }
-          }
-          _ -> Ok(acc)
-        }
-      })
-    }
-    _ -> Ok(dict.new())
-  }
+  use _name, value_node <- parse_ref_or_map(
+    components_node,
+    "responses",
+    True,
+    index,
+  )
+  parse_response(value_node, None, index)
 }
 
 /// Parse a schema reference (either $ref or inline schema).
@@ -2524,29 +2501,13 @@ fn parse_security_schemes_map(
   components_node: yay.Node,
   index: LocationIndex,
 ) -> Result(Dict(String, RefOr(spec.SecurityScheme)), Diagnostic) {
-  case yay.select_sugar(from: components_node, selector: "securitySchemes") {
-    Ok(yay.NodeMap(entries)) -> {
-      list.try_fold(entries, dict.new(), fn(acc, entry) {
-        let #(key_node, value_node) = entry
-        case key_node {
-          yay.NodeStr(name) -> {
-            case yay.extract_optional_string(value_node, "$ref") {
-              Ok(Some(ref_str)) -> Ok(dict.insert(acc, name, Ref(ref_str)))
-              _ -> {
-                use scheme <- result.try(parse_security_scheme(
-                  value_node,
-                  index,
-                ))
-                Ok(dict.insert(acc, name, Value(scheme)))
-              }
-            }
-          }
-          _ -> Ok(acc)
-        }
-      })
-    }
-    _ -> Ok(dict.new())
-  }
+  use _name, value_node <- parse_ref_or_map(
+    components_node,
+    "securitySchemes",
+    False,
+    index,
+  )
+  parse_security_scheme(value_node, index) |> result.map(Value)
 }
 
 /// Parse the pathItems map from components.
@@ -2554,31 +2515,14 @@ fn parse_path_items_map(
   components_node: yay.Node,
   index: LocationIndex,
 ) -> Result(Dict(String, RefOr(PathItem(Unresolved))), Diagnostic) {
-  case yay.select_sugar(from: components_node, selector: "pathItems") {
-    Ok(yay.NodeMap(entries)) -> {
-      list.try_fold(entries, dict.new(), fn(acc, entry) {
-        let #(key_node, value_node) = entry
-        case key_node {
-          yay.NodeStr(name) -> {
-            case yay.extract_optional_string(value_node, "$ref") {
-              Ok(Some(ref_str)) -> Ok(dict.insert(acc, name, Ref(ref_str)))
-              _ -> {
-                use path_item <- result.try(parse_path_item(
-                  value_node,
-                  "components.pathItems." <> name,
-                  None,
-                  index,
-                ))
-                Ok(dict.insert(acc, name, Value(path_item)))
-              }
-            }
-          }
-          _ -> Ok(acc)
-        }
-      })
-    }
-    _ -> Ok(dict.new())
-  }
+  use name, value_node <- parse_ref_or_map(
+    components_node,
+    "pathItems",
+    False,
+    index,
+  )
+  parse_path_item(value_node, "components.pathItems." <> name, None, index)
+  |> result.map(Value)
 }
 
 /// Parse a single security scheme.
