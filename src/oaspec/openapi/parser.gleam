@@ -1085,7 +1085,7 @@ fn validate_unique_path_templates(
 }
 
 fn normalise_path_template(path: String) -> String {
-  case normalise_path_template_loop(path, "", False, "") {
+  case normalise_path_template_loop(path, "", False) {
     Ok(s) -> s
     // The placeholder walker (#588) already rejected malformed paths,
     // so reaching this branch means the input was either well-formed
@@ -1100,7 +1100,6 @@ fn normalise_path_template_loop(
   remaining: String,
   acc: String,
   inside: Bool,
-  _current: String,
 ) -> Result(String, Nil) {
   case string.pop_grapheme(remaining) {
     Error(Nil) ->
@@ -1111,17 +1110,17 @@ fn normalise_path_template_loop(
     Ok(#("{", rest)) ->
       case inside {
         True -> Error(Nil)
-        False -> normalise_path_template_loop(rest, acc <> "{}", True, "")
+        False -> normalise_path_template_loop(rest, acc <> "{}", True)
       }
     Ok(#("}", rest)) ->
       case inside {
-        True -> normalise_path_template_loop(rest, acc, False, "")
+        True -> normalise_path_template_loop(rest, acc, False)
         False -> Error(Nil)
       }
     Ok(#(ch, rest)) ->
       case inside {
-        True -> normalise_path_template_loop(rest, acc, True, ch)
-        False -> normalise_path_template_loop(rest, acc <> ch, False, "")
+        True -> normalise_path_template_loop(rest, acc, True)
+        False -> normalise_path_template_loop(rest, acc <> ch, False)
       }
   }
 }
@@ -1543,7 +1542,7 @@ fn parse_path_item(
     index,
   ))
 
-  use parameters <- result.try(parse_parameters_list(node, components, index))
+  use parameters <- result.try(parse_parameters_list(node, index))
   use servers <- result.try(parse_servers(node, index))
 
   Ok(PathItem(
@@ -1624,23 +1623,17 @@ fn parse_operation(
 
   let deprecated = parser_value.bool_default(node, "deprecated", False)
 
-  use parameters <- result.try(parse_parameters_list(node, components, index))
+  use parameters <- result.try(parse_parameters_list(node, index))
 
   // requestBody is optional; absent is Ok(None), present-but-broken is Error.
   use request_body <- result.try(parse_optional_request_body(
     node,
     context,
-    components,
     index,
   ))
 
   // responses is REQUIRED per OpenAPI 3.x
-  use responses <- result.try(parse_responses_required(
-    node,
-    context,
-    components,
-    index,
-  ))
+  use responses <- result.try(parse_responses_required(node, index))
 
   use security <- result.try(parse_optional_security_requirements(
     node,
@@ -1673,13 +1666,12 @@ fn parse_operation(
 fn parse_optional_request_body(
   node: yay.Node,
   context: String,
-  components: Option(Components(Unresolved)),
   index: LocationIndex,
 ) -> Result(Option(RefOr(RequestBody(Unresolved))), Diagnostic) {
   let present =
     result.is_ok(yay.select_sugar(from: node, selector: "requestBody"))
   use <- bool.guard(!present, Ok(None))
-  use rb <- result.try(parse_request_body_at(node, context, components, index))
+  use rb <- result.try(parse_request_body_at(node, context, index))
   Ok(Some(rb))
 }
 
@@ -1688,28 +1680,23 @@ fn parse_optional_request_body(
 /// in the wild often omit them. Validation can catch missing responses.
 fn parse_responses_required(
   node: yay.Node,
-  context: String,
-  components: Option(Components(Unresolved)),
   index: LocationIndex,
 ) -> Result(
   dict.Dict(http.HttpStatusCode, RefOr(Response(Unresolved))),
   Diagnostic,
 ) {
-  parse_responses(node, context, components, index)
+  parse_responses(node, index)
 }
 
 /// Parse parameters list from a node.
 fn parse_parameters_list(
   node: yay.Node,
-  components: Option(Components(Unresolved)),
   index: LocationIndex,
 ) -> Result(List(RefOr(Parameter(Unresolved))), Diagnostic) {
   case yay.select_sugar(from: node, selector: "parameters") {
     Ok(yay.NodeSeq(items)) -> {
       use parsed <- result.try(
-        list.try_map(items, fn(item) {
-          parse_parameter(item, components, index)
-        }),
+        list.try_map(items, fn(item) { parse_parameter(item, index) }),
       )
       // OAS 3.0 §4.7.10.5: "The list MUST NOT include duplicated
       // parameters. A unique parameter is defined by a combination
@@ -1811,7 +1798,6 @@ fn find_first_duplicate(
 /// Parse a single parameter.
 fn parse_parameter(
   node: yay.Node,
-  _components: Option(Components(Unresolved)),
   index: LocationIndex,
 ) -> Result(RefOr(Parameter(Unresolved)), Diagnostic) {
   // Check for $ref first
@@ -1993,7 +1979,6 @@ fn parse_security_scheme_in(
 fn parse_request_body_at(
   node: yay.Node,
   context: String,
-  _components: Option(Components(Unresolved)),
   index: LocationIndex,
 ) -> Result(RefOr(RequestBody(Unresolved)), Diagnostic) {
   use rb_node <- result.try(
@@ -2140,8 +2125,6 @@ fn parse_content(
 /// Parse responses object.
 fn parse_responses(
   node: yay.Node,
-  _context: String,
-  components: Option(Components(Unresolved)),
   index: LocationIndex,
 ) -> Result(Dict(http.HttpStatusCode, RefOr(Response(Unresolved))), Diagnostic) {
   case yay.select_sugar(from: node, selector: "responses") {
@@ -2164,11 +2147,7 @@ fn parse_responses(
               False ->
                 case http.parse_status_code(status_code) {
                   Ok(code) -> {
-                    use resp <- result.try(parse_response(
-                      value_node,
-                      components,
-                      index,
-                    ))
+                    use resp <- result.try(parse_response(value_node, index))
                     Ok(dict.insert(acc, code, resp))
                   }
                   Error(_) ->
@@ -2178,11 +2157,7 @@ fn parse_responses(
           yay.NodeInt(code) ->
             case http.http_status_from_int(code) {
               Ok(status) -> {
-                use resp <- result.try(parse_response(
-                  value_node,
-                  components,
-                  index,
-                ))
+                use resp <- result.try(parse_response(value_node, index))
                 Ok(dict.insert(acc, status, resp))
               }
               Error(_) ->
@@ -2270,7 +2245,6 @@ fn key_node_to_string(node: yay.Node) -> Option(String) {
 /// Parse a single response object.
 fn parse_response(
   node: yay.Node,
-  _components: Option(Components(Unresolved)),
   index: LocationIndex,
 ) -> Result(RefOr(Response(Unresolved)), Diagnostic) {
   // Check for $ref first
@@ -2455,7 +2429,7 @@ fn parse_parameters_map(
     False,
     index,
   )
-  parse_parameter(value_node, None, index)
+  parse_parameter(value_node, index)
 }
 
 /// Parse the requestBodies map from components.
@@ -2485,7 +2459,7 @@ fn parse_responses_map(
     True,
     index,
   )
-  parse_response(value_node, None, index)
+  parse_response(value_node, index)
 }
 
 /// Parse a schema reference (either $ref or inline schema).

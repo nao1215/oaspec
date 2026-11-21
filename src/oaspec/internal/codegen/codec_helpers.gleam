@@ -8,7 +8,7 @@
 //// module owns the canonical implementations now.
 
 import gleam/string
-import oaspec/internal/codegen/context.{type Context}
+
 import oaspec/internal/codegen/schema_dispatch
 import oaspec/openapi/schema.{
   type SchemaRef, ArraySchema, BooleanSchema, Inline, IntegerSchema,
@@ -36,10 +36,8 @@ pub fn list_at_or(lst: List(String), idx: Int, default: String) -> String {
 }
 
 /// Convert a SchemaRef to a qualified Gleam type string (with `types.`
-/// prefix for component refs). `_ctx` is currently unused but kept on
-/// the signature so future ref-resolving variants don't change the
-/// caller surface.
-pub fn qualified_schema_ref_type(ref: SchemaRef, _ctx: Context) -> String {
+/// prefix for component refs).
+pub fn qualified_schema_ref_type(ref: SchemaRef) -> String {
   case ref {
     Inline(schema) -> schema_dispatch.schema_type(schema)
     _ -> schema_dispatch.schema_ref_qualified_type(ref)

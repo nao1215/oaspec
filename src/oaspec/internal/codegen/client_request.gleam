@@ -254,7 +254,6 @@ pub fn get_body_type(rb: spec.RequestBody(Resolved), op_id: String) -> String {
 pub fn get_body_encode_expr(
   rb: spec.RequestBody(Resolved),
   op_id: String,
-  _ctx: Context,
 ) -> String {
   let content_entries = ir_build.sorted_entries(rb.content)
   case content_entries {
@@ -340,7 +339,6 @@ pub fn generate_multipart_body(
             gleam_field,
             field_schema,
             is_required,
-            ctx,
           )
         MultipartBinaryKind ->
           emit_multipart_simple_field(
@@ -539,14 +537,13 @@ fn emit_multipart_object_field(
   gleam_field: String,
   field_schema: schema.SchemaRef,
   is_required: Bool,
-  ctx: Context,
 ) -> se.StringBuilder {
   let part_header =
     "\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
     <> field_name
     <> "\\\"\\r\\nContent-Type: application/json\\r\\n\\r\\n\""
   let encoded_value = fn(input_expr: String) -> String {
-    multipart_object_encode_expr(field_schema, input_expr, ctx)
+    multipart_object_encode_expr(field_schema, input_expr)
   }
   case is_required {
     True ->
@@ -578,7 +575,6 @@ fn emit_multipart_object_field(
 fn multipart_object_encode_expr(
   field_schema: schema.SchemaRef,
   input_expr: String,
-  _ctx: Context,
 ) -> String {
   case field_schema {
     Reference(name:, ..) ->
@@ -793,7 +789,6 @@ fn emit_array_fold(
         element_key_expr,
         "item",
         items_schema,
-        True,
         indent_base + 1,
         "acc",
         // The hoist pass names array-of-object item schemas with an
@@ -882,7 +877,6 @@ fn emit_form_object_recurse(
   key_prefix_quoted: String,
   accessor: String,
   schema_ref: schema.SchemaRef,
-  _is_required: Bool,
   indent_base: Int,
   parts_var: String,
   parent_path: String,
@@ -973,7 +967,6 @@ fn emit_form_field(
             key_prefix_quoted,
             accessor,
             schema_ref,
-            True,
             indent_base,
             parts_var,
             nested_parent,
@@ -991,7 +984,6 @@ fn emit_form_field(
             key_prefix_quoted,
             "obj",
             schema_ref,
-            True,
             indent_base + 2,
             "acc2",
             nested_parent,
@@ -1495,7 +1487,6 @@ fn emit_bracket_props(
 fn form_field_json_encoder_expr(
   ref: schema.SchemaRef,
   value: String,
-  _ctx: Context,
 ) -> String {
   case ref {
     Inline(schema.StringSchema(..)) -> "json.string(" <> value <> ")"
@@ -1722,8 +1713,7 @@ pub fn generate_form_urlencoded_body(
         let value_expr = "body." <> gleam_field
         case is_required {
           True -> {
-            let inner =
-              form_field_json_encoder_expr(field_schema, value_expr, ctx)
+            let inner = form_field_json_encoder_expr(field_schema, value_expr)
             sb
             |> se.indent(
               1,
@@ -1735,7 +1725,7 @@ pub fn generate_form_urlencoded_body(
             )
           }
           False -> {
-            let inner = form_field_json_encoder_expr(field_schema, "v", ctx)
+            let inner = form_field_json_encoder_expr(field_schema, "v")
             sb
             |> se.indent(
               1,
@@ -1947,11 +1937,11 @@ pub fn generate_delimited_array_query_param(
 ) -> se.StringBuilder {
   let item_to_str = case param.payload {
     ParameterSchema(Inline(schema.ArraySchema(items:, ..))) ->
-      array_item_to_string_fn(items, ctx)
+      schema_dispatch.to_string_fn(items, ctx)
     ParameterSchema(Reference(..) as sr) ->
       case context.resolve_schema_ref(sr, ctx) {
         Ok(schema.ArraySchema(items:, ..)) ->
-          array_item_to_string_fn(items, ctx)
+          schema_dispatch.to_string_fn(items, ctx)
         _ -> "fn(x) { x }"
       }
     _ -> "fn(x) { x }"
@@ -2014,7 +2004,7 @@ pub fn generate_exploded_array_query_param(
   })
 
   let item_to_str = case items_ref {
-    Some(items) -> array_item_to_string_fn(items, ctx)
+    Some(items) -> schema_dispatch.to_string_fn(items, ctx)
     None -> "fn(x) { x }"
   }
   case param.required {
@@ -2120,18 +2110,4 @@ fn emit_json_array_query_param(
       |> se.indent(2, "None -> query")
       |> se.indent(1, "}")
   }
-}
-
-/// Check if a parameter uses deepObject style with an object schema.
-pub fn is_deep_object_param(
-  param: spec.Parameter(Resolved),
-  ctx: Context,
-) -> Bool {
-  operation_ir.is_deep_object_param(param, ctx)
-}
-
-/// Return a function expression that converts an array item to String.
-/// Used in generated code: `list.map(param, <fn>)`.
-fn array_item_to_string_fn(items: schema.SchemaRef, ctx: Context) -> String {
-  schema_dispatch.to_string_fn(items, ctx)
 }

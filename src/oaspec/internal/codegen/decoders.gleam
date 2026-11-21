@@ -423,14 +423,12 @@ fn generate_decoder(
     Inline(OneOfSchema(metadata:, schemas:, discriminator:)) ->
       generate_oneof_decoder(
         sb,
-        name,
         type_name,
         fn_name,
         decoder_fn_name,
         metadata.description,
         schemas,
         discriminator,
-        ctx,
       )
 
     Inline(AnyOfSchema(metadata:, schemas:, ..)) ->
@@ -627,7 +625,7 @@ fn generate_object_decoder(
     True -> "[]"
     False ->
       "["
-      <> se.join_with(
+      <> string.join(
         list.map(props, fn(entry) {
           let #(prop_name, _) = entry
           "\"" <> prop_name <> "\""
@@ -762,7 +760,7 @@ fn generate_object_decoder(
       "decode.success(types."
       <> type_name
       <> "("
-      <> se.join_with(param_names, ", ")
+      <> string.join(param_names, ", ")
       <> "))"
   }
   let sb = sb |> se.indent(1, constructor_call)
@@ -1034,7 +1032,7 @@ fn generate_array_decoder(
   // form (when the hoist pass promoted a sibling schema with the
   // same shape) names a function the IR never emits.
   let inner_decoder = decoder_for_array_items(items, name, "", ctx)
-  let inner_type = codec_helpers.qualified_schema_ref_type(items, ctx)
+  let inner_type = codec_helpers.qualified_schema_ref_type(items)
   let list_type = "List(" <> inner_type <> ")"
   let list_decoder = "decode.list(" <> inner_decoder <> ")"
   let #(gleam_type, decoder_expr) = case nullable {
@@ -1072,14 +1070,12 @@ fn generate_array_decoder(
 /// Without discriminator: try each variant decoder in order.
 fn generate_oneof_decoder(
   sb: se.StringBuilder,
-  _name: String,
   type_name: String,
   fn_name: String,
   decoder_fn_name: String,
   description: Option(String),
   schemas: List(SchemaRef),
   discriminator: Option(schema.Discriminator),
-  _ctx: Context,
 ) -> se.StringBuilder {
   // Only handle $ref variants (inline primitives blocked by validator)
   let all_refs =
@@ -1292,7 +1288,7 @@ fn generate_oneof_decoder(
                 })
               let attempts_list =
                 "["
-                <> se.join_with(
+                <> string.join(
                   list.index_map(ref_variants, fn(_, idx) {
                     "r" <> int.to_string(idx)
                   }),

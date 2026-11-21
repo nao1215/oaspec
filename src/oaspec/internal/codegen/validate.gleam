@@ -147,11 +147,6 @@ fn duplicate_function_name_diagnostic(
   )
 }
 
-/// Convert a validation error to a human-readable string.
-pub fn error_to_string(error: Diagnostic) -> String {
-  diagnostic.to_string(error)
-}
-
 /// Validate all operations for unsupported patterns.
 fn validate_operations(
   ctx: Context,
@@ -301,13 +296,11 @@ fn validate_parameters(
     let complex_schema_errors = validate_complex_param_schema(path, p, ctx)
     let server_structured_param_errors =
       validate_server_structured_param(path, p, ctx)
-    let cookie_errors = validate_server_cookie_param(path, p, ctx)
     list.flatten([
       style_errors,
       content_errors,
       complex_schema_errors,
       server_structured_param_errors,
-      cookie_errors,
     ])
   })
 }
@@ -524,14 +517,6 @@ fn deep_object_server_leaf_supported(
       }
     _ -> False
   }
-}
-
-fn validate_server_cookie_param(
-  _path: String,
-  _param: spec.Parameter(Resolved),
-  _ctx: Context,
-) -> List(Diagnostic) {
-  []
 }
 
 /// Check if a parameter has a complex schema (object, oneOf, allOf, anyOf)
@@ -864,7 +849,7 @@ fn validate_server_form_urlencoded_request_body(
             // diagnostic for the shapes the client now handles but
             // the server doesn't.
             let client_safe =
-              form_urlencoded_field_codegen_safe(field_schema, ctx, 0)
+              form_urlencoded_field_codegen_safe(field_schema, ctx)
             let server_safe =
               form_urlencoded_server_field_supported(field_schema, ctx, 0)
             case client_safe, server_safe {
@@ -952,7 +937,6 @@ fn form_urlencoded_server_field_supported(
 fn form_urlencoded_field_codegen_safe(
   schema_ref: SchemaRef,
   ctx: Context,
-  _depth: Int,
 ) -> Bool {
   case resolve_schema_object(Some(schema_ref), ctx) {
     Some(StringSchema(..))
@@ -965,7 +949,7 @@ fn form_urlencoded_field_codegen_safe(
       dict.to_list(properties)
       |> list.all(fn(entry) {
         let #(_, child_schema) = entry
-        form_urlencoded_field_codegen_safe(child_schema, ctx, 0)
+        form_urlencoded_field_codegen_safe(child_schema, ctx)
       })
     Some(OneOfSchema(..)) | Some(AnyOfSchema(..)) | Some(AllOfSchema(..)) ->
       True
@@ -1000,7 +984,7 @@ fn form_urlencoded_array_items_codegen_safe(
       dict.to_list(properties)
       |> list.all(fn(entry) {
         let #(_, child_schema) = entry
-        form_urlencoded_field_codegen_safe(child_schema, ctx, 0)
+        form_urlencoded_field_codegen_safe(child_schema, ctx)
       })
     Some(OneOfSchema(..)) | Some(AnyOfSchema(..)) | Some(AllOfSchema(..)) ->
       True

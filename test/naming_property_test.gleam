@@ -1,13 +1,11 @@
 //// metamon property tests for `oaspec/internal/util/naming`. Pin
 //// the algebraic invariants the public naming helpers
 //// (`to_pascal_case`, `to_snake_case`, `capitalize`,
-//// `deduplicate_names`, `schema_to_type_name`,
+//// `schema_to_type_name`,
 //// `operation_to_function_name`) are documented to hold so a future
 //// refactor of the regex-driven word splitter surfaces a regression
 //// here instead of being caught by the codegen golden tests.
 
-import gleam/list
-import gleam/set
 import gleam/string
 import metamon
 import metamon/generator
@@ -120,55 +118,6 @@ pub fn capitalize_is_idempotent_test() {
   metamon.forall(generator.string_alpha(range.constant(0, 8)), fn(input) {
     naming.capitalize(naming.capitalize(input)) == naming.capitalize(input)
   })
-}
-
-// ---------- deduplicate_names ----------
-
-pub fn deduplicate_names_preserves_length_test() {
-  metamon.forall(
-    generator.list_of(word_generator(), range.constant(0, 8)),
-    fn(names) {
-      list.length(naming.deduplicate_names(names)) == list.length(names)
-    },
-  )
-}
-
-pub fn deduplicate_names_yields_unique_names_test() {
-  metamon.forall(
-    generator.list_of(word_generator(), range.constant(0, 6)),
-    fn(names) {
-      let result = naming.deduplicate_names(names)
-      list.length(result) == set.size(set.from_list(result))
-    },
-  )
-}
-
-pub fn deduplicate_names_first_occurrence_unchanged_test() {
-  // The doc-comment promises "first occurrence keeps original name".
-  metamon.forall(
-    generator.list_of(word_generator(), range.constant(1, 6)),
-    fn(names) {
-      let unique_first = list.unique(names)
-      let result = naming.deduplicate_names(names)
-      // Every original name still appears in the deduped output (as
-      // the first occurrence).
-      list.all(unique_first, fn(name) { list.contains(result, name) })
-    },
-  )
-}
-
-pub fn deduplicate_names_already_unique_is_identity_test() {
-  metamon.forall(
-    generator.list_of(word_generator(), range.constant(0, 6)),
-    fn(names) {
-      let unique = list.unique(names)
-      naming.deduplicate_names(unique) == unique
-    },
-  )
-}
-
-pub fn deduplicate_names_empty_is_empty_test() {
-  assert naming.deduplicate_names([]) == []
 }
 
 // ---------- schema_to_type_name / operation_to_function_name ----------

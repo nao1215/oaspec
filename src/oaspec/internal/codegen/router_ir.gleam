@@ -6,6 +6,7 @@ import oaspec/config
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/guards
 import oaspec/internal/codegen/import_analysis
+import oaspec/internal/codegen/operation_ir
 import oaspec/internal/codegen/server_request_decode as decode_helpers
 import oaspec/internal/util/content_type
 import oaspec/internal/util/naming
@@ -54,7 +55,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
       let #(_, operation, _, _) = op
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
-          Value(p) -> decode_helpers.is_deep_object_param(p, ctx)
+          Value(p) -> operation_ir.is_deep_object_param(p, ctx)
           _ -> False
         }
       })
@@ -65,7 +66,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
           Value(p) ->
-            decode_helpers.is_deep_object_param(p, ctx)
+            operation_ir.is_deep_object_param(p, ctx)
             && decode_helpers.deep_object_has_additional_properties(p, ctx)
           _ -> False
         }
@@ -77,7 +78,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
           Value(p) ->
-            decode_helpers.is_deep_object_param(p, ctx)
+            operation_ir.is_deep_object_param(p, ctx)
             && !p.required
             && !decode_helpers.deep_object_has_untyped_additional_properties(
               p,
@@ -93,7 +94,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
       list.any(operation.parameters, fn(ref_p) {
         case ref_p {
           Value(p) ->
-            decode_helpers.is_deep_object_param(p, ctx)
+            operation_ir.is_deep_object_param(p, ctx)
             && decode_helpers.deep_object_has_untyped_additional_properties(
               p,
               ctx,

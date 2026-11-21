@@ -1,5 +1,3 @@
-import gleam/list
-
 /// Support level for an OpenAPI feature.
 pub type SupportLevel {
   /// Fully supported in parsing and code generation
@@ -306,9 +304,4 @@ pub fn registry() -> List(Capability) {
     ),
     Capability("encoding", "scope", ParsedNotUsed, "Parsed but no codegen"),
   ]
-}
-
-/// Get capabilities by level.
-pub fn by_level(level: SupportLevel) -> List(Capability) {
-  list.filter(registry(), fn(c) { c.level == level })
 }

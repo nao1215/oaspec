@@ -1,10 +1,9 @@
-import gleam/bool
 import gleam/dict
 import gleam/list
 import gleam/option.{Some}
 import gleam/string
 import oaspec/internal/codegen/context.{type Context}
-import oaspec/openapi/spec.{type Resolved}
+import oaspec/openapi/spec
 
 /// Capitalize the first letter of a string. Used to render HTTP scheme
 /// prefixes like `Bearer` / `Basic` / `Digest` in the emitted security
@@ -111,14 +110,4 @@ fn field_label(variant: String) -> String {
     "ApiKeyCookie" -> "cookie_name"
     _ -> "name"
   }
-}
-
-/// Wrap a value expression with `uri.percent_encode` unless the parameter
-/// declares `allowReserved: true`.
-pub fn maybe_percent_encode(
-  value_expr: String,
-  param: spec.Parameter(Resolved),
-) -> String {
-  use <- bool.guard(param.allow_reserved, value_expr)
-  "uri.percent_encode(" <> value_expr <> ")"
 }

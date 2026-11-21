@@ -6,7 +6,7 @@ pub fn hoist_and_dedup_test() {
   let _ = support.hoist_inline_oneof_variants_case()
   let _ = support.hoist_property_provenance_case()
   let _ = support.hoist_oneof_variant_provenance_case()
-  let _ = support.hoisted_schema_summary_case()
+  let _ = support.hoist_records_provenance_of_every_component_case()
   let _ = support.hoist_inline_array_items_case()
   let _ = support.hoist_preserves_refs_case()
   let _ = support.hoist_preserves_primitives_case()

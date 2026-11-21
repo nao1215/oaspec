@@ -201,27 +201,11 @@ pub fn synthetic_list_suffix_with_set(
 /// name. The component schema keeps its natural name; the inline
 /// enum yields, since the user does not own upstream specs and cannot
 /// rename the component.
+///
+/// `component_type_names` is the already-mapped component-type-name set,
+/// so the collision check is O(log N) per call and the per-name
+/// `schema_to_type_name` work happens once at `Context` construction.
 pub fn inline_enum_type_name(
-  parent_name: String,
-  prop_name: String,
-  component_schema_names: List(String),
-) -> String {
-  let base = schema_to_type_name(parent_name) <> schema_to_type_name(prop_name)
-  let component_type_names =
-    list.map(component_schema_names, schema_to_type_name)
-  case list.contains(component_type_names, base) {
-    False -> base
-    True -> bump_inline_enum_suffix(base, 2, component_type_names)
-  }
-}
-
-/// Like `inline_enum_type_name`, but takes an already-mapped
-/// component-type-name set as a `Dict(String, Nil)`. Collision check
-/// is O(log N) per call and the per-name `schema_to_type_name` work
-/// happens once at `Context` construction instead of being repeated
-/// per inline-enum property — essential on specs with thousands of
-/// component schemas.
-pub fn inline_enum_type_name_with_set(
   parent_name: String,
   prop_name: String,
   component_type_names: dict.Dict(String, Nil),
@@ -229,19 +213,7 @@ pub fn inline_enum_type_name_with_set(
   let base = schema_to_type_name(parent_name) <> schema_to_type_name(prop_name)
   case dict.has_key(component_type_names, base) {
     False -> base
-    True -> bump_inline_enum_suffix_set(base, 2, component_type_names)
-  }
-}
-
-fn bump_inline_enum_suffix(
-  base: String,
-  suffix: Int,
-  taken: List(String),
-) -> String {
-  let candidate = base <> int.to_string(suffix)
-  case list.contains(taken, candidate) {
-    False -> candidate
-    True -> bump_inline_enum_suffix(base, suffix + 1, taken)
+    True -> bump_inline_enum_suffix(base, 2, component_type_names)
   }
 }
 
@@ -279,7 +251,7 @@ fn bump_enum_variant_suffix(
   }
 }
 
-fn bump_inline_enum_suffix_set(
+fn bump_inline_enum_suffix(
   base: String,
   suffix: Int,
   taken: dict.Dict(String, Nil),
@@ -287,7 +259,7 @@ fn bump_inline_enum_suffix_set(
   let candidate = base <> int.to_string(suffix)
   case dict.has_key(taken, candidate) {
     False -> candidate
-    True -> bump_inline_enum_suffix_set(base, suffix + 1, taken)
+    True -> bump_inline_enum_suffix(base, suffix + 1, taken)
   }
 }
 
@@ -481,27 +453,4 @@ fn split_camel_case(input: String, re: Regexes) -> List(String) {
 /// Insert underscores before capital letters in camelCase strings.
 fn insert_underscores_before_caps(input: String, re: Regexes) -> String {
   regexp.replace(re.underscore_before_caps, input, "\\1_\\2")
-}
-
-/// Deduplicate a list of names by appending _2, _3, etc. to duplicates.
-/// Preserves order. First occurrence keeps original name.
-pub fn deduplicate_names(names: List(String)) -> List(String) {
-  let #(result_rev, _) =
-    list.fold(names, #([], dict.new()), fn(acc, name) {
-      let #(result, counts) = acc
-      case dict.get(counts, name) {
-        // nolint: thrown_away_error -- dict.get Error simply means first occurrence; we register count 1 and keep the original name
-        Error(_) -> {
-          let counts = dict.insert(counts, name, 1)
-          #([name, ..result], counts)
-        }
-        Ok(count) -> {
-          let new_count = count + 1
-          let unique_name = name <> "_" <> int.to_string(new_count)
-          let counts = dict.insert(counts, name, new_count)
-          #([unique_name, ..result], counts)
-        }
-      }
-    })
-  list.reverse(result_rev)
 }

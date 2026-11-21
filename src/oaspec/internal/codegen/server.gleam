@@ -9,6 +9,7 @@ import oaspec/internal/codegen/context.{
   type Context, type GeneratedFile, GeneratedFile,
 }
 import oaspec/internal/codegen/guards
+import oaspec/internal/codegen/operation_ir
 import oaspec/internal/codegen/router_ir
 import oaspec/internal/codegen/runtime_snippets
 import oaspec/internal/codegen/server_request_decode as decode_helpers
@@ -125,7 +126,7 @@ fn generate_handlers(
   let sb =
     list.fold(operations, sb, fn(sb, op) {
       let #(op_id, operation, _path, _method) = op
-      generate_handler(sb, op_id, operation, ctx)
+      generate_handler(sb, op_id, operation)
     })
 
   // Callbacks are parsed and resolved but NOT emitted as handler stubs.
@@ -185,7 +186,7 @@ fn generate_operation_handler(
       [pkg <> "/response_types"],
     ]),
   )
-  |> generate_handler(op_id, operation, ctx)
+  |> generate_handler(op_id, operation)
   |> se.to_string()
 }
 
@@ -300,7 +301,6 @@ fn generate_handler(
   sb: se.StringBuilder,
   op_id: String,
   operation: spec.Operation(Resolved),
-  _ctx: Context,
 ) -> se.StringBuilder {
   let fn_name = naming.operation_to_function_name(op_id)
   let request_type = naming.schema_to_type_name(op_id) <> "Request"
@@ -493,7 +493,7 @@ String.",
         _, _, _ -> arm_sb
       }
       arm_sb
-      |> generate_route_body(op_id, fn_name, operation, path, has_params, ctx)
+      |> generate_route_body(op_id, fn_name, operation, has_params, ctx)
       |> se.indent(2, "}")
     })
 
@@ -529,7 +529,6 @@ fn generate_route_body(
   op_id: String,
   fn_name: String,
   operation: spec.Operation(Resolved),
-  path: String,
   has_params: Bool,
   ctx: Context,
 ) -> se.StringBuilder {
@@ -544,7 +543,7 @@ fn generate_route_body(
         3,
         "let response = handlers_generated." <> fn_name <> "(app_state)",
       )
-      |> generate_response_conversion(response_type_name, operation, ctx)
+      |> generate_response_conversion(response_type_name, operation)
     }
     True -> {
       // Has parameters: validate inputs, construct request, call handler
@@ -556,7 +555,6 @@ fn generate_route_body(
         op_id,
         fn_name,
         operation,
-        path,
         ctx,
       )
     }
@@ -574,7 +572,6 @@ fn generate_safe_request_and_dispatch(
   op_id: String,
   fn_name: String,
   operation: spec.Operation(Resolved),
-  _path: String,
   ctx: Context,
 ) -> se.StringBuilder {
   let params =
@@ -600,12 +597,12 @@ fn generate_safe_request_and_dispatch(
     list.filter(params, fn(p) {
       p.in_ == spec.InQuery
       && p.required
-      && !decode_helpers.is_deep_object_param(p, ctx)
+      && !operation_ir.is_deep_object_param(p, ctx)
     })
   let checked_deep_object_params =
     list.filter(params, fn(p) {
       p.in_ == spec.InQuery
-      && decode_helpers.is_deep_object_param(p, ctx)
+      && operation_ir.is_deep_object_param(p, ctx)
       && decode_helpers.deep_object_has_required_properties(p, ctx)
     })
   let required_header_params =
@@ -817,7 +814,7 @@ fn generate_safe_request_and_dispatch(
         spec.InQuery -> {
           let key = param.name
           let raw_var = naming.to_snake_case(param.name) <> "_raw"
-          let is_deep_object = decode_helpers.is_deep_object_param(param, ctx)
+          let is_deep_object = operation_ir.is_deep_object_param(param, ctx)
           let checked_deep_object =
             is_deep_object
             && decode_helpers.deep_object_has_required_properties(param, ctx)
@@ -878,7 +875,7 @@ fn generate_safe_request_and_dispatch(
       3,
       "let response = handlers_generated." <> fn_name <> "(app_state, request)",
     )
-    |> generate_response_conversion(response_type_name, operation, ctx)
+    |> generate_response_conversion(response_type_name, operation)
 
   // Close guard validation (returns 422 with error details)
   let sb = case needs_guard_validation {
@@ -1226,7 +1223,6 @@ fn generate_response_conversion(
   sb: se.StringBuilder,
   response_type_name: String,
   operation: spec.Operation(Resolved),
-  ctx: Context,
 ) -> se.StringBuilder {
   let responses = http.sort_response_entries(dict.to_list(operation.responses))
 
@@ -1281,8 +1277,7 @@ fn generate_response_conversion(
                     content_type.ApplicationJson ->
                       case media_type.schema {
                         Some(_) -> {
-                          let encode_fn =
-                            get_encode_function(media_type.schema, ctx)
+                          let encode_fn = get_encode_function(media_type.schema)
                           emit_response_arm(
                             sb,
                             variant_name,
@@ -1376,8 +1371,7 @@ fn generate_response_conversion(
                     _ ->
                       case media_type.schema {
                         Some(_) -> {
-                          let encode_fn =
-                            get_encode_function(media_type.schema, ctx)
+                          let encode_fn = get_encode_function(media_type.schema)
                           emit_response_arm(
                             sb,
                             variant_name,
@@ -1620,10 +1614,7 @@ fn stringify_header_value(field_type: String, value_expr: String) -> String {
 }
 
 /// Get the encode function name for a schema reference.
-fn get_encode_function(
-  schema_ref: option.Option(schema.SchemaRef),
-  _ctx: Context,
-) -> String {
+fn get_encode_function(schema_ref: option.Option(schema.SchemaRef)) -> String {
   case schema_ref {
     Some(Reference(name:, ..)) -> {
       "encode.encode_" <> naming.to_snake_case(name) <> "_json"
@@ -1678,7 +1669,7 @@ fn path_to_pattern(path: String) -> String {
       }
     })
 
-  "[" <> se.join_with(patterns, ", ") <> "]"
+  "[" <> string.join(patterns, ", ") <> "]"
 }
 
 /// Check if a path segment is a parameter.

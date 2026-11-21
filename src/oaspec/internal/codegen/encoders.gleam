@@ -903,7 +903,7 @@ fn generate_encoder(
       // alias rendered as `Option(List(T))`, so the encoder must accept
       // `Option(List(T))` and use `json.nullable(value, ...)` instead
       // of the bare `json.array(...)` it had been emitting.
-      let inner_type = codec_helpers.qualified_schema_ref_type(items, ctx)
+      let inner_type = codec_helpers.qualified_schema_ref_type(items)
       let list_type = "List(" <> inner_type <> ")"
       // Items dispatch through `json_encoder_fn_for_array_items` so the
       // parent schema name is never spliced into an inline-enum

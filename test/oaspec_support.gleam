@@ -26,7 +26,6 @@ import oaspec/internal/openapi/filter
 import oaspec/internal/openapi/hoist
 import oaspec/internal/openapi/location_index
 import oaspec/internal/openapi/normalize
-import oaspec/internal/openapi/provenance
 import oaspec/internal/openapi/reachability
 import oaspec/internal/openapi/resolve
 import oaspec/internal/openapi/resolver
@@ -75,26 +74,6 @@ pub fn to_snake_case_from_camel_case() {
 pub fn capitalize_case() {
   naming.capitalize("hello")
   |> should.equal("Hello")
-}
-
-pub fn deduplicate_names_no_collision_case() {
-  naming.deduplicate_names(["foo", "bar", "baz"])
-  |> should.equal(["foo", "bar", "baz"])
-}
-
-pub fn deduplicate_names_with_collision_case() {
-  naming.deduplicate_names(["pet_id", "pet_id", "name"])
-  |> should.equal(["pet_id", "pet_id_2", "name"])
-}
-
-pub fn deduplicate_names_triple_collision_case() {
-  naming.deduplicate_names(["x", "x", "x"])
-  |> should.equal(["x", "x_2", "x_3"])
-}
-
-pub fn deduplicate_names_empty_case() {
-  naming.deduplicate_names([])
-  |> should.equal([])
 }
 
 // --- Config Tests ---
@@ -2239,7 +2218,7 @@ paths:
   let errors =
     validate.validate(ctx)
     |> list.filter(fn(e) { e.target != diagnostic.TargetServer })
-  let error_strings = list.map(errors, validate.error_to_string)
+  let error_strings = list.map(errors, diagnostic.to_string)
   list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
   |> should.be_false()
 }
@@ -2270,7 +2249,7 @@ paths:
   let errors =
     validate.validate(ctx)
     |> list.filter(fn(e) { e.target != diagnostic.TargetServer })
-  let error_strings = list.map(errors, validate.error_to_string)
+  let error_strings = list.map(errors, diagnostic.to_string)
   list.any(error_strings, fn(s) { string.contains(s, "Array parameters") })
   |> should.be_false()
 }
@@ -2455,7 +2434,7 @@ paths:
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, validate.error_to_string)
+  let error_strings = list.map(errors, diagnostic.to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "text/plain") && string.contains(s, "is not supported")
   })
@@ -2489,7 +2468,7 @@ paths:
   let errors = validate.validate(ctx)
   // No content-type-related diagnostic should mention application/octet-stream
   // as unsupported.
-  let error_strings = list.map(errors, validate.error_to_string)
+  let error_strings = list.map(errors, diagnostic.to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "application/octet-stream")
     && string.contains(s, "is not supported")
@@ -2665,7 +2644,7 @@ pub fn validate_accepts_deep_object_case() {
   let errors =
     validate.validate(ctx)
     |> list.filter(fn(e) { e.target != diagnostic.TargetServer })
-  let error_strings = list.map(errors, validate.error_to_string)
+  let error_strings = list.map(errors, diagnostic.to_string)
   list.any(error_strings, fn(s) { string.contains(s, "deepObject") })
   |> should.be_false()
 }
@@ -2675,7 +2654,7 @@ pub fn validate_accepts_complex_schema_parameter_case() {
   let errors =
     validate.validate(ctx)
     |> list.filter(fn(e) { e.target != diagnostic.TargetServer })
-  let error_strings = list.map(errors, validate.error_to_string)
+  let error_strings = list.map(errors, diagnostic.to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "Complex schema parameters")
   })
@@ -2731,7 +2710,7 @@ pub fn validate_accepts_multipart_form_data_case() {
   // Filter out server-targeted errors; multipart is valid for client codegen
   let client_errors =
     list.filter(errors, fn(e) { e.target != diagnostic.TargetServer })
-  let error_strings = list.map(client_errors, validate.error_to_string)
+  let error_strings = list.map(client_errors, diagnostic.to_string)
   list.any(error_strings, fn(s) { string.contains(s, "multipart/form-data") })
   |> should.be_false()
 }
@@ -2775,7 +2754,7 @@ components:
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec_with_mode(spec, config.Client)
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, validate.error_to_string)
+  let error_strings = list.map(errors, diagnostic.to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "multipart/form-data fields")
   })
@@ -2786,7 +2765,7 @@ pub fn validate_broken_spec_accepts_inline_oneof_after_hoisting_case() {
   // Inline oneOf variants are now handled by hoisting, so no validation error
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, validate.error_to_string)
+  let error_strings = list.map(errors, diagnostic.to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "oneOf/anyOf with inline schemas")
   })
@@ -2796,7 +2775,7 @@ pub fn validate_broken_spec_accepts_inline_oneof_after_hoisting_case() {
 pub fn validate_broken_spec_accepts_untyped_additional_properties_case() {
   let ctx = make_ctx("test/fixtures/broken_openapi.yaml")
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, validate.error_to_string)
+  let error_strings = list.map(errors, diagnostic.to_string)
   // additionalProperties: true is now supported via Dict(String, Dynamic),
   // so it should NOT appear as a validation error
   list.any(error_strings, fn(s) { string.contains(s, "additionalProperties") })
@@ -2959,7 +2938,7 @@ pub fn validate_deep_inline_oneof_in_request_body_accepted_case() {
   // Inline oneOf in requestBody is now handled by hoisting
   let ctx = make_ctx("test/fixtures/deep_unsupported.yaml")
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, validate.error_to_string)
+  let error_strings = list.map(errors, diagnostic.to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "oneOf/anyOf with inline schemas")
     && string.contains(s, "requestBody")
@@ -2970,7 +2949,7 @@ pub fn validate_deep_inline_oneof_in_request_body_accepted_case() {
 pub fn validate_deep_additional_properties_in_response_case() {
   let ctx = make_ctx("test/fixtures/deep_unsupported.yaml")
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, validate.error_to_string)
+  let error_strings = list.map(errors, diagnostic.to_string)
   // additionalProperties: true is now supported, so no error for it
   list.any(error_strings, fn(s) {
     string.contains(s, "additionalProperties") && string.contains(s, "payload")
@@ -3006,7 +2985,7 @@ pub fn validate_rejects_duplicate_operation_id_case() {
 pub fn validate_aggregates_multiple_errors_in_one_pass_case() {
   let ctx = make_ctx("test/fixtures/error_multiple_issues.yaml")
   let errors = validate.validate(ctx)
-  let messages = list.map(errors, validate.error_to_string)
+  let messages = list.map(errors, diagnostic.to_string)
 
   // The contract: at least two distinct diagnostics returned.
   case list.length(errors) >= 2 {
@@ -3053,7 +3032,7 @@ paths:
   let assert Ok(spec) = parser.parse_string(yaml)
   let ctx = make_ctx_from_spec(spec)
   let errors = validate.validate(ctx)
-  let messages = list.map(errors, validate.error_to_string)
+  let messages = list.map(errors, diagnostic.to_string)
   list.any(messages, fn(s) {
     string.contains(s, "list_items") && string.contains(s, "generated function")
   })
@@ -3065,7 +3044,7 @@ pub fn validate_accepts_unique_operation_ids_case() {
   // produce any duplicate-operationId diagnostic.
   let ctx = make_ctx("test/fixtures/collision.yaml")
   let errors = validate.validate(ctx)
-  let messages = list.map(errors, validate.error_to_string)
+  let messages = list.map(errors, diagnostic.to_string)
   list.any(messages, fn(s) { string.contains(s, "Duplicate operationId") })
   |> should.be_false()
 }
@@ -3405,7 +3384,7 @@ components:
   |> should.equal(schema.HoistedOneOfVariant(parent: "PetType", index: 1))
 }
 
-pub fn hoisted_schema_summary_case() {
+pub fn hoist_records_provenance_of_every_component_case() {
   let yaml =
     "
 openapi: 3.0.3
@@ -3431,18 +3410,18 @@ components:
 "
   let assert Ok(spec) = parser.parse_string(yaml)
   let hoisted = hoist.hoist(spec)
-  let summary = provenance.hoisted_schema_summary(hoisted)
-  // User-authored: Pet, PetList
-  list.length(summary.user_authored) |> should.equal(2)
-  // Hoisted: PetAddress (property), PetListItem (array item)
-  list.length(summary.hoisted_properties) |> should.equal(1)
-  list.length(summary.hoisted_array_items) |> should.equal(1)
-  provenance.total_hoisted(summary) |> should.equal(2)
-  // Parent tracking is preserved through hoist metadata
-  let assert [#(prop_name, parent, property)] = summary.hoisted_properties
-  prop_name |> should.equal("PetAddress")
-  parent |> should.equal("Pet")
-  property |> should.equal("address")
+  let assert Some(components) = hoisted.components
+  let provenance_of = fn(name) {
+    let assert Ok(schema.Inline(obj)) = dict.get(components.schemas, name)
+    schema.get_provenance(obj)
+  }
+  provenance_of("Pet") |> should.equal(schema.UserAuthored)
+  provenance_of("PetList") |> should.equal(schema.UserAuthored)
+  provenance_of("PetAddress")
+  |> should.equal(schema.HoistedProperty(parent: "Pet", property: "address"))
+  provenance_of("PetListItem")
+  |> should.equal(schema.HoistedArrayItem(parent: "PetList"))
+  dict.size(components.schemas) |> should.equal(4)
 }
 
 pub fn hoist_inline_array_items_case() {
@@ -3865,14 +3844,6 @@ pub fn content_type_is_json_compatible_normalised_case() {
   |> should.be_true()
 }
 
-pub fn content_type_is_xml_compatible_normalised_case() {
-  content_type.is_xml_compatible("Application/XML") |> should.be_true()
-  content_type.is_xml_compatible("text/XML; charset=utf-8")
-  |> should.be_true()
-  content_type.is_xml_compatible("application/atom+xml; charset=utf-8")
-  |> should.be_true()
-}
-
 pub fn content_type_x_ndjson_is_supported_response_case() {
   content_type.is_supported_response(content_type.from_string(
     "application/x-ndjson",
@@ -3970,31 +3941,6 @@ pub fn content_type_to_string_case() {
 
   content_type.to_string(content_type.ApplicationOctetStream)
   |> should.equal("application/octet-stream")
-}
-
-pub fn content_type_is_supported_case() {
-  content_type.is_supported(content_type.ApplicationJson)
-  |> should.be_true()
-
-  content_type.is_supported(content_type.TextPlain)
-  |> should.be_true()
-
-  content_type.is_supported(content_type.MultipartFormData)
-  |> should.be_true()
-
-  content_type.is_supported(content_type.FormUrlEncoded)
-  |> should.be_true()
-
-  content_type.is_supported(content_type.ApplicationXml)
-  |> should.be_true()
-
-  content_type.is_supported(content_type.ApplicationOctetStream)
-  |> should.be_true()
-
-  content_type.is_supported(content_type.UnsupportedContentType(
-    "application/msgpack",
-  ))
-  |> should.be_false()
 }
 
 pub fn content_type_is_supported_request_case() {
@@ -8843,8 +8789,6 @@ pub fn wildcard_content_type_classified_as_supported_case() {
   |> should.equal(content_type.Wildcard)
   content_type.to_string(content_type.Wildcard)
   |> should.equal("*/*")
-  content_type.is_supported(content_type.Wildcard)
-  |> should.be_true()
   content_type.is_supported_request(content_type.Wildcard)
   |> should.be_true()
   content_type.is_supported_response(content_type.Wildcard)
@@ -13818,7 +13762,7 @@ pub fn oss_openapi_dotnet_dollar_id_parses_case() {
 pub fn validate_rejects_id_backed_url_ref_with_dedicated_diagnostic_case() {
   let ctx = make_ctx("test/fixtures/oss_openapi_dotnet_dollar_id.yaml")
   let errors = validate.validate(ctx) |> diagnostic.errors_only
-  let messages = list.map(errors, validate.error_to_string)
+  let messages = list.map(errors, diagnostic.to_string)
   list.any(messages, fn(s) {
     string.contains(s, "URL-style $ref")
     && string.contains(s, "OpenAPI 3.1")
@@ -13911,7 +13855,7 @@ components:
   let assert Ok(spec) = parser.parse_string(yaml)
   case resolve.resolve(spec) {
     Error(errors) -> {
-      let messages = list.map(errors, validate.error_to_string)
+      let messages = list.map(errors, diagnostic.to_string)
       list.any(messages, fn(s) {
         string.contains(s, "doesNotExist")
         && string.contains(s, "components.callbacks")
@@ -13951,7 +13895,7 @@ components:
   let assert Ok(spec) = parser.parse_string(yaml)
   case resolve.resolve(spec) {
     Error(errors) -> {
-      let messages = list.map(errors, validate.error_to_string)
+      let messages = list.map(errors, diagnostic.to_string)
       list.any(messages, fn(s) { string.contains(s, "cyclic") })
       |> should.be_true()
     }
@@ -13967,7 +13911,7 @@ pub fn capability_check_warns_on_callbacks_case() {
   let warnings =
     capability_check.check_preserved(ctx, location_index.empty())
     |> diagnostic.warnings_only
-  let messages = list.map(warnings, validate.error_to_string)
+  let messages = list.map(warnings, diagnostic.to_string)
   list.any(messages, fn(s) {
     string.contains(s, "Operation-level callbacks")
     && string.contains(s, "parsed and preserved")
@@ -14699,7 +14643,7 @@ pub fn generate_rejects_non_string_const_case() {
     )
   case generate.generate(spec, cfg) {
     Error(generate.ValidationErrors(errors:)) -> {
-      let messages = list.map(errors, validate.error_to_string)
+      let messages = list.map(errors, diagnostic.to_string)
       list.any(messages, fn(s) { string.contains(s, "const (non-string)") })
       |> should.be_true()
     }
@@ -14727,7 +14671,7 @@ pub fn generate_rejects_multi_type_with_constraints_case() {
     )
   case generate.generate(spec, cfg) {
     Error(generate.ValidationErrors(errors:)) -> {
-      let messages = list.map(errors, validate.error_to_string)
+      let messages = list.map(errors, diagnostic.to_string)
       list.any(messages, fn(s) {
         string.contains(s, "type: [T1, T2] with type-specific constraints")
       })
@@ -14829,10 +14773,16 @@ pub fn capability_check_uses_registry_case() {
 pub fn readme_boundaries_match_registry_case() {
   let assert Ok(doc) = simplifile.read("doc/openapi-support.md")
   // Every Unsupported capability name must appear in the support doc
-  let unsupported = capability.by_level(capability.Unsupported)
+  let unsupported =
+    list.filter(capability.registry(), fn(c) {
+      c.level == capability.Unsupported
+    })
   list.each(unsupported, fn(c) { should.be_true(string.contains(doc, c.name)) })
   // Every NotHandled capability name must appear in the support doc
-  let not_handled = capability.by_level(capability.NotHandled)
+  let not_handled =
+    list.filter(capability.registry(), fn(c) {
+      c.level == capability.NotHandled
+    })
   list.each(not_handled, fn(c) { should.be_true(string.contains(doc, c.name)) })
 }
 
@@ -14972,7 +14922,7 @@ pub fn validate_accepts_delimited_param_styles_case() {
 pub fn pipe_delimited_in_header_rejects_case() {
   let ctx = make_ctx("test/fixtures/pipe_delimited_in_header_rejects.yaml")
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, validate.error_to_string)
+  let error_strings = list.map(errors, diagnostic.to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "pipeDelimited")
     && string.contains(s, "only supported for 'in: query'")
@@ -14983,7 +14933,7 @@ pub fn pipe_delimited_in_header_rejects_case() {
 pub fn space_delimited_non_array_rejects_case() {
   let ctx = make_ctx("test/fixtures/space_delimited_non_array_rejects.yaml")
   let errors = validate.validate(ctx)
-  let error_strings = list.map(errors, validate.error_to_string)
+  let error_strings = list.map(errors, diagnostic.to_string)
   list.any(error_strings, fn(s) {
     string.contains(s, "spaceDelimited")
     && string.contains(s, "requires an array schema")

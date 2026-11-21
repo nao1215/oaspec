@@ -663,7 +663,6 @@ fn generate_client_function(
       header_params,
       cookie_params,
       operation,
-      ctx,
     )
 
   // ------------------------------------------------------------
@@ -838,17 +837,13 @@ fn generate_client_function(
                 single_ct,
                 single_mt,
                 op_id,
-                ctx,
                 headers_record,
               )
-            multiple ->
+            _ ->
               client_response.generate_multi_content_response(
                 sb,
                 status_code,
                 variant_name,
-                multiple,
-                op_id,
-                ctx,
                 headers_record,
               )
           }
@@ -963,7 +958,6 @@ fn build_call_args(
   header_params: List(spec.Parameter(Resolved)),
   cookie_params: List(spec.Parameter(Resolved)),
   operation: spec.Operation(Resolved),
-  _ctx: Context,
 ) -> String {
   let all_params =
     list.append(path_params, query_params)
@@ -1387,7 +1381,7 @@ fn generate_body_emission(
               |> se.indent(1, "}")
           }
         _ -> {
-          let encode_expr = client_request.get_body_encode_expr(rb, op_id, ctx)
+          let encode_expr = client_request.get_body_encode_expr(rb, op_id)
           case rb.required {
             True ->
               sb

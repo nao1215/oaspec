@@ -2,7 +2,6 @@ import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
-import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/util/content_type
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
@@ -73,7 +72,6 @@ pub fn generate_single_content_response(
   media_type_name: String,
   media_type: spec.MediaType,
   op_id: String,
-  ctx: Context,
   headers: Option(HeadersRecord),
 ) -> se.StringBuilder {
   case content_type.from_string(media_type_name) {
@@ -101,7 +99,7 @@ pub fn generate_single_content_response(
       case media_type.schema {
         Some(schema_ref) -> {
           let decode_expr =
-            get_response_decode_expr(schema_ref, op_id, status_code, ctx)
+            get_response_decode_expr(schema_ref, op_id, status_code)
           let sb =
             sb
             |> se.indent(2, status_branch_pattern(status_code) <> " -> {")
@@ -264,9 +262,6 @@ pub fn generate_multi_content_response(
   sb: se.StringBuilder,
   status_code: http.HttpStatusCode,
   variant_name: String,
-  _content_entries: List(#(String, spec.MediaType)),
-  _op_id: String,
-  _ctx: Context,
   headers: Option(HeadersRecord),
 ) -> se.StringBuilder {
   body_branch(sb, status_code, variant_name, "text", headers, fn(sb) {
@@ -485,7 +480,6 @@ pub fn get_response_decode_expr(
   schema_ref: schema.SchemaRef,
   op_id: String,
   status_code: http.HttpStatusCode,
-  _ctx: Context,
 ) -> String {
   case schema_ref {
     Reference(name:, ..) -> {

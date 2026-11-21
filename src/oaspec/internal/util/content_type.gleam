@@ -117,16 +117,6 @@ pub fn is_json_compatible(s: String) -> Bool {
   normalised == "application/json" || string.ends_with(normalised, "+json")
 }
 
-/// Check if a content type string is XML-compatible.
-/// Matches `application/xml`, `text/xml`, and any type with a `+xml`
-/// suffix, with the same normalisation as `is_json_compatible`. (#585)
-pub fn is_xml_compatible(s: String) -> Bool {
-  let normalised = normalise(s)
-  normalised == "application/xml"
-  || normalised == "text/xml"
-  || string.ends_with(normalised, "+xml")
-}
-
 /// Convert a ContentType back to its string representation.
 pub fn to_string(content_type: ContentType) -> String {
   case content_type {
@@ -139,21 +129,6 @@ pub fn to_string(content_type: ContentType) -> String {
     TextXml -> "text/xml"
     Wildcard -> "*/*"
     UnsupportedContentType(s) -> s
-  }
-}
-
-/// Check if a content type is supported anywhere in code generation.
-pub fn is_supported(content_type: ContentType) -> Bool {
-  case content_type {
-    ApplicationJson -> True
-    TextPlain -> True
-    MultipartFormData -> True
-    FormUrlEncoded -> True
-    ApplicationOctetStream -> True
-    ApplicationXml -> True
-    TextXml -> True
-    Wildcard -> True
-    _ -> False
   }
 }
 

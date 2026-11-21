@@ -153,12 +153,9 @@ pub fn make_reference(ref: String) -> SchemaRef {
 /// Extract the schema name from a $ref string (last path segment).
 /// Example: "#/components/schemas/User" -> "User"
 fn ref_to_schema_name(ref: String) -> String {
-  case string.split(ref, "/") {
-    [] -> "Unknown"
-    segments ->
-      list.last(segments)
-      |> result.unwrap("Unknown")
-  }
+  string.split(ref, "/")
+  |> list.last
+  |> result.unwrap(ref)
 }
 
 /// OpenAPI discriminator for oneOf/anyOf.

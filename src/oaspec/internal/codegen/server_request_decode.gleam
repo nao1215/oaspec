@@ -574,13 +574,6 @@ fn query_optional_expr_with_schema(
   }
 }
 
-pub fn is_deep_object_param(
-  param: spec.Parameter(Resolved),
-  ctx: Context,
-) -> Bool {
-  operation_ir.is_deep_object_param(param, ctx)
-}
-
 fn deep_object_properties(
   param: spec.Parameter(Resolved),
   ctx: Context,
@@ -821,7 +814,7 @@ pub fn deep_object_param_has_optional_fields(
   param: spec.Parameter(Resolved),
   ctx: Context,
 ) -> Bool {
-  use <- bool.guard(!is_deep_object_param(param, ctx), False)
+  use <- bool.guard(!operation_ir.is_deep_object_param(param, ctx), False)
   list.any(deep_object_properties(param, ctx), fn(prop) { !prop.required })
 }
 
@@ -857,7 +850,7 @@ fn deep_object_param_needs(
   ctx: Context,
   predicate: fn(DeepObjectProperty) -> Bool,
 ) -> Bool {
-  use <- bool.guard(!is_deep_object_param(param, ctx), False)
+  use <- bool.guard(!operation_ir.is_deep_object_param(param, ctx), False)
   list.any(deep_object_properties(param, ctx), predicate)
 }
 
@@ -1903,8 +1896,10 @@ pub fn generate_body_decode_expr(
               <> naming.to_snake_case(op_id)
               <> "_request_body(body)"
           }
+          // The router decodes a required JSON body into `decoded_body`
+          // before it builds the request.
           case rb.required {
-            True -> "{ let assert Ok(decoded) = " <> decode_fn <> " decoded }"
+            True -> "decoded_body"
             False ->
               "case body { \"\" -> None _ -> { case "
               <> decode_fn

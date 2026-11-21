@@ -12,6 +12,7 @@ import oaspec/internal/codegen/client_security
 import oaspec/internal/codegen/decoders
 import oaspec/internal/codegen/encoders
 import oaspec/internal/codegen/ir_build
+import oaspec/internal/codegen/operation_ir
 import oaspec/internal/codegen/server as server_gen
 import oaspec/internal/codegen/server_request_decode
 import oaspec/internal/codegen/types as types_gen
@@ -55,27 +56,6 @@ pub fn client_security_capitalize_first_all_lower_test() {
   |> should.equal("Basic")
 }
 
-pub fn client_security_maybe_percent_encode_reserved_false_test() {
-  let param = test_helpers.simple_param("q", True, test_helpers.string_schema())
-  client_security.maybe_percent_encode("value", param)
-  |> should.equal("uri.percent_encode(value)")
-}
-
-pub fn client_security_maybe_percent_encode_reserved_true_test() {
-  let param =
-    test_helpers.make_test_param(
-      "q",
-      spec.InQuery,
-      True,
-      spec.ParameterSchema(schema.Inline(test_helpers.string_schema())),
-      None,
-      None,
-      True,
-    )
-  client_security.maybe_percent_encode("value", param)
-  |> should.equal("value")
-}
-
 // ===================================================================
 // client_response tests
 // ===================================================================
@@ -115,44 +95,37 @@ pub fn client_response_inline_schema_to_decoder_object_fallback_test() {
 }
 
 pub fn client_response_get_response_decode_expr_reference_test() {
-  let ctx = test_helpers.make_minimal_ctx()
   let schema_ref =
     schema.Reference(ref: "#/components/schemas/User", name: "User")
   client_response.get_response_decode_expr(
     schema_ref,
     "getUser",
     http.Status(200),
-    ctx,
   )
   |> should.equal("decode.decode_user(text)")
 }
 
 pub fn client_response_get_response_decode_expr_inline_string_test() {
-  let ctx = test_helpers.make_minimal_ctx()
   let schema_ref = schema.Inline(test_helpers.string_schema())
   client_response.get_response_decode_expr(
     schema_ref,
     "getUser",
     http.Status(200),
-    ctx,
   )
   |> should.equal("json.parse(text, dyn_decode.string)")
 }
 
 pub fn client_response_get_response_decode_expr_inline_int_test() {
-  let ctx = test_helpers.make_minimal_ctx()
   let schema_ref = schema.Inline(test_helpers.int_schema())
   client_response.get_response_decode_expr(
     schema_ref,
     "getUser",
     http.Status(200),
-    ctx,
   )
   |> should.equal("json.parse(text, dyn_decode.int)")
 }
 
 pub fn client_response_get_response_decode_expr_array_ref_test() {
-  let ctx = test_helpers.make_minimal_ctx()
   let schema_ref =
     schema.Inline(schema.ArraySchema(
       metadata: schema.default_metadata(),
@@ -165,13 +138,11 @@ pub fn client_response_get_response_decode_expr_array_ref_test() {
     schema_ref,
     "listPets",
     http.Status(200),
-    ctx,
   )
   |> should.equal("json.parse(text, dyn_decode.list(decode.pet_decoder()))")
 }
 
 pub fn client_response_get_response_decode_expr_array_inline_test() {
-  let ctx = test_helpers.make_minimal_ctx()
   let schema_ref =
     schema.Inline(schema.ArraySchema(
       metadata: schema.default_metadata(),
@@ -184,7 +155,6 @@ pub fn client_response_get_response_decode_expr_array_inline_test() {
     schema_ref,
     "getNumbers",
     http.Status(200),
-    ctx,
   )
   // The list combinator lives on `gleam/dynamic/decode` (imported as
   // `dyn_decode` in client.gleam); the local `decode` module is the
@@ -691,7 +661,7 @@ pub fn client_request_is_deep_object_param_object_test() {
       None,
       False,
     )
-  client_request.is_deep_object_param(param, ctx)
+  operation_ir.is_deep_object_param(param, ctx)
   |> should.be_true()
 }
 
@@ -699,7 +669,7 @@ pub fn client_request_is_deep_object_param_string_test() {
   let ctx = test_helpers.make_minimal_ctx()
   let param =
     test_helpers.simple_param("name", True, test_helpers.string_schema())
-  client_request.is_deep_object_param(param, ctx)
+  operation_ir.is_deep_object_param(param, ctx)
   |> should.be_false()
 }
 
@@ -1101,21 +1071,6 @@ pub fn content_type_is_json_compatible_plain_json_test() {
 
 pub fn content_type_is_json_compatible_false_test() {
   content_type.is_json_compatible("text/plain")
-  |> should.be_false()
-}
-
-pub fn content_type_is_xml_compatible_suffix_test() {
-  content_type.is_xml_compatible("application/soap+xml")
-  |> should.be_true()
-}
-
-pub fn content_type_is_xml_compatible_plain_xml_test() {
-  content_type.is_xml_compatible("application/xml")
-  |> should.be_true()
-}
-
-pub fn content_type_is_xml_compatible_false_test() {
-  content_type.is_xml_compatible("application/json")
   |> should.be_false()
 }
 

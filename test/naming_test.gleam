@@ -209,17 +209,21 @@ pub fn naming_dot_encoding_literal_underscore_dot_underscore_test() {
 // Issue #492: inline-enum disambiguation against component schema names.
 
 pub fn naming_inline_enum_type_name_no_collision_returns_base_test() {
-  naming.inline_enum_type_name("foo", "status", ["bar", "baz"])
+  naming.inline_enum_type_name("foo", "status", taken(["Bar", "Baz"]))
   |> should.equal("FooStatus")
 }
 
 pub fn naming_inline_enum_type_name_collision_appends_numeric_suffix_test() {
-  naming.inline_enum_type_name("foo", "status", ["foo_status"])
+  naming.inline_enum_type_name("foo", "status", taken(["FooStatus"]))
   |> should.equal("FooStatus2")
 }
 
 pub fn naming_inline_enum_type_name_chained_collision_bumps_suffix_test() {
-  naming.inline_enum_type_name("foo", "status", ["foo_status", "foo_status_2"])
+  naming.inline_enum_type_name(
+    "foo",
+    "status",
+    taken(["FooStatus", "FooStatus2"]),
+  )
   |> should.equal("FooStatus3")
 }
 

@@ -76,7 +76,7 @@ pub fn build_request_types_module(ctx: Context) -> Module {
   let declarations =
     list.filter_map(operations, fn(op) {
       let #(op_id, operation, _path, _method) = op
-      request_type_decl(op_id, operation, ctx)
+      request_type_decl(op_id, operation)
     })
   ir.module(header: "", imports: imports, declarations: declarations)
 }
@@ -102,7 +102,6 @@ fn compute_request_type_imports(
 fn request_type_decl(
   op_id: String,
   operation: spec.Operation(Resolved),
-  ctx: Context,
 ) -> Result(Declaration, Nil) {
   let params = operation.parameters
   case list.is_empty(params) && option.is_none(operation.request_body) {
@@ -123,7 +122,7 @@ fn request_type_decl(
           request_param_field(param, field_name)
         })
       let body_field = case operation.request_body {
-        Some(Value(rb)) -> [request_body_field(rb, op_id, ctx)]
+        Some(Value(rb)) -> [request_body_field(rb, op_id)]
         _ -> []
       }
       Ok(ir.declaration(
@@ -168,12 +167,8 @@ fn request_param_field(
   Field(name: field_name, type_expr: final_type)
 }
 
-fn request_body_field(
-  rb: spec.RequestBody(Resolved),
-  op_id: String,
-  ctx: Context,
-) -> Field {
-  let body_type = request_body_type(rb, op_id, ctx)
+fn request_body_field(rb: spec.RequestBody(Resolved), op_id: String) -> Field {
+  let body_type = request_body_type(rb, op_id)
   let final_type = case rb.required {
     True -> body_type
     False -> "Option(" <> body_type <> ")"
@@ -181,11 +176,7 @@ fn request_body_field(
   Field(name: "body", type_expr: final_type)
 }
 
-fn request_body_type(
-  rb: spec.RequestBody(Resolved),
-  op_id: String,
-  _ctx: Context,
-) -> String {
+fn request_body_type(rb: spec.RequestBody(Resolved), op_id: String) -> String {
   let content_entries = sorted_entries(rb.content)
   case content_entries {
     [#(media_type_name, media_type), ..] ->
@@ -797,7 +788,7 @@ fn schema_type_decls(
       // closed-object schemas — see Issue #249.
       let fields = case additional_properties {
         Typed(ap_ref) -> {
-          let inner_type = schema_ref_to_type(ap_ref, ctx)
+          let inner_type = schema_ref_to_type(ap_ref)
           list.append(fields, [
             Field(
               name: "additional_properties",
@@ -847,7 +838,7 @@ fn schema_type_decls(
     OneOfSchema(metadata:, schemas:, ..) -> {
       let variants =
         list.map(schemas, fn(s_ref) {
-          let variant_type = schema_ref_to_type(s_ref, ctx)
+          let variant_type = schema_ref_to_type(s_ref)
           let variant_name = type_name <> variant_type
           VariantWithType(name: variant_name, inner_type: variant_type)
         })
@@ -862,7 +853,7 @@ fn schema_type_decls(
     AnyOfSchema(metadata:, schemas:, ..) -> {
       let fields =
         list.map(schemas, fn(s_ref) {
-          let variant_type = schema_ref_to_type(s_ref, ctx)
+          let variant_type = schema_ref_to_type(s_ref)
           let field_name = naming.to_snake_case(variant_type)
           Field(name: field_name, type_expr: "Option(" <> variant_type <> ")")
         })
@@ -1006,7 +997,7 @@ fn anonymous_type_for_schema(
         True -> {
           let variants =
             list.map(schemas, fn(s_ref) {
-              let variant_type = schema_ref_to_type(s_ref, ctx)
+              let variant_type = schema_ref_to_type(s_ref)
               let variant_name = type_name <> variant_type
               VariantWithType(name: variant_name, inner_type: variant_type)
             })
@@ -1064,7 +1055,7 @@ fn schema_ref_to_type_with_inline_enum(
         False -> base
       }
     }
-    _ -> schema_ref_to_type(ref, ctx)
+    _ -> schema_ref_to_type(ref)
   }
 }
 
@@ -1083,14 +1074,14 @@ pub fn inline_enum_type_name_for(
   prop_name: String,
   ctx: Context,
 ) -> String {
-  naming.inline_enum_type_name_with_set(
+  naming.inline_enum_type_name(
     parent_name,
     prop_name,
     context.component_type_names(ctx),
   )
 }
 
-fn schema_ref_to_type(ref: SchemaRef, _ctx: Context) -> String {
+fn schema_ref_to_type(ref: SchemaRef) -> String {
   case ref {
     Inline(s) -> schema_dispatch.schema_type(s)
     Reference(name:, ..) -> naming.schema_to_type_name(name)

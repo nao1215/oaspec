@@ -550,7 +550,6 @@ fn print_resolved_paths(config_path: String, cfg: config.Config) -> Nil {
   }
 }
 
-@internal
 pub fn resolved_path_entries(
   config_path: String,
   cfg: config.Config,
@@ -575,7 +574,6 @@ pub fn resolved_path_entries(
   list.append(base_entries, output_entries)
 }
 
-@internal
 pub fn resolve_path_from_cwd(path: String, cwd: String) -> String {
   let candidate = case path_is_absolute(path) {
     True -> path
