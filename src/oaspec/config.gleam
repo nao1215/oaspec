@@ -371,8 +371,7 @@ fn parse_target_node(
   // disambiguate the two output trees inside a single `<dir>`. In
   // client-only mode there is no server output to clash with, so
   // the default client output is just `<dir>/<package>` and the
-  // generated `import <package>/...` lines resolve correctly
-  // .
+  // generated `import <package>/...` lines resolve correctly.
   //
   // The unused field in single-mode configs (e.g. `output_server`
   // in client-only mode) is set to a sensible-looking placeholder

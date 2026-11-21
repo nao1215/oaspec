@@ -167,7 +167,7 @@ pub fn to_snake_case(input: String) -> String {
 /// `<Schema>List` component schema (whose own decoder would otherwise
 /// emit the same identifier and trip
 /// `Duplicate definition: decode_<schema>_list` at `gleam build`
-/// time).the rename keeps the user-named `XxxList`
+/// time). The rename keeps the user-named `XxxList`
 /// schema's natural decoder name and shifts the synthetic one,
 /// since the user does not own upstream specs like Kubernetes /
 /// Stripe and cannot rename.
@@ -267,11 +267,10 @@ fn bump_numeric_suffix(
 
 /// Replace `.` with `_dot_` so the dot survives the snake/Pascal
 /// pipelines as a `Dot` word boundary instead of being treated as
-/// the same separator class as `_` and `-`.Stripe's
+/// the same separator class as `_` and `-`. Stripe's
 /// spec declares `payment_intent.processing` alongside
 /// `payment_intent_processing`, and treating `.` as plain whitespace
-/// (the prior behavior) collapsed both onto the same Gleam type
-/// name. Encoding the dot keeps the two distinguishable while still
+/// would collapse both onto the same Gleam type name. Encoding the dot keeps the two distinguishable while still
 /// producing readable identifiers (`PaymentIntentDotProcessing`).
 ///
 /// A literal `_dot_` already in the input is first escaped to

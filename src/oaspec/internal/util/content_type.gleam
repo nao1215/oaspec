@@ -4,8 +4,8 @@ import oaspec/internal/capability
 
 /// Supported content types for code generation.
 ///
-/// `Wildcard` represents the OpenAPI `*/*` media-type catch-all
-/// . Specs like Kubernetes' OpenAPI v3 use it for
+/// `Wildcard` represents the OpenAPI `*/*` media-type catch-all.
+/// Specs like Kubernetes' OpenAPI v3 use it for
 /// proxy-style endpoints and resource mutation handlers that accept or
 /// emit arbitrary bytes. oaspec treats `*/*` as `application/octet-stream`
 /// for codegen purposes — request body is `BitArray`, response body is
@@ -29,8 +29,8 @@ pub type ContentType {
 ///
 /// Unrecognized media types fall back to a passthrough alias so real-world
 /// specs like the GitHub REST API don't trip the "unsupported content
-/// type" diagnostic just because they declare vendor-prefixed responses
-/// . The fallback table:
+/// type" diagnostic just because they declare vendor-prefixed responses.
+/// The fallback table:
 ///
 ///   - `text/*` (e.g. `text/html`, `text/x-markdown`) aliases to
 ///     `TextPlain` so the body passes through as a `String`.

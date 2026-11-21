@@ -367,8 +367,8 @@ fn generate_router(
   //
   // `ResponseBody` keeps text and binary payloads distinct end-to-end so a
   // spec that declares `application/octet-stream` or `image/*` responses
-  // round-trips real bytes instead of being smuggled through `String`
-  // . Framework adapters pattern-match on the variant to call
+  // round-trips real bytes instead of being smuggled through `String`.
+  // Framework adapters pattern-match on the variant to call
   // their text- or bytes-shaped response constructor.
   let sb =
     sb
