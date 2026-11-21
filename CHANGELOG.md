@@ -13,12 +13,13 @@ within `Changed` / `Fixed` and stay as-is.
 ### Breaking
 
 - The public API is four modules: `oaspec`, `oaspec/config`, `oaspec/openapi` and `oaspec/transport`. `oaspec/generate`, `oaspec/codegen/writer`, `oaspec/openapi/parser`, `oaspec/openapi/spec`, `oaspec/openapi/schema`, `oaspec/openapi/diagnostic` and `oaspec/mock` are gone.
-- The library entry points are `oaspec.parse_file`, `oaspec.parse_string` (YAML or JSON), `oaspec.resolve`, `oaspec.generate`, `oaspec.validate` and `oaspec.write`. `generate` returns `Generated(files, warnings)` with the final file paths, and `write` takes only that value. The `*_with_progress_and_locations` variants, `ParseLimits` and `parse_string_with_limits` are no longer public; the default limits always apply.
+- The library entry points are `oaspec.parse_file`, `oaspec.parse_string` (YAML or JSON), `oaspec.resolve`, `oaspec.generate`, `oaspec.validate` and `oaspec.write`. `generate` returns `Generated(files, warnings)` with the final file paths, and `write` takes only that value and writes the files unformatted. `generate` and `validate` check the config the way the CLI does and return `InvalidConfig(error)` when `output.server` or `output.client` does not match `package`. The `*_with_progress_and_locations` variants, `ParseLimits` and `parse_string_with_limits` are no longer public; `parse_file` and `parse_string` refuse input over the default 16 MiB.
 - The OpenAPI AST types and `Diagnostic` live in `oaspec/openapi`, with `openapi.diagnostic_to_string`. The functions that build diagnostics are no longer public.
 - `config.Config` is a plain record: read fields directly and use record update instead of the getters, `with_*` functions and `config.new`. `ConfigError` has `CannotReadFile(path, reason: simplifile.FileError)` and `InvalidYaml(detail)` in place of `FileReadError` and `ParseError`.
 - `transport.Request.method` is a `gleam/http.Method`. `transport.Method`, `MethodError`, `method_to_wire` and `method_from_string` are removed. Generated clients import `gleam/http`, so projects using them need `gleam add gleam_http`; regenerate the client after upgrading.
 - `transport.with_security` takes a `List(transport.Credential)` (`ApiKey`, `BearerToken`, `BasicAuth`, `DigestAuth`) instead of the `credentials()` builder, and `with_default_header` is removed in favour of `with_default_headers`.
 - `oaspec/mock` is removed. A test can pass a plain function as the `Send`.
+- A parameter whose name matches a module the generated code imports (`http`, `transport`, `list`, `option`, `types` and others) gets a trailing underscore, so a query parameter `http` becomes the label and field `http_`. Such a parameter used to shadow the module and the generated code did not compile for `transport`; `http` is new because generated clients now import `gleam/http`.
 - `oaspec_httpc` and `oaspec_fetch` need this oaspec version, since they pass `gleam/http` methods through unchanged.
 
 ```gleam

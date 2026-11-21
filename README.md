@@ -96,7 +96,7 @@ oaspec generate --config=oaspec.yaml
 
 ### Using oaspec as a library
 
-The `oaspec` module runs the same steps as the CLI: `parse_file` or `parse_string`, `generate`, then `write`. `generate` does no IO, so a build step or a test can look at the files before they are written.
+The `oaspec` module has the steps the CLI runs: `parse_file` or `parse_string`, `generate`, then `write`. `generate` does no IO, so a build step or a test can look at the files before they are written. `write` does not format the files; run `gleam format` afterwards, as the CLI does.
 
 ```gleam
 import gleam/io
@@ -117,6 +117,8 @@ pub fn main() {
         }
         Error(oaspec.InvalidSpec(errors)) ->
           list.each(errors, fn(e) { io.println(openapi.diagnostic_to_string(e)) })
+        Error(oaspec.InvalidConfig(error)) ->
+          io.println(config.error_to_string(error))
       }
   }
 }
