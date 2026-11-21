@@ -25,6 +25,7 @@ import oaspec/config.{type Config}
 import oaspec/internal/cli
 import oaspec/internal/codegen/context
 import oaspec/internal/codegen/writer
+import oaspec/internal/config_check
 import oaspec/internal/generate as internal_generate
 import oaspec/internal/openapi/parser
 import oaspec/openapi.{
@@ -89,6 +90,12 @@ pub type GenerateError {
   /// The document uses features oaspec cannot generate code for, or has
   /// references that do not resolve. Each problem is one diagnostic.
   InvalidSpec(errors: List(Diagnostic))
+  /// The config's output directories do not fit its `package`: the server
+  /// directory must end in the package path, the client directory in the
+  /// package path or `<package>_client`, and a `src` directory may only be
+  /// the direct parent of the package directory. These are the checks the
+  /// CLI runs after loading `oaspec.yaml`.
+  InvalidConfig(error: config.ConfigError)
 }
 
 /// A reason `write` stopped. Files written before the failure stay on
@@ -178,8 +185,9 @@ pub fn resolve(
 /// Generates the Gleam modules for a document, without writing them.
 ///
 /// `config` decides what is generated (`mode`, `include`,
-/// `handler_layout`) and where each file goes. Problems that do not stop
-/// generation come back in `warnings`.
+/// `handler_layout`) and where each file goes. Its output directories are
+/// checked against its `package` first, as the CLI does. Problems that do
+/// not stop generation come back in `warnings`.
 ///
 /// ## Examples
 ///
@@ -194,10 +202,17 @@ pub fn resolve(
 /// // -> Error(InvalidSpec([Diagnostic(..)]))
 /// ```
 ///
+/// ```gleam
+/// // cfg.package is "api" but cfg.output_server is "./src/server"
+/// oaspec.generate(spec, cfg)
+/// // -> Error(InvalidConfig(config.InvalidValue(field: "output.server", ..)))
+/// ```
+///
 pub fn generate(
   from spec: OpenApiSpec(Unresolved),
   with config: Config,
 ) -> Result(Generated, GenerateError) {
+  use _ <- result.try(check_config(config))
   use summary <- result.map(
     internal_generate.generate(spec, config)
     |> result.map_error(from_internal_generate_error),
@@ -218,8 +233,8 @@ pub fn generate(
   Generated(files:, warnings: summary.warnings)
 }
 
-/// Runs the same checks as `generate` without generating code, and
-/// returns the warnings.
+/// Runs the same checks as `generate`, including the config checks,
+/// without generating code, and returns the warnings.
 ///
 /// ## Examples
 ///
@@ -237,6 +252,7 @@ pub fn validate(
   from spec: OpenApiSpec(Unresolved),
   with config: Config,
 ) -> Result(List(Diagnostic), GenerateError) {
+  use _ <- result.try(check_config(config))
   internal_generate.validate_only(spec, config)
   |> result.map(fn(summary) { summary.warnings })
   |> result.map_error(from_internal_generate_error)
@@ -277,6 +293,12 @@ pub fn write(generated: Generated) -> Result(List(String), WriteError) {
       writer.CannotWriteFile(path:, reason:) -> CannotWriteFile(path:, reason:)
     }
   })
+}
+
+fn check_config(config: Config) -> Result(Nil, GenerateError) {
+  config_check.validate_output_package_match(config)
+  |> result.try(fn(_) { config_check.validate_output_dir_layout(config) })
+  |> result.map_error(InvalidConfig)
 }
 
 fn from_internal_generate_error(

@@ -152,3 +152,30 @@ pub fn parse_file_refuses_input_over_the_size_cap_test() {
   let assert Error(diagnostic) = result
   assert diagnostic.code == "parse_limit_exceeded"
 }
+
+pub fn generate_rejects_output_dir_that_does_not_match_package_test() {
+  let assert Ok(spec) = oaspec.parse_string(yaml_spec)
+  let cfg =
+    config.Config(
+      ..config_for("./test_output/api_test", config.Server),
+      output_server: "./test_output/api_test/server",
+    )
+  let assert Error(oaspec.InvalidConfig(config.InvalidValue(
+    field: "output.server",
+    ..,
+  ))) = oaspec.generate(spec, cfg)
+  let assert Error(oaspec.InvalidConfig(_)) = oaspec.validate(spec, cfg)
+}
+
+pub fn generate_rejects_misplaced_src_directory_test() {
+  let assert Ok(spec) = oaspec.parse_string(yaml_spec)
+  let cfg =
+    config.Config(
+      ..config_for("./test_output/api_test", config.Server),
+      output_server: "./src/gen/api",
+    )
+  let assert Error(oaspec.InvalidConfig(config.InvalidValue(
+    field: "output.server",
+    ..,
+  ))) = oaspec.generate(spec, cfg)
+}
