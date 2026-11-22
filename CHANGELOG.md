@@ -24,22 +24,6 @@ within `Changed` / `Fixed` and stay as-is.
 - A parameter whose name matches a module the generated code imports (`http`, `transport`, `list`, `option`, `types` and others) gets a trailing underscore, so a query parameter `http` becomes the label and field `http_`. Such a parameter used to shadow the module and the generated code did not compile for `transport`; `http` is new because generated clients now import `gleam/http`.
 - `oaspec_httpc` and `oaspec_fetch` need this oaspec version, since they pass `gleam/http` methods through unchanged.
 
-```gleam
-// before
-let send =
-  httpc.send
-  |> transport.with_default_header("x-trace-id", id)
-  |> transport.with_security(
-    transport.credentials() |> transport.with_bearer_token("BearerAuth", token),
-  )
-
-// after
-let send =
-  httpc.send
-  |> transport.with_default_headers([#("x-trace-id", id)])
-  |> transport.with_security([transport.BearerToken("BearerAuth", token)])
-```
-
 ### Changed
 
 - The parser-limit error hint suggests shrinking the spec, since the limits are no longer configurable.
@@ -1945,35 +1929,6 @@ runs alongside the existing `Full GitHub OpenAPI` job.
     `BytesBody(BitArray)` contract for binary payloads.
 - `examples/petstore_client` rewritten to use the new send-first API
   with `oaspec/mock` for its stub transport.
-
-### Migration
-
-Before:
-
-```gleam
-let config =
-  client.new(client.default_base_url(), my_send)
-  |> client.with_bearer_auth(token)
-
-client.get_pet(config, 1)
-```
-
-After:
-
-```gleam
-import oaspec/httpc
-import oaspec/transport
-
-let send =
-  httpc.send
-  |> transport.with_base_url(client.default_base_url())
-  |> transport.with_security(
-    transport.credentials()
-    |> transport.with_bearer_token("BearerAuth", token),
-  )
-
-client.get_pet(send, pet_id: 1)
-```
 
 ## [0.27.0] - 2026-04-28
 
