@@ -10,6 +10,8 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+## [0.74.1] - 2026-11-23
+
 ### Fixed
 
 - Generated clients write a boolean query, form, multipart or path value as `true` / `false`. They wrote `True` / `False` (`bool.to_string`), which servers that compare the text reject, and a boolean array query parameter did not compile because `gleam/bool` was not imported. Generated servers write a boolean response header as `true` / `false` too; the generated client only read the lowercase form, so it saw `True` as missing.
