@@ -1,0 +1,133 @@
+openapi: 3.1.0
+info:
+  title: Request shapes
+  version: "1"
+paths:
+  /items/{count}/{color}/{ids}:
+    get:
+      operationId: getItems
+      parameters:
+        - name: count
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/Count" }
+        - name: color
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/Color" }
+        - name: ids
+          in: path
+          required: true
+          schema: { type: array, items: { type: integer } }
+        - name: flags
+          in: query
+          schema: { type: array, items: { type: boolean } }
+        - name: on
+          in: query
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Item" }
+  /things/{count}/{counts}:
+    get:
+      operationId: getThing
+      parameters:
+        - name: count
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/Count" }
+        - name: counts
+          in: path
+          required: true
+          schema: { type: array, items: { $ref: "#/components/schemas/Ratio" } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Item" }
+  /upload:
+    post:
+      operationId: upload
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                note: { type: string }
+                type: { type: string }
+      responses:
+        "204": { description: done }
+  /form:
+    post:
+      operationId: postForm
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                type: { type: string }
+                enabled: { type: boolean }
+      responses:
+        "204": { description: done }
+  /shapes:
+    post:
+      operationId: createShape
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Shape" }
+      responses:
+        "201":
+          description: created
+          headers:
+            X-Cached:
+              schema: { type: boolean }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Shape" }
+components:
+  schemas:
+    Count: { type: integer }
+    Ratio: { type: number }
+    Marker:
+      type: object
+      required: [kind]
+      properties:
+        kind: { type: string }
+    Color: { type: string, enum: [red, green] }
+    Item:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+        name: { type: [string, "null"] }
+    Circle:
+      type: object
+      required: [kind, radius]
+      properties:
+        kind: { type: string }
+        radius: { type: number }
+    Square:
+      type: object
+      required: [side]
+      properties:
+        kind: { type: string }
+        side: { type: number }
+    Shape:
+      oneOf:
+        - $ref: "#/components/schemas/Circle"
+        - $ref: "#/components/schemas/Square"
+        - $ref: "#/components/schemas/Marker"
+      discriminator:
+        propertyName: kind
+        mapping:
+          sq: "#/components/schemas/Square"

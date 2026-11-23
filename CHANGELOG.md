@@ -10,6 +10,16 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Fixed
+
+- Generated clients write a boolean query, form, multipart or path value as `true` / `false`. They wrote `True` / `False` (`bool.to_string`), which servers that compare the text reject, and a boolean array query parameter did not compile because `gleam/bool` was not imported. Generated servers write a boolean response header as `true` / `false` too; the generated client only read the lowercase form, so it saw `True` as missing.
+- Encoding a variant of a discriminated `oneOf` writes the discriminator value the decoder dispatches on (`"sq"` from `mapping: { sq: ... }`, or the schema name), not whatever the caller put in the record's discriminator field.
+- An optional `multipart/form-data` request body generated a client that read fields from an `Option` and did not compile. It now sends no body for `None`, and the parts go out in the order of the schema's properties instead of reversed.
+- An optional `application/x-www-form-urlencoded` request body no longer leaves an unused `body_content_type` binding (a warning) in the client.
+- A generated server parses a path parameter whose schema is a `$ref` (to an integer, number or string enum) or an array (`1,2,3`). It passed the raw `String` to the typed field, which did not compile.
+- A parameter that is an array of a `$ref` schema (`items: { $ref: '#/components/schemas/Ratio' }`) was typed as an unqualified `List(Ratio)` in `request_types.gleam`, and the client did not import `gleam/int` / `gleam/float` to write its items, so neither compiled.
+- A client that uses component schemas only in parameters and responses no longer imports the `encode` module it never calls (an unused import warning).
+
 ## [0.74.0] - 2026-11-22
 
 ### Breaking

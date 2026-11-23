@@ -301,20 +301,32 @@ pub fn server_request_decode_query_schema_needs_float_test() {
 pub fn server_request_decode_param_parse_expr_string_test() {
   let param =
     test_helpers.simple_param("name", True, test_helpers.string_schema())
-  server_request_decode.param_parse_expr("name_val", param)
+  server_request_decode.param_parse_expr(
+    "name_val",
+    param,
+    test_helpers.make_minimal_ctx(),
+  )
   |> should.equal("name_val")
 }
 
 pub fn server_request_decode_param_parse_expr_int_test() {
   let param = test_helpers.simple_param("id", True, test_helpers.int_schema())
-  server_request_decode.param_parse_expr("id_val", param)
+  server_request_decode.param_parse_expr(
+    "id_val",
+    param,
+    test_helpers.make_minimal_ctx(),
+  )
   |> should.equal("int.parse(id_val)")
 }
 
 pub fn server_request_decode_param_parse_expr_float_test() {
   let param =
     test_helpers.simple_param("price", True, test_helpers.float_schema())
-  server_request_decode.param_parse_expr("price_val", param)
+  server_request_decode.param_parse_expr(
+    "price_val",
+    param,
+    test_helpers.make_minimal_ctx(),
+  )
   |> should.equal("float.parse(price_val)")
 }
 
@@ -2205,14 +2217,14 @@ paths:
   |> should.be_true()
   string.contains(router_file.content, "body: EmptyBody") |> should.be_true()
 
-  // Bool header is stringified via bool.to_string and gleam/bool is
-  // imported automatically.
+  // Bool header is written as `true` / `false`, which the generated
+  // client reads back; `bool.to_string` wrote `True`.
   string.contains(
     router_file.content,
-    "[#(\"X-Cache-Hit\", bool.to_string(hdrs.x_cache_hit))]",
+    "[#(\"X-Cache-Hit\", case hdrs.x_cache_hit { True -> \"true\" False -> \"false\" })]",
   )
   |> should.be_true()
-  string.contains(router_file.content, "import gleam/bool") |> should.be_true()
+  string.contains(router_file.content, "import gleam/bool") |> should.be_false()
 }
 
 /// A response with no `content` block must dispatch to `EmptyBody`,

@@ -1675,6 +1675,64 @@ cd "$PROJECT_ROOT"
 rm -rf "$ALIAS_DIR"
 
 # -------------------------------------------------------
+# Step 14a2: request shapes on both targets
+# -------------------------------------------------------
+# Optional multipart and form bodies, a discriminated oneOf, boolean
+# query arrays, a Bool response header and `$ref`, enum and array path
+# parameters. Each of these used to give generated code that did not
+# compile or warned, on one side or the other.
+info "Testing request shapes on Erlang and JavaScript..."
+SHAPES_DIR="$SCRIPT_DIR/request_shapes_test"
+rm -rf "$SHAPES_DIR"
+mkdir -p "$SHAPES_DIR/src"
+
+cat > "$SHAPES_DIR/oaspec.yaml" << 'YAML_EOF'
+input: test/fixtures/request_shapes_roundtrip.yaml
+mode: both
+output:
+  server: ./integration_test/request_shapes_test/src/api
+  client: ./integration_test/request_shapes_test/src/api_client
+package: api
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate --config="$SHAPES_DIR/oaspec.yaml"
+
+cat > "$SHAPES_DIR/gleam.toml" << 'TOML_EOF'
+name = "request_shapes_test"
+version = "0.1.0"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
+oaspec = { path = "../.." }
+TOML_EOF
+
+cat > "$SHAPES_DIR/src/request_shapes_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cd "$SHAPES_DIR"
+gleam deps download
+
+verify_generated_format src/api
+verify_generated_format src/api_client
+for target in erlang javascript; do
+  if gleam build --target "$target" --warnings-as-errors 2>&1; then
+    info "PASS: Generated request-shape code compiles on $target (warnings-as-errors)."
+  else
+    fail "Generated request-shape code failed to compile on $target."
+  fi
+done
+
+cd "$PROJECT_ROOT"
+rm -rf "$SHAPES_DIR"
+
+# -------------------------------------------------------
 # Step 14b: `handlers: per_operation` output compiles
 # -------------------------------------------------------
 # The fixture's operationIds collide with the other generated module

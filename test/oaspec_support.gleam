@@ -8326,14 +8326,15 @@ pub fn deep_object_primitive_props_client_imports_primitives_case() {
   let assert Ok(summary) = generate.generate(unresolved, cfg)
   let assert Ok(client_file) =
     list.find(summary.files, fn(f) { f.path == "client.gleam" })
-  // The deepObject sub-properties trigger int/float/bool to_string
-  // emissions, which in turn require the matching primitive modules.
+  // The deepObject sub-properties trigger int/float to_string
+  // emissions, which in turn require the matching primitive modules. A
+  // Bool is written as `true` / `false` and needs no import.
   string.contains(client_file.content, "import gleam/int")
   |> should.be_true()
   string.contains(client_file.content, "import gleam/float")
   |> should.be_true()
   string.contains(client_file.content, "import gleam/bool")
-  |> should.be_true()
+  |> should.be_false()
   // Nested-ObjectSchema property inner_count: integer is reached via
   // the recursive walker.
   string.contains(client_file.content, "filter[nested][inner_count]")
@@ -18452,5 +18453,248 @@ paths:
   string.contains(client_file.content, "pub fn pulls_merge_async(send send:")
   |> should.be_true()
   string.contains(client_file.content, "pub fn pulls_merge_async2(")
+  |> should.be_true()
+}
+
+// --- Optional form bodies, multipart order and discriminated encoders ---
+
+const optional_bodies_spec =
+  "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /upload:
+    post:
+      operationId: upload
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                note: { type: string }
+      responses:
+        '204': { description: done }
+  /form:
+    post:
+      operationId: postForm
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                type: { type: string }
+      responses:
+        '204': { description: done }
+  /shapes:
+    post:
+      operationId: createShape
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Shape' }
+      responses:
+        '204': { description: done }
+components:
+  schemas:
+    Circle:
+      type: object
+      required: [kind, radius]
+      properties:
+        kind: { type: string }
+        radius: { type: number }
+    Square:
+      type: object
+      required: [side]
+      properties:
+        kind: { type: string }
+        side: { type: number }
+    Shape:
+      oneOf:
+        - $ref: '#/components/schemas/Circle'
+        - $ref: '#/components/schemas/Square'
+      discriminator:
+        propertyName: kind
+        mapping:
+          sq: '#/components/schemas/Square'
+"
+
+fn optional_bodies_files() -> List(context.GeneratedFile) {
+  let assert Ok(spec) = parser.parse_string(optional_bodies_spec)
+  let ctx = make_ctx_from_spec_with_mode(hoist.hoist(spec), config.Client)
+  list.flatten([client_gen.generate(ctx), encoders.generate(ctx)])
+}
+
+fn file_content(files: List(context.GeneratedFile), part: String) -> String {
+  let assert Ok(file) =
+    list.find(files, fn(f) { string.contains(f.path, part) })
+  file.content
+}
+
+/// An optional multipart body is an `Option(UploadRequest)`. The client
+/// used to read `body.file` from it, which does not compile.
+pub fn optional_multipart_body_unwraps_the_option_case() {
+  let client = file_content(optional_bodies_files(), "client.gleam")
+  let assert Ok(#(_, upload)) =
+    string.split_once(client, "pub fn build_upload_request(")
+  string.contains(upload, "let #(body_str, body_content_type) = case body {")
+  |> should.be_true()
+  string.contains(upload, "None -> transport.EmptyBody") |> should.be_true()
+  // Parts go out in the order of the schema's properties.
+  string.contains(upload, "string.join(list.reverse(parts), \"\")")
+  |> should.be_true()
+}
+
+/// The optional form body used to bind `body_content_type` twice, and
+/// the inner binding was an unused-variable warning.
+pub fn optional_form_body_binds_the_content_type_once_case() {
+  let client = file_content(optional_bodies_files(), "client.gleam")
+  let assert Ok(#(_, form)) =
+    string.split_once(client, "pub fn build_post_form_request(")
+  let assert Ok(#(form, _)) = string.split_once(form, "\n}\n")
+  string.contains(form, "let #(body_str, body_content_type) = case body {")
+  |> should.be_true()
+  list.length(string.split(form, "let body_content_type =")) |> should.equal(2)
+}
+
+/// Encoding a discriminated variant writes the discriminator value the
+/// decoder dispatches on, not whatever the caller put in the field.
+pub fn discriminated_one_of_encoder_sets_the_mapped_value_case() {
+  let encode = file_content(optional_bodies_files(), "encode.gleam")
+  string.contains(
+    encode,
+    "types.ShapeCircle(inner) -> encode_circle_json(types.Circle(..inner, kind: \"Circle\"))",
+  )
+  |> should.be_true()
+  string.contains(
+    encode,
+    "types.ShapeSquare(inner) -> encode_square_json(types.Square(..inner, kind: option.Some(\"sq\")))",
+  )
+  |> should.be_true()
+}
+
+const path_and_bool_spec =
+  "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /a/{count}/{color}/{ids}:
+    get:
+      operationId: getA
+      parameters:
+        - name: count
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Count' }
+        - name: color
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Color' }
+        - name: ids
+          in: path
+          required: true
+          schema: { type: array, items: { type: integer } }
+        - name: flags
+          in: query
+          schema: { type: array, items: { type: boolean } }
+        - name: on
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Thing' }
+components:
+  schemas:
+    Count: { type: integer }
+    Color: { type: string, enum: [red, green] }
+    Thing:
+      type: object
+      properties:
+        name: { type: string }
+"
+
+/// Booleans go on the wire as `true` / `false`, which the generated
+/// server and client both read; `bool.to_string` wrote `True`, and the
+/// array form also lacked the `gleam/bool` import.
+pub fn client_writes_booleans_in_lowercase_case() {
+  let assert Ok(spec) = parser.parse_string(path_and_bool_spec)
+  let ctx = make_ctx_from_spec_with_mode(hoist.hoist(spec), config.Client)
+  let client = file_content(client_gen.generate(ctx), "client.gleam")
+  string.contains(client, "bool.to_string") |> should.be_false()
+  string.contains(client, "case v { True -> \"true\" False -> \"false\" }")
+  |> should.be_true()
+  string.contains(
+    client,
+    "fn(b) { case b { True -> \"true\" False -> \"false\" } }",
+  )
+  |> should.be_true()
+}
+
+/// A client whose operations only read typed responses never calls
+/// into `encode`, so it does not import it (an unused import warning).
+pub fn read_only_client_does_not_import_encode_case() {
+  let yaml =
+    "
+openapi: 3.0.3
+info:
+  title: Test
+  version: 1.0.0
+paths:
+  /things/{id}:
+    get:
+      operationId: getThing
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Count' }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Thing' }
+components:
+  schemas:
+    Count: { type: integer }
+    Thing:
+      type: object
+      properties:
+        name: { type: string }
+"
+  let assert Ok(spec) = parser.parse_string(yaml)
+  let ctx = make_ctx_from_spec_with_mode(hoist.hoist(spec), config.Client)
+  let client = file_content(client_gen.generate(ctx), "client.gleam")
+  string.contains(client, "import api/encode") |> should.be_false()
+}
+
+/// A path parameter whose schema is a `$ref`, or an array, is parsed to
+/// its type. The router used to hand the raw String to an `Int` or
+/// enum field, which does not compile.
+pub fn router_parses_ref_and_array_path_parameters_case() {
+  let assert Ok(spec) = parser.parse_string(path_and_bool_spec)
+  let ctx = make_ctx_from_spec_with_mode(hoist.hoist(spec), config.Server)
+  let router = file_content(server_gen.generate(ctx), "router.gleam")
+  string.contains(router, "case int.parse(count) {") |> should.be_true()
+  string.contains(
+    router,
+    "case case color { \"red\" -> Ok(types.ColorRed) \"green\" -> Ok(types.ColorGreen) _ -> Error(Nil) } {",
+  )
+  |> should.be_true()
+  string.contains(
+    router,
+    "case list.try_map(string.split(ids, \",\"), int.parse) {",
+  )
   |> should.be_true()
 }

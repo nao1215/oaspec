@@ -5,6 +5,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/set
 import oaspec/internal/codegen/context.{type Context}
+import oaspec/internal/openapi/resolver
 import oaspec/openapi.{
   type SchemaObject, type SchemaRef, AllOfSchema, ArraySchema, BooleanSchema,
   Forbidden, Inline, IntegerSchema, NumberSchema, ObjectSchema, OneOfSchema,
@@ -329,5 +330,30 @@ pub fn array_items(schema_ref: SchemaRef, ctx: Context) -> Option(SchemaRef) {
   case context.resolve_schema_ref(schema_ref, ctx) {
     Ok(ArraySchema(items:, ..)) -> Some(items)
     _ -> None
+  }
+}
+
+/// Get the discriminator value for a $ref.
+/// OpenAPI discriminator.mapping is keyed by payload values, with $ref paths
+/// as values: { "dog": "#/components/schemas/Dog" }.
+/// Given a ref_name like "Dog", find the mapping key that points to it.
+/// Falls back to ref_name if no explicit mapping exists.
+pub fn discriminator_value(
+  disc: openapi.Discriminator,
+  ref: String,
+  ref_name: String,
+) -> String {
+  // Search mapping entries: key = discriminator value, value = $ref path or schema name
+  let found =
+    dict.to_list(disc.mapping)
+    |> list.find(fn(entry) {
+      let #(_disc_value, target) = entry
+      // The target may be a full $ref path or just the schema name
+      target == ref || resolver.ref_to_name(target) == ref_name
+    })
+  case found {
+    Ok(#(disc_value, _)) -> disc_value
+    // nolint: thrown_away_error -- missing mapping entry is expected; fall back to the ref name
+    Error(_) -> ref_name
   }
 }

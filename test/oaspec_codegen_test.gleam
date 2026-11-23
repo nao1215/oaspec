@@ -77,6 +77,12 @@ pub fn guard_and_decoder_generation_test() {
   let _ =
     support.typed_additional_props_decoder_rejects_invalid_extra_values_case()
   let _ = support.multipart_optional_field_generates_case_expr_case()
+  let _ = support.optional_multipart_body_unwraps_the_option_case()
+  let _ = support.optional_form_body_binds_the_content_type_once_case()
+  let _ = support.discriminated_one_of_encoder_sets_the_mapped_value_case()
+  let _ = support.client_writes_booleans_in_lowercase_case()
+  let _ = support.read_only_client_does_not_import_encode_case()
+  let _ = support.router_parses_ref_and_array_path_parameters_case()
   let _ = support.multipart_ref_scalar_field_is_stringified_case()
   let _ = support.path_ref_array_parameters_are_stringified_case()
   let _ = support.guards_composite_validator_compiles_case()

@@ -32,7 +32,11 @@ pub fn operations_need_typed_schemas(
         case ref_p {
           Value(p) ->
             case p.payload {
-              ParameterSchema(Reference(..)) -> True
+              ParameterSchema(Reference(..))
+              | ParameterSchema(Inline(openapi.ArraySchema(
+                  items: Reference(..),
+                  ..,
+                ))) -> True
               _ -> False
             }
           _ -> False

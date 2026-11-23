@@ -8,12 +8,11 @@ import oaspec/internal/codegen/operation_ir
 import oaspec/internal/codegen/schema_utils
 import oaspec/internal/openapi/spec
 import oaspec/internal/util/content_type as ct_util
-import oaspec/openapi.{Inline, ParameterSchema, Value}
+import oaspec/openapi.{Inline, Value}
 
 /// Structured import / helper requirements for client generation.
 pub type ClientRequirements {
   ClientRequirements(
-    needs_bool: Bool,
     needs_float: Bool,
     has_multi_content_response: Bool,
     has_form_urlencoded: Bool,
@@ -48,25 +47,14 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
       })
     })
 
-  let needs_bool =
-    list.any(all_params, fn(p) {
-      case p.payload {
-        ParameterSchema(Inline(openapi.BooleanSchema(..))) -> True
-        _ -> False
-      }
-    })
-    || deep_object_param_has_property(operations, ctx, fn(s) {
-      case s {
-        openapi.BooleanSchema(..) -> True
-        _ -> False
-      }
-    })
   let needs_float_param =
     list.any(all_params, fn(p) {
-      case p.payload {
-        ParameterSchema(Inline(openapi.NumberSchema(..))) -> True
-        _ -> False
-      }
+      param_value_schema_is(p, ctx, fn(s) {
+        case s {
+          openapi.NumberSchema(..) -> True
+          _ -> False
+        }
+      })
     })
     || deep_object_param_has_property(operations, ctx, fn(s) {
       case s {
@@ -186,8 +174,9 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     has_form_urlencoded
     || has_multi_content_response
     || has_response_headers
-    // Array fields fold the input via list.fold; object
-    // fields don't need list directly but other multipart paths might.
+    // The multipart body joins its parts with `list.reverse`, and
+    // array fields fold the input via list.fold.
+    || has_multipart
     || has_multipart_array_field
     || list.any(all_params, fn(p) { p.in_ == openapi.InQuery })
     || list.any(all_params, fn(p) { p.in_ == openapi.InCookie })
@@ -364,11 +353,12 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     })
 
   // Form-urlencoded bodies stringify each scalar leaf via
-  // `int.to_string` / `float.to_string` / `bool.to_string` for the
-  // matching primitive types. The form-body emitter walks the tree
-  // recursively, so the import-needs analyser has to mirror the same
-  // walk to pull `gleam/int` / `gleam/float` / `gleam/bool` into the
-  // import set when the body shape calls for them.
+  // `int.to_string` / `float.to_string` for the matching primitive
+  // types (a Bool is written as `true` / `false` with no import). The
+  // form-body emitter walks the tree recursively, so the import-needs
+  // analyser has to mirror the same walk to pull `gleam/int` /
+  // `gleam/float` into the import set when the body shape calls for
+  // them.
   let has_form_urlencoded_int =
     form_body_has_primitive(operations, ctx, fn(s) {
       case s {
@@ -383,31 +373,17 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
         _ -> False
       }
     })
-  let has_form_urlencoded_bool =
-    form_body_has_primitive(operations, ctx, fn(s) {
-      case s {
-        openapi.BooleanSchema(..) -> True
-        _ -> False
-      }
-    })
-
-  let needs_bool = needs_bool || has_form_urlencoded_bool
 
   let needs_int =
     has_int_response_header
     || has_form_urlencoded_int
     || list.any(all_params, fn(p) {
-      case
-        spec.parameter_schema(p)
-        |> option.map(context.resolve_schema_ref(_, ctx))
-      {
-        Some(Ok(openapi.IntegerSchema(..)))
-        | Some(Ok(openapi.ArraySchema(
-            items: Inline(openapi.IntegerSchema(..)),
-            ..,
-          ))) -> True
-        _ -> False
-      }
+      param_value_schema_is(p, ctx, fn(s) {
+        case s {
+          openapi.IntegerSchema(..) -> True
+          _ -> False
+        }
+      })
     })
     || deep_object_param_has_property(operations, ctx, fn(s) {
       case s {
@@ -491,7 +467,6 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     })
 
   ClientRequirements(
-    needs_bool: needs_bool,
     needs_float: needs_float,
     has_multi_content_response: has_multi_content_response,
     has_form_urlencoded: has_form_urlencoded,
@@ -755,9 +730,31 @@ fn ref_contains_composite(ref: openapi.SchemaRef, ctx: Context) -> Bool {
 /// sub-properties. Detects whether any deepObject query parameter has
 /// a (recursively-nested) property whose resolved schema matches
 /// `pred`. The deepObject codegen path emits `int.to_string` /
-/// `float.to_string` / `bool.to_string` for primitive sub-properties,
-/// so the import gate must mirror that recursion to pull in
-/// `gleam/int` / `gleam/float` / `gleam/bool`.
+/// `float.to_string` for numeric sub-properties, so the import gate
+/// must mirror that recursion to pull in `gleam/int` / `gleam/float`.
+/// Whether the parameter's value, or each item of an array parameter,
+/// resolves through any `$ref` to a schema that matches `pred`. The
+/// client stringifies such values with `int.to_string` /
+/// `float.to_string`.
+fn param_value_schema_is(
+  p: openapi.Parameter(openapi.Resolved),
+  ctx: context.Context,
+  pred: fn(openapi.SchemaObject) -> Bool,
+) -> Bool {
+  case
+    spec.parameter_schema(p)
+    |> option.map(context.resolve_schema_ref(_, ctx))
+  {
+    Some(Ok(openapi.ArraySchema(items:, ..))) ->
+      case context.resolve_schema_ref(items, ctx) {
+        Ok(item) -> pred(item)
+        Error(_) -> False
+      }
+    Some(Ok(schema)) -> pred(schema)
+    _ -> False
+  }
+}
+
 fn deep_object_param_has_property(
   operations: List(context.AnalyzedOperation),
   ctx: Context,
@@ -874,10 +871,6 @@ pub fn imports(requirements: ClientRequirements, ctx: Context) -> List(String) {
   }
   let imports = case requirements.needs_json {
     True -> ["gleam/json", ..imports]
-    False -> imports
-  }
-  let imports = case requirements.needs_bool {
-    True -> ["gleam/bool", ..imports]
     False -> imports
   }
   let imports = case requirements.needs_float {

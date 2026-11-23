@@ -367,7 +367,9 @@ pub fn generate_multipart_body(
   sb
   |> se.indent(
     1,
-    "let body_str = string.join(parts, \"\") <> \"--\" <> boundary <> \"--\\r\\n\"",
+    // The parts were prepended; reverse them so they go out in the
+    // order of the schema's properties.
+    "let body_str = string.join(list.reverse(parts), \"\") <> \"--\" <> boundary <> \"--\\r\\n\"",
   )
   |> se.indent(
     1,

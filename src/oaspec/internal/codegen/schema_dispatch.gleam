@@ -87,7 +87,7 @@ pub fn to_string_expr(schema: SchemaObject, value: String) -> String {
   case schema {
     IntegerSchema(..) -> "int.to_string(" <> value <> ")"
     NumberSchema(..) -> "float.to_string(" <> value <> ")"
-    BooleanSchema(..) -> "bool.to_string(" <> value <> ")"
+    BooleanSchema(..) -> bool_to_wire(value)
     StringSchema(..)
     | ArraySchema(..)
     | ObjectSchema(..)
@@ -95,6 +95,13 @@ pub fn to_string_expr(schema: SchemaObject, value: String) -> String {
     | OneOfSchema(..)
     | AnyOfSchema(..) -> value
   }
+}
+
+/// The expression that writes a `Bool` the way JSON and URLs spell it,
+/// `true` or `false`. `bool.to_string` gives `True` and `False`, which
+/// servers that compare the text do not accept.
+pub fn bool_to_wire(value: String) -> String {
+  "case " <> value <> " { True -> \"true\" False -> \"false\" }"
 }
 
 /// Map a schema ref to a to_string expression, resolving refs if needed.
@@ -205,7 +212,7 @@ pub fn to_string_fn(ref: SchemaRef, ctx: Context) -> String {
     Inline(StringSchema(..)) -> "fn(x) { x }"
     Inline(IntegerSchema(..)) -> "int.to_string"
     Inline(NumberSchema(..)) -> "float.to_string"
-    Inline(BooleanSchema(..)) -> "bool.to_string"
+    Inline(BooleanSchema(..)) -> "fn(b) { " <> bool_to_wire("b") <> " }"
     Reference(name:, ..) -> {
       case context.resolve_schema_ref(ref, ctx) {
         Ok(StringSchema(enum_values:, ..)) if enum_values != [] ->
