@@ -1,6 +1,7 @@
 import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/guards
 import oaspec/internal/codegen/import_analysis
@@ -746,10 +747,9 @@ fn param_value_schema_is(
     |> option.map(context.resolve_schema_ref(_, ctx))
   {
     Some(Ok(openapi.ArraySchema(items:, ..))) ->
-      case context.resolve_schema_ref(items, ctx) {
-        Ok(item) -> pred(item)
-        Error(_) -> False
-      }
+      context.resolve_schema_ref(items, ctx)
+      |> result.map(pred)
+      |> result.unwrap(False)
     Some(Ok(schema)) -> pred(schema)
     _ -> False
   }
