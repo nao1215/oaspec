@@ -258,6 +258,79 @@ fn generate_anonymous_request_body_encoder(
   }
 }
 
+/// The pattern binding and the value a discriminated `oneOf` variant
+/// encodes. When the variant record carries the discriminator property
+/// as a plain, non-nullable string, the union sets it to the variant's
+/// discriminator value, so encoding `ShapeSquare(Square(kind: "square",
+/// ..))` sends the mapped `"sq"` that the decoder dispatches on instead
+/// of whatever the caller put in the field. A constant property is not
+/// in the record and is already written as its constant. A variant that
+/// is an alias of another schema is encoded as it is.
+fn discriminated_inner(
+  disc: openapi.Discriminator,
+  name: String,
+  ref: String,
+  ctx: Context,
+) -> #(String, String) {
+  let unchanged = #("inner", "inner")
+  let value = schema_utils.discriminator_value(disc, ref, name)
+  let own_schema =
+    context.component_schemas(ctx)
+    |> list.key_find(name)
+  case own_schema {
+    Ok(Inline(ObjectSchema(properties:, required:, ..))) -> {
+      // The record's fields, named as the type generator names them:
+      // constant properties are left out before deduplicating.
+      let props =
+        ir_build.sorted_entries(properties)
+        |> list.filter(fn(entry) {
+          schema_utils.constant_property_value(entry.1, entry.0, required)
+          == None
+        })
+      let field_names =
+        dedup.dedup_property_names(list.map(props, fn(e) { e.0 }))
+      let fields = list.zip(props, field_names)
+      case list.find(fields, fn(entry) { entry.0.0 == disc.property_name }) {
+        Ok(#(
+          #(prop_name, Inline(StringSchema(enum_values: [], ..)) as prop),
+          field_name,
+        )) ->
+          case schema_utils.schema_ref_is_nullable(prop, ctx) {
+            True -> unchanged
+            False -> {
+              let literal =
+                "\"" <> codec_helpers.escape_for_string_literal(value) <> "\""
+              let field_value = case list.contains(required, prop_name) {
+                True -> literal
+                False -> "option.Some(" <> literal <> ")"
+              }
+              let constructor = "types." <> naming.schema_to_type_name(name)
+              case fields {
+                // The discriminator is the only field: build the record
+                // instead of a record update that changes every field.
+                [_] -> #(
+                  "_",
+                  constructor <> "(" <> field_name <> ": " <> field_value <> ")",
+                )
+                _ -> #(
+                  "inner",
+                  constructor
+                    <> "(..inner, "
+                    <> field_name
+                    <> ": "
+                    <> field_value
+                    <> ")",
+                )
+              }
+            }
+          }
+        _ -> unchanged
+      }
+    }
+    _ -> unchanged
+  }
+}
+
 /// Generate an encoder function for a schema.
 /// Each type gets two functions:
 ///   encode_x_json(value) -> json.Json  (for composition in objects)
@@ -649,7 +722,7 @@ fn generate_encoder(
       generate_encoder(sb, name, merged_schema, ctx)
     }
 
-    Inline(OneOfSchema(schemas:, ..)) -> {
+    Inline(OneOfSchema(schemas:, discriminator:, ..)) -> {
       // oneOf encoder: pattern match on tagged union variants
       let all_refs =
         list.all(schemas, fn(s) {
@@ -680,19 +753,27 @@ fn generate_encoder(
           let sb =
             list.fold(schemas, sb, fn(sb, s_ref) {
               case s_ref {
-                Reference(name:, ..) -> {
+                Reference(name:, ref:) -> {
                   let variant_type = naming.schema_to_type_name(name)
                   let variant_name = type_name <> variant_type
                   let inner_encoder =
                     "encode_" <> naming.to_snake_case(name) <> "_json"
+                  let #(binding, inner) = case discriminator {
+                    Some(disc) -> discriminated_inner(disc, name, ref, ctx)
+                    None -> #("inner", "inner")
+                  }
                   sb
                   |> se.indent(
                     2,
                     "types."
                       <> variant_name
-                      <> "(inner) -> "
+                      <> "("
+                      <> binding
+                      <> ") -> "
                       <> inner_encoder
-                      <> "(inner)",
+                      <> "("
+                      <> inner
+                      <> ")",
                   )
                 }
                 _ -> sb

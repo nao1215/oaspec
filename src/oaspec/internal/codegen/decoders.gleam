@@ -12,7 +12,6 @@ import oaspec/internal/codegen/ir_build
 import oaspec/internal/codegen/schema_dispatch
 import oaspec/internal/codegen/schema_utils
 import oaspec/internal/openapi/dedup
-import oaspec/internal/openapi/resolver
 import oaspec/internal/util/http
 import oaspec/internal/util/naming
 import oaspec/internal/util/string_extra as se
@@ -1059,7 +1058,8 @@ fn generate_oneof_decoder(
                   let variant_decoder =
                     naming.to_snake_case(ref_name) <> "_decoder()"
                   // Check discriminator mapping first, fallback to ref name
-                  let disc_value = get_discriminator_value(disc, ref, ref_name)
+                  let disc_value =
+                    schema_utils.discriminator_value(disc, ref, ref_name)
                   sb
                   |> se.indent(2, "\"" <> disc_value <> "\" -> {")
                   |> se.indent(
@@ -1104,14 +1104,14 @@ fn generate_oneof_decoder(
           // Build the "expected" list mirroring the discriminator values
           // each variant arm matches above. When the spec supplies an
           // explicit `mapping`, those keys win; otherwise each variant
-          // falls back to its ref name (matching `get_discriminator_value`
+          // falls back to its ref name (matching `schema_utils.discriminator_value`
           // semantics on lines 1099-1119).
           let valid_disc_values =
             schemas
             |> list.filter_map(fn(s_ref) {
               case s_ref {
                 Reference(ref:, name:) ->
-                  Ok(get_discriminator_value(disc, ref, name))
+                  Ok(schema_utils.discriminator_value(disc, ref, name))
                 _ -> Error(Nil)
               }
             })
@@ -1293,31 +1293,6 @@ fn generate_oneof_decoder(
         }
       }
     }
-  }
-}
-
-/// Get the discriminator value for a $ref.
-/// OpenAPI discriminator.mapping is keyed by payload values, with $ref paths
-/// as values: { "dog": "#/components/schemas/Dog" }.
-/// Given a ref_name like "Dog", find the mapping key that points to it.
-/// Falls back to ref_name if no explicit mapping exists.
-fn get_discriminator_value(
-  disc: openapi.Discriminator,
-  ref: String,
-  ref_name: String,
-) -> String {
-  // Search mapping entries: key = discriminator value, value = $ref path or schema name
-  let found =
-    dict.to_list(disc.mapping)
-    |> list.find(fn(entry) {
-      let #(_disc_value, target) = entry
-      // The target may be a full $ref path or just the schema name
-      target == ref || resolver.ref_to_name(target) == ref_name
-    })
-  case found {
-    Ok(#(disc_value, _)) -> disc_value
-    // nolint: thrown_away_error -- missing mapping entry is expected; fall back to the ref name
-    Error(_) -> ref_name
   }
 }
 

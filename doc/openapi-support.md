@@ -52,10 +52,11 @@ materialised by the generator.
   base64-decode themselves (e.g. with `yabase/facade.decode_base64`).
   Invalid base64 input is not rejected at decode time.
 - `format: binary`: the field is decoded and emitted as a plain `String`.
-  For `multipart/form-data` request bodies, the higher-level body codepath
-  (`client_request`) already handles binary bodies correctly via
-  `BytesBody`; this caveat only applies when `binary` appears as a
-  field-level format on a string schema outside that context.
+  This includes a `multipart/form-data` part: the generated client writes
+  the part from that `String` into a text body, so a file that is not
+  valid UTF-8 cannot be sent through it. A whole request body of
+  `application/octet-stream` is a `BitArray` sent as `BytesBody`; use it
+  for arbitrary bytes.
 
 A future release may auto-decode `format: byte` to `BitArray` or emit a
 `format` docstring on the generated field; tracking issue

@@ -144,7 +144,7 @@ fn request_param_field(
         Inline(IntegerSchema(..)) -> "Int"
         Inline(NumberSchema(..)) -> "Float"
         Inline(BooleanSchema(..)) -> "Bool"
-        Reference(name:, ..) -> naming.schema_to_type_name(name)
+        Reference(name:, ..) -> "types." <> naming.schema_to_type_name(name)
         Inline(ArraySchema(..))
         | Inline(ObjectSchema(..))
         | Inline(AllOfSchema(..))

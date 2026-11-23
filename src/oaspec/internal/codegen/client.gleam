@@ -94,7 +94,24 @@ fn generate_client(ctx: Context) -> String {
       generate_client_function(sb, op_id, operation, path, method, ctx)
     })
 
-  se.to_string(sb)
+  drop_unused_encode_import(se.to_string(sb), ctx)
+}
+
+/// The `types` and `encode` modules are imported together whenever an
+/// operation uses a component schema, but a client whose operations only
+/// read typed responses never calls into `encode`, and Gleam warns
+/// about the unused import. Every call the client makes into it is an
+/// `encode.encode_*` function.
+fn drop_unused_encode_import(content: String, ctx: Context) -> String {
+  let import_line = "import " <> context.config(ctx).package <> "/encode\n"
+  case string.split_once(content, import_line) {
+    Ok(#(before, after)) ->
+      case string.contains(after, "encode.encode_") {
+        True -> content
+        False -> before <> after
+      }
+    Error(Nil) -> content
+  }
 }
 
 /// Substitute server variable placeholders.
@@ -1354,12 +1371,29 @@ fn generate_multipart_body_emission(
   op_id: String,
   ctx: Context,
 ) -> se.StringBuilder {
-  // Reuse the existing multipart string builder, but redirect its final
-  // assembly to a `body` value rather than calling `request.set_body`.
-  let sb = client_request.generate_multipart_body(sb, rb, op_id, ctx)
-  // The helper leaves `body_str` and `boundary` in scope.
-  sb
-  |> se.indent(1, "let body = transport.TextBody(body_str)")
+  // The helper leaves `body_str` and `body_content_type` in scope.
+  case rb.required {
+    True ->
+      client_request.generate_multipart_body(sb, rb, op_id, ctx)
+      |> se.indent(1, "let body = transport.TextBody(body_str)")
+    // An optional body is bound as `Option(<RequestType>)` and the
+    // multipart emitter reads `body.<field>`, so unwrap it first, as the
+    // form-urlencoded emitter does. `None` sends no body and no
+    // content-type.
+    False ->
+      sb
+      |> se.indent(1, "let #(body_str, body_content_type) = case body {")
+      |> se.indent(2, "Some(body) -> {")
+      |> client_request.generate_multipart_body(rb, op_id, ctx)
+      |> se.indent(3, "#(body_str, body_content_type)")
+      |> se.indent(2, "}")
+      |> se.indent(2, "None -> #(\"\", \"\")")
+      |> se.indent(1, "}")
+      |> se.indent(1, "let body = case body {")
+      |> se.indent(2, "Some(_) -> transport.TextBody(body_str)")
+      |> se.indent(2, "None -> transport.EmptyBody")
+      |> se.indent(1, "}")
+  }
 }
 
 fn generate_form_urlencoded_body_emission(
@@ -1382,17 +1416,13 @@ fn generate_form_urlencoded_body_emission(
     // the form `content-type` for absent bodies.
     False ->
       sb
-      |> se.indent(1, "let body_str = case body {")
+      |> se.indent(1, "let #(body_str, body_content_type) = case body {")
       |> se.indent(2, "Some(body) -> {")
       |> client_request.generate_form_urlencoded_body(rb, op_id, ctx)
-      |> se.indent(3, "body_str")
+      |> se.indent(3, "#(body_str, body_content_type)")
       |> se.indent(2, "}")
-      |> se.indent(2, "None -> \"\"")
+      |> se.indent(2, "None -> #(\"\", \"\")")
       |> se.indent(1, "}")
-      |> se.indent(
-        1,
-        "let body_content_type = \"application/x-www-form-urlencoded\"",
-      )
       |> se.indent(1, "let body = case body {")
       |> se.indent(2, "Some(_) -> transport.TextBody(body_str)")
       |> se.indent(2, "None -> transport.EmptyBody")

@@ -27,7 +27,6 @@ pub type RouterRequirements {
     has_nested_form_urlencoded_body: Bool,
     needs_int: Bool,
     needs_float: Bool,
-    needs_bool: Bool,
     needs_string: Bool,
     needs_cookie_lookup: Bool,
     needs_list_import: Bool,
@@ -153,6 +152,13 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
           Value(p) ->
             decode_helpers.query_schema_needs_int(spec.parameter_schema(p), ctx)
             || decode_helpers.deep_object_param_needs_int(p, ctx)
+            || p.in_ == openapi.InPath
+            && decode_helpers.body_field_kind_needs_int(
+              decode_helpers.schema_ref_body_field_kind(
+                spec.parameter_schema(p),
+                ctx,
+              ),
+            )
           _ -> False
         }
       })
@@ -179,6 +185,13 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
               ctx,
             )
             || decode_helpers.deep_object_param_needs_float(p, ctx)
+            || p.in_ == openapi.InPath
+            && decode_helpers.body_field_kind_needs_float(
+              decode_helpers.schema_ref_body_field_kind(
+                spec.parameter_schema(p),
+                ctx,
+              ),
+            )
           _ -> False
         }
       })
@@ -193,8 +206,6 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
       }
     })
     || operations_have_response_header_of_type(operations, "Float")
-
-  let needs_bool = operations_have_response_header_of_type(operations, "Bool")
 
   let needs_string =
     has_form_urlencoded_body
@@ -212,10 +223,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
                   p,
                 ))
                 || decode_helpers.deep_object_param_needs_string(p, ctx)
-              openapi.InPath ->
-                decode_helpers.query_schema_needs_string(spec.parameter_schema(
-                  p,
-                ))
+              openapi.InPath -> decode_helpers.path_param_needs_string(p, ctx)
             }
           _ -> False
         }
@@ -252,6 +260,7 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
             case p.in_, spec.parameter_schema(p) {
               openapi.InQuery, Some(Inline(openapi.ArraySchema(..))) -> True
               openapi.InHeader, Some(Inline(openapi.ArraySchema(..))) -> True
+              openapi.InPath, _ -> decode_helpers.path_param_is_list(p, ctx)
               _, _ -> False
             }
           _ -> False
@@ -392,7 +401,6 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
     has_nested_form_urlencoded_body: has_nested_form_urlencoded_body,
     needs_int: needs_int,
     needs_float: needs_float,
-    needs_bool: needs_bool,
     needs_string: needs_string,
     needs_cookie_lookup: needs_cookie_lookup,
     needs_list_import: needs_list_import,
@@ -428,10 +436,6 @@ pub fn imports(requirements: RouterRequirements, ctx: Context) -> List(String) {
   }
   let std_imports = case requirements.needs_float {
     True -> list.append(std_imports, ["gleam/float"])
-    False -> std_imports
-  }
-  let std_imports = case requirements.needs_bool {
-    True -> list.append(std_imports, ["gleam/bool"])
     False -> std_imports
   }
   let std_imports = case requirements.needs_option {

@@ -12,6 +12,7 @@ import oaspec/internal/codegen/guards
 import oaspec/internal/codegen/operation_ir
 import oaspec/internal/codegen/router_ir
 import oaspec/internal/codegen/runtime_snippets
+import oaspec/internal/codegen/schema_dispatch
 import oaspec/internal/codegen/server_request_decode as decode_helpers
 import oaspec/internal/openapi/dedup
 import oaspec/internal/openapi/spec
@@ -586,7 +587,8 @@ fn generate_safe_request_and_dispatch(
   // Collect path params that need Result-based parsing (int, float)
   let path_params_needing_parse =
     list.filter(params, fn(p) {
-      p.in_ == openapi.InPath && decode_helpers.param_needs_result_unwrap(p)
+      p.in_ == openapi.InPath
+      && decode_helpers.param_needs_result_unwrap(p, ctx)
     })
 
   // Required query / header / cookie params, and deep-object query params
@@ -623,7 +625,7 @@ fn generate_safe_request_and_dispatch(
   let sb =
     list.fold(path_params_needing_parse, sb, fn(sb, p) {
       let var_name = naming.to_snake_case(p.name)
-      let parse_expr = decode_helpers.param_parse_expr(var_name, p)
+      let parse_expr = decode_helpers.param_parse_expr(var_name, p, ctx)
       sb
       |> se.indent(3, "case " <> parse_expr <> " {")
       |> se.indent(4, "Ok(" <> var_name <> "_parsed) -> {")
@@ -820,11 +822,11 @@ fn generate_safe_request_and_dispatch(
       let value_expr = case param.in_ {
         openapi.InPath -> {
           // Use the parsed variable if it needed Result unwrapping
-          case decode_helpers.param_needs_result_unwrap(param) {
+          case decode_helpers.param_needs_result_unwrap(param, ctx) {
             True -> naming.to_snake_case(param.name) <> "_parsed"
             False -> {
               let var_name = naming.to_snake_case(param.name)
-              decode_helpers.param_parse_expr(var_name, param)
+              decode_helpers.param_parse_expr(var_name, param, ctx)
             }
           }
         }
@@ -1477,9 +1479,9 @@ fn append_chunks(prefix: String, header_chunks: List(String)) -> String {
 ///
 /// Required: `[#("Pagination-Cursor", hdrs.pagination_cursor)]`
 /// Optional: `case hdrs.pagination_cursor { Some(v) -> [#(...)] None -> [] }`
-/// Non-string types are stringified via `int.to_string` /
-/// `float.to_string` / `bool.to_string` (the necessary imports are
-/// added by the import-analysis pass).
+/// Int and Float values are stringified via `int.to_string` /
+/// `float.to_string` (the necessary imports are added by the
+/// import-analysis pass), and a Bool as `true` or `false`.
 fn header_chunk_expr(spec: router_ir.HeaderSpec) -> String {
   let render_value = fn(value_expr: String) -> String {
     "[#(\""
@@ -1508,7 +1510,7 @@ fn stringify_header_value(field_type: String, value_expr: String) -> String {
   case field_type {
     "Int" -> "int.to_string(" <> value_expr <> ")"
     "Float" -> "float.to_string(" <> value_expr <> ")"
-    "Bool" -> "bool.to_string(" <> value_expr <> ")"
+    "Bool" -> schema_dispatch.bool_to_wire(value_expr)
     _ -> value_expr
   }
 }

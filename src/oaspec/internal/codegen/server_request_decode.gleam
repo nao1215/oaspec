@@ -16,7 +16,7 @@ import oaspec/openapi.{
 
 /// Expression that case-insensitively parses a string to Bool.
 /// Accepts "true"/"True"/"TRUE" etc. as True, everything else as False.
-/// This is compatible with Gleam's bool.to_string which produces "True"/"False".
+/// Generated clients send `true` / `false`.
 const bool_parse_expr =
   "case string.lowercase(v) { \"true\" -> True _ -> False }"
 
@@ -112,33 +112,101 @@ pub fn body_field_kind_needs_float(kind: BodyFieldKind) -> Bool {
 
 /// Generate parse expression for a path parameter (already bound as String).
 /// Returns a safe expression that does not crash on invalid input.
-/// For types that need parsing (int, float), returns the raw parse call
-/// so the router can wrap it in a case expression for error handling.
+/// For types that need parsing (int, float, a string enum, a list of
+/// numbers), returns the raw `Result` so the router can wrap it in a
+/// case expression that answers 400 on failure. A `$ref` schema is read
+/// through to its target, and an array is the `simple` style
+/// comma-separated list.
 pub fn param_parse_expr(
   var_name: String,
   param: openapi.Parameter(Resolved),
+  ctx: Context,
 ) -> String {
-  case spec.parameter_schema(param) {
-    Some(Inline(openapi.IntegerSchema(..))) -> {
-      "int.parse(" <> var_name <> ")"
-    }
-    Some(Inline(openapi.NumberSchema(..))) -> {
-      "float.parse(" <> var_name <> ")"
-    }
-    Some(Inline(openapi.BooleanSchema(..))) -> {
-      "{ let v = " <> var_name <> " " <> bool_parse_expr <> " }"
-    }
-    _ -> var_name
+  let split = "string.split(" <> var_name <> ", \",\")"
+  case path_param_enum(param, ctx) {
+    Some(#(type_name, values)) ->
+      enum_match_result_expr(var_name, type_name, values)
+    None ->
+      case schema_ref_body_field_kind(spec.parameter_schema(param), ctx) {
+        BodyFieldInt -> "int.parse(" <> var_name <> ")"
+        BodyFieldFloat -> "float.parse(" <> var_name <> ")"
+        BodyFieldBool ->
+          "{ let v = " <> var_name <> " " <> bool_parse_expr <> " }"
+        BodyFieldStringArray -> split
+        BodyFieldIntArray -> "list.try_map(" <> split <> ", int.parse)"
+        BodyFieldFloatArray -> "list.try_map(" <> split <> ", float.parse)"
+        BodyFieldBoolArray ->
+          "list.map(" <> split <> ", fn(v) { " <> bool_parse_expr <> " })"
+        BodyFieldString | BodyFieldUnknown -> var_name
+      }
   }
 }
 
 /// Return true when the parse expression returns a Result that the router
-/// must unwrap (int/float parsing). Bool and string params are always safe.
-pub fn param_needs_result_unwrap(param: openapi.Parameter(Resolved)) -> Bool {
+/// must unwrap. Bool and string params are always safe.
+pub fn param_needs_result_unwrap(
+  param: openapi.Parameter(Resolved),
+  ctx: Context,
+) -> Bool {
+  case path_param_enum(param, ctx) {
+    Some(_) -> True
+    None ->
+      case schema_ref_body_field_kind(spec.parameter_schema(param), ctx) {
+        BodyFieldInt
+        | BodyFieldFloat
+        | BodyFieldIntArray
+        | BodyFieldFloatArray -> True
+        BodyFieldBool
+        | BodyFieldBoolArray
+        | BodyFieldString
+        | BodyFieldStringArray
+        | BodyFieldUnknown -> False
+      }
+  }
+}
+
+fn path_param_enum(
+  param: openapi.Parameter(Resolved),
+  ctx: Context,
+) -> Option(#(String, List(String))) {
   case spec.parameter_schema(param) {
-    Some(Inline(openapi.IntegerSchema(..)))
-    | Some(Inline(openapi.NumberSchema(..))) -> True
-    _ -> False
+    Some(schema_ref) -> schema_ref_string_enum(schema_ref, ctx)
+    None -> None
+  }
+}
+
+/// Whether the path parameter's parse expression calls into
+/// `gleam/string` (a Bool, or a list split on commas).
+pub fn path_param_needs_string(
+  param: openapi.Parameter(Resolved),
+  ctx: Context,
+) -> Bool {
+  case schema_ref_body_field_kind(spec.parameter_schema(param), ctx) {
+    BodyFieldBool
+    | BodyFieldStringArray
+    | BodyFieldIntArray
+    | BodyFieldFloatArray
+    | BodyFieldBoolArray -> True
+    BodyFieldInt | BodyFieldFloat | BodyFieldString | BodyFieldUnknown -> False
+  }
+}
+
+/// Whether the path parameter is a list, whose parse expression calls
+/// into `gleam/list`.
+pub fn path_param_is_list(
+  param: openapi.Parameter(Resolved),
+  ctx: Context,
+) -> Bool {
+  case schema_ref_body_field_kind(spec.parameter_schema(param), ctx) {
+    BodyFieldStringArray
+    | BodyFieldIntArray
+    | BodyFieldFloatArray
+    | BodyFieldBoolArray -> True
+    BodyFieldInt
+    | BodyFieldFloat
+    | BodyFieldBool
+    | BodyFieldString
+    | BodyFieldUnknown -> False
   }
 }
 
@@ -415,6 +483,7 @@ fn parameter_is_enum_ref(p: openapi.Parameter(Resolved), ctx: Context) -> Bool {
     openapi.InQuery, Some(s)
     | openapi.InHeader, Some(s)
     | openapi.InCookie, Some(s)
+    | openapi.InPath, Some(s)
     ->
       case schema_ref_string_enum(s, ctx) {
         Some(_) -> True
