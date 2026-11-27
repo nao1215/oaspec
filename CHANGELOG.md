@@ -10,7 +10,7 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
-### Changed
+### Breaking
 
 - A generated server reads a Bool parameter or form, multipart or deepObject field only from the lowercase literals `true` and `false`, which OpenAPI uses and the generated client sends. `TRUE`, `True` and other spellings now answer 400; they were read case-insensitively before.
 - A `type: string, format: binary` part of a `multipart/form-data` request body is a `BitArray` (an array of them is a `List(BitArray)`), inline or through a `$ref`. It was a `String`, so a file that is not valid UTF-8, such as a PNG, could be neither sent nor received.
