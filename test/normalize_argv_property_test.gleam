@@ -8,8 +8,6 @@ import gleam/list
 import gleam/string
 import metamon
 import metamon/generator
-import metamon/generator/range
-import metamon/relation
 import oaspec/internal/cli
 
 // ---------- argv generators ----------
@@ -35,9 +33,12 @@ fn bool_flag_gen() -> generator.Generator(String) {
 // A value-shaped argv token: starts with a non-`-` byte (so
 // normalize_argv treats it as a value rather than a flag).
 fn value_token_gen() -> generator.Generator(String) {
-  // string_alpha guarantees the first character is alphabetic — never
+  // Alphabetic guarantees the first character is alphabetic — never
   // `-` — so the token always satisfies value_is_value internally.
-  generator.string_alpha(range.constant(1, 8))
+  generator.string(
+    of: generator.Alphabetic,
+    length: generator.range(from: 1, to: 8),
+  )
 }
 
 // A short-form `-X` flag — nothing in the value-flag list starts with
@@ -49,7 +50,10 @@ fn short_flag_gen() -> generator.Generator(String) {
 
 // A free-form positional argument — alphanumeric, no leading `-`.
 fn positional_gen() -> generator.Generator(String) {
-  generator.string_alphanumeric(range.constant(1, 8))
+  generator.string(
+    of: generator.Alphanumeric,
+    length: generator.range(from: 1, to: 8),
+  )
 }
 
 // An argv element drawn from any of the four shapes above. The
@@ -65,7 +69,7 @@ fn argv_token_gen() -> generator.Generator(String) {
 }
 
 fn argv_gen() -> generator.Generator(List(String)) {
-  generator.list_of(argv_token_gen(), range.constant(0, 8))
+  generator.list_of(argv_token_gen(), length: generator.range(from: 0, to: 8))
 }
 
 // An argv that contains no value-bearing long flags. normalize_argv
@@ -78,7 +82,7 @@ fn argv_without_value_flags_gen() -> generator.Generator(List(String)) {
       positional_gen(),
       value_token_gen(),
     ])
-  generator.list_of(token, range.constant(0, 8))
+  generator.list_of(token, length: generator.range(from: 0, to: 8))
 }
 
 // ---------- properties ----------
@@ -87,19 +91,19 @@ fn argv_without_value_flags_gen() -> generator.Generator(List(String)) {
 //    A second pass cannot collapse new pairs because `--name=value`
 //    has the `=` baked in and is not in the value-flag list anymore.
 pub fn normalize_argv_idempotent_test() {
-  let mr =
+  let morph =
     metamon.idempotency_of(
       name: "normalize_argv_idempotent",
       of: cli.normalize_argv,
     )
-  metamon.forall_morph(argv_gen(), mr, cli.normalize_argv)
+  metamon.forall_morph(argv_gen(), [morph], cli.normalize_argv)
 }
 
 // 2. Length non-increasing: each pair-collapse turns two argv elements
 //    into one, and no other shape grows the list.
 pub fn normalize_argv_length_non_increasing_test() {
   metamon.forall(argv_gen(), fn(args) {
-    list.length(cli.normalize_argv(args)) <= list.length(args)
+    assert list.length(cli.normalize_argv(args)) <= list.length(args)
   })
 }
 
@@ -107,7 +111,7 @@ pub fn normalize_argv_length_non_increasing_test() {
 //    return the input bit-for-bit when there is nothing to collapse.
 pub fn normalize_argv_passthrough_when_no_value_flags_test() {
   metamon.forall(argv_without_value_flags_gen(), fn(args) {
-    cli.normalize_argv(args) == args
+    assert cli.normalize_argv(args) == args
   })
 }
 
@@ -118,8 +122,8 @@ pub fn normalize_argv_value_flag_equivalence_test() {
     generator.tuple2(value_flag_gen(), value_token_gen()),
     fn(pair) {
       let #(flag, value) = pair
-      cli.normalize_argv([flag, value])
-      == cli.normalize_argv([flag <> "=" <> value])
+      assert cli.normalize_argv([flag, value])
+        == cli.normalize_argv([flag <> "=" <> value])
     },
   )
 }
@@ -131,7 +135,7 @@ pub fn normalize_argv_value_flag_equivalence_test() {
 pub fn normalize_argv_output_has_no_unjoined_value_flag_pairs_test() {
   metamon.forall(argv_gen(), fn(args) {
     let normalised = cli.normalize_argv(args)
-    !contains_unjoined_value_flag_pair(normalised)
+    assert !contains_unjoined_value_flag_pair(normalised)
   })
 }
 
@@ -170,17 +174,14 @@ fn is_value_token(arg: String) -> Bool {
 pub fn normalize_argv_appending_bool_flag_commutes_test() {
   metamon.forall(generator.tuple2(argv_gen(), bool_flag_gen()), fn(pair) {
     let #(args, bool_flag) = pair
-    cli.normalize_argv(list.append(args, [bool_flag]))
-    == list.append(cli.normalize_argv(args), [bool_flag])
+    assert cli.normalize_argv(list.append(args, [bool_flag]))
+      == list.append(cli.normalize_argv(args), [bool_flag])
   })
 }
 
-// Sanity: the all_equal relation is satisfied trivially when both
-// branches return the same shape — used here so `relation` has a
-// referenced symbol to keep the import alive even if the file is
-// pruned to a single property in the future.
+// Sanity: the equality relation the morphs above rely on holds for
+// equal values.
 pub fn normalize_argv_pure_smoke_test() {
-  let all_equal = relation.all_equal()
-  let assert True = all_equal.holds([1, 1, 1])
-  Nil
+  let equal = metamon.equal()
+  assert equal.holds(1, 1)
 }

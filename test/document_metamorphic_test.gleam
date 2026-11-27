@@ -26,7 +26,6 @@ import gleam/result
 import gleam/string
 import metamon
 import metamon/generator
-import metamon/generator/range
 import oaspec/config
 import oaspec/internal/generate
 import oaspec/internal/openapi/parser
@@ -135,12 +134,12 @@ fn to_json(node: yay.Node) -> json.Json {
   }
 }
 
-/// True when the rewritten document generates the same files. On a
+/// Assert that the rewritten document generates the same files. On a
 /// difference the assertion message names the fixture and the files.
-fn same_output(
+fn assert_same_output(
   c: Case,
   rewritten: Result(List(#(String, String)), Nil),
-) -> Bool {
+) -> Nil {
   let assert Ok(files) = rewritten
     as { c.name <> ": the rewritten document is rejected" }
   let before = dict.from_list(c.files)
@@ -154,29 +153,30 @@ fn same_output(
       <> ": generated files differ after the rewrite: "
       <> string.join(changed, ", ")
     }
-  list.length(files) == list.length(c.files)
+  assert list.length(files) == list.length(c.files)
+    as { c.name <> ": the rewrite changes the number of generated files" }
 }
 
 pub fn json_form_generates_the_same_code_test() -> Nil {
   list.each(cases(), fn(c) {
-    assert same_output(c, from_json(json.to_string(to_json(c.root))))
+    assert_same_output(c, from_json(json.to_string(to_json(c.root))))
   })
 }
 
 pub fn top_level_key_order_does_not_change_the_code_test() -> Nil {
   let all = cases()
   metamon.forall_with(
-    metamon.default_config() |> metamon.with_runs_or_panic(5),
-    generator.int(range.constant(0, 1000)),
+    metamon.Config(..metamon.default_config(), runs: 5),
+    generator.int(generator.range(from: 0, to: 1000)),
     fn(seed) {
-      list.all(all, fn(c) {
+      list.each(all, fn(c) {
         let assert yay.NodeMap(pairs) = c.root
         let shuffled =
           pairs
           |> list.index_map(fn(pair, i) { #({ i * 7919 + seed } % 1009, pair) })
           |> list.sort(fn(a, b) { int.compare(a.0, b.0) })
           |> list.map(fn(pair) { pair.1 })
-        same_output(
+        assert_same_output(
           c,
           from_json(json.to_string(to_json(yay.NodeMap(shuffled)))),
         )
@@ -207,7 +207,7 @@ pub fn extension_keys_do_not_change_the_code_test() -> Nil {
         }
       })
       |> list.append([#(yay.NodeStr("x-oaspec-test"), extension)])
-    assert same_output(
+    assert_same_output(
       c,
       from_json(json.to_string(to_json(yay.NodeMap(with_extensions)))),
     )
