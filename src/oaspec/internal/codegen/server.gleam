@@ -423,6 +423,10 @@ String.",
     True -> se.raw(sb, runtime_snippets.multipart_helpers)
     False -> sb
   }
+  let sb = case requirements.has_multipart_text_part {
+    True -> se.raw(sb, runtime_snippets.multipart_text_fields)
+    False -> sb
+  }
 
   let sb = case requirements.has_nested_form_urlencoded_body {
     True -> se.raw(sb, runtime_snippets.form_object_present)
@@ -471,26 +475,31 @@ String.",
         || option.is_some(operation.request_body)
 
       // When the route signature is `body: BitArray`
-      // (because some other operation in this spec declares
-      // `application/octet-stream`), every non-binary arm needs to
-      // shadow `body` with the String conversion at the top so the
-      // existing per-content-type decoding code can keep treating
-      // `body` as a String. Binary arms use `body` directly.
+      // (because some operation in this spec reads raw bytes), every
+      // text arm needs to shadow `body` with the String conversion at
+      // the top so the existing per-content-type decoding code can keep
+      // treating `body` as a String. Octet-stream arms use `body`
+      // directly. A multipart arm always parses bytes, so in a
+      // `body: String` route it shadows `body` with its UTF-8 bytes.
       let arm_sb =
         sb
         |> se.indent(2, "\"" <> method_str <> "\", " <> path_pattern <> " -> {")
       let arm_sb = case
         requirements.has_binary_request_body,
         option.is_some(operation.request_body),
-        decode_helpers.operation_uses_octet_stream_body(operation)
+        decode_helpers.operation_uses_octet_stream_body(operation),
+        decode_helpers.operation_uses_multipart_body(operation)
       {
-        True, True, False ->
+        True, True, False, False ->
           arm_sb
           |> se.indent(
             3,
             "let body = bit_array.to_string(body) |> result.unwrap(\"\")",
           )
-        _, _, _ -> arm_sb
+        False, True, _, True ->
+          arm_sb
+          |> se.indent(3, "let body = bit_array.from_string(body)")
+        _, _, _, _ -> arm_sb
       }
       arm_sb
       |> generate_route_body(op_id, fn_name, operation, has_params, ctx)
@@ -804,14 +813,36 @@ fn generate_safe_request_and_dispatch(
       case decode_helpers.request_body_uses_form_urlencoded(rb) {
         True -> sb |> se.indent(3, "let form_body = parse_form_body(body)")
         False ->
-          case decode_helpers.request_body_uses_multipart(rb) {
-            True ->
+          case
+            decode_helpers.request_body_uses_multipart(rb),
+            decode_helpers.request_body_has_bytes_part(rb, ctx),
+            decode_helpers.request_body_has_text_part(rb, ctx)
+          {
+            // Binary parts are read from `multipart_parts`, text fields
+            // from its UTF-8 view `multipart_body`.
+            True, True, True ->
               sb
               |> se.indent(
                 3,
-                "let multipart_body = parse_multipart_body(body, headers)",
+                "let multipart_parts = parse_multipart_body(body, headers)",
               )
-            False -> sb
+              |> se.indent(
+                3,
+                "let multipart_body = multipart_text_fields(multipart_parts)",
+              )
+            True, True, False ->
+              sb
+              |> se.indent(
+                3,
+                "let multipart_parts = parse_multipart_body(body, headers)",
+              )
+            True, False, _ ->
+              sb
+              |> se.indent(
+                3,
+                "let multipart_body = multipart_text_fields(parse_multipart_body(body, headers))",
+              )
+            False, _, _ -> sb
           }
       }
     _ -> sb

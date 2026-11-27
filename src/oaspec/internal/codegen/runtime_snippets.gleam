@@ -88,7 +88,9 @@ fn parse_form_body(body: String) -> Dict(String, List(String)) {
 
 "
 
-/// Emitted when any `multipart/form-data` request body exists.
+/// Emitted when any `multipart/form-data` request body exists. The parser
+/// works on bytes, so a `format: binary` part reaches the handler unchanged;
+/// it uses only `gleam_stdlib`, so it runs on Erlang and JavaScript.
 pub const multipart_helpers: String =
   "fn multipart_boundary(headers: Dict(String, String)) -> Result(String, Nil) {
   case dict.get(headers, \"content-type\") {
@@ -120,35 +122,115 @@ fn multipart_name(raw_headers: String) -> Result(String, Nil) {
   })
 }
 
-fn parse_multipart_body(body: String, headers: Dict(String, String)) -> Dict(String, List(String)) {
+fn parse_multipart_body(body: BitArray, headers: Dict(String, String)) -> Dict(String, List(BitArray)) {
   case multipart_boundary(headers) {
-    Ok(boundary) -> {
-      let delimiter = \"--\" <> boundary
-      let parts = string.split(body, delimiter)
-      list.fold(parts, dict.new(), fn(acc, part) {
-        let normalized_part = part |> string.remove_prefix(\"\\r\\n\") |> string.remove_suffix(\"\\r\\n\")
-        case normalized_part == \"\" || normalized_part == \"--\" {
+    Ok(boundary) ->
+      multipart_split(body, bit_array.from_string(\"--\" <> boundary))
+      |> list.fold(dict.new(), fn(acc, part) {
+        let part = multipart_trim_crlf(part)
+        case part == <<>> || part == <<\"--\":utf8>> {
           True -> acc
           False ->
-            case string.split_once(normalized_part, on: \"\\r\\n\\r\\n\") {
-              Ok(#(raw_part_headers, raw_value)) ->
-                case multipart_name(raw_part_headers) {
-                  Ok(name) -> {
-                    let value = raw_value
-                    case dict.get(acc, name) {
-                      Ok(existing) -> dict.insert(acc, name, list.append(existing, [value]))
-                      Error(_) -> dict.insert(acc, name, [value])
+            case multipart_split_once(part, <<13, 10, 13, 10>>) {
+              Ok(#(raw_part_headers, value)) ->
+                case bit_array.to_string(raw_part_headers) {
+                  Ok(part_headers) ->
+                    case multipart_name(part_headers) {
+                      Ok(name) ->
+                        case dict.get(acc, name) {
+                          Ok(existing) -> dict.insert(acc, name, list.append(existing, [value]))
+                          Error(_) -> dict.insert(acc, name, [value])
+                        }
+                      Error(_) -> acc
                     }
-                  }
                   Error(_) -> acc
                 }
               Error(_) -> acc
             }
         }
       })
-    }
     Error(_) -> dict.new()
   }
+}
+
+// The bytes between each `delimiter` of `bytes`, including the preamble
+// before the first one and whatever follows the last one.
+fn multipart_split(bytes: BitArray, delimiter: BitArray) -> List(BitArray) {
+  multipart_split_loop(bytes, delimiter, [])
+}
+
+fn multipart_split_loop(bytes: BitArray, delimiter: BitArray, acc: List(BitArray)) -> List(BitArray) {
+  case multipart_split_once(bytes, delimiter) {
+    Ok(#(part, rest)) -> multipart_split_loop(rest, delimiter, [part, ..acc])
+    Error(_) -> list.reverse([bytes, ..acc])
+  }
+}
+
+// The bytes before and after the first `separator` in `bytes`.
+fn multipart_split_once(bytes: BitArray, separator: BitArray) -> Result(#(BitArray, BitArray), Nil) {
+  case separator {
+    <<first, _:bytes>> ->
+      case multipart_find(bytes, separator, first, 0) {
+        Ok(at) -> {
+          let after = at + bit_array.byte_size(separator)
+          case bit_array.slice(bytes, 0, at), bit_array.slice(bytes, after, bit_array.byte_size(bytes) - after) {
+            Ok(before), Ok(rest) -> Ok(#(before, rest))
+            _, _ -> Error(Nil)
+          }
+        }
+        Error(_) -> Error(Nil)
+      }
+    _ -> Error(Nil)
+  }
+}
+
+// The offset of the first `needle` in `rest`, which starts `offset` bytes
+// into the input. Only a byte equal to the needle's `first` byte is
+// compared in full.
+fn multipart_find(rest: BitArray, needle: BitArray, first: Int, offset: Int) -> Result(Int, Nil) {
+  case rest {
+    <<byte, tail:bytes>> if byte == first ->
+      case bit_array.slice(rest, 0, bit_array.byte_size(needle)) {
+        Ok(window) if window == needle -> Ok(offset)
+        _ -> multipart_find(tail, needle, first, offset + 1)
+      }
+    <<_, tail:bytes>> -> multipart_find(tail, needle, first, offset + 1)
+    _ -> Error(Nil)
+  }
+}
+
+// The part without the CRLF that ends the delimiter line before it and the
+// CRLF that belongs to the delimiter after it. The bytes in between are
+// the part, unchanged.
+fn multipart_trim_crlf(part: BitArray) -> BitArray {
+  let part = case part {
+    <<13, 10, rest:bytes>> -> rest
+    _ -> part
+  }
+  let size = bit_array.byte_size(part)
+  case bit_array.slice(part, size - 2, 2) {
+    Ok(<<13, 10>>) ->
+      case bit_array.slice(part, 0, size - 2) {
+        Ok(value) -> value
+        Error(_) -> part
+      }
+    _ -> part
+  }
+}
+
+"
+
+/// Emitted when a `multipart/form-data` request body has a text part. A
+/// part whose bytes are not UTF-8 is left out, so a required text field
+/// with such a part answers 400.
+pub const multipart_text_fields: String =
+  "fn multipart_text_fields(parts: Dict(String, List(BitArray))) -> Dict(String, List(String)) {
+  dict.fold(parts, dict.new(), fn(acc, name, values) {
+    case list.try_map(values, bit_array.to_string) {
+      Ok(texts) -> dict.insert(acc, name, texts)
+      Error(_) -> acc
+    }
+  })
 }
 
 "

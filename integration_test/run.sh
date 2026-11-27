@@ -646,6 +646,7 @@ cat > "$MULTI_DIR/test/multipart_test_test.gleam" << 'GLEAM_EOF'
 
 import api/handlers
 import api/router
+import gleam/bit_array
 import gleam/dict
 import gleeunit
 import gleeunit/should
@@ -675,7 +676,8 @@ fn post(parts: List(#(String, String))) {
     ["upload"],
     dict.new(),
     headers,
-    body <> "--XBOUNDARY--\r\n",
+    // The body has a binary part, so the router reads it as bytes.
+    bit_array.from_string(body <> "--XBOUNDARY--\r\n"),
   )
 }
 
@@ -2233,6 +2235,331 @@ done
 
 cd "$PROJECT_ROOT"
 rm -rf "$SHAPES_DIR"
+
+# -------------------------------------------------------
+# Step 14a3: binary multipart parts on both targets
+# -------------------------------------------------------
+# A `format: binary` part is any sequence of bytes. The generated client
+# must write it into the body unchanged and the generated server must hand
+# it to the handler unchanged, including bytes that are not UTF-8, next to
+# text parts in the same body.
+info "Testing binary multipart parts on Erlang and JavaScript..."
+BINARY_PARTS_DIR="$SCRIPT_DIR/multipart_binary_parts_test"
+rm -rf "$BINARY_PARTS_DIR"
+mkdir -p "$BINARY_PARTS_DIR/src" "$BINARY_PARTS_DIR/test"
+
+cat > "$BINARY_PARTS_DIR/oaspec.yaml" << 'YAML_EOF'
+input: test/fixtures/multipart_binary_parts.yaml
+mode: both
+output:
+  server: ./integration_test/multipart_binary_parts_test/src/api
+  client: ./integration_test/multipart_binary_parts_test/src/api_client
+package: api
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate --config="$BINARY_PARTS_DIR/oaspec.yaml"
+
+# The handler echoes what it received (base64 in JSON), so the test can
+# compare bytes.
+cat > "$BINARY_PARTS_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
+import api/request_types
+import api/response_types
+import api/types
+import gleam/bit_array
+import gleam/int
+import gleam/list
+import gleam/option
+import gleam/string
+
+pub type State {
+  State
+}
+
+pub fn upload_files(
+  state: State,
+  req: request_types.UploadFilesRequest,
+) -> response_types.UploadFilesResponse {
+  let _ = state
+  let body = req.body
+  let separator = <<"|":utf8>>
+  let received =
+    bit_array.concat(
+      list.intersperse(
+        [
+          bit_array.from_string(body.name),
+          body.file,
+          body.avatar,
+          option.unwrap(body.thumbnail, <<"no thumbnail":utf8>>),
+          option.unwrap(body.cover, <<"no cover":utf8>>),
+          bit_array.concat(list.intersperse(body.attachments, <<",":utf8>>)),
+          bit_array.concat(
+            list.intersperse(option.unwrap(body.extras, []), <<",":utf8>>),
+          ),
+          bit_array.from_string(string.join(option.unwrap(body.tags, []), ",")),
+          bit_array.from_string(int.to_string(option.unwrap(body.count, -1))),
+        ],
+        separator,
+      ),
+    )
+  response_types.UploadFilesResponseOk(
+    types.UploadEcho(received: bit_array.base64_encode(received, True)),
+  )
+}
+GLEAM_EOF
+
+cat > "$BINARY_PARTS_DIR/gleam.toml" << 'TOML_EOF'
+name = "multipart_binary_parts_test"
+version = "0.1.0"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
+oaspec = { path = "../.." }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$BINARY_PARTS_DIR/src/multipart_binary_parts_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cat > "$BINARY_PARTS_DIR/test/multipart_binary_parts_test_test.gleam" << 'GLEAM_EOF'
+import api/decode
+import api/handlers
+import api/router
+import api/types
+import api_client/client
+import gleam/bit_array
+import gleam/dict
+import gleam/option.{None, Some}
+import gleeunit
+import gleeunit/should
+import oaspec/transport
+
+pub fn main() {
+  gleeunit.main()
+}
+
+// Not UTF-8: 0xff never appears in UTF-8, and the CRLF and dashes look
+// like multipart framing.
+const image = <<0xff, 0xd8, 0x00, 0x89>>
+
+const framing = <<0x00, 0xfe, 0x0d, 0x0a, 0x2d, 0x2d, 0x0d, 0x0a>>
+
+const boundary = "XBOUNDARY"
+
+fn upload() -> types.UploadFilesRequest {
+  types.UploadFilesRequest(
+    active: Some(True),
+    attachments: [image, framing],
+    avatar: framing,
+    count: Some(3),
+    cover: None,
+    extras: Some([<<0x80>>]),
+    file: image,
+    kind: Some(types.UploadKindScan),
+    name: "photo set",
+    ratio: None,
+    tags: Some(["a", "b"]),
+    thumbnail: Some(<<>>),
+  )
+}
+
+fn contains(haystack: BitArray, needle: BitArray) -> Bool {
+  contains_at(haystack, needle, 0)
+}
+
+fn contains_at(haystack: BitArray, needle: BitArray, at: Int) -> Bool {
+  let size = bit_array.byte_size(needle)
+  case bit_array.slice(haystack, at, size) {
+    Ok(window) if window == needle -> True
+    Ok(_) -> contains_at(haystack, needle, at + 1)
+    Error(_) -> False
+  }
+}
+
+fn text_part(name: String, value: String) -> BitArray {
+  bit_array.from_string(
+    "--"
+    <> boundary
+    <> "\r\nContent-Disposition: form-data; name=\""
+    <> name
+    <> "\"\r\n\r\n"
+    <> value
+    <> "\r\n",
+  )
+}
+
+fn bytes_part(name: String, value: BitArray) -> BitArray {
+  bit_array.concat([
+    bit_array.from_string(
+      "--"
+      <> boundary
+      <> "\r\nContent-Disposition: form-data; name=\""
+      <> name
+      <> "\"; filename=\"upload.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n",
+    ),
+    value,
+    <<"\r\n":utf8>>,
+  ])
+}
+
+fn post(parts: List(BitArray)) -> router.ServerResponse {
+  let body =
+    bit_array.concat([
+      bit_array.concat(parts),
+      bit_array.from_string("--" <> boundary <> "--\r\n"),
+    ])
+  router.route(
+    handlers.State,
+    "POST",
+    ["files"],
+    dict.new(),
+    dict.from_list([
+      #("content-type", "multipart/form-data; boundary=" <> boundary),
+    ]),
+    body,
+  )
+}
+
+fn echo_of(response: router.ServerResponse) -> BitArray {
+  response.status |> should.equal(200)
+  let assert router.TextBody(json) = response.body
+  let assert Ok(types.UploadEcho(received:)) = decode.decode_upload_echo(json)
+  let assert Ok(bytes) = bit_array.base64_decode(received)
+  bytes
+}
+
+pub fn client_writes_binary_parts_unchanged_test() {
+  let assert Ok(request) = client.build_upload_files_request(body: upload())
+  let assert transport.BytesBody(body) = request.body
+  contains(
+    body,
+    bit_array.concat([
+      <<"name=\"file\"; filename=\"file\"\r\nContent-Type: application/octet-stream\r\n\r\n":utf8>>,
+      image,
+      <<"\r\n":utf8>>,
+    ]),
+  )
+  |> should.be_true()
+  contains(
+    body,
+    bit_array.concat([
+      <<"name=\"attachments\"; filename=\"attachments\"\r\nContent-Type: application/octet-stream\r\n\r\n":utf8>>,
+      framing,
+      <<"\r\n":utf8>>,
+    ]),
+  )
+  |> should.be_true()
+  contains(body, <<"name=\"name\"\r\n\r\nphoto set\r\n":utf8>>)
+  |> should.be_true()
+  contains(body, <<"name=\"kind\"\r\n\r\nscan\r\n":utf8>>)
+  |> should.be_true()
+}
+
+pub fn server_hands_binary_parts_to_the_handler_test() {
+  post([
+    text_part("name", "photo set"),
+    bytes_part("file", image),
+    bytes_part("avatar", framing),
+    bytes_part("attachments", image),
+    bytes_part("attachments", framing),
+    text_part("tags", "a"),
+    text_part("tags", "b"),
+    text_part("count", "3"),
+  ])
+  |> echo_of
+  |> should.equal(
+    bit_array.concat([
+      <<"photo set|":utf8>>,
+      image,
+      <<"|":utf8>>,
+      framing,
+      <<"|no thumbnail|no cover|":utf8>>,
+      image,
+      <<",":utf8>>,
+      framing,
+      <<"||a,b|3":utf8>>,
+    ]),
+  )
+}
+
+pub fn client_body_reaches_the_server_handler_unchanged_test() {
+  let assert Ok(request) = client.build_upload_files_request(body: upload())
+  let assert transport.BytesBody(body) = request.body
+  router.route(
+    handlers.State,
+    "POST",
+    ["files"],
+    dict.new(),
+    dict.from_list(request.headers),
+    body,
+  )
+  |> echo_of
+  |> should.equal(
+    bit_array.concat([
+      <<"photo set|":utf8>>,
+      image,
+      <<"|":utf8>>,
+      framing,
+      <<"||no cover|":utf8>>,
+      image,
+      <<",":utf8>>,
+      framing,
+      <<"|":utf8>>,
+      <<0x80>>,
+      <<"|a,b|3":utf8>>,
+    ]),
+  )
+}
+
+pub fn missing_binary_part_returns_400_test() {
+  post([
+    text_part("name", "photo set"),
+    bytes_part("avatar", framing),
+    bytes_part("attachments", image),
+  ]).status
+  |> should.equal(400)
+}
+
+pub fn text_part_that_is_not_utf8_returns_400_test() {
+  post([
+    bytes_part("name", image),
+    bytes_part("file", image),
+    bytes_part("avatar", framing),
+    bytes_part("attachments", image),
+  ]).status
+  |> should.equal(400)
+}
+GLEAM_EOF
+
+cd "$BINARY_PARTS_DIR"
+gleam deps download
+
+verify_generated_format src/api
+verify_generated_format src/api_client
+for target in erlang javascript; do
+  if gleam build --target "$target" --warnings-as-errors 2>&1; then
+    info "PASS: Generated binary multipart code compiles on $target (warnings-as-errors)."
+  else
+    fail "Generated binary multipart code failed to compile on $target."
+  fi
+done
+
+if gleam test --target erlang; then
+  info "PASS: Binary multipart parts reach the server handler unchanged."
+else
+  fail "Binary multipart integration tests failed."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$BINARY_PARTS_DIR"
 
 # -------------------------------------------------------
 # Step 14b: `handlers: per_operation` output compiles

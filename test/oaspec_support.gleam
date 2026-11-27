@@ -5410,6 +5410,140 @@ components:
   |> should.be_true()
 }
 
+pub fn multipart_binary_parts_are_sent_as_bytes_case() {
+  // A `format: binary` part is written into the body unchanged, so the
+  // body is a BitArray sent as `BytesBody`, with text parts as UTF-8.
+  let ctx = make_ctx("test/fixtures/multipart_binary_parts.yaml")
+  let assert [client_file] = client_gen.generate(ctx)
+  let content = client_file.content
+  let binary_header = fn(name) {
+    "bit_array.from_string(\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
+    <> name
+    <> "\\\"; filename=\\\""
+    <> name
+    <> "\\\"\\r\\nContent-Type: application/octet-stream\\r\\n\\r\\n\")"
+  }
+
+  string.contains(content, "import gleam/bit_array")
+  |> should.be_true()
+  string.contains(content, "let body = transport.BytesBody(body_bytes)")
+  |> should.be_true()
+  string.contains(content, "transport.TextBody(body_str)")
+  |> should.be_false()
+  string.contains(
+    content,
+    "let body_bytes = bit_array.concat(list.reverse([bit_array.from_string(\"--\" <> boundary <> \"--\\r\\n\"), ..parts]))",
+  )
+  |> should.be_true()
+  // Binary parts, required and optional, inline and through a `$ref`.
+  string.contains(
+    content,
+    "let parts = [bit_array.concat(["
+      <> binary_header("file")
+      <> ", body.file, bit_array.from_string(\"\\r\\n\")]), ..parts]",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "let parts = [bit_array.concat(["
+      <> binary_header("avatar")
+      <> ", body.avatar, bit_array.from_string(\"\\r\\n\")]), ..parts]",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "Some(v) -> [bit_array.concat(["
+      <> binary_header("thumbnail")
+      <> ", v, bit_array.from_string(\"\\r\\n\")]), ..parts]",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "Some(v) -> [bit_array.concat(["
+      <> binary_header("cover")
+      <> ", v, bit_array.from_string(\"\\r\\n\")]), ..parts]",
+  )
+  |> should.be_true()
+  // Arrays of binary parts, required and optional.
+  string.contains(
+    content,
+    "let parts = list.fold(body.attachments, parts, fn(acc, item) { [bit_array.concat(["
+      <> binary_header("attachments")
+      <> ", item, bit_array.from_string(\"\\r\\n\")]), ..acc] })",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "Some(v) -> list.fold(v, parts, fn(acc, item) { [bit_array.concat(["
+      <> binary_header("extras")
+      <> ", item, bit_array.from_string(\"\\r\\n\")]), ..acc] })",
+  )
+  |> should.be_true()
+  // Text parts are the same text, as UTF-8 bytes.
+  string.contains(
+    content,
+    "let parts = [bit_array.from_string(\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\"name\\\"\\r\\n\\r\\n\" <> body.name <> \"\\r\\n\"), ..parts]",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "Some(v) -> [bit_array.from_string(\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\"count\\\"\\r\\n\\r\\n\" <> int.to_string(v) <> \"\\r\\n\"), ..parts]",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "fn(acc, item) { [bit_array.from_string(\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\"tags\\\"\\r\\n\\r\\n\" <> item <> \"\\r\\n\"), ..acc] }",
+  )
+  |> should.be_true()
+  // Optional scalar parts unwrap with `Some`, and a number part writes
+  // through `float.to_string`, so both are imported.
+  string.contains(content, "import gleam/option.{None, Some}")
+  |> should.be_true()
+  string.contains(content, "import gleam/float")
+  |> should.be_true()
+}
+
+pub fn multipart_binary_parts_are_bit_arrays_in_types_case() {
+  // The record of a multipart body carries binary parts as BitArray. Its
+  // JSON codecs write such a field as a base64 string.
+  let ctx = make_ctx("test/fixtures/multipart_binary_parts.yaml")
+  let assert [types_file, ..] = types.generate(ctx)
+  let types_content = types_file.content
+  string.contains(
+    types_content,
+    "UploadFilesRequest(active: Option(Bool), attachments: List(BitArray), avatar: BitArray, count: Option(Int), cover: Option(BitArray), extras: Option(List(BitArray)), file: BitArray, kind: Option(UploadKind), name: String, ratio: Option(Float), tags: Option(List(String)), thumbnail: Option(BitArray))",
+  )
+  |> should.be_true()
+  // A component that is only a binary string keeps its alias.
+  string.contains(types_content, "pub type UploadFile = String")
+  |> should.be_true()
+
+  let assert [encode_file] = encoders.generate(ctx)
+  let encode_content = encode_file.content
+  string.contains(encode_content, "import gleam/bit_array")
+  |> should.be_true()
+  string.contains(
+    encode_content,
+    "#(\"file\", json.string(bit_array.base64_encode(value.file, True)))",
+  )
+  |> should.be_true()
+  string.contains(
+    encode_content,
+    "#(\"attachments\", json.array(value.attachments, fn(bytes) { json.string(bit_array.base64_encode(bytes, True)) }))",
+  )
+  |> should.be_true()
+
+  let assert [decode_file] = decoders.generate(ctx)
+  let decode_content = decode_file.content
+  string.contains(decode_content, "import gleam/bit_array")
+  |> should.be_true()
+  string.contains(
+    decode_content,
+    "use file <- decode.field(\"file\", decode.then(decode.string, fn(text) { case bit_array.base64_decode(text) { Ok(bytes) -> decode.success(bytes) Error(Nil) -> decode.failure(<<>>, \"base64\") } }))",
+  )
+  |> should.be_true()
+}
+
 pub fn path_ref_array_parameters_are_stringified_case() {
   let yaml =
     "
@@ -12116,12 +12250,12 @@ pub fn server_multipart_body_is_parsed_case() {
 
   string.contains(
     content,
-    "fn parse_multipart_body(body: String, headers: Dict(String, String)) -> Dict(String, List(String)) {",
+    "fn parse_multipart_body(body: BitArray, headers: Dict(String, String)) -> Dict(String, List(BitArray)) {",
   )
   |> should.be_true()
   string.contains(
     content,
-    "let multipart_body = parse_multipart_body(body, headers)",
+    "let multipart_body = multipart_text_fields(multipart_parts)",
   )
   |> should.be_true()
   string.contains(content, "Ok(types.UploadMultipartRequest(")
@@ -12145,14 +12279,11 @@ pub fn server_multipart_body_is_parsed_case() {
   |> should.be_true()
   string.contains(
     content,
-    "file: case dict.get(multipart_body, \"file\") { Ok([v, ..]) -> Some(v) _ -> None }",
+    "file: case dict.get(multipart_parts, \"file\") { Ok([v, ..]) -> Some(v) _ -> None }",
   )
   |> should.be_true()
-  string.contains(
-    content,
-    "let normalized_part = part |> string.remove_prefix(\"\\r\\n\") |> string.remove_suffix(\"\\r\\n\")",
-  )
-  |> should.be_true()
+  // A part body keeps its bytes: only the CRLF before the next delimiter
+  // is removed, and nothing is trimmed.
   string.contains(content, "let value = string.trim(raw_value)")
   |> should.be_false()
 }
@@ -12240,7 +12371,7 @@ pub fn server_multipart_ref_fields_are_parsed_case() {
   |> should.be_true()
   string.contains(
     content,
-    "file: case dict.get(multipart_body, \"file\") { Ok([v, ..]) -> Some(v) _ -> None }",
+    "file: case dict.get(multipart_parts, \"file\") { Ok([v, ..]) -> Some(v) _ -> None }",
   )
   |> should.be_true()
 }
@@ -12779,6 +12910,104 @@ paths:
   |> should.be_true()
   // scores (int array) should parse each value
   string.contains(content, "int.parse")
+  |> should.be_true()
+}
+
+pub fn server_multipart_binary_parts_are_bytes_case() {
+  // A `format: binary` part is any sequence of bytes, so the router reads
+  // the body as a BitArray and hands the handler the part body unchanged.
+  let ctx = make_ctx("test/fixtures/multipart_binary_parts.yaml")
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(content, "body: BitArray) -> ServerResponse {")
+  |> should.be_true()
+  string.contains(
+    content,
+    "fn parse_multipart_body(body: BitArray, headers: Dict(String, String)) -> Dict(String, List(BitArray)) {",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "let multipart_parts = parse_multipart_body(body, headers)",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "let multipart_body = multipart_text_fields(multipart_parts)",
+  )
+  |> should.be_true()
+  // The multipart arm reads the raw bytes, not a String copy of them.
+  string.contains(content, "let body = bit_array.to_string(body)")
+  |> should.be_false()
+  // Binary parts, required and optional, inline and through a `$ref`.
+  string.contains(
+    content,
+    "case dict.get(multipart_parts, \"file\") { Ok([body_file, ..]) -> ",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "case dict.get(multipart_parts, \"avatar\") { Ok([body_avatar, ..]) -> ",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "thumbnail: case dict.get(multipart_parts, \"thumbnail\") { Ok([v, ..]) -> Some(v) _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "cover: case dict.get(multipart_parts, \"cover\") { Ok([v, ..]) -> Some(v) _ -> None }",
+  )
+  |> should.be_true()
+  // Arrays of binary parts, required and optional.
+  string.contains(
+    content,
+    "case dict.get(multipart_parts, \"attachments\") { Ok(vs) -> { let body_attachments = vs ",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "extras: case dict.get(multipart_parts, \"extras\") { Ok(vs) -> Some(vs) _ -> None }",
+  )
+  |> should.be_true()
+  // Text parts still come from the UTF-8 view of the parts.
+  string.contains(
+    content,
+    "case dict.get(multipart_body, \"name\") { Ok([body_name, ..]) -> ",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "count: case dict.get(multipart_body, \"count\") { Ok([v, ..]) -> { case int.parse(v) { Ok(n) -> Some(n) _ -> None } } _ -> None }",
+  )
+  |> should.be_true()
+  string.contains(content, "dict.get(multipart_body, \"tags\")")
+  |> should.be_true()
+}
+
+pub fn server_multipart_text_body_reads_bytes_case() {
+  // A multipart body without binary parts keeps the `body: String` router
+  // and parses the same bytes.
+  let ctx = make_ctx("test/fixtures/server_multipart_enum_field.yaml")
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+
+  string.contains(content, "body: String) -> ServerResponse {")
+  |> should.be_true()
+  string.contains(content, "let body = bit_array.from_string(body)")
+  |> should.be_true()
+  string.contains(
+    content,
+    "let multipart_body = multipart_text_fields(parse_multipart_body(body, headers))",
+  )
+  |> should.be_true()
+  string.contains(content, "import gleam/bit_array")
   |> should.be_true()
 }
 
@@ -18629,11 +18858,12 @@ pub fn optional_multipart_body_unwraps_the_option_case() {
   let client = file_content(optional_bodies_files(), "client.gleam")
   let assert Ok(#(_, upload)) =
     string.split_once(client, "pub fn build_upload_request(")
-  string.contains(upload, "let #(body_str, body_content_type) = case body {")
+  string.contains(upload, "let #(body_bytes, body_content_type) = case body {")
   |> should.be_true()
+  string.contains(upload, "None -> #(<<>>, \"\")") |> should.be_true()
   string.contains(upload, "None -> transport.EmptyBody") |> should.be_true()
   // Parts go out in the order of the schema's properties.
-  string.contains(upload, "string.join(list.reverse(parts), \"\")")
+  string.contains(upload, "bit_array.concat(list.reverse([")
   |> should.be_true()
 }
 

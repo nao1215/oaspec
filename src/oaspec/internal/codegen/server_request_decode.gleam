@@ -7,6 +7,7 @@ import oaspec/internal/codegen/codec_helpers
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/ir_build
 import oaspec/internal/codegen/operation_ir
+import oaspec/internal/codegen/schema_utils
 import oaspec/internal/openapi/spec
 import oaspec/internal/util/content_type
 import oaspec/internal/util/naming
@@ -1204,6 +1205,13 @@ fn deep_object_param_needs(
   list.any(deep_object_properties(param, ctx), predicate)
 }
 
+/// The pattern of an empty request body in the route arm: a multipart arm
+/// reads its body as a BitArray, every other arm as a String.
+fn empty_body_pattern(rb: openapi.RequestBody(Resolved)) -> String {
+  use <- bool.guard(request_body_uses_multipart(rb), "<<>>")
+  "\"\""
+}
+
 pub fn request_body_uses_form_urlencoded(
   rb: openapi.RequestBody(Resolved),
 ) -> Bool {
@@ -1245,6 +1253,43 @@ pub fn operation_uses_octet_stream_body(
 ) -> Bool {
   case operation.request_body {
     Some(Value(rb)) -> request_body_uses_octet_stream(rb)
+    _ -> False
+  }
+}
+
+/// True when the multipart body has a `format: binary` part or an array of
+/// them. Such a part is raw bytes, so the router takes `body: BitArray`.
+pub fn request_body_has_bytes_part(
+  rb: openapi.RequestBody(Resolved),
+  ctx: Context,
+) -> Bool {
+  list.any(multipart_body_properties(rb, ctx), fn(prop) {
+    option.is_some(schema_utils.bytes_field(prop.schema_ref, ctx))
+  })
+}
+
+/// True when the router reads a field of the multipart body from the UTF-8
+/// view of its parts, `multipart_body`. A body without binary parts always
+/// does.
+pub fn request_body_has_text_part(
+  rb: openapi.RequestBody(Resolved),
+  ctx: Context,
+) -> Bool {
+  !request_body_has_bytes_part(rb, ctx)
+  || list.any(multipart_body_properties(rb, ctx), fn(prop) {
+    option.is_none(schema_utils.bytes_field(prop.schema_ref, ctx))
+  })
+}
+
+/// True when the router hands the operation's body over as bytes: an
+/// `application/octet-stream` body, or a multipart body with a binary part.
+pub fn operation_reads_body_as_bytes(
+  operation: openapi.Operation(Resolved),
+  ctx: Context,
+) -> Bool {
+  case operation.request_body {
+    Some(Value(rb)) ->
+      request_body_uses_octet_stream(rb) || request_body_has_bytes_part(rb, ctx)
     _ -> False
   }
 }
@@ -1733,12 +1778,18 @@ fn multipart_body_parts(
     multipart_body_properties(rb, ctx)
     |> list.map(fn(prop) {
       let binding = "body_" <> prop.field_name
+      // A binary part is read from the raw parts; every other field from
+      // their UTF-8 view.
+      let source = case schema_utils.bytes_field(prop.schema_ref, ctx) {
+        Some(_) -> "multipart_parts"
+        None -> "multipart_body"
+      }
       case field_needs_check(prop.required, prop.schema_ref, ctx) {
         True -> #(
           [
             checked_field_case(
               prop.name,
-              "multipart_body",
+              source,
               False,
               binding,
               prop.required,
@@ -1752,8 +1803,11 @@ fn multipart_body_parts(
           [],
           prop.field_name
             <> ": "
-            <> multipart_body_optional_expr_with_schema(
+            <> body_optional_expr(
             prop.name,
+            source,
+            False,
+            "_",
             Some(prop.schema_ref),
             ctx,
           ),
@@ -1836,7 +1890,9 @@ pub fn checked_body_result_expr(
   case rb.required {
     True -> result
     False ->
-      "case body { \"\" -> Ok(None) _ -> case "
+      "case body { "
+      <> empty_body_pattern(rb)
+      <> " -> Ok(None) _ -> case "
       <> result
       <> " { Ok(value) -> Ok(Some(value)) _ -> Error(Nil) } }"
   }
@@ -2007,14 +2063,6 @@ fn form_body_optional_expr_with_schema(
   ctx: Context,
 ) -> String {
   body_optional_expr(key, "form_body", True, "_", schema_ref, ctx)
-}
-
-fn multipart_body_optional_expr_with_schema(
-  key: String,
-  schema_ref: Option(SchemaRef),
-  ctx: Context,
-) -> String {
-  body_optional_expr(key, "multipart_body", False, "_", schema_ref, ctx)
 }
 
 /// Inline string-enum dispatch for an optional form/multipart body
@@ -2420,7 +2468,12 @@ pub fn generate_body_decode_expr(
           let body_expr = multipart_body_constructor_expr(rb, op_id, ctx)
           case rb.required {
             True -> body_expr
-            False -> "case body { \"\" -> None _ -> Some(" <> body_expr <> ") }"
+            False ->
+              "case body { "
+              <> empty_body_pattern(rb)
+              <> " -> None _ -> Some("
+              <> body_expr
+              <> ") }"
           }
         }
         _ -> {

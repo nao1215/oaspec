@@ -1183,3 +1183,51 @@ scenarios:
           dir:
             path: project/generated/api/handlers
             exists: false
+
+  # A `format: binary` multipart part was a String, so a file that is not
+  # UTF-8 could be neither sent nor received.
+  - name: generate types binary multipart parts as BitArray on both sides
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/multipart_binary_parts.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            mode: both
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+      - assert:
+          file:
+            path: project/generated/api/types.gleam
+            contains:
+              - "    file: BitArray,"
+              - "    thumbnail: Option(BitArray),"
+              - "    avatar: BitArray,"
+              - "    cover: Option(BitArray),"
+              - "    attachments: List(BitArray),"
+              - "    extras: Option(List(BitArray)),"
+              - "    name: String,"
+      - assert:
+          file:
+            path: project/generated/api/router.gleam
+            contains:
+              - "  body: BitArray,\n) -> ServerResponse {"
+              - "let multipart_parts = parse_multipart_body(body, headers)"
+      - assert:
+          file:
+            path: project/generated/api_client/client.gleam
+            contains:
+              - "let body = transport.BytesBody(body_bytes)"
+      - assert:
+          file:
+            path: project/generated/api_client/client.gleam
+            not_contains: "transport.TextBody(body_str)"

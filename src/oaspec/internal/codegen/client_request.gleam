@@ -285,6 +285,9 @@ pub fn get_body_encode_expr(
 }
 
 /// Generate multipart/form-data body encoding in the client function.
+/// Each part is a `BitArray`: text parts are their UTF-8 bytes and a
+/// `format: binary` part is the caller's bytes unchanged. The helper
+/// leaves `body_bytes` and `body_content_type` in scope.
 pub fn generate_multipart_body(
   sb: se.StringBuilder,
   rb: openapi.RequestBody(Resolved),
@@ -369,22 +372,12 @@ pub fn generate_multipart_body(
     1,
     // The parts were prepended; reverse them so they go out in the
     // order of the schema's properties.
-    "let body_str = string.join(list.reverse(parts), \"\") <> \"--\" <> boundary <> \"--\\r\\n\"",
+    "let body_bytes = bit_array.concat(list.reverse([bit_array.from_string(\"--\" <> boundary <> \"--\\r\\n\"), ..parts]))",
   )
   |> se.indent(
     1,
     "let body_content_type = \"multipart/form-data; boundary=\" <> boundary",
   )
-}
-
-pub fn multipart_field_is_binary(
-  field_schema: openapi.SchemaRef,
-  ctx: Context,
-) -> Bool {
-  case context.resolve_schema_ref(field_schema, ctx) {
-    Ok(openapi.StringSchema(format: Some("binary"), ..)) -> True
-    _ -> False
-  }
 }
 
 /// Dispatch each multipart field by its high-level shape so
@@ -403,7 +396,7 @@ fn multipart_field_kind(
   ctx: Context,
 ) -> MultipartFieldKind {
   use <- bool.guard(
-    multipart_field_is_binary(field_schema, ctx),
+    schema_utils.is_binary_string(field_schema, ctx),
     MultipartBinaryKind,
   )
   case field_schema {
@@ -419,11 +412,54 @@ fn multipart_field_kind(
   }
 }
 
+/// The expression of the part header (boundary line, Content-Disposition
+/// and, for a binary part, `filename` and `Content-Type:
+/// application/octet-stream`), as a String ending in the blank line.
+fn multipart_part_header(field_name: String, is_binary: Bool) -> String {
+  let disposition =
+    "\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
+    <> field_name
+    <> "\\\""
+  case is_binary {
+    True ->
+      disposition
+      <> "; filename=\\\""
+      <> field_name
+      <> "\\\"\\r\\nContent-Type: application/octet-stream\\r\\n\\r\\n\""
+    False -> disposition <> "\\r\\n\\r\\n\""
+  }
+}
+
+/// The `BitArray` expression of one part. `value_expr` is a String for a
+/// text part (written as UTF-8) and a BitArray for a binary part (written
+/// unchanged).
+fn multipart_part_expr(
+  field_name: String,
+  value_expr: String,
+  is_binary: Bool,
+) -> String {
+  let header = multipart_part_header(field_name, is_binary)
+  case is_binary {
+    True ->
+      "bit_array.concat([bit_array.from_string("
+      <> header
+      <> "), "
+      <> value_expr
+      <> ", bit_array.from_string(\"\\r\\n\")])"
+    False ->
+      "bit_array.from_string("
+      <> header
+      <> " <> "
+      <> value_expr
+      <> " <> \"\\r\\n\")"
+  }
+}
+
 /// Emit a single multipart part for a scalar or binary field. The
 /// scalar path stringifies the value (or uses it directly when the
 /// schema is already `String`); the binary path emits the
 /// `Content-Type: application/octet-stream` header and passes the
-/// value through unchanged.
+/// bytes through unchanged.
 fn emit_multipart_simple_field(
   sb: se.StringBuilder,
   field_name: String,
@@ -432,54 +468,36 @@ fn emit_multipart_simple_field(
   is_binary: Bool,
   is_required: Bool,
 ) -> se.StringBuilder {
-  let part_header_binary =
-    "\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
-    <> field_name
-    <> "\\\"; filename=\\\""
-    <> field_name
-    <> "\\\"\\r\\nContent-Type: application/octet-stream\\r\\n\\r\\n\""
-  let part_header_text =
-    "\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
-    <> field_name
-    <> "\\\"\\r\\n\\r\\n\""
-  let part_header = case is_binary {
-    True -> part_header_binary
-    False -> part_header_text
+  let value_expr = fn(input_expr: String) -> String {
+    case to_string_fn {
+      "" -> input_expr
+      fn_name -> fn_name <> "(" <> input_expr <> ")"
+    }
   }
   case is_required {
-    True -> {
-      let value_expr = case to_string_fn {
-        "" -> "body." <> gleam_field
-        fn_name -> fn_name <> "(body." <> gleam_field <> ")"
-      }
+    True ->
       sb
       |> se.indent(
         1,
         "let parts = ["
-          <> part_header
-          <> " <> "
-          <> value_expr
-          <> " <> \"\\r\\n\", ..parts]",
+          <> multipart_part_expr(
+          field_name,
+          value_expr("body." <> gleam_field),
+          is_binary,
+        )
+          <> ", ..parts]",
       )
-    }
-    False -> {
-      let value_expr = case to_string_fn {
-        "" -> "v"
-        fn_name -> fn_name <> "(v)"
-      }
+    False ->
       sb
       |> se.indent(1, "let parts = case body." <> gleam_field <> " {")
       |> se.indent(
         2,
         "Some(v) -> ["
-          <> part_header
-          <> " <> "
-          <> value_expr
-          <> " <> \"\\r\\n\", ..parts]",
+          <> multipart_part_expr(field_name, value_expr("v"), is_binary)
+          <> ", ..parts]",
       )
       |> se.indent(2, "None -> parts")
       |> se.indent(1, "}")
-    }
   }
 }
 
@@ -496,20 +514,17 @@ fn emit_multipart_array_field(
   is_required: Bool,
   ctx: Context,
 ) -> se.StringBuilder {
-  let part_header =
-    "\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
-    <> field_name
-    <> "\\\"\\r\\n\\r\\n\""
-  let item_to_string =
-    schema_dispatch.schema_ref_to_string_expr(items, "item", ctx)
+  let is_binary = schema_utils.is_binary_string(items, ctx)
+  let item_expr = case is_binary {
+    True -> "item"
+    False -> schema_dispatch.schema_ref_to_string_expr(items, "item", ctx)
+  }
   let fold_expr = fn(list_expr: String) -> String {
     "list.fold("
     <> list_expr
     <> ", parts, fn(acc, item) { ["
-    <> part_header
-    <> " <> "
-    <> item_to_string
-    <> " <> \"\\r\\n\", ..acc] })"
+    <> multipart_part_expr(field_name, item_expr, is_binary)
+    <> ", ..acc] })"
   }
   case is_required {
     True ->
@@ -542,31 +557,24 @@ fn emit_multipart_object_field(
     "\"--\" <> boundary <> \"\\r\\nContent-Disposition: form-data; name=\\\""
     <> field_name
     <> "\\\"\\r\\nContent-Type: application/json\\r\\n\\r\\n\""
-  let encoded_value = fn(input_expr: String) -> String {
-    multipart_object_encode_expr(field_schema, input_expr)
+  let part_expr = fn(input_expr: String) -> String {
+    "bit_array.from_string("
+    <> part_header
+    <> " <> "
+    <> multipart_object_encode_expr(field_schema, input_expr)
+    <> " <> \"\\r\\n\")"
   }
   case is_required {
     True ->
       sb
       |> se.indent(
         1,
-        "let parts = ["
-          <> part_header
-          <> " <> "
-          <> encoded_value("body." <> gleam_field)
-          <> " <> \"\\r\\n\", ..parts]",
+        "let parts = [" <> part_expr("body." <> gleam_field) <> ", ..parts]",
       )
     False ->
       sb
       |> se.indent(1, "let parts = case body." <> gleam_field <> " {")
-      |> se.indent(
-        2,
-        "Some(v) -> ["
-          <> part_header
-          <> " <> "
-          <> encoded_value("v")
-          <> " <> \"\\r\\n\", ..parts]",
-      )
+      |> se.indent(2, "Some(v) -> [" <> part_expr("v") <> ", ..parts]")
       |> se.indent(2, "None -> parts")
       |> se.indent(1, "}")
   }

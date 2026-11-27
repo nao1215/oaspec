@@ -8,6 +8,9 @@
 /// types.gleam, decoders.gleam, client.gleam and guards.gleam share it.
 import gleam/option.{type Option, None, Some}
 import oaspec/internal/codegen/context.{type Context}
+import oaspec/internal/codegen/schema_utils.{
+  type BytesField, BytesList, BytesValue,
+}
 import oaspec/internal/openapi/schema
 import oaspec/internal/util/naming
 import oaspec/openapi.{
@@ -201,6 +204,49 @@ pub fn json_encoder_fn(ref: SchemaRef) -> String {
     Inline(BooleanSchema(..)) -> "json.bool"
     Reference(name:, ..) -> "encode_" <> naming.to_snake_case(name) <> "_json"
     Inline(_) -> "fn(_) { json.null() }"
+  }
+}
+
+/// The Gleam type of a multipart part that holds raw bytes.
+pub fn bytes_field_type(field: BytesField) -> String {
+  case field {
+    BytesValue -> "BitArray"
+    BytesList -> "List(BitArray)"
+  }
+}
+
+const base64_decoder =
+  "decode.then(decode.string, fn(text) { case bit_array.base64_decode(text) { Ok(bytes) -> decode.success(bytes) Error(Nil) -> decode.failure(<<>>, \"base64\") } })"
+
+const base64_encoder_fn =
+  "fn(bytes) { json.string(bit_array.base64_encode(bytes, True)) }"
+
+/// The JSON decoder of a multipart part that holds raw bytes. JSON has no
+/// bytes, so the value is read as a base64 string.
+pub fn bytes_field_decoder(field: BytesField) -> String {
+  case field {
+    BytesValue -> base64_decoder
+    BytesList -> "decode.list(" <> base64_decoder <> ")"
+  }
+}
+
+/// The JSON encoder expression of a multipart part that holds raw bytes,
+/// written as a base64 string.
+pub fn bytes_field_json_encoder_expr(
+  field: BytesField,
+  value: String,
+) -> String {
+  case field {
+    BytesValue -> "json.string(bit_array.base64_encode(" <> value <> ", True))"
+    BytesList -> "json.array(" <> value <> ", " <> base64_encoder_fn <> ")"
+  }
+}
+
+/// `bytes_field_json_encoder_expr` as a function reference.
+pub fn bytes_field_json_encoder_fn(field: BytesField) -> String {
+  case field {
+    BytesValue -> base64_encoder_fn
+    BytesList -> "fn(items) { json.array(items, " <> base64_encoder_fn <> ") }"
   }
 }
 

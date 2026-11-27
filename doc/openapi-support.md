@@ -41,22 +41,31 @@ so the spec is rejected.
 
 ## `format: byte` and `format: binary`
 
-The OpenAPI `format` keyword on a `string` schema is passed through as
-metadata only. Generated fields keep the Gleam type `String`; the encoded
-contract (`format: byte` = base64 per OAS 3.0 §4.7.4 / OAS 3.1 alignment
-with JSON Schema, `format: binary` = raw bytes) is not enforced or
-materialised by the generator.
+The OpenAPI `format` keyword on a `string` schema is mostly passed through
+as metadata. Generated fields keep the Gleam type `String`, with one
+exception: a `format: binary` part of a `multipart/form-data` request body
+is a `BitArray`.
 
 - `format: byte`: the field is decoded and emitted as the literal base64
   character string. Callers that need the underlying bytes must
   base64-decode themselves (e.g. with `yabase/facade.decode_base64`).
   Invalid base64 input is not rejected at decode time.
-- `format: binary`: the field is decoded and emitted as a plain `String`.
-  This includes a `multipart/form-data` part: the generated client writes
-  the part from that `String` into a text body, so a file that is not
-  valid UTF-8 cannot be sent through it. A whole request body of
-  `application/octet-stream` is a `BitArray` sent as `BytesBody`; use it
-  for arbitrary bytes.
+- `format: binary` in a `multipart/form-data` body: the part is a
+  `BitArray`, and an array of them (`type: array, items: { type: string,
+  format: binary }`) is a `List(BitArray)`. This holds for an inline
+  schema and for a `$ref` to one. The generated client sends the body as
+  `BytesBody` and writes the bytes of a binary part unchanged, with
+  `Content-Type: application/octet-stream`; text parts are their UTF-8
+  bytes. The generated router then takes `body: BitArray` and hands the
+  handler the raw bytes of each binary part. A text part whose bytes are
+  not UTF-8 is treated as missing, so a required one answers 400. The JSON
+  encoder and decoder of the body record write a binary part as a base64
+  string, since JSON has no bytes. A component that is only `type: string,
+  format: binary` keeps its `String` alias; the multipart field that
+  refers to it is the `BitArray`.
+- `format: binary` anywhere else: the field is decoded and emitted as a
+  plain `String`. A whole request body of `application/octet-stream` is a
+  `BitArray` sent as `BytesBody`; use it for arbitrary bytes.
 
 A future release may auto-decode `format: byte` to `BitArray` or emit a
 `format` docstring on the generated field; tracking issue

@@ -1,5 +1,6 @@
 /// Shared schema analysis utilities used by types.gleam, ir_build.gleam
 /// and the other codegen modules.
+import gleam/bool
 import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -331,6 +332,68 @@ pub fn array_items(schema_ref: SchemaRef, ctx: Context) -> Option(SchemaRef) {
     Ok(ArraySchema(items:, ..)) -> Some(items)
     _ -> None
   }
+}
+
+/// How a `multipart/form-data` part holds raw bytes.
+pub type BytesField {
+  /// A `type: string, format: binary` part, typed `BitArray`.
+  BytesValue
+  /// An array of binary parts, typed `List(BitArray)`.
+  BytesList
+}
+
+/// True when `schema_ref` is, or is a `$ref` to, a `type: string,
+/// format: binary` schema.
+pub fn is_binary_string(schema_ref: SchemaRef, ctx: Context) -> Bool {
+  case context.resolve_schema_ref(schema_ref, ctx) {
+    Ok(StringSchema(format: Some("binary"), ..)) -> True
+    _ -> False
+  }
+}
+
+/// How the multipart part `schema_ref` holds raw bytes: `Some(BytesValue)`
+/// for a binary string, `Some(BytesList)` for an array of them, `None` for
+/// a text part.
+pub fn bytes_field(schema_ref: SchemaRef, ctx: Context) -> Option(BytesField) {
+  use <- bool.guard(is_binary_string(schema_ref, ctx), Some(BytesValue))
+  case array_items(schema_ref, ctx) {
+    Some(items) ->
+      case is_binary_string(items, ctx) {
+        True -> Some(BytesList)
+        False -> None
+      }
+    None -> None
+  }
+}
+
+/// `bytes_field` for the property `schema_ref` of the component schema
+/// `record_name`, and `None` when that component is not the schema of a
+/// `multipart/form-data` request body. Elsewhere a binary string stays a
+/// `String`.
+pub fn multipart_bytes_field(
+  record_name: String,
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Option(BytesField) {
+  use <- bool.guard(!context.is_multipart_body_schema(ctx, record_name), None)
+  bytes_field(schema_ref, ctx)
+}
+
+/// True when any of the component `schemas` is a multipart body record with
+/// a binary part, so the JSON codecs of that record use `gleam/bit_array`.
+pub fn schemas_have_multipart_bytes_field(
+  schemas: List(#(String, SchemaRef)),
+  ctx: Context,
+) -> Bool {
+  list.any(schemas, fn(entry) {
+    case entry {
+      #(name, Inline(ObjectSchema(properties:, ..))) ->
+        list.any(dict.values(properties), fn(prop_ref) {
+          option.is_some(multipart_bytes_field(name, prop_ref, ctx))
+        })
+      _ -> False
+    }
+  })
 }
 
 /// Get the discriminator value for a $ref.

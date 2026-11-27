@@ -13,6 +13,10 @@ within `Changed` / `Fixed` and stay as-is.
 ### Changed
 
 - A generated server reads a Bool parameter or form, multipart or deepObject field only from the lowercase literals `true` and `false`, which OpenAPI uses and the generated client sends. `TRUE`, `True` and other spellings now answer 400; they were read case-insensitively before.
+- A `type: string, format: binary` part of a `multipart/form-data` request body is a `BitArray` (an array of them is a `List(BitArray)`), inline or through a `$ref`. It was a `String`, so a file that is not valid UTF-8, such as a PNG, could be neither sent nor received.
+- Generated clients send a multipart body as `BytesBody` and write a binary part's bytes unchanged; text parts are their UTF-8 bytes.
+- A generated server whose spec has a multipart body with a binary part takes `body: BitArray` in `route`, and hands the handler the raw bytes of each binary part. Its multipart parser works on bytes on Erlang and JavaScript. A text part that is not UTF-8 is treated as missing, so a required one answers 400.
+- The JSON encoder and decoder of a multipart body record write a binary part as a base64 string.
 
 ### Fixed
 

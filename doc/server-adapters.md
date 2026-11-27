@@ -89,7 +89,8 @@ The same shape applies: decompose `wisp.Request`, call
 ## Binary request bodies
 
 If any operation in your spec declares `application/octet-stream` on its
-request body, the generated router signature is `body: BitArray` (not
+request body, or a `multipart/form-data` body with a `format: binary`
+part, the generated router signature is `body: BitArray` (not
 `String`) so arbitrary binary payloads round-trip without going through
 `bit_array.to_string`. In that case drop the
 `|> bit_array.to_string |> result.unwrap("")` step from the snippet above

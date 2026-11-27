@@ -120,8 +120,30 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
         _ -> False
       }
     })
-  let has_multipart_optional_complex_field =
-    multipart_has_optional_complex_field(operations, ctx)
+  // Every optional multipart field is written through a
+  // `Some(v) -> ... None -> parts` arm.
+  let has_multipart_optional_field =
+    multipart_has_optional_field(operations, ctx)
+  // Integer and number parts, and the items of array parts, are written
+  // with `int.to_string` / `float.to_string`.
+  let has_multipart_int =
+    multipart_has_field_or_item(operations, ctx, fn(s) {
+      case s {
+        openapi.IntegerSchema(..) -> True
+        _ -> False
+      }
+    })
+  let has_multipart_float =
+    multipart_has_field_or_item(operations, ctx, fn(s) {
+      case s {
+        openapi.NumberSchema(..) -> True
+        _ -> False
+      }
+    })
+  // An object part that hoist left inline is written with
+  // `string.inspect`.
+  let has_multipart_inline_object_field =
+    multipart_has_inline_object_field(operations, ctx)
 
   // DeepObject parameters expand each property into a
   // bracketed-bracketed query entry; optional outer or inner
@@ -281,7 +303,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
   let needs_string =
     has_multi_content_response
     || has_form_urlencoded
-    || has_multipart
+    || has_multipart_inline_object_field
     || list.any(all_params, fn(p) {
       p.in_ == openapi.InPath || p.in_ == openapi.InCookie
     })
@@ -300,9 +322,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     needs_option_type
     || has_optional_response_headers
     || any_operation_has_server(ctx)
-    // Optional multipart object/array fields wrap the
-    // per-field emission in a `Some(v) -> ... None -> parts` arm.
-    || has_multipart_optional_complex_field
+    || has_multipart_optional_field
     // DeepObject params unwrap optional outer / inner
     // properties through `Some(...) -> ... None -> query`.
     || has_deep_object_param
@@ -310,7 +330,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     needs_option_type
     || has_optional_response_headers
     || any_operation_has_no_server(ctx)
-    || has_multipart_optional_complex_field
+    || has_multipart_optional_field
     || has_deep_object_param
 
   // Typed response headers (`type: integer`, `type: number`)
@@ -378,6 +398,7 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
   let needs_int =
     has_int_response_header
     || has_form_urlencoded_int
+    || has_multipart_int
     || list.any(all_params, fn(p) {
       param_value_schema_is(p, ctx, fn(s) {
         case s {
@@ -394,7 +415,10 @@ pub fn analyze(ctx: Context) -> ClientRequirements {
     })
 
   let needs_float =
-    needs_float_param || has_float_response_header || has_form_urlencoded_float
+    needs_float_param
+    || has_float_response_header
+    || has_form_urlencoded_float
+    || has_multipart_float
 
   // Gate on `mt.schema = Some(_)` so the import-needs analyzer agrees
   // with `client_response.gleam`'s emission gate. A schema-less
@@ -520,7 +544,7 @@ fn multipart_has_field(
   })
 }
 
-fn multipart_has_optional_complex_field(
+fn multipart_has_optional_field(
   operations: List(context.AnalyzedOperation),
   ctx: Context,
 ) -> Bool {
@@ -536,22 +560,55 @@ fn multipart_has_optional_complex_field(
               })
             {
               Some(openapi.ObjectSchema(properties:, required:, ..)) ->
-                dict.to_list(properties)
-                |> list.any(fn(entry) {
-                  let #(name, prop_ref) = entry
-                  let is_optional = !list.contains(required, name)
-                  is_optional
-                  && case
-                    context.resolve_schema_ref(prop_ref, ctx)
-                    |> option.from_result
-                  {
-                    Some(openapi.ArraySchema(..)) -> True
-                    Some(openapi.ObjectSchema(..)) -> True
-                    _ -> False
-                  }
+                list.any(dict.keys(properties), fn(name) {
+                  !list.contains(required, name)
                 })
               _ -> False
             }
+          // nolint: thrown_away_error -- absent multipart key just means no field to inspect
+          Error(_) -> False
+        }
+      _ -> False
+    }
+  })
+}
+
+/// `multipart_has_field` that also looks at the items of array fields.
+fn multipart_has_field_or_item(
+  operations: List(context.AnalyzedOperation),
+  ctx: Context,
+  pred: fn(openapi.SchemaObject) -> Bool,
+) -> Bool {
+  multipart_has_field(operations, ctx, fn(s) {
+    pred(s)
+    || case s {
+      openapi.ArraySchema(items:, ..) ->
+        context.resolve_schema_ref(items, ctx)
+        |> option.from_result
+        |> option.map(pred)
+        == Some(True)
+      _ -> False
+    }
+  })
+}
+
+fn multipart_has_inline_object_field(
+  operations: List(context.AnalyzedOperation),
+  ctx: Context,
+) -> Bool {
+  list.any(operations, fn(op) {
+    let context.AnalyzedOperation(_, operation, _, _) = op
+    case operation.request_body {
+      Some(Value(rb)) ->
+        case dict.get(rb.content, "multipart/form-data") {
+          Ok(media_type) ->
+            multipart_object_props(media_type.schema, ctx)
+            |> list.any(fn(entry) {
+              case entry.1 {
+                Inline(openapi.ObjectSchema(..)) -> True
+                _ -> False
+              }
+            })
           // nolint: thrown_away_error -- absent multipart key just means no field to inspect
           Error(_) -> False
         }
@@ -879,6 +936,11 @@ pub fn imports(requirements: ClientRequirements, ctx: Context) -> List(String) {
   }
   let imports = case requirements.needs_list {
     True -> ["gleam/list", ..imports]
+    False -> imports
+  }
+  // Multipart parts are assembled as bytes.
+  let imports = case requirements.has_multipart {
+    True -> ["gleam/bit_array", ..imports]
     False -> imports
   }
   let imports = case requirements.needs_uri {

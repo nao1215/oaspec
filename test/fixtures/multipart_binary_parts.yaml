@@ -1,0 +1,78 @@
+openapi: 3.0.3
+info:
+  title: Multipart Binary Parts Test API
+  version: 1.0.0
+paths:
+  /files:
+    post:
+      operationId: uploadFiles
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - name
+                - file
+                - avatar
+                - attachments
+              properties:
+                name:
+                  type: string
+                count:
+                  type: integer
+                ratio:
+                  type: number
+                active:
+                  type: boolean
+                kind:
+                  $ref: "#/components/schemas/UploadKind"
+                tags:
+                  type: array
+                  items:
+                    type: string
+                file:
+                  type: string
+                  format: binary
+                thumbnail:
+                  type: string
+                  format: binary
+                avatar:
+                  $ref: "#/components/schemas/UploadFile"
+                cover:
+                  $ref: "#/components/schemas/UploadFile"
+                attachments:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                extras:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/UploadFile"
+      responses:
+        "200":
+          description: The received parts, echoed back
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadEcho"
+components:
+  schemas:
+    UploadFile:
+      type: string
+      format: binary
+    UploadKind:
+      type: string
+      enum:
+        - photo
+        - scan
+    UploadEcho:
+      type: object
+      required:
+        - received
+      properties:
+        received:
+          type: string
+          format: byte

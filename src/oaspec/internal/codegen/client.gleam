@@ -1371,26 +1371,26 @@ fn generate_multipart_body_emission(
   op_id: String,
   ctx: Context,
 ) -> se.StringBuilder {
-  // The helper leaves `body_str` and `body_content_type` in scope.
+  // The helper leaves `body_bytes` and `body_content_type` in scope.
   case rb.required {
     True ->
       client_request.generate_multipart_body(sb, rb, op_id, ctx)
-      |> se.indent(1, "let body = transport.TextBody(body_str)")
+      |> se.indent(1, "let body = transport.BytesBody(body_bytes)")
     // An optional body is bound as `Option(<RequestType>)` and the
     // multipart emitter reads `body.<field>`, so unwrap it first, as the
     // form-urlencoded emitter does. `None` sends no body and no
     // content-type.
     False ->
       sb
-      |> se.indent(1, "let #(body_str, body_content_type) = case body {")
+      |> se.indent(1, "let #(body_bytes, body_content_type) = case body {")
       |> se.indent(2, "Some(body) -> {")
       |> client_request.generate_multipart_body(rb, op_id, ctx)
-      |> se.indent(3, "#(body_str, body_content_type)")
+      |> se.indent(3, "#(body_bytes, body_content_type)")
       |> se.indent(2, "}")
-      |> se.indent(2, "None -> #(\"\", \"\")")
+      |> se.indent(2, "None -> #(<<>>, \"\")")
       |> se.indent(1, "}")
       |> se.indent(1, "let body = case body {")
-      |> se.indent(2, "Some(_) -> transport.TextBody(body_str)")
+      |> se.indent(2, "Some(_) -> transport.BytesBody(body_bytes)")
       |> se.indent(2, "None -> transport.EmptyBody")
       |> se.indent(1, "}")
   }
