@@ -10,6 +10,14 @@ within `Changed` / `Fixed` and stay as-is.
 
 ## [Unreleased]
 
+### Changed
+
+- A generated server reads a Bool parameter or form, multipart or deepObject field only from the lowercase literals `true` and `false`, which OpenAPI uses and the generated client sends. `TRUE`, `True` and other spellings now answer 400; they were read case-insensitively before.
+
+### Fixed
+
+- A generated server answers 400 for a Bool path, query, header or cookie parameter, or an item of a Bool array parameter, whose value is not `true` or `false`. It read every value other than `true` as `False`, so `?verbose=yes`, `?verbose=1` and `?verbose=` reached the handler as a valid request. Optional Bool fields of deepObject parameters and of form and multipart bodies follow the same rule, and a required header or cookie parameter whose schema is a `$ref` to a boolean now compiles.
+
 ## [0.74.1] - 2026-11-23
 
 ### Fixed

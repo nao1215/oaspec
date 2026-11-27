@@ -1,0 +1,152 @@
+openapi: 3.0.3
+info:
+  title: Bool parameters
+  version: 1.0.0
+paths:
+  /path/{on}/{ons}:
+    get:
+      operationId: boolPath
+      parameters:
+        - name: on
+          in: path
+          required: true
+          schema: { type: boolean }
+        - name: ons
+          in: path
+          required: true
+          schema: { type: array, items: { type: boolean } }
+      responses:
+        "200":
+          description: ok
+          content:
+            text/plain:
+              schema: { type: string }
+  /query:
+    get:
+      operationId: boolQuery
+      parameters:
+        - name: on
+          in: query
+          required: true
+          schema: { type: boolean }
+        - name: ons
+          in: query
+          required: true
+          schema: { type: array, items: { type: boolean } }
+        - name: verbose
+          in: query
+          schema: { type: boolean }
+        - name: picks
+          in: query
+          explode: false
+          schema: { type: array, items: { type: boolean } }
+        - name: toggle
+          in: query
+          schema: { $ref: "#/components/schemas/Toggle" }
+      responses:
+        "200":
+          description: ok
+          content:
+            text/plain:
+              schema: { type: string }
+  /header:
+    get:
+      operationId: boolHeader
+      parameters:
+        - name: X-On
+          in: header
+          required: true
+          schema: { type: boolean }
+        - name: X-Ons
+          in: header
+          required: true
+          schema: { type: array, items: { type: boolean } }
+        - name: X-Verbose
+          in: header
+          schema: { type: boolean }
+        - name: X-Picks
+          in: header
+          schema: { type: array, items: { type: boolean } }
+        - name: X-Toggle
+          in: header
+          required: true
+          schema: { $ref: "#/components/schemas/Toggle" }
+      responses:
+        "200":
+          description: ok
+          content:
+            text/plain:
+              schema: { type: string }
+  /cookie:
+    get:
+      operationId: boolCookie
+      parameters:
+        - name: on
+          in: cookie
+          required: true
+          schema: { type: boolean }
+        - name: verbose
+          in: cookie
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: ok
+          content:
+            text/plain:
+              schema: { type: string }
+  /deep:
+    get:
+      operationId: boolDeep
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            properties:
+              active: { type: boolean }
+      responses:
+        "200":
+          description: ok
+          content:
+            text/plain:
+              schema: { type: string }
+  /form:
+    post:
+      operationId: boolForm
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                active: { type: boolean }
+                flags: { type: array, items: { type: boolean } }
+      responses:
+        "200":
+          description: ok
+          content:
+            text/plain:
+              schema: { type: string }
+  /multipart:
+    post:
+      operationId: boolMultipart
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                active: { type: boolean }
+      responses:
+        "200":
+          description: ok
+          content:
+            text/plain:
+              schema: { type: string }
+components:
+  schemas:
+    Toggle: { type: boolean }

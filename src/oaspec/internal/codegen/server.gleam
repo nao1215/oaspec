@@ -604,12 +604,25 @@ fn generate_safe_request_and_dispatch(
     list.filter(params, fn(p) {
       p.in_ == openapi.InQuery
       && operation_ir.is_deep_object_param(p, ctx)
-      && decode_helpers.deep_object_has_required_properties(p, ctx)
+      && decode_helpers.deep_object_needs_check(p, ctx)
     })
   let required_header_params =
     list.filter(params, fn(p) { p.in_ == openapi.InHeader && p.required })
   let required_cookie_params =
     list.filter(params, fn(p) { p.in_ == openapi.InCookie && p.required })
+  // Optional Bool query / header / cookie params. A present value that is
+  // not true / false answers 400, so each is read into a Result first.
+  let checked_optional_bool_params =
+    list.filter_map(params, fn(p) {
+      use <- bool.guard(
+        p.required || operation_ir.is_deep_object_param(p, ctx),
+        Error(Nil),
+      )
+      case decode_helpers.optional_bool_param_result_expr(p, ctx) {
+        Some(result_expr) -> Ok(#(p, result_expr))
+        None -> Error(Nil)
+      }
+    })
 
   // Check if the request body needs safe decoding (required JSON body)
   let needs_body_guard = case operation.request_body {
@@ -684,7 +697,7 @@ fn generate_safe_request_and_dispatch(
 
   let sb =
     list.fold(required_header_params, sb, fn(sb, p) {
-      single_value_required_open_parse_case(sb, p)
+      single_value_required_open_parse_case(sb, p, ctx)
     })
 
   // Open lookup cases for required cookie params.
@@ -698,7 +711,17 @@ fn generate_safe_request_and_dispatch(
 
   let sb =
     list.fold(required_cookie_params, sb, fn(sb, p) {
-      single_value_required_open_parse_case(sb, p)
+      single_value_required_open_parse_case(sb, p, ctx)
+    })
+
+  // Open result cases for optional Bool params. `<param>__bool` cannot
+  // collide with a parameter variable (see the checked body below).
+  let sb =
+    list.fold(checked_optional_bool_params, sb, fn(sb, entry) {
+      let #(p, result_expr) = entry
+      sb
+      |> se.indent(3, "case " <> result_expr <> " {")
+      |> se.indent(4, "Ok(" <> optional_bool_var(p) <> ") -> {")
     })
 
   // Determine the body schema reference name (used for decode and guard validation)
@@ -819,6 +842,14 @@ fn generate_safe_request_and_dispatch(
     list.fold(params_with_field_names, sb, fn(sb, entry) {
       let #(param, field_name) = entry
       let trailing = ","
+      let checked_optional_bool =
+        list.any(checked_optional_bool_params, fn(checked) {
+          checked.0 == param
+        })
+      use <- bool.lazy_guard(checked_optional_bool, fn() {
+        sb
+        |> se.indent(4, field_name <> ": " <> optional_bool_var(param) <> ",")
+      })
       let value_expr = case param.in_ {
         openapi.InPath -> {
           // Use the parsed variable if it needed Result unwrapping
@@ -835,8 +866,7 @@ fn generate_safe_request_and_dispatch(
           let raw_var = naming.to_snake_case(param.name) <> "_raw"
           let is_deep_object = operation_ir.is_deep_object_param(param, ctx)
           let checked_deep_object =
-            is_deep_object
-            && decode_helpers.deep_object_has_required_properties(param, ctx)
+            is_deep_object && decode_helpers.deep_object_needs_check(param, ctx)
           use <- bool.guard(
             checked_deep_object,
             naming.to_snake_case(param.name) <> "__deep",
@@ -855,7 +885,7 @@ fn generate_safe_request_and_dispatch(
           let key = string.lowercase(param.name)
           let raw_var = naming.to_snake_case(param.name) <> "_raw"
           case param.required {
-            True -> decode_helpers.header_required_expr(raw_var, param)
+            True -> decode_helpers.header_required_expr(raw_var, param, ctx)
             False -> decode_helpers.header_optional_expr(key, param)
           }
         }
@@ -863,7 +893,7 @@ fn generate_safe_request_and_dispatch(
           let key = param.name
           let raw_var = naming.to_snake_case(param.name) <> "_raw"
           case param.required {
-            True -> decode_helpers.cookie_required_expr(raw_var, param)
+            True -> decode_helpers.cookie_required_expr(raw_var, param, ctx)
             False -> decode_helpers.cookie_optional_expr(key, param)
           }
         }
@@ -937,10 +967,22 @@ fn generate_safe_request_and_dispatch(
   }
 
   // Close required-param case expressions in LIFO (reverse) order:
-  // cookie parse, cookie lookup, header parse, header lookup, deep object,
-  // query parse, query lookup, then finally the path int/float parse cases. The
-  // catch-all `_ ->` arm covers `Ok([])` (empty query lists) along with
-  // `Error(_)` so all failure modes return 400.
+  // optional Bool, cookie parse, cookie lookup, header parse, header lookup,
+  // deep object, query parse, query lookup, then finally the path parse
+  // cases. The catch-all `_ ->` arm covers `Ok([])` (empty query lists)
+  // along with `Error(_)` so all failure modes return 400.
+  let sb =
+    list.fold(list.reverse(checked_optional_bool_params), sb, fn(sb, entry) {
+      let detail = case { entry.0 }.in_ {
+        openapi.InQuery -> "invalid query parameter"
+        openapi.InHeader | openapi.InCookie -> "invalid header or cookie"
+        openapi.InPath -> "invalid path parameter"
+      }
+      sb
+      |> se.indent(4, "}")
+      |> se.indent(4, "_ -> " <> problem_response_expr(400, detail))
+      |> se.indent(3, "}")
+    })
   let sb =
     list.fold(required_cookie_params, sb, fn(sb, p) {
       close_single_value_required_parse_case(sb, p, ctx)
@@ -975,6 +1017,13 @@ fn generate_safe_request_and_dispatch(
   })
 }
 
+/// The variable an optional Bool param is bound to once it parsed. The
+/// router's own variables contain `__`, which `naming.to_snake_case` never
+/// produces, so it cannot collide with a parameter variable.
+fn optional_bool_var(p: openapi.Parameter(Resolved)) -> String {
+  naming.to_snake_case(p.name) <> "__bool"
+}
+
 /// True when this query param is treated as a list (explode=true array).
 /// Matches the helper used by `query_required_expr` so the open/close
 /// scaffolding stays in sync with the value expression.
@@ -994,7 +1043,8 @@ fn query_param_explode_array(p: openapi.Parameter(Resolved)) -> Bool {
 /// - scalar Integer/Number → `case int.parse(<raw>) { Ok(<raw>_parsed) -> {`
 /// - array of Integer/Number with explode=true → `case list.try_map(<raw>, int.parse) { Ok(<raw>_parsed_list) -> {`
 /// - array of Integer/Number with explode=false → split first, then try_map.
-/// String / Bool / array-of-string / array-of-bool need no extra case.
+/// - Bool or array of Bool → match `true` / `false`, see `open_bool_parse`.
+/// String / array-of-string need no extra case.
 fn query_required_open_parse_case(
   sb: se.StringBuilder,
   p: openapi.Parameter(Resolved),
@@ -1006,6 +1056,13 @@ fn query_required_open_parse_case(
     Some(openapi.SpaceDelimitedStyle) -> " "
     _ -> ","
   }
+  let items = case query_param_explode_array(p) {
+    True -> raw_var
+    False -> "string.split(" <> raw_var <> ", \"" <> delim <> "\")"
+  }
+  use <- bool.lazy_guard(is_bool_param(p, ctx), fn() {
+    open_bool_parse(sb, p, raw_var, items, ctx)
+  })
   case spec.parameter_schema(p) {
     Some(openapi.Inline(openapi.IntegerSchema(..))) ->
       sb
@@ -1090,6 +1147,39 @@ fn array_float_parse_expr(
   }
 }
 
+/// Open the case that parses a required Bool param (`<raw>_parsed`) or
+/// list of Bools (`<raw>_parsed_list`) from `raw_var`, whose items are
+/// `items` for a list. Returns `sb` unchanged for any other param.
+fn open_bool_parse(
+  sb: se.StringBuilder,
+  p: openapi.Parameter(Resolved),
+  raw_var: String,
+  items: String,
+  ctx: Context,
+) -> se.StringBuilder {
+  case decode_helpers.bool_shape(spec.parameter_schema(p), ctx) {
+    Some(decode_helpers.BoolScalar) ->
+      sb
+      |> se.indent(
+        3,
+        "case " <> decode_helpers.bool_result_expr(raw_var) <> " {",
+      )
+      |> se.indent(4, "Ok(" <> raw_var <> "_parsed) -> {")
+    Some(decode_helpers.BoolList) ->
+      sb
+      |> se.indent(
+        3,
+        "case " <> decode_helpers.bool_list_result_expr(items) <> " {",
+      )
+      |> se.indent(4, "Ok(" <> raw_var <> "_parsed_list) -> {")
+    None -> sb
+  }
+}
+
+fn is_bool_param(p: openapi.Parameter(Resolved), ctx: Context) -> Bool {
+  option.is_some(decode_helpers.bool_shape(spec.parameter_schema(p), ctx))
+}
+
 /// Close the matching parse case for a required query param.
 fn close_query_required_parse_case(
   sb: se.StringBuilder,
@@ -1105,6 +1195,7 @@ fn close_query_required_parse_case(
     )
     |> se.indent(3, "}")
   }
+  use <- bool.lazy_guard(is_bool_param(p, ctx), fn() { close(sb) })
   case spec.parameter_schema(p) {
     Some(openapi.Inline(openapi.IntegerSchema(..)))
     | Some(openapi.Inline(openapi.NumberSchema(..)))
@@ -1134,8 +1225,18 @@ fn close_query_required_parse_case(
 fn single_value_required_open_parse_case(
   sb: se.StringBuilder,
   p: openapi.Parameter(Resolved),
+  ctx: Context,
 ) -> se.StringBuilder {
   let raw_var = naming.to_snake_case(p.name) <> "_raw"
+  use <- bool.lazy_guard(is_bool_param(p, ctx), fn() {
+    open_bool_parse(
+      sb,
+      p,
+      raw_var,
+      "string.split(" <> raw_var <> ", \",\")",
+      ctx,
+    )
+  })
   case spec.parameter_schema(p) {
     Some(openapi.Inline(openapi.IntegerSchema(..))) ->
       sb
@@ -1187,6 +1288,7 @@ fn close_single_value_required_parse_case(
     )
     |> se.indent(3, "}")
   }
+  use <- bool.lazy_guard(is_bool_param(p, ctx), fn() { close(sb) })
   case spec.parameter_schema(p) {
     Some(openapi.Inline(openapi.IntegerSchema(..)))
     | Some(openapi.Inline(openapi.NumberSchema(..)))
