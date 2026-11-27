@@ -91,8 +91,8 @@ scenarios:
             path: project/generated/api/router.gleam
             contains:
               - '"false" -> Ok(False)'
-              - 'Ok(verbose__bool) -> {'
-              - 'verbose: verbose__bool,'
+              - 'Ok(verbose__query_checked) -> {'
+              - 'verbose: verbose__query_checked,'
               - 'title\":\"invalid query parameter'
       - assert:
           file:

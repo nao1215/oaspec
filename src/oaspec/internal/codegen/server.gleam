@@ -714,8 +714,8 @@ fn generate_safe_request_and_dispatch(
       single_value_required_open_parse_case(sb, p, ctx)
     })
 
-  // Open result cases for optional Bool params. `<param>__bool` cannot
-  // collide with a parameter variable (see the checked body below).
+  // Open result cases for optional Bool params. Their variables cannot
+  // collide with a parameter variable (see `optional_bool_var`).
   let sb =
     list.fold(checked_optional_bool_params, sb, fn(sb, entry) {
       let #(p, result_expr) = entry
@@ -1017,11 +1017,19 @@ fn generate_safe_request_and_dispatch(
   })
 }
 
-/// The variable an optional Bool param is bound to once it parsed. The
-/// router's own variables contain `__`, which `naming.to_snake_case` never
-/// produces, so it cannot collide with a parameter variable.
+/// The variable a checked optional param is bound to once it parsed,
+/// such as `verbose__query_checked`. The router's own variables contain
+/// `__`, which `naming.to_snake_case` never produces, so it cannot collide
+/// with a parameter variable, and the location keeps a query and a cookie
+/// parameter of the same name apart.
 fn optional_bool_var(p: openapi.Parameter(Resolved)) -> String {
-  naming.to_snake_case(p.name) <> "__bool"
+  let location = case p.in_ {
+    openapi.InQuery -> "query"
+    openapi.InHeader -> "header"
+    openapi.InCookie -> "cookie"
+    openapi.InPath -> "path"
+  }
+  naming.to_snake_case(p.name) <> "__" <> location <> "_checked"
 }
 
 /// True when this query param is treated as a list (explode=true array).

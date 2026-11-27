@@ -11777,7 +11777,7 @@ paths:
   // than true / false answers 400.
   string.contains(content, "case case dict.get(headers, \"x-enabled\") {")
   |> should.be_true()
-  string.contains(content, "x_enabled: x_enabled__bool,")
+  string.contains(content, "x_enabled: x_enabled__header_checked,")
   |> should.be_true()
   // Issue #307: failure paths emit RFC 7807 Problem JSON, not plain text.
   string.contains(content, "status: 400") |> should.be_true()
@@ -12449,9 +12449,9 @@ pub fn server_bool_params_reject_other_values_case() {
   let content = router_file.content
   assert_bool_decode_rejects_other_values(content)
   // Optional Bool parameters are checked before the request is built.
-  string.contains(content, "Ok(verbose__bool) ->")
+  string.contains(content, "Ok(verbose__query_checked) ->")
   |> should.be_true()
-  string.contains(content, "Ok(x_picks__bool) ->")
+  string.contains(content, "Ok(x_picks__header_checked) ->")
   |> should.be_true()
 }
 

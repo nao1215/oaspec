@@ -71,6 +71,9 @@ paths:
           in: header
           required: true
           schema: { $ref: "#/components/schemas/Toggle" }
+        - name: X-Ref-Flags
+          in: header
+          schema: { $ref: "#/components/schemas/Flags" }
       responses:
         "200":
           description: ok
@@ -87,6 +90,9 @@ paths:
           schema: { type: boolean }
         - name: verbose
           in: cookie
+          schema: { type: boolean }
+        - name: verbose
+          in: query
           schema: { type: boolean }
       responses:
         "200":
@@ -124,6 +130,7 @@ paths:
               properties:
                 active: { type: boolean }
                 flags: { type: array, items: { type: boolean } }
+                refs: { $ref: "#/components/schemas/Flags" }
       responses:
         "200":
           description: ok
@@ -150,3 +157,4 @@ paths:
 components:
   schemas:
     Toggle: { type: boolean }
+    Flags: { type: array, items: { type: boolean } }

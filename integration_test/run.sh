@@ -1603,8 +1603,12 @@ fn header(entries: List(#(String, String))) {
 }
 
 fn cookie(value: String) {
+  cookie_and_query(value, [])
+}
+
+fn cookie_and_query(value: String, query: List(#(String, List(String)))) {
   let headers = dict.from_list([#("cookie", value)])
-  router.route(handlers.State, "GET", ["cookie"], dict.new(), headers, "")
+  router.route(handlers.State, "GET", ["cookie"], dict.from_list(query), headers, "")
 }
 
 fn deep(active: String) {
@@ -1670,6 +1674,8 @@ pub fn query_optional_bool_test() {
 pub fn query_optional_bool_array_test() {
   query([#("picks", ["true,false"])]) |> expect_ok("[False], None, Some([True, False]), None)")
   query([#("picks", ["true,ture"])]).status |> should.equal(400)
+  query([#("picks", [""])]).status |> should.equal(400)
+  query([#("picks", ["true,"])]).status |> should.equal(400)
 }
 
 pub fn query_optional_ref_bool_test() {
@@ -1678,9 +1684,10 @@ pub fn query_optional_ref_bool_test() {
 }
 
 pub fn header_bools_test() {
-  header([]) |> expect_ok("BoolHeaderRequest(True, [False], None, None, True)")
-  header([#("x-verbose", "false"), #("x-picks", "true, false")])
-  |> expect_ok("BoolHeaderRequest(True, [False], Some(False), Some([True, False]), True)")
+  header([]) |> expect_ok("BoolHeaderRequest(True, [False], None, None, True, None)")
+  header([#("x-verbose", "false"), #("x-picks", "true, false"), #("x-ref-flags", "false,true")])
+  |> expect_ok("BoolHeaderRequest(True, [False], Some(False), Some([True, False]), True, Some([False, True]))")
+  header([#("x-ref-flags", "true,yes")]).status |> should.equal(400)
   header([#("x-on", "1")]).status |> should.equal(400)
   header([#("x-ons", "true,yes")]).status |> should.equal(400)
   header([#("x-verbose", "")]).status |> should.equal(400)
@@ -1691,13 +1698,22 @@ pub fn header_bools_test() {
 }
 
 pub fn cookie_bools_test() {
-  cookie("on=false") |> expect_ok("BoolCookieRequest(False, None)")
-  cookie("on=true; verbose=true") |> expect_ok("BoolCookieRequest(True, Some(True))")
+  cookie("on=false") |> expect_ok("BoolCookieRequest(False, None, None)")
+  cookie("on=true; verbose=true") |> expect_ok("BoolCookieRequest(True, Some(True), None)")
   cookie("on=1").status |> should.equal(400)
   cookie("on=").status |> should.equal(400)
   cookie("on=TRUE").status |> should.equal(400)
   cookie("on=true; verbose=FALSE").status |> should.equal(400)
   cookie("on=true; verbose=yes").status |> should.equal(400)
+}
+
+// A query and a cookie parameter of the same name are read separately.
+pub fn cookie_and_query_of_the_same_name_test() {
+  cookie_and_query("on=true", [#("verbose", ["true"])])
+  |> expect_ok("BoolCookieRequest(True, None, Some(True))")
+  cookie_and_query("on=true; verbose=false", [])
+  |> expect_ok("BoolCookieRequest(True, Some(False), None)")
+  cookie_and_query("on=true", [#("verbose", ["yes"])]).status |> should.equal(400)
 }
 
 pub fn deep_object_optional_bool_test() {
@@ -1706,8 +1722,9 @@ pub fn deep_object_optional_bool_test() {
 }
 
 pub fn form_optional_bools_test() {
-  form("active=false&flags=true&flags=false")
-  |> expect_ok("(Some(False), Some([True, False]))")
+  form("active=false&flags=true&flags=false&refs=true")
+  |> expect_ok("(Some(False), Some([True, False]), Some([True]))")
+  form("refs=yes").status |> should.equal(400)
   form("active=maybe").status |> should.equal(400)
   form("flags=true&flags=nah").status |> should.equal(400)
   form("active=TRUE").status |> should.equal(400)

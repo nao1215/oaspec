@@ -20,25 +20,23 @@ pub type BoolShape {
   BoolList
 }
 
-/// The Bool shape of a parameter or field schema: a boolean (inline or
-/// through a `$ref`), or an inline array whose items are booleans. `None`
-/// for every other schema.
+/// The Bool shape of a parameter or field schema: a boolean, or an array
+/// whose items are booleans, inline or through a `$ref`. `None` for every
+/// other schema.
 pub fn bool_shape(
   schema_ref: Option(SchemaRef),
   ctx: Context,
 ) -> Option(BoolShape) {
-  case schema_ref {
-    Some(Inline(openapi.ArraySchema(items:, ..))) ->
-      case body_field_kind(items, ctx) == BodyFieldBool {
-        True -> Some(BoolList)
-        False -> None
-      }
-    Some(schema_ref) ->
-      case body_field_kind(schema_ref, ctx) == BodyFieldBool {
-        True -> Some(BoolScalar)
-        False -> None
-      }
-    None -> None
+  case schema_ref_body_field_kind(schema_ref, ctx) {
+    BodyFieldBool -> Some(BoolScalar)
+    BodyFieldBoolArray -> Some(BoolList)
+    BodyFieldUnknown
+    | BodyFieldString
+    | BodyFieldInt
+    | BodyFieldFloat
+    | BodyFieldStringArray
+    | BodyFieldIntArray
+    | BodyFieldFloatArray -> None
   }
 }
 
@@ -420,10 +418,10 @@ pub fn optional_bool_param_result_expr(
         True -> #("Ok(vs)", bool_list_result_expr("vs"))
         False -> #(
           "Ok(vs)",
+          // An empty item, as in `?picks=` or `?picks=true,`, is not a
+          // Bool, so it answers 400 as it does for a required list.
           bool_list_result_expr(
-            "vs |> list.flat_map(fn(v) { string.split(v, \""
-            <> delim
-            <> "\") }) |> list.filter(fn(s) { string.trim(s) != \"\" })",
+            "list.flat_map(vs, fn(v) { string.split(v, \"" <> delim <> "\") })",
           ),
         )
       }
