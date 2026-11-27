@@ -112,6 +112,13 @@ fn generate_decoders(
     True -> list.append(base_imports, ["gleam/list", "gleam/result"])
     False -> base_imports
   }
+  // A binary part of a multipart body record is read from base64.
+  let base_imports = case
+    schema_utils.schemas_have_multipart_bytes_field(schemas, ctx)
+  {
+    True -> ["gleam/bit_array", ..base_imports]
+    False -> base_imports
+  }
   let base_imports = case needs_types {
     True ->
       list.append(base_imports, [
@@ -514,7 +521,12 @@ fn generate_object_decoder(
       // as optional even if listed in required
       let is_write_only = schema_utils.schema_ref_is_write_only(prop_ref, ctx)
       let is_required = list.contains(required, prop_name) && !is_write_only
-      let field_decoder = schema_ref_to_decoder(prop_ref, name, prop_name, ctx)
+      let field_decoder = case
+        schema_utils.multipart_bytes_field(name, prop_ref, ctx)
+      {
+        Some(bytes) -> schema_dispatch.bytes_field_decoder(bytes)
+        None -> schema_ref_to_decoder(prop_ref, name, prop_name, ctx)
+      }
       let is_nullable_schema =
         schema_utils.schema_ref_is_nullable(prop_ref, ctx)
 

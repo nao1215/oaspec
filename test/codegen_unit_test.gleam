@@ -12,6 +12,7 @@ import oaspec/internal/codegen/decoders
 import oaspec/internal/codegen/encoders
 import oaspec/internal/codegen/ir_build
 import oaspec/internal/codegen/operation_ir
+import oaspec/internal/codegen/schema_utils
 import oaspec/internal/codegen/server as server_gen
 import oaspec/internal/codegen/server_request_decode
 import oaspec/internal/codegen/types as types_gen
@@ -705,7 +706,7 @@ pub fn client_request_is_deep_object_param_string_test() {
   |> should.be_false()
 }
 
-pub fn client_request_multipart_field_is_binary_true_test() {
+pub fn schema_utils_is_binary_string_true_test() {
   let ctx = test_helpers.make_minimal_ctx()
   let binary_schema =
     openapi.StringSchema(
@@ -716,13 +717,13 @@ pub fn client_request_multipart_field_is_binary_true_test() {
       max_length: None,
       pattern: None,
     )
-  client_request.multipart_field_is_binary(openapi.Inline(binary_schema), ctx)
+  schema_utils.is_binary_string(openapi.Inline(binary_schema), ctx)
   |> should.be_true()
 }
 
-pub fn client_request_multipart_field_is_binary_false_test() {
+pub fn schema_utils_is_binary_string_false_test() {
   let ctx = test_helpers.make_minimal_ctx()
-  client_request.multipart_field_is_binary(
+  schema_utils.is_binary_string(
     openapi.Inline(test_helpers.string_schema()),
     ctx,
   )

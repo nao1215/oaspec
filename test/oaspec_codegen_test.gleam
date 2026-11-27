@@ -84,6 +84,8 @@ pub fn guard_and_decoder_generation_test() {
   let _ = support.read_only_client_does_not_import_encode_case()
   let _ = support.router_parses_ref_and_array_path_parameters_case()
   let _ = support.multipart_ref_scalar_field_is_stringified_case()
+  let _ = support.multipart_binary_parts_are_sent_as_bytes_case()
+  let _ = support.multipart_binary_parts_are_bit_arrays_in_types_case()
   let _ = support.path_ref_array_parameters_are_stringified_case()
   let _ = support.guards_composite_validator_compiles_case()
   let _ = support.guards_optional_field_and_array_suffix_case()

@@ -39,6 +39,8 @@ pub fn server_param_and_body_codegen_test() {
   let _ = support.server_enum_params_decode_into_enum_case()
   let _ = support.server_cookie_param_float_case()
   let _ = support.server_multipart_array_field_codegen_case()
+  let _ = support.server_multipart_binary_parts_are_bytes_case()
+  let _ = support.server_multipart_text_body_reads_bytes_case()
   let _ = support.server_form_urlencoded_two_level_nesting_codegen_case()
 }
 

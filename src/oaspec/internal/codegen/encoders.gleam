@@ -123,6 +123,13 @@ fn generate_encoders(
       |> ensure_import(option_import_line)
     False -> base_imports
   }
+  // A binary part of a multipart body record is written as base64.
+  let base_imports = case
+    schema_utils.schemas_have_multipart_bytes_field(schemas, ctx)
+  {
+    True -> ["gleam/bit_array", ..base_imports]
+    False -> base_imports
+  }
   let imports = case needs_types {
     True ->
       list.append(base_imports, [
@@ -994,8 +1001,11 @@ fn schema_ref_to_json_encoder(
   prop_name: String,
   ctx: Context,
 ) -> String {
-  case ref {
-    Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
+  // A binary part of a multipart body record is written as base64.
+  case schema_utils.multipart_bytes_field(parent_name, ref, ctx), ref {
+    Some(bytes), _ ->
+      schema_dispatch.bytes_field_json_encoder_expr(bytes, value_expr)
+    None, Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
       let fn_name =
         "encode_"
         <> naming.to_snake_case(ir_build.inline_enum_type_name_for(
@@ -1006,7 +1016,7 @@ fn schema_ref_to_json_encoder(
         <> "_json"
       fn_name <> "(" <> value_expr <> ")"
     }
-    Inline(ArraySchema(items:, ..)) -> {
+    None, Inline(ArraySchema(items:, ..)) -> {
       // Array items skip the inline-enum encoder dispatch — the IR
       // collapses item types to bare primitives, so the encoder must
       // match.
@@ -1014,7 +1024,7 @@ fn schema_ref_to_json_encoder(
         json_encoder_fn_for_array_items(items, parent_name, prop_name, ctx)
       "json.array(" <> value_expr <> ", " <> inner_fn <> ")"
     }
-    _ -> schema_dispatch.json_encoder_expr(ref, value_expr)
+    None, _ -> schema_dispatch.json_encoder_expr(ref, value_expr)
   }
 }
 
@@ -1026,8 +1036,9 @@ fn schema_ref_to_json_encoder_fn(
   prop_name: String,
   ctx: Context,
 ) -> String {
-  case ref {
-    Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
+  case schema_utils.multipart_bytes_field(parent_name, ref, ctx), ref {
+    Some(bytes), _ -> schema_dispatch.bytes_field_json_encoder_fn(bytes)
+    None, Inline(StringSchema(enum_values:, ..)) if enum_values != [] -> {
       "encode_"
       <> naming.to_snake_case(ir_build.inline_enum_type_name_for(
         parent_name,
@@ -1036,12 +1047,12 @@ fn schema_ref_to_json_encoder_fn(
       ))
       <> "_json"
     }
-    Inline(ArraySchema(items:, ..)) -> {
+    None, Inline(ArraySchema(items:, ..)) -> {
       let inner =
         json_encoder_fn_for_array_items(items, parent_name, prop_name, ctx)
       "fn(items) { json.array(items, " <> inner <> ") }"
     }
-    _ -> schema_dispatch.json_encoder_fn(ref)
+    None, _ -> schema_dispatch.json_encoder_fn(ref)
   }
 }
 

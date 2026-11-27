@@ -43,6 +43,7 @@ pub opaque type Context {
     schema_cache: dict.Dict(String, Result(SchemaObject, resolver.ResolveError)),
     component_type_names: dict.Dict(String, Nil),
     operation_function_names: dict.Dict(String, Nil),
+    multipart_body_schemas: dict.Dict(String, Nil),
   )
 }
 
@@ -66,6 +67,7 @@ pub fn new(spec: OpenApiSpec(Resolved), config: Config) -> Context {
     schema_cache: build_schema_cache(spec),
     component_type_names: build_component_type_names(spec),
     operation_function_names: build_operation_function_names(analyzed),
+    multipart_body_schemas: build_multipart_body_schemas(spec, analyzed),
   )
 }
 
@@ -153,6 +155,55 @@ pub fn component_schemas(ctx: Context) -> List(#(String, SchemaRef)) {
         }
       })
     None -> []
+  }
+}
+
+/// Whether the component schema `name` is the object schema of a
+/// `multipart/form-data` request body. The `format: binary` properties of
+/// such a record are raw bytes (`BitArray`), not text.
+pub fn is_multipart_body_schema(ctx: Context, name: String) -> Bool {
+  dict.has_key(ctx.multipart_body_schemas, name)
+}
+
+fn build_multipart_body_schemas(
+  spec: OpenApiSpec(Resolved),
+  analyzed: List(AnalyzedOperation),
+) -> dict.Dict(String, Nil) {
+  let schemas = case spec.components {
+    Some(components) -> components.schemas
+    None -> dict.new()
+  }
+  list.fold(analyzed, dict.new(), fn(acc, entry) {
+    let body_schema = case entry.operation.request_body {
+      Some(openapi.Value(request_body)) ->
+        dict.get(request_body.content, "multipart/form-data")
+        |> option.from_result
+        |> option.then(fn(media_type) { media_type.schema })
+      _ -> None
+    }
+    case option.then(body_schema, object_component_name(schemas, _, 0)) {
+      Some(name) -> dict.insert(acc, name, Nil)
+      None -> acc
+    }
+  })
+}
+
+/// The component an object `$ref` ends at, following `$ref` aliases
+/// (`Upload: { $ref: UploadForm }`) a bounded number of times.
+fn object_component_name(
+  schemas: dict.Dict(String, SchemaRef),
+  schema_ref: SchemaRef,
+  depth: Int,
+) -> Option(String) {
+  case schema_ref {
+    Reference(name:, ..) if depth < 16 ->
+      case dict.get(schemas, name) {
+        Ok(Inline(openapi.ObjectSchema(..))) -> Some(name)
+        Ok(Reference(..) as next) ->
+          object_component_name(schemas, next, depth + 1)
+        _ -> None
+      }
+    _ -> None
   }
 }
 

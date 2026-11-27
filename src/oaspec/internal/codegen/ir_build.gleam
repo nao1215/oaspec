@@ -763,16 +763,27 @@ fn schema_type_decls(
         |> list.map(fn(pair) {
           let #(entry, field_name) = pair
           let #(prop_name, prop_ref) = entry
-          let field_type =
-            schema_ref_to_type_with_inline_enum(
-              prop_ref,
-              raw_name,
-              prop_name,
-              ctx,
-            )
           let is_required = list.contains(required, prop_name)
           let is_already_optional =
             schema_utils.schema_ref_is_nullable(prop_ref, ctx)
+          // A binary part of a multipart body is raw bytes; anywhere else
+          // a binary string stays a `String`.
+          let field_type = case
+            schema_utils.multipart_bytes_field(raw_name, prop_ref, ctx),
+            prop_ref,
+            is_already_optional
+          {
+            Some(bytes), Inline(_), True ->
+              "Option(" <> schema_dispatch.bytes_field_type(bytes) <> ")"
+            Some(bytes), _, _ -> schema_dispatch.bytes_field_type(bytes)
+            None, _, _ ->
+              schema_ref_to_type_with_inline_enum(
+                prop_ref,
+                raw_name,
+                prop_name,
+                ctx,
+              )
+          }
           // For an inline nullable schema, `field_type`
           // already includes the `Option(...)` wrapper (added inside
           // `schema_dispatch.schema_type`). For a $ref to a nullable

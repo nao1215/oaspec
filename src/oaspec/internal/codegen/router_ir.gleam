@@ -23,7 +23,8 @@ pub type RouterRequirements {
     has_form_urlencoded_body: Bool,
     has_multipart_body: Bool,
     has_binary_request_body: Bool,
-    needs_bit_array_import: Bool,
+    has_multipart_text_part: Bool,
+    has_text_arm_in_bytes_route: Bool,
     has_nested_form_urlencoded_body: Bool,
     needs_int: Bool,
     needs_float: Bool,
@@ -112,27 +113,37 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
       let context.AnalyzedOperation(_, operation, _, _) = op
       decode_helpers.operation_uses_multipart_body(operation)
     })
-  // When any operation declares
-  // `application/octet-stream` on its request body, the route
-  // function takes `body: BitArray` instead of `body: String` so
+  // When any operation declares `application/octet-stream` on its
+  // request body, or a multipart body with a `format: binary` part, the
+  // route function takes `body: BitArray` instead of `body: String` so
   // arbitrary binary payloads round-trip without being forced
   // through `bit_array.to_string`. Specs without any binary
   // request body keep the existing `body: String` signature.
   let has_binary_request_body =
     list.any(operations, fn(op) {
       let context.AnalyzedOperation(_, operation, _, _) = op
-      decode_helpers.operation_uses_octet_stream_body(operation)
+      decode_helpers.operation_reads_body_as_bytes(operation, ctx)
     })
-  // The route arms shadow `body` with the String conversion
-  // only for non-binary arms that actually have a request body.
-  // The `bit_array` / `result` imports are needed iff at least
-  // one such arm exists alongside a binary one.
-  let needs_bit_array_import =
+  let has_multipart_text_part =
+    list.any(operations, fn(op) {
+      let context.AnalyzedOperation(_, operation, _, _) = op
+      case operation.request_body {
+        Some(Value(rb)) ->
+          decode_helpers.request_body_uses_multipart(rb)
+          && decode_helpers.request_body_has_text_part(rb, ctx)
+        _ -> False
+      }
+    })
+  // In a `body: BitArray` route, the arms that read their body as text
+  // (every body that is neither octet-stream nor multipart) shadow `body`
+  // with `bit_array.to_string(body) |> result.unwrap("")`.
+  let has_text_arm_in_bytes_route =
     has_binary_request_body
     && list.any(operations, fn(op) {
       let context.AnalyzedOperation(_, operation, _, _) = op
       option.is_some(operation.request_body)
       && !decode_helpers.operation_uses_octet_stream_body(operation)
+      && !decode_helpers.operation_uses_multipart_body(operation)
     })
   let has_nested_form_urlencoded_body =
     list.any(operations, fn(op) {
@@ -397,7 +408,8 @@ pub fn analyze(ctx: Context) -> RouterRequirements {
     has_form_urlencoded_body: has_form_urlencoded_body,
     has_multipart_body: has_multipart_body,
     has_binary_request_body: has_binary_request_body,
-    needs_bit_array_import: needs_bit_array_import,
+    has_multipart_text_part: has_multipart_text_part,
+    has_text_arm_in_bytes_route: has_text_arm_in_bytes_route,
     has_nested_form_urlencoded_body: has_nested_form_urlencoded_body,
     needs_int: needs_int,
     needs_float: needs_float,
@@ -456,14 +468,19 @@ pub fn imports(requirements: RouterRequirements, ctx: Context) -> List(String) {
     True -> list.append(std_imports, ["gleam/dynamic"])
     False -> std_imports
   }
-  // When the route signature is `body: BitArray`
-  // and at least one non-binary arm exists, every non-binary
-  // arm shadows `body` with
-  // `bit_array.to_string(body) |> result.unwrap("")`, so both
-  // `gleam/bit_array` and `gleam/result` need to be imported.
-  // Pure-binary specs skip the imports to avoid unused warnings.
-  let std_imports = case requirements.needs_bit_array_import {
-    True -> list.append(std_imports, ["gleam/bit_array", "gleam/result"])
+  // A text arm of a `body: BitArray` route shadows `body` with
+  // `bit_array.to_string(body) |> result.unwrap("")`, and the multipart
+  // parser works on bytes, so they need `gleam/bit_array`; only the
+  // shadowing needs `gleam/result`. Other specs skip the imports to avoid
+  // unused warnings.
+  let std_imports = case
+    requirements.has_text_arm_in_bytes_route || requirements.has_multipart_body
+  {
+    True -> list.append(std_imports, ["gleam/bit_array"])
+    False -> std_imports
+  }
+  let std_imports = case requirements.has_text_arm_in_bytes_route {
+    True -> list.append(std_imports, ["gleam/result"])
     False -> std_imports
   }
 
