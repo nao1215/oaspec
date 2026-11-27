@@ -2469,3 +2469,13 @@ components:
   |> should.be_true()
   string.contains(types_file.content, "NoteKindText") |> should.be_true()
 }
+
+pub fn server_request_decode_enum_match_escapes_values_test() {
+  // An enum value with a quote or a backslash is a valid Gleam literal.
+  let expr =
+    server_request_decode.enum_match_result_expr("v", "Quote", [
+      "say \"hi\"", "back\\slash",
+    ])
+  assert string.contains(expr, "\"say \\\"hi\\\"\" -> Ok(types.QuoteSayHi)")
+  assert string.contains(expr, "\"back\\\\slash\" -> Ok(types.QuoteBackSlash)")
+}

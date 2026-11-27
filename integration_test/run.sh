@@ -1758,6 +1758,204 @@ rm -rf "$BOOL_PARAMS_DIR"
 info "Boolean parameter integration tests passed."
 
 # -------------------------------------------------------
+# Step 13b3: enum parameters and arrays of enum items
+# -------------------------------------------------------
+# Path, query, header and cookie parameters whose schema is a `$ref` to a
+# string enum, or an array of such items. The generated client and server
+# must compile on both targets, and the server must decode each item into
+# the enum type and answer 400 for a value that is not one of the enum's.
+info "Testing enum parameter decoding..."
+
+ENUM_PARAMS_DIR="$SCRIPT_DIR/enum_params_test"
+rm -rf "$ENUM_PARAMS_DIR"
+mkdir -p "$ENUM_PARAMS_DIR/src" "$ENUM_PARAMS_DIR/test"
+
+cat > "$ENUM_PARAMS_DIR/oaspec.yaml" << 'YAML_EOF'
+input: test/fixtures/server_enum_params.yaml
+mode: both
+output:
+  server: ./integration_test/enum_params_test/src/api
+  client: ./integration_test/enum_params_test/src/api_client
+package: api
+validate: false
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate --config="$ENUM_PARAMS_DIR/oaspec.yaml"
+
+cat > "$ENUM_PARAMS_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
+import api/request_types
+import api/response_types
+import gleam/string
+
+pub type State {
+  State
+}
+
+pub fn enum_path(state: State, req: request_types.EnumPathRequest) -> response_types.EnumPathResponse {
+  let _ = state
+  response_types.EnumPathResponseOk(string.inspect(req))
+}
+
+pub fn enum_query(state: State, req: request_types.EnumQueryRequest) -> response_types.EnumQueryResponse {
+  let _ = state
+  response_types.EnumQueryResponseOk(string.inspect(req))
+}
+
+pub fn enum_header(state: State, req: request_types.EnumHeaderRequest) -> response_types.EnumHeaderResponse {
+  let _ = state
+  response_types.EnumHeaderResponseOk(string.inspect(req))
+}
+
+pub fn enum_cookie(state: State, req: request_types.EnumCookieRequest) -> response_types.EnumCookieResponse {
+  let _ = state
+  response_types.EnumCookieResponseOk(string.inspect(req))
+}
+GLEAM_EOF
+
+cat > "$ENUM_PARAMS_DIR/gleam.toml" << 'TOML_EOF'
+name = "enum_params_test"
+version = "0.1.0"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
+oaspec = { path = "../.." }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$ENUM_PARAMS_DIR/src/enum_params_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cat > "$ENUM_PARAMS_DIR/test/enum_params_test_test.gleam" << 'GLEAM_EOF'
+// A `$ref` enum parameter, or an item of an array of them, decodes into
+// the enum type. A value that is not one of the enum's answers 400. The
+// handlers answer with the inspected request as a JSON string.
+
+import api/handlers
+import api/router
+import gleam/dict
+import gleam/string
+import gleeunit
+import gleeunit/should
+
+pub fn main() {
+  gleeunit.main()
+}
+
+fn body_text(response: router.ServerResponse) -> String {
+  case response.body {
+    router.TextBody(text) -> text
+    _ -> ""
+  }
+}
+
+fn expect_ok(response: router.ServerResponse, fragment: String) {
+  response.status |> should.equal(200)
+  string.contains(body_text(response), fragment) |> should.be_true()
+}
+
+fn path(kinds: String, modes: String, kind: String) {
+  router.route(handlers.State, "GET", ["path", kinds, modes, kind], dict.new(), dict.new(), "")
+}
+
+fn query(entries: List(#(String, List(String)))) {
+  let query =
+    dict.from_list([#("kinds", ["a"]), #("packed", ["b"]), #("piped", ["b|a"]), ..entries])
+  router.route(handlers.State, "GET", ["query"], query, dict.new(), "")
+}
+
+fn header(entries: List(#(String, String))) {
+  let headers =
+    dict.from_list([#("x-kinds", "a"), #("x-kind", "b"), ..entries])
+  router.route(handlers.State, "GET", ["header"], dict.new(), headers, "")
+}
+
+fn cookie(value: String) {
+  let headers = dict.from_list([#("cookie", value)])
+  router.route(handlers.State, "GET", ["cookie"], dict.new(), headers, "")
+}
+
+pub fn path_enum_items_test() {
+  path("a,b", "fast,slow", "b") |> expect_ok("EnumPathRequest([KindA, KindB], [")
+  path("a,b", "fast,slow", "b") |> expect_ok("slow")
+  path("b", "fast", "a") |> expect_ok("EnumPathRequest([KindB], [")
+  path("b", "fast", "a") |> expect_ok("], KindA)")
+}
+
+pub fn path_unknown_enum_item_returns_400_test() {
+  path("a,c", "fast", "a").status |> should.equal(400)
+  path("A", "fast", "a").status |> should.equal(400)
+  path("", "fast", "a").status |> should.equal(400)
+  path("a", "fast", "c").status |> should.equal(400)
+}
+
+pub fn query_required_enum_arrays_test() {
+  query([]) |> expect_ok("EnumQueryRequest([KindA], [KindB], [KindB, KindA], None, None, None)")
+  query([#("kinds", ["a", "b"]), #("packed", ["b,a"])])
+  |> expect_ok("EnumQueryRequest([KindA, KindB], [KindB, KindA], [KindB, KindA], None, None, None)")
+  query([#("kinds", ["a", "c"])]).status |> should.equal(400)
+  query([#("packed", ["b,c"])]).status |> should.equal(400)
+  // pipeDelimited defaults to explode: false, so one value carries the list.
+  query([#("piped", ["a|c"])]).status |> should.equal(400)
+}
+
+pub fn query_optional_enum_arrays_test() {
+  query([#("maybe_kinds", ["b", "a"]), #("maybe_packed", ["a,b"])])
+  |> expect_ok("[KindA], [KindB], [KindB, KindA], Some([KindB, KindA]), Some([KindA, KindB]), None)")
+  query([#("modes", ["fast"])]) |> expect_ok("[KindA], [KindB], [KindB, KindA], None, None, Some([")
+  query([#("maybe_kinds", ["a", "x"])]).status |> should.equal(400)
+  query([#("maybe_packed", ["a,x"])]).status |> should.equal(400)
+}
+
+pub fn header_enums_test() {
+  header([]) |> expect_ok("EnumHeaderRequest([KindA], KindB, None, None, None)")
+  header([#("x-kinds", "b, a"), #("x-maybe-kinds", "a,b"), #("x-maybe-kind", "a")])
+  |> expect_ok("EnumHeaderRequest([KindB, KindA], KindB, Some([KindA, KindB]), Some(KindA), None)")
+  header([#("x-kinds", "a,c")]).status |> should.equal(400)
+  header([#("x-kind", "c")]).status |> should.equal(400)
+  header([#("x-maybe-kinds", "a,c")]).status |> should.equal(400)
+}
+
+pub fn cookie_enums_test() {
+  cookie("kind=a") |> expect_ok("EnumCookieRequest(KindA, None)")
+  cookie("kind=b; maybe_kind=a") |> expect_ok("EnumCookieRequest(KindB, Some(KindA))")
+  cookie("kind=c").status |> should.equal(400)
+}
+GLEAM_EOF
+
+cd "$ENUM_PARAMS_DIR"
+gleam deps download
+
+verify_generated_format src/api
+verify_generated_format src/api_client
+for target in erlang javascript; do
+  if gleam build --target "$target" --warnings-as-errors 2>&1; then
+    info "PASS: Enum parameter code compiles on $target (warnings-as-errors)."
+  else
+    fail "Enum parameter code failed to compile on $target."
+  fi
+done
+
+if gleam test; then
+  info "PASS: Enum parameters decode into the enum type and reject other values."
+else
+  fail "Enum parameter integration tests failed."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$ENUM_PARAMS_DIR"
+
+info "Enum parameter integration tests passed."
+
+# -------------------------------------------------------
 # Step 13c: router variables do not collide with parameter variables
 # -------------------------------------------------------
 info "Testing router variable names against colliding parameter names..."
