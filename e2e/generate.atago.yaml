@@ -102,6 +102,44 @@ scenarios:
               - '_ -> False'
               - 'string.lowercase'
 
+  # A generated server bound the raw String of an array of enum items, or
+  # of a required enum header, to a field of the enum type, so it did not
+  # compile.
+  - name: generate makes the server decode enum parameters and arrays of enum items
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/server_enum_params.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml --mode=server
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+      - assert:
+          file:
+            path: project/generated/api/router.gleam
+            contains:
+              - 'list.try_map(string.split(kinds, ","), fn(item) {'
+              - '"a" -> Ok(types.KindA)'
+              - 'kinds: kinds_parsed,'
+              - 'kinds: kinds_raw_parsed_list,'
+              - 'x_kind: x_kind_raw_parsed,'
+              - 'Ok(x_maybe_kinds__header_checked) -> {'
+      - assert:
+          file:
+            path: project/generated/api/router.gleam
+            not_contains:
+              - 'kinds: string.split(kinds, ",")'
+              - 'x_kinds: x_kinds_raw,'
+
   - name: generate exits non-zero when the spec fails to parse
     steps:
       - fixture:

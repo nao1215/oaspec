@@ -181,8 +181,8 @@ pub fn body_field_kind_needs_float(kind: BodyFieldKind) -> Bool {
 
 /// Generate parse expression for a path parameter (already bound as String).
 /// Returns a safe expression that does not crash on invalid input.
-/// For types that need parsing (int, float, a string enum, a list of
-/// numbers), returns the raw `Result` so the router can wrap it in a
+/// For types that need parsing (int, float, bool, a string enum, a list of
+/// numbers, bools or enum items), returns the raw `Result` so the router can wrap it in a
 /// case expression that answers 400 on failure. A `$ref` schema is read
 /// through to its target, and an array is the `simple` style
 /// comma-separated list.
@@ -192,11 +192,14 @@ pub fn param_parse_expr(
   ctx: Context,
 ) -> String {
   let split = "string.split(" <> var_name <> ", \",\")"
-  case path_param_enum(param, ctx) {
-    Some(#(type_name, values)) ->
+  let schema_ref = spec.parameter_schema(param)
+  case path_param_enum(param, ctx), enum_array_items(schema_ref, ctx) {
+    Some(#(type_name, values)), _ ->
       enum_match_result_expr(var_name, type_name, values)
-    None ->
-      case schema_ref_body_field_kind(spec.parameter_schema(param), ctx) {
+    None, Some(#(type_name, values)) ->
+      enum_list_result_expr(split, type_name, values)
+    None, None ->
+      case schema_ref_body_field_kind(schema_ref, ctx) {
         BodyFieldInt -> "int.parse(" <> var_name <> ")"
         BodyFieldFloat -> "float.parse(" <> var_name <> ")"
         BodyFieldBool -> bool_result_expr(var_name)
@@ -215,6 +218,10 @@ pub fn param_needs_result_unwrap(
   param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> Bool {
+  use <- bool.guard(
+    option.is_some(enum_array_items(spec.parameter_schema(param), ctx)),
+    True,
+  )
   case path_param_enum(param, ctx) {
     Some(_) -> True
     None ->
@@ -384,17 +391,48 @@ pub fn bool_result_expr(value: String) -> String {
   <> " { \"true\" -> Ok(True) \"false\" -> Ok(False) _ -> Error(Nil) }"
 }
 
-/// For an optional Bool query, header or cookie parameter, the expression
-/// of type `Result(Option(Bool), Nil)` (or `Result(Option(List(Bool)), Nil)`)
-/// that reads it. A present value that is not `true` or `false` is
-/// `Error(Nil)`, which the router answers with 400. `None` for a parameter
-/// that is not a Bool.
-pub fn optional_bool_param_result_expr(
+/// How the router parses a present optional parameter that it checks
+/// before building the request.
+type CheckedParse {
+  /// One value: `parse` takes the String expression of the value.
+  CheckedValue(parse: fn(String) -> String)
+  /// A list: `parse_items` takes the `List(String)` expression of the items.
+  CheckedList(parse_items: fn(String) -> String)
+}
+
+/// The `CheckedParse` of a Bool, a list of Bools or a list of enum items.
+/// `None` for every other schema.
+fn optional_checked_parse(
+  schema_ref: Option(SchemaRef),
+  ctx: Context,
+) -> Option(CheckedParse) {
+  case bool_shape(schema_ref, ctx), enum_array_items(schema_ref, ctx) {
+    Some(BoolScalar), _ -> Some(CheckedValue(bool_result_expr))
+    Some(BoolList), _ -> Some(CheckedList(bool_list_result_expr))
+    None, Some(#(type_name, values)) ->
+      Some(
+        CheckedList(fn(items) {
+          enum_list_result_expr(items, type_name, values)
+        }),
+      )
+    None, None -> None
+  }
+}
+
+/// For an optional query, header or cookie parameter that is a Bool, a
+/// list of Bools or a list of enum items, the expression of type
+/// `Result(Option(T), Nil)` that reads it. A present value that does not
+/// parse, such as a Bool other than `true` or `false` or an item that is not
+/// one of the enum's values, is `Error(Nil)`, which the router answers with
+/// 400. `None` for every other parameter.
+pub fn optional_checked_param_result_expr(
   param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> Option(String) {
-  let schema_ref = spec.parameter_schema(param)
-  use shape <- option.then(bool_shape(schema_ref, ctx))
+  use checked <- option.then(optional_checked_parse(
+    spec.parameter_schema(param),
+    ctx,
+  ))
   // A query value is a list of every occurrence; a header or cookie value
   // is one String. A path parameter is always required.
   use #(lookup, multi) <- option.then(case param.in_ {
@@ -410,24 +448,24 @@ pub fn optional_bool_param_result_expr(
     openapi.InPath -> None
   })
   let delim = operation_ir.delimiter_for_style(param.style)
-  let #(present, parsed) = case shape, multi {
-    BoolScalar, True -> #("Ok([v, ..])", bool_result_expr("v"))
-    BoolScalar, False -> #("Ok(v)", bool_result_expr("v"))
-    BoolList, True ->
+  let #(present, parsed) = case checked, multi {
+    CheckedValue(parse), True -> #("Ok([v, ..])", parse("v"))
+    CheckedValue(parse), False -> #("Ok(v)", parse("v"))
+    CheckedList(parse_items), True ->
       case operation_ir.effective_explode(param) {
-        True -> #("Ok(vs)", bool_list_result_expr("vs"))
+        True -> #("Ok(vs)", parse_items("vs"))
         False -> #(
           "Ok(vs)",
-          // An empty item, as in `?picks=` or `?picks=true,`, is not a
-          // Bool, so it answers 400 as it does for a required list.
-          bool_list_result_expr(
+          // An empty item, as in `?picks=` or `?picks=true,`, does not
+          // parse, so it answers 400 as it does for a required list.
+          parse_items(
             "list.flat_map(vs, fn(v) { string.split(v, \"" <> delim <> "\") })",
           ),
         )
       }
-    BoolList, False -> #(
+    CheckedList(parse_items), False -> #(
       "Ok(v)",
-      bool_list_result_expr("string.split(v, \",\")"),
+      parse_items("string.split(v, \",\")"),
     )
   }
   Some(optional_checked_result_expr(lookup, present, parsed))
@@ -519,6 +557,11 @@ fn query_required_expr_with_schema(
   use <- bool.lazy_guard(bool_shape(schema_ref, ctx) == Some(BoolList), fn() {
     bound_var <> "_parsed_list"
   })
+  // Likewise an array of enum items.
+  use <- bool.lazy_guard(
+    option.is_some(enum_array_items(schema_ref, ctx)),
+    fn() { bound_var <> "_parsed_list" },
+  )
   case schema_ref {
     Some(Inline(openapi.ArraySchema(items: Inline(openapi.StringSchema(..)), ..))) ->
       case explode {
@@ -649,10 +692,8 @@ fn parameter_is_enum_ref(p: openapi.Parameter(Resolved), ctx: Context) -> Bool {
     | openapi.InCookie, Some(s)
     | openapi.InPath, Some(s)
     ->
-      case schema_ref_string_enum(s, ctx) {
-        Some(_) -> True
-        None -> False
-      }
+      option.is_some(schema_ref_string_enum(s, ctx))
+      || option.is_some(enum_array_items(Some(s), ctx))
     _, _ -> False
   }
 }
@@ -678,6 +719,33 @@ pub fn enum_match_result_expr(
     })
     |> string.join(" ")
   "case " <> bound_var <> " { " <> arms <> " _ -> Error(Nil) }"
+}
+
+/// The enum type name and values of an inline array schema whose items are
+/// a `$ref` to a string enum. `None` for every other schema.
+pub fn enum_array_items(
+  schema_ref: Option(SchemaRef),
+  ctx: Context,
+) -> Option(#(String, List(String))) {
+  case schema_ref {
+    Some(Inline(openapi.ArraySchema(items:, ..))) ->
+      schema_ref_string_enum(items, ctx)
+    _ -> None
+  }
+}
+
+/// `Result(List(types.<TypeName>), Nil)` for the `List(String)` expression
+/// `items`: every item, trimmed, must be one of the enum's `values`.
+pub fn enum_list_result_expr(
+  items: String,
+  type_name: String,
+  values: List(String),
+) -> String {
+  "list.try_map("
+  <> items
+  <> ", fn(item) { "
+  <> enum_match_result_expr("string.trim(item)", type_name, values)
+  <> " })"
 }
 
 /// Render the inline Gleam expression that converts a raw query-string
@@ -2096,9 +2164,16 @@ pub fn header_required_expr(
 pub fn header_optional_expr(
   key: String,
   param: openapi.Parameter(Resolved),
+  ctx: Context,
 ) -> String {
   let lookup = "dict.get(headers, \"" <> key <> "\")"
-  single_value_optional_expr(lookup, "v", "_", spec.parameter_schema(param))
+  single_value_optional_expr(
+    lookup,
+    "v",
+    "_",
+    spec.parameter_schema(param),
+    ctx,
+  )
 }
 
 /// Generate expression for a required cookie parameter.
@@ -2118,6 +2193,7 @@ pub fn cookie_required_expr(
 pub fn cookie_optional_expr(
   key: String,
   param: openapi.Parameter(Resolved),
+  ctx: Context,
 ) -> String {
   let lookup = "cookie_lookup(headers, \"" <> key <> "\")"
   single_value_optional_expr(
@@ -2125,6 +2201,7 @@ pub fn cookie_optional_expr(
     "v",
     "Error(_)",
     spec.parameter_schema(param),
+    ctx,
   )
 }
 
@@ -2149,6 +2226,15 @@ fn single_value_required_expr(
   use <- bool.lazy_guard(bool_shape(schema_ref, ctx) == Some(BoolList), fn() {
     bound_var <> "_parsed_list"
   })
+  // Likewise a `$ref` enum and an array of enum items.
+  use <- bool.lazy_guard(
+    option.is_some(enum_array_items(schema_ref, ctx)),
+    fn() { bound_var <> "_parsed_list" },
+  )
+  use <- bool.lazy_guard(
+    option.is_some(option.then(schema_ref, schema_ref_string_enum(_, ctx))),
+    fn() { bound_var <> "_parsed" },
+  )
   case schema_ref {
     Some(Inline(openapi.ArraySchema(items: Inline(openapi.StringSchema(..)), ..))) ->
       "list.map(string.split("
@@ -2170,6 +2256,30 @@ fn single_value_required_expr(
 
 /// Generate an optional expression for a source that returns a single value.
 fn single_value_optional_expr(
+  lookup: String,
+  var: String,
+  miss: String,
+  schema_ref: Option(SchemaRef),
+  ctx: Context,
+) -> String {
+  // A `$ref` string enum reads an unknown value as `None`, as an optional
+  // enum query parameter does.
+  case option.then(schema_ref, schema_ref_string_enum(_, ctx)) {
+    Some(#(type_name, values)) ->
+      "case "
+      <> lookup
+      <> " { Ok("
+      <> var
+      <> ") -> "
+      <> enum_match_option_expr(var, type_name, values)
+      <> " "
+      <> miss
+      <> " -> None }"
+    None -> single_value_optional_primitive_expr(lookup, var, miss, schema_ref)
+  }
+}
+
+fn single_value_optional_primitive_expr(
   lookup: String,
   var: String,
   miss: String,

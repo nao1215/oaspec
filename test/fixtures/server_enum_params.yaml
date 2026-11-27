@@ -1,0 +1,125 @@
+openapi: 3.0.3
+info:
+  title: Enum parameters
+  version: 1.0.0
+paths:
+  /path/{kinds}/{modes}/{kind}:
+    get:
+      operationId: enumPath
+      parameters:
+        - name: kinds
+          in: path
+          required: true
+          style: simple
+          schema:
+            type: array
+            items: { $ref: "#/components/schemas/Kind" }
+        - name: modes
+          in: path
+          required: true
+          schema:
+            type: array
+            items: { type: string, enum: [fast, slow] }
+        - name: kind
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/Kind" }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Echo" }
+  /query:
+    get:
+      operationId: enumQuery
+      parameters:
+        - name: kinds
+          in: query
+          required: true
+          schema:
+            type: array
+            items: { $ref: "#/components/schemas/Kind" }
+        - name: packed
+          in: query
+          required: true
+          explode: false
+          schema:
+            type: array
+            items: { $ref: "#/components/schemas/Kind" }
+        - name: maybe_kinds
+          in: query
+          schema:
+            type: array
+            items: { $ref: "#/components/schemas/Kind" }
+        - name: maybe_packed
+          in: query
+          explode: false
+          schema:
+            type: array
+            items: { $ref: "#/components/schemas/Kind" }
+        - name: modes
+          in: query
+          schema:
+            type: array
+            items: { type: string, enum: [fast, slow] }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Echo" }
+  /header:
+    get:
+      operationId: enumHeader
+      parameters:
+        - name: X-Kinds
+          in: header
+          required: true
+          schema:
+            type: array
+            items: { $ref: "#/components/schemas/Kind" }
+        - name: X-Kind
+          in: header
+          required: true
+          schema: { $ref: "#/components/schemas/Kind" }
+        - name: X-Maybe-Kinds
+          in: header
+          schema:
+            type: array
+            items: { $ref: "#/components/schemas/Kind" }
+        - name: X-Maybe-Kind
+          in: header
+          schema: { $ref: "#/components/schemas/Kind" }
+        - name: X-Modes
+          in: header
+          schema:
+            type: array
+            items: { type: string, enum: [fast, slow] }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Echo" }
+  /cookie:
+    get:
+      operationId: enumCookie
+      parameters:
+        - name: kind
+          in: cookie
+          required: true
+          schema: { $ref: "#/components/schemas/Kind" }
+        - name: maybe_kind
+          in: cookie
+          schema: { $ref: "#/components/schemas/Kind" }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Echo" }
+components:
+  schemas:
+    Kind: { type: string, enum: [a, b] }
+    Echo: { type: string }

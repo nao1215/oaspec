@@ -12455,6 +12455,62 @@ pub fn server_bool_params_reject_other_values_case() {
   |> should.be_true()
 }
 
+pub fn server_enum_params_decode_into_enum_case() {
+  // `$ref` enum parameters and arrays of `$ref` enum items in the path,
+  // query, headers and cookies. Each value is matched against the enum's
+  // values; a raw String never reaches a `types.Kind` field.
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/server_enum_params.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  let item_match =
+    "fn(item) { case string.trim(item) { \"a\" -> Ok(types.KindA) \"b\" -> Ok(types.KindB) _ -> Error(Nil) } }"
+  // Path: split on commas, then match each item.
+  string.contains(
+    content,
+    "list.try_map(string.split(kinds, \",\"), " <> item_match <> ")",
+  )
+  |> should.be_true()
+  string.contains(content, "kinds: string.split(kinds, \",\")")
+  |> should.be_false()
+  // Query, exploded and packed, and headers.
+  string.contains(content, "list.try_map(kinds_raw, " <> item_match <> ")")
+  |> should.be_true()
+  string.contains(
+    content,
+    "list.try_map(string.split(packed_raw, \",\"), " <> item_match <> ")",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "list.try_map(string.split(x_kinds_raw, \",\"), " <> item_match <> ")",
+  )
+  |> should.be_true()
+  list.each(
+    ["kinds: kinds_raw,", "packed: packed_raw,", "x_kinds: x_kinds_raw,"],
+    fn(raw_field) { string.contains(content, raw_field) |> should.be_false() },
+  )
+  // A required `$ref` enum header and cookie open the case they close.
+  string.contains(
+    content,
+    "case x_kind_raw { \"a\" -> Ok(types.KindA) \"b\" -> Ok(types.KindB) _ -> Error(Nil) } {",
+  )
+  |> should.be_true()
+  string.contains(
+    content,
+    "case kind_raw { \"a\" -> Ok(types.KindA) \"b\" -> Ok(types.KindB) _ -> Error(Nil) } {",
+  )
+  |> should.be_true()
+  // Optional arrays of enum items are checked before the request is built.
+  string.contains(content, "Ok(maybe_kinds__query_checked) ->")
+  |> should.be_true()
+  string.contains(content, "Ok(x_maybe_kinds__header_checked) ->")
+  |> should.be_true()
+}
+
 pub fn server_cookie_param_float_case() {
   let yaml =
     "
