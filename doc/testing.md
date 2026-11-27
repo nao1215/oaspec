@@ -40,4 +40,50 @@ The atago suites in `e2e/` run the escript: `init`, `generate`, `validate`, the 
 
 `gleam run -m metamon/mutation -- run` changes one operator, `!` or boolean literal in a module under `src/` at a time and runs `gleam test --target erlang` on each change; `gleam run -m metamon/mutation -- gate` then fails on a survivor that `doc/mutation/baseline.json` does not list, and `gleam run -m metamon/mutation -- baseline` records a full run as the baseline. `.github/workflows/mutation.yml` mutates the modules a pull request or push changes and runs the gate; the weekly run mutates every module in two parts. `just mutation` and `just mutation-record` run the same steps locally.
 
-There is no baseline yet. It will be recorded from the first full run on CI. Until then, pull requests and pushes mutate nothing, and the weekly and manual runs mutate every module without the gate.
+The baseline comes from the first full run on CI (2026-11-27, run 46076687779). To record a new one, download the `mutation-results` artifact of a weekly run to `build/mutation/results.json` and run `just mutation-record`, which also rewrites the table below. `just mutation` runs every module locally; a loaded machine can time out tests that pass on CI, so record the baseline from a CI run.
+
+<!-- mutation:start -->
+| Module | Killed | Lived | Timed out | Score |
+|---|---:|---:|---:|---:|
+| `oaspec/config` | 3 | 1 | 0 | 75.0% |
+| `oaspec/internal/cli` | 21 | 14 | 0 | 60.0% |
+| `oaspec/internal/codegen/client` | 12 | 2 | 0 | 85.7% |
+| `oaspec/internal/codegen/client_ir` | 67 | 91 | 0 | 42.4% |
+| `oaspec/internal/codegen/client_request` | 37 | 26 | 0 | 58.7% |
+| `oaspec/internal/codegen/codec_helpers` | 2 | 2 | 0 | 50.0% |
+| `oaspec/internal/codegen/context` | 2 | 2 | 0 | 50.0% |
+| `oaspec/internal/codegen/decoders` | 9 | 2 | 0 | 81.8% |
+| `oaspec/internal/codegen/encoders` | 28 | 9 | 0 | 75.7% |
+| `oaspec/internal/codegen/guards` | 29 | 36 | 0 | 44.6% |
+| `oaspec/internal/codegen/import_analysis` | 12 | 1 | 0 | 92.3% |
+| `oaspec/internal/codegen/ir_build` | 10 | 14 | 0 | 41.7% |
+| `oaspec/internal/codegen/operation_ir` | 5 | 1 | 0 | 83.3% |
+| `oaspec/internal/codegen/router_ir` | 62 | 35 | 0 | 63.9% |
+| `oaspec/internal/codegen/schema_dispatch` | 1 | 1 | 0 | 50.0% |
+| `oaspec/internal/codegen/schema_utils` | 19 | 15 | 0 | 55.9% |
+| `oaspec/internal/codegen/server` | 32 | 6 | 0 | 84.2% |
+| `oaspec/internal/codegen/server_request_decode` | 53 | 44 | 0 | 54.6% |
+| `oaspec/internal/codegen/validate` | 33 | 9 | 0 | 78.6% |
+| `oaspec/internal/codegen/writer` | 5 | 0 | 0 | 100.0% |
+| `oaspec/internal/config_check` | 9 | 3 | 0 | 75.0% |
+| `oaspec/internal/generate` | 1 | 0 | 0 | 100.0% |
+| `oaspec/internal/openapi/capability_check` | 0 | 3 | 0 | 0.0% |
+| `oaspec/internal/openapi/dedup` | 3 | 3 | 0 | 50.0% |
+| `oaspec/internal/openapi/diagnostic` | 3 | 1 | 0 | 75.0% |
+| `oaspec/internal/openapi/diagnostic_format` | 1 | 0 | 0 | 100.0% |
+| `oaspec/internal/openapi/external_loader` | 1 | 0 | 0 | 100.0% |
+| `oaspec/internal/openapi/external_loader_planner` | 8 | 0 | 0 | 100.0% |
+| `oaspec/internal/openapi/filter` | 7 | 3 | 0 | 70.0% |
+| `oaspec/internal/openapi/hoist` | 6 | 2 | 0 | 75.0% |
+| `oaspec/internal/openapi/normalize` | 2 | 15 | 0 | 11.8% |
+| `oaspec/internal/openapi/operations` | 1 | 0 | 0 | 100.0% |
+| `oaspec/internal/openapi/parser` | 56 | 21 | 2 | 73.4% |
+| `oaspec/internal/openapi/parser_schema` | 21 | 7 | 0 | 75.0% |
+| `oaspec/internal/openapi/schema` | 3 | 3 | 0 | 50.0% |
+| `oaspec/internal/progress` | 9 | 4 | 0 | 69.2% |
+| `oaspec/internal/util/content_type` | 9 | 0 | 0 | 100.0% |
+| `oaspec/internal/util/http` | 7 | 6 | 0 | 53.8% |
+| `oaspec/internal/util/naming` | 6 | 1 | 0 | 85.7% |
+| `oaspec/transport` | 16 | 0 | 0 | 100.0% |
+| all | 611 | 383 | 2 | 61.5% |
+<!-- mutation:end -->
