@@ -38,10 +38,6 @@ The atago suites in `e2e/` run the escript: `init`, `generate`, `validate`, the 
 
 ## Mutation testing
 
-Gleam has no mutation testing tool, so the score is measured by hand with a small script that changes one operator or branch result at a time (`==` and `!=`, `&&` and `||`, a dropped `!`, `-> True` and `-> False`) in a copy of the project and runs `gleam test` after each change. A mutant the suite still passes ("lived") points at a branch no test pins down. Score = killed / (killed + lived).
+`gleam run -m metamon/mutation -- run` changes one operator, `!` or boolean literal in a module under `src/` at a time and runs `gleam test --target erlang` on each change; `gleam run -m metamon/mutation -- gate` then fails on a survivor that `doc/mutation/baseline.json` does not list, and `gleam run -m metamon/mutation -- baseline` records a full run as the baseline. `.github/workflows/mutation.yml` mutates the modules a pull request or push changes and runs the gate; the weekly run mutates every module in two parts. `just mutation` and `just mutation-record` run the same steps locally.
 
-| Date | Modules | Killed | Lived | Score |
-|---|---|---|---|---|
-| 2026-11-19 | `codegen/router_ir`, `codegen/validate`, `codegen/guards`, `codegen/schema_utils`, `openapi/normalize`, `util/content_type`, `util/naming`, `util/http` | 126 | 106 | 54.3% |
-
-Most survivors are in predicates that decide whether a helper or an import is emitted (`router_ir.operations_have_response_header*`, `operation_needs_guard_validation`, the `schema_utils` checks) and in `normalize.has_type_specific_constraints`: flipping them changes generated code only for documents no test generates. A new run should not score lower, and those modules are where new tests pay off first.
+There is no baseline yet. It will be recorded from the first full run on CI. Until then, pull requests and pushes mutate nothing, and the weekly and manual runs mutate every module without the gate.
