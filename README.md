@@ -296,7 +296,7 @@ just bench
 | End-to-end tests and output snapshots | [Wrong exit codes, messages and file trees of the shipped escript](https://github.com/nao1215/oaspec/blob/main/doc/testing.md#end-to-end-tests-and-output-snapshots) |
 | Real documents | [Generated code that does not compile for large published documents](https://github.com/nao1215/oaspec/blob/main/doc/testing.md#real-documents) |
 | Paired CI benchmarks | [Slower start-up, validate and generate](https://github.com/nao1215/oaspec/blob/main/doc/testing.md#paired-ci-benchmarks) |
-| Mutation testing (local) | [Branches of the generator that no test pins down](https://github.com/nao1215/oaspec/blob/main/doc/testing.md#mutation-testing) |
+| Mutation testing | [Branches of the generator that no test pins down](https://github.com/nao1215/oaspec/blob/main/doc/testing.md#mutation-testing) |
 
 ## License
 

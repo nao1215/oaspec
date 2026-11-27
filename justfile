@@ -79,6 +79,16 @@ all: clean deps
   @echo ""
   @echo "All checks passed."
 
+# Mutation testing of every module, failing on survivors the baseline lacks.
+# Slow (about 1000 mutants): CI runs it weekly in 2 parts.
+mutation workers="8":
+  gleam run -m metamon/mutation -- run --workers {{workers}}
+  gleam run -m metamon/mutation -- gate
+
+# Record build/mutation/results.json as the baseline and refresh doc/testing.md
+mutation-record:
+  gleam run -m metamon/mutation -- baseline
+
 sync-check:
   bash scripts/check_sync.sh
 
