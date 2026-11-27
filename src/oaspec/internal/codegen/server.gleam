@@ -1039,12 +1039,8 @@ fn optional_checked_var(p: openapi.Parameter(Resolved)) -> String {
 /// scaffolding stays in sync with the value expression.
 fn query_param_explode_array(p: openapi.Parameter(Resolved)) -> Bool {
   case spec.parameter_schema(p) {
-    Some(openapi.Inline(openapi.ArraySchema(..))) -> {
-      case p.explode {
-        Some(False) -> False
-        _ -> True
-      }
-    }
+    Some(openapi.Inline(openapi.ArraySchema(..))) ->
+      operation_ir.effective_explode(p)
     _ -> False
   }
 }
@@ -1133,14 +1129,14 @@ fn array_int_parse_expr(
   p: openapi.Parameter(Resolved),
   delim: String,
 ) -> String {
-  case p.explode {
-    Some(False) ->
+  case operation_ir.effective_explode(p) {
+    False ->
       "list.try_map(list.map(string.split("
       <> raw_var
       <> ", \""
       <> delim
       <> "\"), string.trim), int.parse)"
-    _ -> "list.try_map(list.map(" <> raw_var <> ", string.trim), int.parse)"
+    True -> "list.try_map(list.map(" <> raw_var <> ", string.trim), int.parse)"
   }
 }
 
@@ -1149,14 +1145,15 @@ fn array_float_parse_expr(
   p: openapi.Parameter(Resolved),
   delim: String,
 ) -> String {
-  case p.explode {
-    Some(False) ->
+  case operation_ir.effective_explode(p) {
+    False ->
       "list.try_map(list.map(string.split("
       <> raw_var
       <> ", \""
       <> delim
       <> "\"), string.trim), float.parse)"
-    _ -> "list.try_map(list.map(" <> raw_var <> ", string.trim), float.parse)"
+    True ->
+      "list.try_map(list.map(" <> raw_var <> ", string.trim), float.parse)"
   }
 }
 

@@ -1868,7 +1868,7 @@ fn path(kinds: String, modes: String, kind: String) {
 
 fn query(entries: List(#(String, List(String)))) {
   let query =
-    dict.from_list([#("kinds", ["a"]), #("packed", ["b"]), ..entries])
+    dict.from_list([#("kinds", ["a"]), #("packed", ["b"]), #("piped", ["b|a"]), ..entries])
   router.route(handlers.State, "GET", ["query"], query, dict.new(), "")
 }
 
@@ -1898,17 +1898,19 @@ pub fn path_unknown_enum_item_returns_400_test() {
 }
 
 pub fn query_required_enum_arrays_test() {
-  query([]) |> expect_ok("EnumQueryRequest([KindA], [KindB], None, None, None)")
+  query([]) |> expect_ok("EnumQueryRequest([KindA], [KindB], [KindB, KindA], None, None, None)")
   query([#("kinds", ["a", "b"]), #("packed", ["b,a"])])
-  |> expect_ok("EnumQueryRequest([KindA, KindB], [KindB, KindA], None, None, None)")
+  |> expect_ok("EnumQueryRequest([KindA, KindB], [KindB, KindA], [KindB, KindA], None, None, None)")
   query([#("kinds", ["a", "c"])]).status |> should.equal(400)
   query([#("packed", ["b,c"])]).status |> should.equal(400)
+  // pipeDelimited defaults to explode: false, so one value carries the list.
+  query([#("piped", ["a|c"])]).status |> should.equal(400)
 }
 
 pub fn query_optional_enum_arrays_test() {
   query([#("maybe_kinds", ["b", "a"]), #("maybe_packed", ["a,b"])])
-  |> expect_ok("[KindA], [KindB], Some([KindB, KindA]), Some([KindA, KindB]), None)")
-  query([#("modes", ["fast"])]) |> expect_ok("[KindA], [KindB], None, None, Some([")
+  |> expect_ok("[KindA], [KindB], [KindB, KindA], Some([KindB, KindA]), Some([KindA, KindB]), None)")
+  query([#("modes", ["fast"])]) |> expect_ok("[KindA], [KindB], [KindB, KindA], None, None, Some([")
   query([#("maybe_kinds", ["a", "x"])]).status |> should.equal(400)
   query([#("maybe_packed", ["a,x"])]).status |> should.equal(400)
 }

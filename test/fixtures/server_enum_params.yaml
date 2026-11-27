@@ -47,6 +47,13 @@ paths:
           schema:
             type: array
             items: { $ref: "#/components/schemas/Kind" }
+        - name: piped
+          in: query
+          required: true
+          style: pipeDelimited
+          schema:
+            type: array
+            items: { $ref: "#/components/schemas/Kind" }
         - name: maybe_kinds
           in: query
           schema:

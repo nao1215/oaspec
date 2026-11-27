@@ -17,6 +17,7 @@ within `Changed` / `Fixed` and stay as-is.
 ### Fixed
 
 - A generated server compiles for a path, query or header parameter that is an array of `$ref` string enum items, and for a header or cookie parameter that is a `$ref` string enum. It bound the raw String to the enum-typed field, or for a required header or cookie opened no case for the one it closed. Each item is now matched against the enum's values, and a value that is not one of them answers 400, also for an optional array. An array of inline enum items stays `List(String)`, as an inline enum parameter is `String`.
+- A required query array parameter with `style: pipeDelimited` or `spaceDelimited` and no `explode` is read as one delimited value, the default for those styles, as the optional one already was. It was read as one item per occurrence, so `?ids=1|2` did not parse.
 - A generated server answers 400 for a Bool path, query, header or cookie parameter, or an item of a Bool array parameter, whose value is not `true` or `false`. It read every value other than `true` as `False`, so `?verbose=yes`, `?verbose=1` and `?verbose=` reached the handler as a valid request. Optional Bool fields of deepObject parameters and of form and multipart bodies follow the same rule, and a required header or cookie parameter whose schema is a `$ref` to a boolean now compiles.
 
 ## [0.74.1] - 2026-11-23

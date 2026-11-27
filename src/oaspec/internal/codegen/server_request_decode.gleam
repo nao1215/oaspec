@@ -3,6 +3,7 @@ import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import oaspec/internal/codegen/codec_helpers
 import oaspec/internal/codegen/context.{type Context}
 import oaspec/internal/codegen/ir_build
 import oaspec/internal/codegen/operation_ir
@@ -711,7 +712,7 @@ pub fn enum_match_result_expr(
     values
     |> list.map(fn(v) {
       "\""
-      <> v
+      <> codec_helpers.escape_for_string_literal(v)
       <> "\" -> Ok(types."
       <> type_name
       <> naming.to_pascal_case(v)
@@ -761,7 +762,7 @@ fn enum_match_option_expr(
     values
     |> list.map(fn(v) {
       "\""
-      <> v
+      <> codec_helpers.escape_for_string_literal(v)
       <> "\" -> Some(types."
       <> type_name
       <> naming.to_pascal_case(v)
