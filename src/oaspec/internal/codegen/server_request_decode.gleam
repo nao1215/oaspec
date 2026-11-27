@@ -14,11 +14,80 @@ import oaspec/openapi.{
   ObjectSchema, Reference, Typed, Unspecified, Untyped, Value,
 }
 
-/// Expression that case-insensitively parses a string to Bool.
-/// Accepts "true"/"True"/"TRUE" etc. as True, everything else as False.
-/// Generated clients send `true` / `false`.
-const bool_parse_expr =
-  "case string.lowercase(v) { \"true\" -> True _ -> False }"
+/// How a parameter carries a Bool: one value, or a list of them.
+pub type BoolShape {
+  BoolScalar
+  BoolList
+}
+
+/// The Bool shape of a parameter or field schema: a boolean, or an array
+/// whose items are booleans, inline or through a `$ref`. `None` for every
+/// other schema.
+pub fn bool_shape(
+  schema_ref: Option(SchemaRef),
+  ctx: Context,
+) -> Option(BoolShape) {
+  case schema_ref_body_field_kind(schema_ref, ctx) {
+    BodyFieldBool -> Some(BoolScalar)
+    BodyFieldBoolArray -> Some(BoolList)
+    BodyFieldUnknown
+    | BodyFieldString
+    | BodyFieldInt
+    | BodyFieldFloat
+    | BodyFieldStringArray
+    | BodyFieldIntArray
+    | BodyFieldFloatArray -> None
+  }
+}
+
+/// `Result(List(Bool), Nil)` for the `List(String)` expression `items`:
+/// every item, trimmed, must be `true` or `false`.
+pub fn bool_list_result_expr(items: String) -> String {
+  "list.try_map("
+  <> items
+  <> ", fn(item) { "
+  <> bool_result_expr("string.trim(item)")
+  <> " })"
+}
+
+/// `Result(Option(T), Nil)` for a value that may be absent: `Ok(None)` when
+/// `lookup` does not match `present`, the parsed value in `Some` when
+/// `parsed` is `Ok`, and `Error(Nil)` when a present value does not parse.
+fn optional_checked_result_expr(
+  lookup: String,
+  present: String,
+  parsed: String,
+) -> String {
+  "case "
+  <> lookup
+  <> " { "
+  <> present
+  <> " -> case "
+  <> parsed
+  <> " { Ok(value) -> Ok(Some(value)) _ -> Error(Nil) } _ -> Ok(None) }"
+}
+
+/// `Option(Bool)` for the String expression `value`, `None` when it is not
+/// `true` or `false`. The router checks every Bool it reads into a request
+/// before building it, so this only keeps the unchecked expressions total.
+fn bool_option_expr(value: String) -> String {
+  "case " <> bool_result_expr(value) <> " { Ok(b) -> Some(b) _ -> None }"
+}
+
+/// `List(Bool)` for the `List(String)` expression `items`, dropping the
+/// items that are not `true` or `false`. Like `bool_option_expr`, only
+/// reached where the router has not already checked the value.
+fn bool_list_filter_expr(items: String, trim: Bool) -> String {
+  let item = case trim {
+    True -> "string.trim(item)"
+    False -> "item"
+  }
+  "list.filter_map("
+  <> items
+  <> ", fn(item) { "
+  <> bool_result_expr(item)
+  <> " })"
+}
 
 type DeepObjectProperty {
   DeepObjectProperty(
@@ -130,20 +199,18 @@ pub fn param_parse_expr(
       case schema_ref_body_field_kind(spec.parameter_schema(param), ctx) {
         BodyFieldInt -> "int.parse(" <> var_name <> ")"
         BodyFieldFloat -> "float.parse(" <> var_name <> ")"
-        BodyFieldBool ->
-          "{ let v = " <> var_name <> " " <> bool_parse_expr <> " }"
+        BodyFieldBool -> bool_result_expr(var_name)
         BodyFieldStringArray -> split
         BodyFieldIntArray -> "list.try_map(" <> split <> ", int.parse)"
         BodyFieldFloatArray -> "list.try_map(" <> split <> ", float.parse)"
-        BodyFieldBoolArray ->
-          "list.map(" <> split <> ", fn(v) { " <> bool_parse_expr <> " })"
+        BodyFieldBoolArray -> bool_list_result_expr(split)
         BodyFieldString | BodyFieldUnknown -> var_name
       }
   }
 }
 
 /// Return true when the parse expression returns a Result that the router
-/// must unwrap. Bool and string params are always safe.
+/// must unwrap. Only string params are always safe.
 pub fn param_needs_result_unwrap(
   param: openapi.Parameter(Resolved),
   ctx: Context,
@@ -154,13 +221,11 @@ pub fn param_needs_result_unwrap(
       case schema_ref_body_field_kind(spec.parameter_schema(param), ctx) {
         BodyFieldInt
         | BodyFieldFloat
+        | BodyFieldBool
         | BodyFieldIntArray
-        | BodyFieldFloatArray -> True
-        BodyFieldBool
-        | BodyFieldBoolArray
-        | BodyFieldString
-        | BodyFieldStringArray
-        | BodyFieldUnknown -> False
+        | BodyFieldFloatArray
+        | BodyFieldBoolArray -> True
+        BodyFieldString | BodyFieldStringArray | BodyFieldUnknown -> False
       }
   }
 }
@@ -176,18 +241,21 @@ fn path_param_enum(
 }
 
 /// Whether the path parameter's parse expression calls into
-/// `gleam/string` (a Bool, or a list split on commas).
+/// `gleam/string` (a list split on commas).
 pub fn path_param_needs_string(
   param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> Bool {
   case schema_ref_body_field_kind(spec.parameter_schema(param), ctx) {
-    BodyFieldBool
-    | BodyFieldStringArray
+    BodyFieldStringArray
     | BodyFieldIntArray
     | BodyFieldFloatArray
     | BodyFieldBoolArray -> True
-    BodyFieldInt | BodyFieldFloat | BodyFieldString | BodyFieldUnknown -> False
+    BodyFieldBool
+    | BodyFieldInt
+    | BodyFieldFloat
+    | BodyFieldString
+    | BodyFieldUnknown -> False
   }
 }
 
@@ -305,12 +373,122 @@ fn required_field_case(
   }
 }
 
-/// `Ok(True)` / `Ok(False)` for `true` / `false` in any case, `Error(Nil)`
-/// for any other value of the String expression `value`.
-fn bool_result_expr(value: String) -> String {
-  "case string.lowercase("
+/// `Ok(True)` / `Ok(False)` for `true` / `false`, `Error(Nil)` for any
+/// other value of the String expression `value`, so that a value such as
+/// `TRUE`, `1`, `yes` or an empty string answers 400 instead of reading as
+/// False. OpenAPI and JSON Schema spell booleans in lowercase, and the
+/// generated client sends them that way.
+pub fn bool_result_expr(value: String) -> String {
+  "case "
   <> value
-  <> ") { \"true\" -> Ok(True) \"false\" -> Ok(False) _ -> Error(Nil) }"
+  <> " { \"true\" -> Ok(True) \"false\" -> Ok(False) _ -> Error(Nil) }"
+}
+
+/// For an optional Bool query, header or cookie parameter, the expression
+/// of type `Result(Option(Bool), Nil)` (or `Result(Option(List(Bool)), Nil)`)
+/// that reads it. A present value that is not `true` or `false` is
+/// `Error(Nil)`, which the router answers with 400. `None` for a parameter
+/// that is not a Bool.
+pub fn optional_bool_param_result_expr(
+  param: openapi.Parameter(Resolved),
+  ctx: Context,
+) -> Option(String) {
+  let schema_ref = spec.parameter_schema(param)
+  use shape <- option.then(bool_shape(schema_ref, ctx))
+  // A query value is a list of every occurrence; a header or cookie value
+  // is one String. A path parameter is always required.
+  use #(lookup, multi) <- option.then(case param.in_ {
+    openapi.InQuery ->
+      Some(#("dict.get(query, \"" <> param.name <> "\")", True))
+    openapi.InHeader ->
+      Some(#(
+        "dict.get(headers, \"" <> string.lowercase(param.name) <> "\")",
+        False,
+      ))
+    openapi.InCookie ->
+      Some(#("cookie_lookup(headers, \"" <> param.name <> "\")", False))
+    openapi.InPath -> None
+  })
+  let delim = operation_ir.delimiter_for_style(param.style)
+  let #(present, parsed) = case shape, multi {
+    BoolScalar, True -> #("Ok([v, ..])", bool_result_expr("v"))
+    BoolScalar, False -> #("Ok(v)", bool_result_expr("v"))
+    BoolList, True ->
+      case operation_ir.effective_explode(param) {
+        True -> #("Ok(vs)", bool_list_result_expr("vs"))
+        False -> #(
+          "Ok(vs)",
+          // An empty item, as in `?picks=` or `?picks=true,`, is not a
+          // Bool, so it answers 400 as it does for a required list.
+          bool_list_result_expr(
+            "list.flat_map(vs, fn(v) { string.split(v, \"" <> delim <> "\") })",
+          ),
+        )
+      }
+    BoolList, False -> #(
+      "Ok(v)",
+      bool_list_result_expr("string.split(v, \",\")"),
+    )
+  }
+  Some(optional_checked_result_expr(lookup, present, parsed))
+}
+
+/// Whether a deep-object, form or multipart field is read in a nested case
+/// that answers 400 when it does not parse: a required field, and an
+/// optional Bool field, whose value must be `true` or `false` when present.
+fn field_needs_check(
+  required: Bool,
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> Bool {
+  required || option.is_some(bool_shape(Some(schema_ref), ctx))
+}
+
+/// The nested case that binds a field for which `field_needs_check` holds.
+/// An optional field is bound as an `Option`.
+fn checked_field_case(
+  key: String,
+  source: String,
+  trim: Bool,
+  binding: String,
+  required: Bool,
+  schema_ref: SchemaRef,
+  ctx: Context,
+) -> #(String, String) {
+  case required {
+    True -> required_field_case(key, source, trim, binding, schema_ref, ctx)
+    False -> {
+      let lookup = "dict.get(" <> source <> ", \"" <> key <> "\")"
+      let item = case trim {
+        True -> "string.trim(item)"
+        False -> "item"
+      }
+      // `field_needs_check` holds, so an optional field is a Bool or a
+      // list of Bools.
+      let #(present, parsed) = case body_field_kind(schema_ref, ctx) {
+        BodyFieldBoolArray -> #(
+          "Ok(vs)",
+          "list.try_map(vs, fn(item) { " <> bool_result_expr(item) <> " })",
+        )
+        BodyFieldBool
+        | BodyFieldUnknown
+        | BodyFieldString
+        | BodyFieldInt
+        | BodyFieldFloat
+        | BodyFieldStringArray
+        | BodyFieldIntArray
+        | BodyFieldFloatArray -> #("Ok([v, ..])", bool_result_expr("v"))
+      }
+      #(
+        "case "
+          <> optional_checked_result_expr(lookup, present, parsed)
+          <> " { Ok("
+          <> binding
+          <> ") -> ",
+        " _ -> Error(Nil) }",
+      )
+    }
+  }
 }
 
 /// Wrap the record constructor `constructor` in the nested `cases` so it
@@ -333,6 +511,14 @@ fn query_required_expr_with_schema(
   ctx: Context,
 ) -> String {
   let delim = operation_ir.delimiter_for_style(style)
+  // The router parses a Bool parameter in its own case and binds the
+  // result (see `query_required_open_parse_case` in server.gleam).
+  use <- bool.lazy_guard(bool_shape(schema_ref, ctx) == Some(BoolScalar), fn() {
+    bound_var <> "_parsed"
+  })
+  use <- bool.lazy_guard(bool_shape(schema_ref, ctx) == Some(BoolList), fn() {
+    bound_var <> "_parsed_list"
+  })
   case schema_ref {
     Some(Inline(openapi.ArraySchema(items: Inline(openapi.StringSchema(..)), ..))) ->
       case explode {
@@ -354,30 +540,8 @@ fn query_required_expr_with_schema(
       bound_var <> "_parsed_list"
     Some(Inline(openapi.ArraySchema(items: Inline(openapi.NumberSchema(..)), ..))) ->
       bound_var <> "_parsed_list"
-    Some(Inline(openapi.ArraySchema(
-      items: Inline(openapi.BooleanSchema(..)),
-      ..,
-    ))) ->
-      case explode {
-        Some(False) ->
-          "list.map(string.split("
-          <> bound_var
-          <> ", \""
-          <> delim
-          <> "\"), fn(item) { let v = string.trim(item) "
-          <> bool_parse_expr
-          <> " })"
-        _ ->
-          "list.map("
-          <> bound_var
-          <> ", fn(item) { let v = string.trim(item) "
-          <> bool_parse_expr
-          <> " })"
-      }
     Some(Inline(openapi.IntegerSchema(..))) -> bound_var <> "_parsed"
     Some(Inline(openapi.NumberSchema(..))) -> bound_var <> "_parsed"
-    Some(Inline(openapi.BooleanSchema(..))) ->
-      "{ let v = " <> bound_var <> " " <> bool_parse_expr <> " }"
     Some(ref) ->
       case schema_ref_string_enum(ref, ctx) {
         // Required enum query params rely on the router-side
@@ -604,17 +768,20 @@ fn query_optional_expr_with_schema(
         Some(False) ->
           "case dict.get(query, \""
           <> key
-          <> "\") { Ok(vs) -> Some(vs |> list.flat_map(fn(v) { string.split(v, \""
-          <> delim
-          <> "\") }) |> list.filter(fn(s) { string.trim(s) != \"\" }) |> list.map(fn(item) { let v = string.trim(item) "
-          <> bool_parse_expr
-          <> " })) _ -> None }"
+          <> "\") { Ok(vs) -> Some("
+          <> bool_list_filter_expr(
+            "vs |> list.flat_map(fn(v) { string.split(v, \""
+              <> delim
+              <> "\") })",
+            True,
+          )
+          <> ") _ -> None }"
         _ ->
           "case dict.get(query, \""
           <> key
-          <> "\") { Ok(vs) -> Some(list.map(vs, fn(item) { let v = string.trim(item) "
-          <> bool_parse_expr
-          <> " })) _ -> None }"
+          <> "\") { Ok(vs) -> Some("
+          <> bool_list_filter_expr("vs", True)
+          <> ") _ -> None }"
       }
     Some(Inline(openapi.IntegerSchema(..))) ->
       "case dict.get(query, \""
@@ -627,9 +794,9 @@ fn query_optional_expr_with_schema(
     Some(Inline(openapi.BooleanSchema(..))) ->
       "case dict.get(query, \""
       <> key
-      <> "\") { Ok([v, ..]) -> Some("
-      <> bool_parse_expr
-      <> ") _ -> None }"
+      <> "\") { Ok([v, ..]) -> "
+      <> bool_option_expr("v")
+      <> " _ -> None }"
     Some(ref) ->
       case schema_ref_string_enum(ref, ctx) {
         Some(#(type_name, values)) -> {
@@ -660,9 +827,9 @@ fn query_optional_expr_with_schema(
             Some(BooleanScalar) ->
               "case dict.get(query, \""
               <> key
-              <> "\") { Ok([v, ..]) -> Some("
-              <> bool_parse_expr
-              <> ") _ -> None }"
+              <> "\") { Ok([v, ..]) -> "
+              <> bool_option_expr("v")
+              <> " _ -> None }"
             None ->
               "case dict.get(query, \""
               <> key
@@ -719,14 +886,23 @@ fn deep_object_type_name(
   }
 }
 
-/// True when the deep-object parameter has a required property, so the
-/// router must look it up into a Result and answer 400 when it is missing
-/// or does not parse.
-pub fn deep_object_has_required_properties(
+/// True when the deep-object parameter has a property that must be checked
+/// (see `field_needs_check`), so the router must look it up into a Result
+/// and answer 400 when it is missing or does not parse.
+pub fn deep_object_needs_check(
   param: openapi.Parameter(Resolved),
   ctx: Context,
 ) -> Bool {
-  list.any(deep_object_properties(param, ctx), fn(prop) { prop.required })
+  list.any(deep_object_properties(param, ctx), fn(prop) {
+    deep_object_property_needs_check(prop, ctx)
+  })
+}
+
+fn deep_object_property_needs_check(
+  prop: DeepObjectProperty,
+  ctx: Context,
+) -> Bool {
+  field_needs_check(prop.required, prop.schema_ref, ctx)
 }
 
 /// Expression of type `Result(T, Nil)` (or `Result(Option(T), Nil)` for an
@@ -799,13 +975,14 @@ fn deep_object_constructor_result_expr(
 ) -> String {
   let cases =
     deep_object_properties(param, ctx)
-    |> list.filter(fn(prop) { prop.required })
+    |> list.filter(fn(prop) { deep_object_property_needs_check(prop, ctx) })
     |> list.map(fn(prop) {
-      required_field_case(
+      checked_field_case(
         key <> "[" <> prop.name <> "]",
         "query",
         True,
         deep_object_binding(prop),
+        prop.required,
         prop.schema_ref,
         ctx,
       )
@@ -820,9 +997,9 @@ fn deep_object_binding(prop: DeepObjectProperty) -> String {
   "deep_" <> prop.field_name
 }
 
-/// Record constructor for the deep-object parameter. Required properties
-/// are read from the `deep_<field>` variables that
-/// `deep_object_constructor_result_expr` binds; optional ones are looked up
+/// Record constructor for the deep-object parameter. Properties that must
+/// be checked are read from the `deep_<field>` variables that
+/// `deep_object_constructor_result_expr` binds; the others are looked up
 /// inline.
 fn deep_object_constructor_expr(
   key: String,
@@ -834,7 +1011,7 @@ fn deep_object_constructor_expr(
     deep_object_properties(param, ctx)
     |> list.map(fn(prop) {
       let prop_key = key <> "[" <> prop.name <> "]"
-      let value_expr = case prop.required {
+      let value_expr = case deep_object_property_needs_check(prop, ctx) {
         True -> deep_object_binding(prop)
         False ->
           query_optional_expr_with_schema(
@@ -1201,7 +1378,8 @@ fn form_urlencoded_object_result_expr(
 }
 
 /// True when a field of the form object, at any nesting level, must be
-/// checked: a required primitive field, or a nested object that has one.
+/// checked: a primitive field for which `field_needs_check` holds, or a
+/// nested object that has one.
 fn form_urlencoded_properties_need_check(
   properties: List(DeepObjectProperty),
   ctx: Context,
@@ -1217,7 +1395,7 @@ fn form_urlencoded_properties_need_check(
           ctx,
           nesting_depth + 1,
         )
-      False -> prop.required
+      False -> field_needs_check(prop.required, prop.schema_ref, ctx)
     }
   })
 }
@@ -1275,7 +1453,10 @@ fn form_urlencoded_field_parts(
       ctx,
       nesting_depth + 1,
     )
-  case nested_checked, !is_object && prop.required {
+  case
+    nested_checked,
+    !is_object && field_needs_check(prop.required, prop.schema_ref, ctx)
+  {
     True, _ -> {
       let nested =
         form_urlencoded_object_result_expr(
@@ -1307,11 +1488,12 @@ fn form_urlencoded_field_parts(
     }
     False, True -> #(
       [
-        required_field_case(
+        checked_field_case(
           key,
           "form_body",
           True,
           binding,
+          prop.required,
           prop.schema_ref,
           ctx,
         ),
@@ -1320,7 +1502,7 @@ fn form_urlencoded_field_parts(
     )
     False, False -> {
       // Reached only for a nested object without a field to check or an
-      // optional primitive field.
+      // optional primitive field that is not a Bool.
       let value_expr = case is_object, prop.required {
         True, True ->
           form_urlencoded_object_required_expr(
@@ -1470,8 +1652,9 @@ fn multipart_body_constructor_expr(
 }
 
 /// The record constructor of a multipart body and the nested cases that
-/// bind every required field. A body without a required field has no
-/// cases, so its constructor can be used on its own.
+/// bind every field that must be checked (see `field_needs_check`). A body
+/// without such a field has no cases, so its constructor can be used on
+/// its own.
 fn multipart_body_parts(
   rb: openapi.RequestBody(Resolved),
   op_id: String,
@@ -1481,14 +1664,15 @@ fn multipart_body_parts(
     multipart_body_properties(rb, ctx)
     |> list.map(fn(prop) {
       let binding = "body_" <> prop.field_name
-      case prop.required {
+      case field_needs_check(prop.required, prop.schema_ref, ctx) {
         True -> #(
           [
-            required_field_case(
+            checked_field_case(
               prop.name,
               "multipart_body",
               False,
               binding,
+              prop.required,
               prop.schema_ref,
               ctx,
             ),
@@ -1560,7 +1744,7 @@ pub fn checked_body_result_expr(
         content_type.MultipartFormData ->
           case
             list.any(multipart_body_properties(rb, ctx), fn(prop) {
-              prop.required
+              field_needs_check(prop.required, prop.schema_ref, ctx)
             })
           {
             True -> {
@@ -1705,7 +1889,6 @@ fn form_urlencoded_properties_need(
 pub fn query_schema_needs_string(schema_ref: Option(SchemaRef)) -> Bool {
   case schema_ref {
     Some(Inline(openapi.ArraySchema(..))) -> True
-    Some(Inline(openapi.BooleanSchema(..))) -> True
     _ -> False
   }
 }
@@ -1849,9 +2032,9 @@ fn body_optional_expr_kind(
     BodyFieldBoolArray ->
       "case "
       <> lookup
-      <> " { Ok(vs) -> Some(list.map(vs, fn(item) { "
-      <> array_item_bool_parse(trim_items)
-      <> " })) "
+      <> " { Ok(vs) -> Some("
+      <> bool_list_filter_expr("vs", trim_items)
+      <> ") "
       <> miss
       <> " -> None }"
     BodyFieldInt ->
@@ -1869,9 +2052,9 @@ fn body_optional_expr_kind(
     BodyFieldBool ->
       "case "
       <> lookup
-      <> " { Ok([v, ..]) -> Some("
-      <> bool_parse_expr
-      <> ") "
+      <> " { Ok([v, ..]) -> "
+      <> bool_option_expr("v")
+      <> " "
       <> miss
       <> " -> None }"
     _ ->
@@ -1895,14 +2078,6 @@ fn array_item_float_parse(trim: Bool) -> String {
   "let trimmed = string.trim(item) case float.parse(trimmed) { Ok(n) -> n _ -> 0.0 }"
 }
 
-/// Parse expression for array items: bool, with optional trimming.
-fn array_item_bool_parse(trim: Bool) -> String {
-  case trim {
-    True -> "let v = string.trim(item) " <> bool_parse_expr
-    False -> "let v = item " <> bool_parse_expr
-  }
-}
-
 /// Generate expression for a required header parameter.
 ///
 /// `bound_var` is the raw header String the router has already pulled
@@ -1912,8 +2087,9 @@ fn array_item_bool_parse(trim: Bool) -> String {
 pub fn header_required_expr(
   bound_var: String,
   param: openapi.Parameter(Resolved),
+  ctx: Context,
 ) -> String {
-  single_value_required_expr(bound_var, spec.parameter_schema(param))
+  single_value_required_expr(bound_var, spec.parameter_schema(param), ctx)
 }
 
 /// Generate expression for an optional header parameter.
@@ -1933,8 +2109,9 @@ pub fn header_optional_expr(
 pub fn cookie_required_expr(
   bound_var: String,
   param: openapi.Parameter(Resolved),
+  ctx: Context,
 ) -> String {
-  single_value_required_expr(bound_var, spec.parameter_schema(param))
+  single_value_required_expr(bound_var, spec.parameter_schema(param), ctx)
 }
 
 /// Generate expression for an optional cookie parameter.
@@ -1962,7 +2139,16 @@ pub fn cookie_optional_expr(
 fn single_value_required_expr(
   bound_var: String,
   schema_ref: Option(SchemaRef),
+  ctx: Context,
 ) -> String {
+  // The router parses a Bool parameter in its own case and binds the
+  // result (see `single_value_required_open_parse_case` in server.gleam).
+  use <- bool.lazy_guard(bool_shape(schema_ref, ctx) == Some(BoolScalar), fn() {
+    bound_var <> "_parsed"
+  })
+  use <- bool.lazy_guard(bool_shape(schema_ref, ctx) == Some(BoolList), fn() {
+    bound_var <> "_parsed_list"
+  })
   case schema_ref {
     Some(Inline(openapi.ArraySchema(items: Inline(openapi.StringSchema(..)), ..))) ->
       "list.map(string.split("
@@ -1976,19 +2162,8 @@ fn single_value_required_expr(
       bound_var <> "_parsed_list"
     Some(Inline(openapi.ArraySchema(items: Inline(openapi.NumberSchema(..)), ..))) ->
       bound_var <> "_parsed_list"
-    Some(Inline(openapi.ArraySchema(
-      items: Inline(openapi.BooleanSchema(..)),
-      ..,
-    ))) ->
-      "list.map(string.split("
-      <> bound_var
-      <> ", \",\"), fn(item) { "
-      <> array_item_bool_parse(True)
-      <> " })"
     Some(Inline(openapi.IntegerSchema(..))) -> bound_var <> "_parsed"
     Some(Inline(openapi.NumberSchema(..))) -> bound_var <> "_parsed"
-    Some(Inline(openapi.BooleanSchema(..))) ->
-      "{ let v = " <> bound_var <> " " <> bool_parse_expr <> " }"
     _ -> bound_var
   }
 }
@@ -2046,11 +2221,9 @@ fn single_value_optional_expr(
       <> lookup
       <> " { Ok("
       <> var
-      <> ") -> Some(list.map(string.split("
-      <> var
-      <> ", \",\"), fn(item) { "
-      <> array_item_bool_parse(True)
-      <> " })) "
+      <> ") -> Some("
+      <> bool_list_filter_expr("string.split(" <> var <> ", \",\")", True)
+      <> ") "
       <> miss
       <> " -> None }"
     Some(Inline(openapi.IntegerSchema(..))) ->
@@ -2078,9 +2251,9 @@ fn single_value_optional_expr(
       <> lookup
       <> " { Ok("
       <> var
-      <> ") -> Some("
-      <> bool_parse_expr
-      <> ") "
+      <> ") -> "
+      <> bool_option_expr(var)
+      <> " "
       <> miss
       <> " -> None }"
     _ ->

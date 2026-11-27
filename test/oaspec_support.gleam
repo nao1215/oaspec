@@ -11087,12 +11087,11 @@ components:
   |> should.be_true()
 }
 
-// --- Bool parameter case-insensitive parsing tests ---
+// --- Bool parameter parsing tests ---
 
-pub fn server_bool_path_param_case_insensitive_case() {
-  // Server codegen should parse both "true"/"True" and "false"/"False" for bool params.
-  // Gleam's bool.to_string produces "True"/"False" (capitalized), so server must
-  // accept both cases to be compatible with the client.
+pub fn server_bool_path_param_lowercase_only_case() {
+  // OpenAPI spells booleans `true` / `false`, and the generated client
+  // sends them that way, so the server accepts only those two values.
   let yaml =
     "
 openapi: 3.0.3
@@ -11118,12 +11117,23 @@ paths:
   let assert Ok(router_file) =
     list.find(files, fn(f) { f.path == "router.gleam" })
   let content = router_file.content
-  // Must accept "true" and "True" as True (case-insensitive)
+  assert_bool_decode_rejects_other_values(content)
+}
+
+/// A generated router reads a Bool only from `true` / `false` and answers
+/// 400 for every other value, `TRUE` included; it never falls back to False.
+fn assert_bool_decode_rejects_other_values(content: String) -> Nil {
+  string.contains(content, "\"false\" -> Ok(False)")
+  |> should.be_true()
+  string.contains(content, "_ -> False }")
+  |> should.be_false()
   string.contains(content, "string.lowercase")
+  |> should.be_false()
+  string.contains(content, "status: 400")
   |> should.be_true()
 }
 
-pub fn server_bool_query_param_case_insensitive_case() {
+pub fn server_bool_query_param_lowercase_only_case() {
   let yaml =
     "
 openapi: 3.0.3
@@ -11149,9 +11159,7 @@ paths:
   let assert Ok(router_file) =
     list.find(files, fn(f) { f.path == "router.gleam" })
   let content = router_file.content
-  // Must accept "true"/"True" as True via case-insensitive comparison
-  string.contains(content, "string.lowercase")
-  |> should.be_true()
+  assert_bool_decode_rejects_other_values(content)
 }
 
 pub fn validate_non_json_request_body_unsupported_for_server_case() {
@@ -11347,7 +11355,7 @@ paths:
   |> should.be_true()
 }
 
-pub fn server_bool_optional_query_param_case_insensitive_case() {
+pub fn server_bool_optional_query_param_lowercase_only_case() {
   let yaml =
     "
 openapi: 3.0.3
@@ -11373,9 +11381,7 @@ paths:
   let assert Ok(router_file) =
     list.find(files, fn(f) { f.path == "router.gleam" })
   let content = router_file.content
-  // Must accept "true"/"True" as True via case-insensitive comparison
-  string.contains(content, "string.lowercase")
-  |> should.be_true()
+  assert_bool_decode_rejects_other_values(content)
 }
 
 pub fn server_float_path_param_parsed_case() {
@@ -11767,7 +11773,11 @@ paths:
   |> should.be_true()
   string.contains(content, "x_threshold: x_threshold_raw_parsed,")
   |> should.be_true()
-  string.contains(content, "x_enabled: case dict.get(headers, \"x-enabled\") {")
+  // An optional Bool header is read into a Result first, so a value other
+  // than true / false answers 400.
+  string.contains(content, "case case dict.get(headers, \"x-enabled\") {")
+  |> should.be_true()
+  string.contains(content, "x_enabled: x_enabled__header_checked,")
   |> should.be_true()
   // Issue #307: failure paths emit RFC 7807 Problem JSON, not plain text.
   string.contains(content, "status: 400") |> should.be_true()
@@ -11824,7 +11834,7 @@ pub fn server_header_array_params_are_parsed_case() {
   |> should.be_true()
   string.contains(
     content,
-    "x_flags: list.map(string.split(x_flags_raw, \",\"), fn(item) { let v = string.trim(item) case string.lowercase(v) { \"true\" -> True _ -> False } }),",
+    "case list.try_map(string.split(x_flags_raw, \",\"), fn(item) { case string.trim(item) { \"true\" -> Ok(True) \"false\" -> Ok(False) _ -> Error(Nil) } }) {",
   )
   |> should.be_true()
 }
@@ -11912,7 +11922,7 @@ pub fn server_deep_object_params_are_parsed_case() {
   |> should.be_false()
   string.contains(
     content,
-    "active: case dict.get(query, \"filter[active]\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
+    "case dict.get(query, \"filter[active]\") { Ok([v, ..]) -> case case v { \"true\" -> Ok(True) \"false\" -> Ok(False) _ -> Error(Nil) } { Ok(value) -> Ok(Some(value)) _ -> Error(Nil) } _ -> Ok(None) } { Ok(deep_active) -> ",
   )
   |> should.be_true()
   string.contains(
@@ -11927,10 +11937,14 @@ pub fn server_deep_object_params_are_parsed_case() {
   |> should.be_true()
   string.contains(content, "scores: deep_scores,")
   |> should.be_true()
+  // `options` has an optional Bool property, which must be true / false
+  // when present, so it is checked like a deep object with a required one.
   string.contains(
     content,
-    "options: case deep_object_present_any(query, \"options\")",
+    "let options__deep_result = case deep_object_present_any(query, \"options\")",
   )
+  |> should.be_true()
+  string.contains(content, "options: options__deep,")
   |> should.be_true()
   string.contains(
     content,
@@ -11939,7 +11953,7 @@ pub fn server_deep_object_params_are_parsed_case() {
   |> should.be_true()
   string.contains(
     content,
-    "enabled: case dict.get(query, \"options[enabled]\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
+    "case dict.get(query, \"options[enabled]\") { Ok([v, ..]) -> case case v { \"true\" -> Ok(True) \"false\" -> Ok(False) _ -> Error(Nil) } { Ok(value) -> Ok(Some(value)) _ -> Error(Nil) } _ -> Ok(None) } { Ok(deep_enabled) -> ",
   )
   |> should.be_true()
   // additional_properties field should call deep_object_additional_properties helper
@@ -12019,7 +12033,7 @@ pub fn server_form_urlencoded_body_is_parsed_case() {
   |> should.be_false()
   string.contains(
     content,
-    "active: case dict.get(form_body, \"active\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
+    "case dict.get(form_body, \"active\") { Ok([v, ..]) -> case case v { \"true\" -> Ok(True) \"false\" -> Ok(False) _ -> Error(Nil) } { Ok(value) -> Ok(Some(value)) _ -> Error(Nil) } _ -> Ok(None) } { Ok(body_active) -> ",
   )
   |> should.be_true()
   string.contains(
@@ -12121,7 +12135,7 @@ pub fn server_multipart_body_is_parsed_case() {
   |> should.be_true()
   string.contains(
     content,
-    "active: case dict.get(multipart_body, \"active\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
+    "case dict.get(multipart_body, \"active\") { Ok([v, ..]) -> case case v { \"true\" -> Ok(True) \"false\" -> Ok(False) _ -> Error(Nil) } { Ok(value) -> Ok(Some(value)) _ -> Error(Nil) } _ -> Ok(None) } { Ok(body_active) -> ",
   )
   |> should.be_true()
   string.contains(
@@ -12164,7 +12178,7 @@ pub fn server_form_urlencoded_ref_fields_are_parsed_case() {
 
   string.contains(
     content,
-    "active: case dict.get(form_body, \"active\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
+    "case dict.get(form_body, \"active\") { Ok([v, ..]) -> case case v { \"true\" -> Ok(True) \"false\" -> Ok(False) _ -> Error(Nil) } { Ok(value) -> Ok(Some(value)) _ -> Error(Nil) } _ -> Ok(None) } { Ok(body_active) -> ",
   )
   |> should.be_true()
   string.contains(
@@ -12190,7 +12204,7 @@ pub fn server_form_urlencoded_ref_fields_are_parsed_case() {
   |> should.be_true()
   string.contains(
     content,
-    "enabled: case dict.get(form_body, \"profile[enabled]\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
+    "case dict.get(form_body, \"profile[enabled]\") { Ok([v, ..]) -> case case v { \"true\" -> Ok(True) \"false\" -> Ok(False) _ -> Error(Nil) } { Ok(value) -> Ok(Some(value)) _ -> Error(Nil) } _ -> Ok(None) } { Ok(body_enabled) -> ",
   )
   |> should.be_true()
 }
@@ -12216,7 +12230,7 @@ pub fn server_multipart_ref_fields_are_parsed_case() {
 
   string.contains(
     content,
-    "active: case dict.get(multipart_body, \"active\") { Ok([v, ..]) -> Some(case string.lowercase(v) { \"true\" -> True _ -> False }) _ -> None }",
+    "case dict.get(multipart_body, \"active\") { Ok([v, ..]) -> case case v { \"true\" -> Ok(True) \"false\" -> Ok(False) _ -> Error(Nil) } { Ok(value) -> Ok(Some(value)) _ -> Error(Nil) } _ -> Ok(None) } { Ok(body_active) -> ",
   )
   |> should.be_true()
   string.contains(
@@ -12418,10 +12432,26 @@ paths:
   let assert Ok(router_file) =
     list.find(files, fn(f) { f.path == "router.gleam" })
   let content = router_file.content
-  // Boolean cookie should use case-insensitive bool parsing
   string.contains(content, "cookie_lookup(headers, \"dark_mode\")")
   |> should.be_true()
-  string.contains(content, "string.lowercase")
+  assert_bool_decode_rejects_other_values(content)
+}
+
+pub fn server_bool_params_reject_other_values_case() {
+  // Every Bool parameter and optional Bool body field of the fixture,
+  // required or optional, scalar or array, in each location.
+  let assert Ok(spec) =
+    parser.parse_file("test/fixtures/server_bool_params.yaml")
+  let ctx = make_ctx_from_spec(spec)
+  let files = server_gen.generate(ctx)
+  let assert Ok(router_file) =
+    list.find(files, fn(f) { f.path == "router.gleam" })
+  let content = router_file.content
+  assert_bool_decode_rejects_other_values(content)
+  // Optional Bool parameters are checked before the request is built.
+  string.contains(content, "Ok(verbose__query_checked) ->")
+  |> should.be_true()
+  string.contains(content, "Ok(x_picks__header_checked) ->")
   |> should.be_true()
 }
 

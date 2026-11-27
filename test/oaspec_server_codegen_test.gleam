@@ -10,11 +10,11 @@ import oaspec_support as support
 import test_helpers
 
 pub fn server_param_and_body_codegen_test() {
-  let _ = support.server_bool_path_param_case_insensitive_case()
-  let _ = support.server_bool_query_param_case_insensitive_case()
+  let _ = support.server_bool_path_param_lowercase_only_case()
+  let _ = support.server_bool_query_param_lowercase_only_case()
   let _ = support.server_header_param_name_lowercased_case()
   let _ = support.server_optional_header_param_name_lowercased_case()
-  let _ = support.server_bool_optional_query_param_case_insensitive_case()
+  let _ = support.server_bool_optional_query_param_lowercase_only_case()
   let _ = support.server_float_path_param_parsed_case()
   let _ =
     support.server_cookie_params_are_generated_without_todo_placeholders_case()
@@ -35,6 +35,7 @@ pub fn server_param_and_body_codegen_test() {
   let _ = support.server_cookie_param_optional_string_case()
   let _ = support.server_cookie_param_integer_case()
   let _ = support.server_cookie_param_boolean_case()
+  let _ = support.server_bool_params_reject_other_values_case()
   let _ = support.server_cookie_param_float_case()
   let _ = support.server_multipart_array_field_codegen_case()
   let _ = support.server_form_urlencoded_two_level_nesting_codegen_case()

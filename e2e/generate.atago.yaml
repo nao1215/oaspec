@@ -66,6 +66,42 @@ scenarios:
               - field_in_non_recursive
               - field_in_recursive
 
+  # A generated server read every Bool parameter other than true as False,
+  # so `?verbose=yes` reached the handler as a valid request.
+  - name: generate makes the server answer 400 for a Bool that is not lowercase true or false
+    steps:
+      - fixture:
+          file: project/openapi.yaml
+          from: ../test/fixtures/server_bool_params.yaml
+      - fixture:
+          file: project/oaspec.yaml
+          content: |
+            input: ./openapi.yaml
+            package: api
+            output:
+              dir: ./generated
+      - run:
+          command: ${env:OASPEC_BIN} generate --config=oaspec.yaml --mode=server
+          cwd: project
+          sandbox_home: true
+      - assert:
+          exit_code: 0
+      - assert:
+          file:
+            path: project/generated/api/router.gleam
+            contains:
+              - '"false" -> Ok(False)'
+              - 'Ok(verbose__query_checked) -> {'
+              - 'verbose: verbose__query_checked,'
+              - 'title\":\"invalid query parameter'
+      - assert:
+          file:
+            path: project/generated/api/router.gleam
+            not_contains:
+              - '"true" -> True'
+              - '_ -> False'
+              - 'string.lowercase'
+
   - name: generate exits non-zero when the spec fails to parse
     steps:
       - fixture:

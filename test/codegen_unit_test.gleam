@@ -258,10 +258,11 @@ pub fn server_request_decode_schema_ref_body_field_kind_none_test() {
 }
 
 pub fn server_request_decode_query_schema_needs_string_test() {
+  // A Bool is matched against `true` / `false` without `gleam/string`.
   server_request_decode.query_schema_needs_string(
     Some(openapi.Inline(test_helpers.bool_schema())),
   )
-  |> should.be_true()
+  |> should.be_false()
   server_request_decode.query_schema_needs_string(
     Some(openapi.Inline(test_helpers.string_schema())),
   )
@@ -373,7 +374,12 @@ pub fn server_request_decode_query_required_expr_bool_has_no_let_assert_test() {
 pub fn server_request_decode_header_required_expr_int_returns_bound_var_test() {
   let param =
     test_helpers.simple_param("X-Limit", True, test_helpers.int_schema())
-  let expr = server_request_decode.header_required_expr("x_limit_raw", param)
+  let expr =
+    server_request_decode.header_required_expr(
+      "x_limit_raw",
+      param,
+      test_helpers.make_minimal_ctx(),
+    )
   expr |> should.equal("x_limit_raw_parsed")
   string.contains(expr, "let assert") |> should.be_false()
 }
@@ -381,14 +387,24 @@ pub fn server_request_decode_header_required_expr_int_returns_bound_var_test() {
 pub fn server_request_decode_header_required_expr_string_has_no_let_assert_test() {
   let param =
     test_helpers.simple_param("X-Trace", True, test_helpers.string_schema())
-  let expr = server_request_decode.header_required_expr("x_trace_raw", param)
+  let expr =
+    server_request_decode.header_required_expr(
+      "x_trace_raw",
+      param,
+      test_helpers.make_minimal_ctx(),
+    )
   expr |> should.equal("x_trace_raw")
 }
 
 pub fn server_request_decode_cookie_required_expr_string_returns_bound_var_test() {
   let param =
     test_helpers.simple_param("session", True, test_helpers.string_schema())
-  let expr = server_request_decode.cookie_required_expr("session_raw", param)
+  let expr =
+    server_request_decode.cookie_required_expr(
+      "session_raw",
+      param,
+      test_helpers.make_minimal_ctx(),
+    )
   expr |> should.equal("session_raw")
   string.contains(expr, "let assert") |> should.be_false()
 }
@@ -396,7 +412,12 @@ pub fn server_request_decode_cookie_required_expr_string_returns_bound_var_test(
 pub fn server_request_decode_cookie_required_expr_int_returns_bound_var_test() {
   let param =
     test_helpers.simple_param("page_size", True, test_helpers.int_schema())
-  let expr = server_request_decode.cookie_required_expr("page_size_raw", param)
+  let expr =
+    server_request_decode.cookie_required_expr(
+      "page_size_raw",
+      param,
+      test_helpers.make_minimal_ctx(),
+    )
   expr |> should.equal("page_size_raw_parsed")
   string.contains(expr, "let assert") |> should.be_false()
 }

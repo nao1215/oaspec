@@ -1383,8 +1383,8 @@ pub fn main() {
 GLEAM_EOF
 
 cat > "$BOOL_DIR/test/required_bool_test_test.gleam" << 'GLEAM_EOF'
-// A required boolean field accepts true / false in any case and answers
-// 400 for any other value instead of reading it as False.
+// A required boolean field accepts only true / false and answers 400 for
+// any other value, TRUE included, instead of reading it as False.
 
 import api/handlers
 import api/router
@@ -1408,7 +1408,11 @@ fn submit(body: String) {
 }
 
 pub fn deep_object_true_returns_200_test() {
-  search("TRUE").status |> should.equal(200)
+  search("true").status |> should.equal(200)
+}
+
+pub fn deep_object_uppercase_bool_returns_400_test() {
+  search("TRUE").status |> should.equal(400)
 }
 
 pub fn deep_object_false_returns_200_test() {
@@ -1420,7 +1424,11 @@ pub fn deep_object_unparseable_bool_returns_400_test() {
 }
 
 pub fn form_bools_return_200_test() {
-  submit("active=true&flags=false&flags=True").status |> should.equal(200)
+  submit("active=true&flags=false&flags=true").status |> should.equal(200)
+}
+
+pub fn form_capitalised_bool_array_item_returns_400_test() {
+  submit("active=true&flags=false&flags=True").status |> should.equal(400)
 }
 
 pub fn form_unparseable_bool_returns_400_test() {
@@ -1452,6 +1460,302 @@ cd "$PROJECT_ROOT"
 rm -rf "$BOOL_DIR"
 
 info "Required boolean integration tests passed."
+
+# -------------------------------------------------------
+# Step 13b2: boolean parameters and optional boolean fields reject values
+# other than true / false
+# -------------------------------------------------------
+# Path, query, header and cookie parameters, required and optional,
+# scalar and array, plus optional deepObject, form and multipart fields.
+# The handlers echo the decoded request so the tests also see which Bool
+# each accepted value became.
+info "Testing boolean parameter decoding..."
+
+BOOL_PARAMS_DIR="$SCRIPT_DIR/bool_params_test"
+rm -rf "$BOOL_PARAMS_DIR"
+mkdir -p "$BOOL_PARAMS_DIR/src/api" "$BOOL_PARAMS_DIR/test"
+
+cat > "$BOOL_PARAMS_DIR/oaspec.yaml" << 'YAML_EOF'
+input: test/fixtures/server_bool_params.yaml
+output:
+  server: ./integration_test/bool_params_test/src/api
+package: api
+validate: false
+YAML_EOF
+
+cd "$PROJECT_ROOT"
+
+gleam run -- generate \
+  --config="$BOOL_PARAMS_DIR/oaspec.yaml" \
+  --mode=server
+
+cat > "$BOOL_PARAMS_DIR/src/api/handlers.gleam" << 'GLEAM_EOF'
+import api/request_types
+import api/response_types
+import gleam/string
+
+pub type State {
+  State
+}
+
+pub fn bool_path(state: State, req: request_types.BoolPathRequest) -> response_types.BoolPathResponse {
+  let _ = state
+  response_types.BoolPathResponseOk(string.inspect(req))
+}
+
+pub fn bool_query(state: State, req: request_types.BoolQueryRequest) -> response_types.BoolQueryResponse {
+  let _ = state
+  response_types.BoolQueryResponseOk(string.inspect(req))
+}
+
+pub fn bool_header(state: State, req: request_types.BoolHeaderRequest) -> response_types.BoolHeaderResponse {
+  let _ = state
+  response_types.BoolHeaderResponseOk(string.inspect(req))
+}
+
+pub fn bool_cookie(state: State, req: request_types.BoolCookieRequest) -> response_types.BoolCookieResponse {
+  let _ = state
+  response_types.BoolCookieResponseOk(string.inspect(req))
+}
+
+pub fn bool_deep(state: State, req: request_types.BoolDeepRequest) -> response_types.BoolDeepResponse {
+  let _ = state
+  response_types.BoolDeepResponseOk(string.inspect(req))
+}
+
+pub fn bool_form(state: State, req: request_types.BoolFormRequest) -> response_types.BoolFormResponse {
+  let _ = state
+  response_types.BoolFormResponseOk(string.inspect(req))
+}
+
+pub fn bool_multipart(state: State, req: request_types.BoolMultipartRequest) -> response_types.BoolMultipartResponse {
+  let _ = state
+  response_types.BoolMultipartResponseOk(string.inspect(req))
+}
+GLEAM_EOF
+
+cat > "$BOOL_PARAMS_DIR/gleam.toml" << 'TOML_EOF'
+name = "bool_params_test"
+version = "0.1.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+TOML_EOF
+
+cat > "$BOOL_PARAMS_DIR/src/bool_params_test.gleam" << 'GLEAM_EOF'
+pub fn main() {
+  Nil
+}
+GLEAM_EOF
+
+cat > "$BOOL_PARAMS_DIR/test/bool_params_test_test.gleam" << 'GLEAM_EOF'
+// A Bool value accepts only true / false. Any other value, such as "TRUE",
+// "1", "yes", "ture" or an empty string, answers 400 instead of reaching
+// the handler as False.
+
+import api/handlers
+import api/router
+import gleam/dict
+import gleam/string
+import gleeunit
+import gleeunit/should
+
+pub fn main() {
+  gleeunit.main()
+}
+
+fn body_text(response: router.ServerResponse) -> String {
+  case response.body {
+    router.TextBody(text) -> text
+    _ -> ""
+  }
+}
+
+fn expect_ok(response: router.ServerResponse, fragment: String) {
+  response.status |> should.equal(200)
+  string.contains(body_text(response), fragment) |> should.be_true()
+}
+
+fn path(on: String, ons: String) {
+  router.route(handlers.State, "GET", ["path", on, ons], dict.new(), dict.new(), "")
+}
+
+fn query(entries: List(#(String, List(String)))) {
+  let query =
+    dict.from_list([#("on", ["true"]), #("ons", ["false"]), ..entries])
+  router.route(handlers.State, "GET", ["query"], query, dict.new(), "")
+}
+
+fn header(entries: List(#(String, String))) {
+  let headers =
+    dict.from_list([
+      #("x-on", "true"),
+      #("x-ons", "false"),
+      #("x-toggle", "true"),
+      ..entries
+    ])
+  router.route(handlers.State, "GET", ["header"], dict.new(), headers, "")
+}
+
+fn cookie(value: String) {
+  cookie_and_query(value, [])
+}
+
+fn cookie_and_query(value: String, query: List(#(String, List(String)))) {
+  let headers = dict.from_list([#("cookie", value)])
+  router.route(handlers.State, "GET", ["cookie"], dict.from_list(query), headers, "")
+}
+
+fn deep(active: String) {
+  let query = dict.from_list([#("filter[active]", [active])])
+  router.route(handlers.State, "GET", ["deep"], query, dict.new(), "")
+}
+
+fn form(body: String) {
+  let headers =
+    dict.from_list([#("content-type", "application/x-www-form-urlencoded")])
+  router.route(handlers.State, "POST", ["form"], dict.new(), headers, body)
+}
+
+fn multipart(active: String) {
+  let headers =
+    dict.from_list([#("content-type", "multipart/form-data; boundary=b")])
+  let body =
+    "--b\r\nContent-Disposition: form-data; name=\"active\"\r\n\r\n"
+    <> active
+    <> "\r\n--b--\r\n"
+  router.route(handlers.State, "POST", ["multipart"], dict.new(), headers, body)
+}
+
+pub fn path_true_and_false_test() {
+  path("true", "true,false") |> expect_ok("BoolPathRequest(True, [True, False])")
+  path("false", "false") |> expect_ok("BoolPathRequest(False, [False])")
+}
+
+pub fn path_invalid_bool_returns_400_test() {
+  path("1", "true").status |> should.equal(400)
+  path("yes", "true").status |> should.equal(400)
+  path("ture", "true").status |> should.equal(400)
+  path("TRUE", "true").status |> should.equal(400)
+  path("False", "true").status |> should.equal(400)
+  path("", "true").status |> should.equal(400)
+}
+
+pub fn path_invalid_bool_array_item_returns_400_test() {
+  path("true", "true,maybe").status |> should.equal(400)
+  path("true", "").status |> should.equal(400)
+  path("true", "true,FALSE").status |> should.equal(400)
+}
+
+pub fn query_required_bools_test() {
+  query([]) |> expect_ok("BoolQueryRequest(True, [False], None, None, None)")
+  query([#("on", ["false"])]) |> expect_ok("BoolQueryRequest(False, [False],")
+  query([#("on", ["1"])]).status |> should.equal(400)
+  query([#("on", ["TRUE"])]).status |> should.equal(400)
+  query([#("on", [""])]).status |> should.equal(400)
+  query([#("ons", ["true", "nope"])]).status |> should.equal(400)
+}
+
+pub fn query_optional_bool_test() {
+  query([]) |> expect_ok("[False], None, None, None)")
+  query([#("verbose", ["true"])]) |> expect_ok("[False], Some(True), None, None)")
+  query([#("verbose", ["TRUE"])]).status |> should.equal(400)
+  query([#("verbose", ["false"])]) |> expect_ok("[False], Some(False), None, None)")
+  query([#("verbose", ["yes"])]).status |> should.equal(400)
+  query([#("verbose", ["1"])]).status |> should.equal(400)
+  query([#("verbose", [""])]).status |> should.equal(400)
+}
+
+pub fn query_optional_bool_array_test() {
+  query([#("picks", ["true,false"])]) |> expect_ok("[False], None, Some([True, False]), None)")
+  query([#("picks", ["true,ture"])]).status |> should.equal(400)
+  query([#("picks", [""])]).status |> should.equal(400)
+  query([#("picks", ["true,"])]).status |> should.equal(400)
+}
+
+pub fn query_optional_ref_bool_test() {
+  query([#("toggle", ["false"])]) |> expect_ok("[False], None, None, Some(False))")
+  query([#("toggle", ["maybe"])]).status |> should.equal(400)
+}
+
+pub fn header_bools_test() {
+  header([]) |> expect_ok("BoolHeaderRequest(True, [False], None, None, True, None)")
+  header([#("x-verbose", "false"), #("x-picks", "true, false"), #("x-ref-flags", "false,true")])
+  |> expect_ok("BoolHeaderRequest(True, [False], Some(False), Some([True, False]), True, Some([False, True]))")
+  header([#("x-ref-flags", "true,yes")]).status |> should.equal(400)
+  header([#("x-on", "1")]).status |> should.equal(400)
+  header([#("x-ons", "true,yes")]).status |> should.equal(400)
+  header([#("x-verbose", "")]).status |> should.equal(400)
+  header([#("x-picks", "true,0")]).status |> should.equal(400)
+  header([#("x-toggle", "no")]).status |> should.equal(400)
+  header([#("x-on", "TRUE")]).status |> should.equal(400)
+  header([#("x-verbose", "True")]).status |> should.equal(400)
+}
+
+pub fn cookie_bools_test() {
+  cookie("on=false") |> expect_ok("BoolCookieRequest(False, None, None)")
+  cookie("on=true; verbose=true") |> expect_ok("BoolCookieRequest(True, Some(True), None)")
+  cookie("on=1").status |> should.equal(400)
+  cookie("on=").status |> should.equal(400)
+  cookie("on=TRUE").status |> should.equal(400)
+  cookie("on=true; verbose=FALSE").status |> should.equal(400)
+  cookie("on=true; verbose=yes").status |> should.equal(400)
+}
+
+// A query and a cookie parameter of the same name are read separately.
+pub fn cookie_and_query_of_the_same_name_test() {
+  cookie_and_query("on=true", [#("verbose", ["true"])])
+  |> expect_ok("BoolCookieRequest(True, None, Some(True))")
+  cookie_and_query("on=true; verbose=false", [])
+  |> expect_ok("BoolCookieRequest(True, Some(False), None)")
+  cookie_and_query("on=true", [#("verbose", ["yes"])]).status |> should.equal(400)
+}
+
+pub fn deep_object_optional_bool_test() {
+  deep("false") |> expect_ok("(Some(False))")
+  deep("maybe").status |> should.equal(400)
+}
+
+pub fn form_optional_bools_test() {
+  form("active=false&flags=true&flags=false&refs=true")
+  |> expect_ok("(Some(False), Some([True, False]), Some([True]))")
+  form("refs=yes").status |> should.equal(400)
+  form("active=maybe").status |> should.equal(400)
+  form("flags=true&flags=nah").status |> should.equal(400)
+  form("active=TRUE").status |> should.equal(400)
+}
+
+pub fn multipart_optional_bool_test() {
+  multipart("true") |> expect_ok("(Some(True))")
+  multipart("maybe").status |> should.equal(400)
+}
+GLEAM_EOF
+
+cd "$BOOL_PARAMS_DIR"
+gleam deps download
+
+verify_generated_format src/api
+if gleam build --warnings-as-errors 2>&1; then
+  info "PASS: Boolean parameter server code compiles (warnings-as-errors)."
+else
+  fail "Boolean parameter server code failed to compile."
+fi
+
+if gleam test; then
+  info "PASS: Boolean parameters decode true / false and reject other values."
+else
+  fail "Boolean parameter integration tests failed."
+fi
+
+cd "$PROJECT_ROOT"
+rm -rf "$BOOL_PARAMS_DIR"
+
+info "Boolean parameter integration tests passed."
 
 # -------------------------------------------------------
 # Step 13c: router variables do not collide with parameter variables
