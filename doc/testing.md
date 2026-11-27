@@ -40,4 +40,4 @@ The atago suites in `e2e/` run the escript: `init`, `generate`, `validate`, the 
 
 `gleam run -m metamon/mutation -- run` changes one operator, `!` or boolean literal in a module under `src/` at a time and runs `gleam test --target erlang` on each change; `gleam run -m metamon/mutation -- gate` then fails on a survivor that `doc/mutation/baseline.json` does not list, and `gleam run -m metamon/mutation -- baseline` records a full run as the baseline. `.github/workflows/mutation.yml` mutates the modules a pull request or push changes and runs the gate; the weekly run mutates every module in two parts. `just mutation` and `just mutation-record` run the same steps locally.
 
-There is no baseline yet. It will be recorded from the first full run on CI, and until then the workflow runs without the gate.
+There is no baseline yet. It will be recorded from the first full run on CI. Until then, pull requests and pushes mutate nothing, and the weekly and manual runs mutate every module without the gate.

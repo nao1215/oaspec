@@ -83,7 +83,7 @@ all: clean deps
 # Slow (about 1000 mutants): CI runs it weekly in 2 parts.
 mutation workers="8":
   gleam run -m metamon/mutation -- run --workers {{workers}}
-  gleam run -m metamon/mutation -- gate
+  if [ -f doc/mutation/baseline.json ]; then gleam run -m metamon/mutation -- gate; else echo "No baseline yet: run just mutation-record to record this run."; fi
 
 # Record build/mutation/results.json as the baseline and refresh doc/testing.md
 mutation-record:
