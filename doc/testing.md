@@ -38,7 +38,7 @@ The atago suites in `e2e/` run the escript: `init`, `generate`, `validate`, the 
 
 ## Coverage
 
-`just coverage` (`gleam build --target erlang`, then `gleam run -m metamon/mutation -- coverage`) runs the tests on the Erlang target with every module under `src/` measured and writes `build/coverage/lcov.info`; `.github/workflows/coverage.yml` reports it with octocov on pull requests and main. The local run on 2026-11-28 reached 87.3% of the lines.
+`just coverage` (`gleam build --target erlang`, then `gleam run -m metamon/mutation -- coverage`) runs the tests on the Erlang target with every module under `src/` measured and writes `build/coverage/lcov.info`; `.github/workflows/coverage.yml` reports it with octocov on pull requests and main. The coverage command needs Gleam 1.19 or later, which is newer than the build floor in `gleam.toml`. The local run on 2026-11-28 reached 87.3% of the lines.
 
 ## Mutation testing
 
