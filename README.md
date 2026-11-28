@@ -1,6 +1,7 @@
 # oaspec
 
 [![CI](https://github.com/nao1215/oaspec/actions/workflows/ci-tests.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci-tests.yml)
+![Coverage](https://raw.githubusercontent.com/nao1215/octocovs-central-repo/main/badges/nao1215/oaspec/coverage.svg)
 [![Quick](https://github.com/nao1215/oaspec/actions/workflows/ci-quick.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci-quick.yml)
 [![Adapters](https://github.com/nao1215/oaspec/actions/workflows/ci-adapters.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/ci-adapters.yml)
 [![Gitleaks](https://github.com/nao1215/oaspec/actions/workflows/gitleaks.yml/badge.svg)](https://github.com/nao1215/oaspec/actions/workflows/gitleaks.yml)
