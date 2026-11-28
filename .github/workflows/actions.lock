@@ -32,6 +32,7 @@ workflows:
         - 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
         - 'erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124'
         - 'k1low/octocov-action@a167dc0dee441b7ffc45e1b862ab55ec0d87f278'
+        - 'nao1215/setup-atago@5dca90fe652651408ccd1c2aee030767484482a9'
     '.github/workflows/gitleaks.yml':
         - 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
         - 'gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e'

@@ -1,8 +1,9 @@
 name: Coverage
 
-# Line coverage of the Erlang test run, measured by
-# `gleam run -m metamon/mutation -- coverage` (Erlang's `cover`, with the line
-# numbers of the Gleam source) and reported by octocov. The badge is served by
+# Line coverage of the Erlang test run and the atago E2E suite, measured by
+# `gleam run -m metamon/mutation -- coverage --e2e` (with the line numbers of
+# the Gleam source) and reported by octocov. The E2E suite runs an escript
+# that metamon writes, which counts the lines of each run. The badge is served by
 # nao1215/octocovs-central-repo, which collects the report artifact of main.
 
 on:
@@ -39,10 +40,13 @@ jobs:
           otp-version: "29"
           gleam-version: "1.x"
           rebar3-version: "3"
+      - uses: nao1215/setup-atago@5dca90fe652651408ccd1c2aee030767484482a9 # v0.1.5
+        with:
+          version: v0.26.3
       - name: Build
         run: gleam build --target erlang
       - name: Measure line coverage
-        run: gleam run -m metamon/mutation -- coverage
+        run: gleam run -m metamon/mutation -- coverage --e2e 'OASPEC_BIN="$METAMON_COVERAGE_ESCRIPT" atago run --ci --parallel 1 ./e2e'
       - uses: k1LoW/octocov-action@a167dc0dee441b7ffc45e1b862ab55ec0d87f278 # v1.5.2
         with:
           config: .octocov.yml
