@@ -36,6 +36,10 @@ The atago suites in `e2e/` run the escript: `init`, `generate`, `validate`, the 
 
 `bench/himorime.yaml` measures the escript; `.github/workflows/bench.yml` compares each pull request with its base in the same job. `bench/README.md` lists what is measured.
 
+## Coverage
+
+`just coverage` (`gleam build --target erlang`, then `gleam run -m metamon/mutation -- coverage`) runs the tests on the Erlang target with every module under `src/` measured and writes `build/coverage/lcov.info`; `.github/workflows/coverage.yml` reports it with octocov on pull requests and main. The coverage command needs Gleam 1.19 or later, which is newer than the build floor in `gleam.toml`. The local run on 2026-11-28 reached 87.3% of the lines.
+
 ## Mutation testing
 
 `gleam run -m metamon/mutation -- run` changes one operator, `!` or boolean literal in a module under `src/` at a time and runs `gleam test --target erlang` on each change; `gleam run -m metamon/mutation -- gate` then fails on a survivor that `doc/mutation/baseline.json` does not list, and `gleam run -m metamon/mutation -- baseline` records a full run as the baseline. `.github/workflows/mutation.yml` mutates the modules a pull request or push changes and runs the gate; the weekly run mutates every module in two parts. `just mutation` and `just mutation-record` run the same steps locally.
